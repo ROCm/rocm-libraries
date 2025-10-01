@@ -604,7 +604,6 @@ namespace
                     path = std::string{dirname(&rocsparselt_so_path[0])};
 #endif // ifndef HIPSPARSELT_STATIC_LIB
 
-                std::cout << "!!!!!!! path: " << path << std::endl;
                 // Find the location of the libraries
                 // The first path below is for new build system where `hipblaslt` is added as a subdirectory
                 if(TestPath(path + "/../hipblaslt/Tensile/library"))
