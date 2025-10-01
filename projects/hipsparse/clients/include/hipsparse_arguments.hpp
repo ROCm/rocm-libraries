@@ -116,7 +116,7 @@ struct Arguments
     int timing;
     int iters;
 
-    char filename[128]; // nos2.bin, bmwcra_1.bin, etc
+    char filename[256]; // nos2.bin, bmwcra_1.bin, etc
     char function[64]; // axpby, spmv_csr, etc
 
     Arguments()
