@@ -34,158 +34,9 @@
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
 
-#if(MIO_BN_VARIANT == 0)
+#if (MIO_BN_VARIANT == 0)
 
-// #define MIO_BN_SEGTMP (MIO_BN_HW * (MIO_BN_GRP0 / MIO_BN_HW))
-// #define MIO_BN_SEGMENT ((MIO_BN_SEGTMP > MIO_BN_NHW) ? (MIO_BN_NHW) : (MIO_BN_SEGTMP))
-// #define MIO_BN_NLOOP ((MIO_BN_NHW + MIO_BN_SEGMENT - 1) / MIO_BN_SEGMENT)
-// #define MIO_BN_SEGIHW (MIO_BN_SEGMENT / MIO_BN_HW)
-// #define MIO_BN_NLOOPM (MIO_BN_NLOOP - 1)
-// #define MIO_BN_SNHW (MIO_BN_NLOOPM * MIO_BN_SEGIHW)
-
-// __attribute__((reqd_work_group_size(MIO_BN_GRP0, MIO_BN_GRP1, MIO_BN_GRP2))) __kernel void
-// MIOpenBatchNormActivFwdTrainSpatial(float INHW,
-//                                     const _FLOAT alpha,
-//                                     const _FLOAT beta,
-//                                     const _FLOAT gamma,
-//                                     double epsilon,
-// #if(MIO_RUNNING_RESULT == 1)
-//                                     double expAvgFactor,
-// #endif
-//                                     const __global _FLOAT* __restrict in,
-//                                     __global _FLOAT* __restrict out,
-//                                     __constant _FLOAT_PREC* __restrict bias,
-//                                     __constant _FLOAT_PREC* __restrict scale
-
-// #if(MIO_RUNNING_RESULT == 1)
-//                                     ,
-//                                     __global _FLOAT_PREC* __restrict runningMean,
-//                                     __global _FLOAT_PREC* __restrict runningVariance
-// #endif
-
-// #if(MIO_SAVE_MEAN_VARIANCE == 1)
-//                                     ,
-//                                     __global _FLOAT_PREC* __restrict savedInvVariance,
-//                                     __global _FLOAT_PREC* __restrict savedMean
-// #endif
-
-// )
-// {
-
-//     // SPATIAL
-//     _FLOAT_PREC mean        = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC variance    = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC invVariance = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC pvscale     = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC pvbias      = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC batchvalues[MIO_BN_NLOOP];
-
-//     __local _FLOAT_PREC lcl_bias;
-//     __local _FLOAT_PREC lcl_scale;
-
-//     unsigned int index  = 0;
-//     unsigned int lid    = get_local_id(0);
-//     unsigned int grpid  = get_group_id(0);
-//     unsigned int chwid  = grpid * MIO_BN_HW + (lid % MIO_BN_HW);
-//     unsigned int lidihw = lid / MIO_BN_HW;
-//     unsigned int nid    = 0;
-//     _FLOAT_PREC bn_out  = 0.;
-//     _FLOAT_PREC act_out = 0.;
-
-//     if(lid == 0)
-//     {
-//         lcl_scale = *(scale + grpid);
-//         lcl_bias  = *(bias + grpid);
-//     }
-//     barrier(CLK_LOCAL_MEM_FENCE);
-
-//     if(lid < MIO_BN_SEGMENT)
-//     {
-// #if(MIOPEN_USE_FP16 == 0)
-//         __attribute__((opencl_unroll_hint(2)))
-// #endif
-//         for(unsigned int n = 0; n < MIO_BN_NLOOPM; ++n)
-//         {
-//             nid            = n * MIO_BN_SEGIHW + lidihw;
-//             index          = nid * MIO_BN_CHW + chwid;
-//             batchvalues[n] = FLOAT2FLOATPREC(*(in + index));
-//             mean += batchvalues[n];
-//             variance = mad(batchvalues[n], batchvalues[n], variance);
-//         }
-//         nid   = MIO_BN_SNHW + lidihw;
-//         index = nid * MIO_BN_CHW + chwid;
-//         batchvalues[MIO_BN_NLOOPM] =
-//             (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) : (_FLOAT_PREC)0.;
-//         mean += batchvalues[MIO_BN_NLOOPM];
-//         variance = mad(batchvalues[MIO_BN_NLOOPM], batchvalues[MIO_BN_NLOOPM], variance);
-//     }
-//     barrier(CLK_LOCAL_MEM_FENCE);
-
-// #if !MIOPEN_USE_AMDGCN
-//     local _FLOAT_ACCUM lcl_data_x[MIO_BN_LDS_SIZE];
-//     local _FLOAT_ACCUM lcl_data_y[MIO_BN_LDS_SIZE];
-//     lds_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
-// #else
-//     local _FLOAT_ACCUM lcl_data_x[MIO_BN_LDSGCN_SIZE];
-//     local _FLOAT_ACCUM lcl_data_y[MIO_BN_LDSGCN_SIZE];
-//     gcn_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
-// #endif
-
-//     variance    = mad(-mean, mean, variance);
-//     invVariance = rsqrt(variance + (_FLOAT_PREC)epsilon);
-//     pvscale     = lcl_scale;
-//     pvbias      = lcl_bias;
-
-//     if(lid < MIO_BN_SEGMENT)
-//     {
-//         //==== CALC NORM =======================
-//         _FLOAT_PREC inhat = (_FLOAT_PREC)0.;
-
-//         for(unsigned int n = 0; n < MIO_BN_NLOOPM; n++)
-//         { // apply normalization
-//             inhat  = (batchvalues[n] - mean) * invVariance;
-//             nid    = n * MIO_BN_SEGIHW + lidihw;
-//             index  = nid * MIO_BN_CHW + chwid;
-//             bn_out = mad(pvscale, inhat, pvbias);
-//             ActivationFunction(1,
-//                                &act_out,
-//                                &bn_out,
-//                                FLOAT2FLOATPREC(gamma),
-//                                FLOAT2FLOATPREC(beta),
-//                                FLOAT2FLOATPREC(alpha));
-//             out[index] = FLOATPREC2FLOAT(act_out);
-//         } // end for
-
-//         // Tail of loop
-//         inhat = (batchvalues[MIO_BN_NLOOPM] - mean) * invVariance;
-//         nid   = MIO_BN_SNHW + lidihw;
-//         index = nid * MIO_BN_CHW + chwid;
-//         if(index < MIO_BN_NCHW)
-//         {
-//             bn_out = mad(pvscale, inhat, pvbias);
-//             ActivationFunction(1,
-//                                &act_out,
-//                                &bn_out,
-//                                FLOAT2FLOATPREC(gamma),
-//                                FLOAT2FLOATPREC(beta),
-//                                FLOAT2FLOATPREC(alpha));
-//             out[index] = FLOATPREC2FLOAT(act_out);
-//         }
-//     }
-
-//     if(lid == 0)
-//     {
-// #if(MIO_RUNNING_RESULT == 1)
-//         running_stash(runningMean, runningVariance, expAvgFactor, mean, variance, grpid);
-// #endif
-
-// #if(MIO_SAVE_MEAN_VARIANCE == 1)
-//         saved_stash(savedMean, savedInvVariance, mean, invVariance, grpid);
-// #endif
-//     }
-// } // end spatial norm
-
-#elif(MIO_BN_VARIANT == 1)
+#elif (MIO_BN_VARIANT == 1)
 
 // //===========
 
@@ -320,9 +171,8 @@
 //         nidx                = remkey / MIO_BN_HW;
 //         hwidx               = remkey - (nidx * MIO_BN_HW);
 //         index               = nidx * MIO_BN_CHW + chwid + hwidx;
-//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) : (_FLOAT_PREC)0.;
-//         mean += xin;
-//         variance = mad(xin, xin, variance);
+//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) :
+//         (_FLOAT_PREC)0.; mean += xin; variance = mad(xin, xin, variance);
 //     }
 // #endif
 // #endif
@@ -403,8 +253,8 @@
 //         nidx            = l / MIO_BN_HW;
 //         hwidx           = l - (nidx * MIO_BN_HW);
 //         index           = nidx * MIO_BN_CHW + chwid + hwidx;
-//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) : (_FLOAT_PREC)0.;
-//         xhat[j]         = (xin - mean) * invVariance;
+//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) :
+//         (_FLOAT_PREC)0.; xhat[j]         = (xin - mean) * invVariance;
 //     }
 //     barrier(CLK_GLOBAL_MEM_FENCE);
 //     for(unsigned int j = 0; j < MIO_MAX_READ; j++)
@@ -441,12 +291,12 @@
 
 // } // end spatial norm
 
-#elif(MIO_BN_VARIANT == 2)
+#elif (MIO_BN_VARIANT == 2)
 // MULTI-KERNEL reduction for > 33M elements
 
 // TODO static assert not imlemented!
 
-#elif(MIO_BN_VARIANT == 3)
+#elif (MIO_BN_VARIANT == 3)
 
 // ported ...
 
@@ -464,183 +314,336 @@ namespace batchnorm {
 template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl
 {
-    static_assert(false, "this variant is not supported.");
+    static_assert(false, "This variant is not supported.");
+};
+
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
+{
+    static constexpr unsigned int segtmp =
+        mio_bn_config::hw * (mio_bn_config::launch_dim.grp0 / mio_bn_config::hw);
+    static constexpr unsigned int segment =
+        (segtmp > mio_bn_config::nhw) ? mio_bn_config::nhw : segtmp;
+    static constexpr unsigned int nloop  = (mio_bn_config::nhw + segment - 1) / segment;
+    static constexpr unsigned int segihw = segment / mio_bn_config::hw;
+    static constexpr unsigned int nloopm = nloop - 1;
+    static constexpr unsigned int snhw   = nloopm * segihw;
+
+    constexpr __forceinline__ __device__ void operator()(FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         float INHW,
+                                                         const FpType alpha,
+                                                         const FpType beta,
+                                                         const FpType gamma,
+                                                         double epsilon,
+                                                         const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict bias,
+                                                         const FpPrecType* __restrict scale)
+    {
+        mean        = 0;
+        variance    = 0;
+        invVariance = 0;
+
+        FpPrecType pvscale = 0;
+        FpPrecType pvbias  = 0;
+        FpPrecType batchvalues[nloop];
+
+        unsigned int index  = 0;
+        unsigned int lid    = threadIdx.x;
+        unsigned int grpid  = blockIdx.x;
+        unsigned int chwid  = grpid * mio_bn_config::hw + (lid % mio_bn_config::hw);
+        unsigned int lidihw = lid / mio_bn_config::hw;
+        unsigned int nid    = 0;
+        FpPrecType bn_out   = 0.;
+        FpPrecType act_out  = 0.;
+
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+        if(lid == 0)
+        {
+            lcl_scale = scale[grpid];
+            lcl_bias  = bias[grpid];
+        }
+
+        __syncthreads();
+
+        if(lid < segment)
+        {
+            // #if(MIOPEN_USE_FP16 == 0)
+            //         __attribute__((opencl_unroll_hint(2)))
+            // #endif
+            for(unsigned int n = 0; n < nloopm; ++n)
+            {
+                nid            = n * segihw + lidihw;
+                index          = nid * mio_bn_config::chw + chwid;
+                batchvalues[n] = cast<FpPrecType>(in[index]);
+                mean += batchvalues[n];
+                variance = fma(batchvalues[n], batchvalues[n], variance);
+            }
+            nid                 = snhw + lidihw;
+            index               = nid * mio_bn_config::chw + chwid;
+            batchvalues[nloopm] = (index < mio_bn_config::nchw) ? cast<FpPrecType>(in[index]) : 0;
+            mean += batchvalues[nloopm];
+            variance = fma(batchvalues[nloopm], batchvalues[nloopm], variance);
+        }
+
+        __syncthreads();
+
+        constexpr auto lcl_data_size =
+            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        if constexpr(mio_bn_config::use_amdgnc)
+        {
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+        else
+        {
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+
+        variance    = fma(-mean, mean, variance);
+        invVariance = rsqrt(variance + cast<FpPrecType>(epsilon));
+        pvscale     = lcl_scale;
+        pvbias      = lcl_bias;
+
+        if(lid < segment)
+        {
+            FpPrecType inhat = 0;
+
+            // Apply normalization
+            for(unsigned int n = 0; n < nloopm; n++)
+            {
+                inhat  = (batchvalues[n] - mean) * invVariance;
+                nid    = n * segihw + lidihw;
+                index  = nid * mio_bn_config::chw + chwid;
+                bn_out = fma(pvscale, inhat, pvbias);
+                ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                                  *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                                  cast<FpPrecType>(gamma),
+                                                  cast<FpPrecType>(beta),
+                                                  cast<FpPrecType>(alpha));
+                out[index] = cast<FpPrecType>(act_out);
+            }
+
+            // Tail of loop
+            inhat = (batchvalues[nloopm] - mean) * invVariance;
+            nid   = snhw + lidihw;
+            index = nid * mio_bn_config::chw + chwid;
+            if(index < mio_bn_config::nchw)
+            {
+                bn_out = fma(pvscale, inhat, pvbias);
+                ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                                  *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                                  cast<FpPrecType>(gamma),
+                                                  cast<FpPrecType>(beta),
+                                                  cast<FpPrecType>(alpha));
+                out[index] = cast<FpPrecType>(act_out);
+            }
+        }
+    }
+};
+
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
+{
+    constexpr __forceinline__ __device__ void operator()(FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         float INHW,
+                                                         const FpType alpha,
+                                                         const FpType beta,
+                                                         const FpType gamma,
+                                                         double epsilon,
+                                                         const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict bias,
+                                                         const FpPrecType* __restrict scale)
+    {}
 };
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
 {
+    static constexpr bool NormPerN = mio_bn_config::n < mio_bn_config::max_n;
 
-constexpr __forceinline__ __device__ void operator()(
-        FpPrecType &mean,
-        FpPrecType &variance,
-        FpPrecType &invVariance,
-        float INHW,
-        const FpType alpha,
-        const FpType beta,
-        const FpType gamma,
-        double epsilon,
-        const FpType* __restrict in,
-        FpType* __restrict out,
-        const FpPrecType* __restrict bias,
-        const FpPrecType* __restrict scale)
-{
-    mean        = 0;
-    variance    = 0;
-    invVariance = 0;
-
-    unsigned int lid   = threadIdx.x;
-    unsigned int grpid = blockIdx.x;
-    unsigned int cidx  = grpid * mio_bn_config::hw;
-
-    constexpr bool NormPerN = mio_bn_config::n < mio_bn_config::max_n;
-
-    // Unused if (NormPerN == false)
-    FpPrecType minibatch[NormPerN ? mio_bn_config::n : 1];
-
-    __shared__ FpPrecType lcl_bias;
-    __shared__ FpPrecType lcl_scale;
-    if(lid == 0)
+    // This variant implies the image is greater than a wavefront, but smaller than 257
+    constexpr __forceinline__ __device__ void operator()(FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         float INHW,
+                                                         const FpType alpha,
+                                                         const FpType beta,
+                                                         const FpType gamma,
+                                                         double epsilon,
+                                                         const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict bias,
+                                                         const FpPrecType* __restrict scale)
     {
-        lcl_scale = scale[grpid];
-        lcl_bias  = bias[grpid];
-    }
+        mean        = 0;
+        variance    = 0;
+        invVariance = 0;
 
-    __syncthreads();
+        unsigned int lid   = threadIdx.x;
+        unsigned int grpid = blockIdx.x;
+        unsigned int cidx  = grpid * mio_bn_config::hw;
 
-    if(lid < mio_bn_config::hw)
-    {
-        static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{
-            [&](unsigned int n) {
+        // Unused if (NormPerN == false)
+        FpPrecType minibatch[NormPerN ? mio_bn_config::n : 1];
+
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+        if(lid == 0)
+        {
+            lcl_scale = scale[grpid];
+            lcl_bias  = bias[grpid];
+        }
+
+        __syncthreads();
+
+        if(lid < mio_bn_config::hw)
+        {
+            static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{[&](unsigned int n) {
                 unsigned int index = n * mio_bn_config::chw + cidx + lid;
-                auto xin = miopen::batchnorm::cast<FpPrecType>(in[index]);
+                auto xin           = miopen::batchnorm::cast<FpPrecType>(in[index]);
                 if constexpr(NormPerN)
                 {
                     minibatch[n] = xin;
                 }
                 mean += xin;
                 variance = fma(xin, xin, variance);
-            }
-        };
-    }
+            }};
+        }
 
-    __syncthreads();
+        __syncthreads();
 
-    if constexpr(mio_config::use_amdgnc)
-    {
-        __shared__ FpAccumType lcl_data_x2[MIO_BN_LDSGCN_SIZE];
-        __shared__ FpAccumType lcl_data_y2[MIO_BN_LDSGCN_SIZE];
-        miopen::reduction::gcn_reduce2<FpAccumType, MIO_BN_LDSGCN_SIZE>(
-            reinterpret_cast<FpAccumType&>(mean),
-            reinterpret_cast<FpAccumType&>(variance),
-            static_cast<FpAccumType>(INHW),
-            lcl_data_x2,
-            lcl_data_y2,
-            lid);
-    }
-    else
-    {
+        if constexpr(mio_config::use_amdgnc)
+        {
+            __shared__ FpAccumType lcl_data_x2[MIO_BN_LDSGCN_SIZE];
+            __shared__ FpAccumType lcl_data_y2[MIO_BN_LDSGCN_SIZE];
+            miopen::reduction::gcn_reduce2<FpAccumType, MIO_BN_LDSGCN_SIZE>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x2,
+                lcl_data_y2,
+                lid);
+        }
+        else
+        {
 #if MIOPEN_USE_FP16 == 1
-    //     local float lcl_data[MIO_BN_LDS_SIZE];
-    //     lcl_data[lid] = (float)mean;
-    //     barrier(CLK_LOCAL_MEM_FENCE);
-    //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-    //     {
-    //         if(lid < red)
-    //             lcl_data[lid] += lcl_data[lid + red];
-    //         barrier(CLK_LOCAL_MEM_FENCE);
-    //     }
-    //     float temp_mean = (float)mean;
-    //     regLDSreduce(&temp_mean, lcl_data, lid, (float)INHW);
-    //     mean = (_FLOAT_PREC)temp_mean;
-    //     barrier(CLK_LOCAL_MEM_FENCE);
-    //     lcl_data[lid] = (float)variance;
-    //     barrier(CLK_LOCAL_MEM_FENCE);
+            //     local float lcl_data[MIO_BN_LDS_SIZE];
+            //     lcl_data[lid] = (float)mean;
+            //     barrier(CLK_LOCAL_MEM_FENCE);
+            //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
+            //     {
+            //         if(lid < red)
+            //             lcl_data[lid] += lcl_data[lid + red];
+            //         barrier(CLK_LOCAL_MEM_FENCE);
+            //     }
+            //     float temp_mean = (float)mean;
+            //     regLDSreduce(&temp_mean, lcl_data, lid, (float)INHW);
+            //     mean = (_FLOAT_PREC)temp_mean;
+            //     barrier(CLK_LOCAL_MEM_FENCE);
+            //     lcl_data[lid] = (float)variance;
+            //     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-    //     {
-    //         if(lid < red)
-    //             lcl_data[lid] += lcl_data[lid + red];
-    //         barrier(CLK_LOCAL_MEM_FENCE);
-    //     }
-    //     float temp_variance = (float)variance;
-    //     regLDSreduce(&temp_variance, lcl_data, lid, (float)INHW);
-    //     variance = (_FLOAT_PREC)temp_variance;
+            //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
+            //     {
+            //         if(lid < red)
+            //             lcl_data[lid] += lcl_data[lid + red];
+            //         barrier(CLK_LOCAL_MEM_FENCE);
+            //     }
+            //     float temp_variance = (float)variance;
+            //     regLDSreduce(&temp_variance, lcl_data, lid, (float)INHW);
+            //     variance = (_FLOAT_PREC)temp_variance;
 #else
-        FpPrecType lcl_data[MIO_BN_LDS_SIZE];
+            FpPrecType lcl_data[MIO_BN_LDS_SIZE];
 
-        // Reduce mean
-        lcl_data[lid] = mean;
-        __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-        for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-        {
-            if(lid < red)
+            // Reduce mean
+            lcl_data[lid] = mean;
+            __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
+            for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
             {
-                lcl_data[lid] += lcl_data[lid + red];
+                if(lid < red)
+                {
+                    lcl_data[lid] += lcl_data[lid + red];
+                }
+                __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
             }
+            regLDSreduce(&mean, lcl_data, lid, static_cast<FpPrecType>(INHW));
             __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-        }
-        regLDSreduce(&mean, lcl_data, lid, static_cast<FpPrecType>(INHW));
-        __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
 
-        // Reduce variance
-        lcl_data[lid] = variance;
-        __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-        for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-        {
-            if(lid < red)
-                lcl_data[lid] += lcl_data[lid + red];
+            // Reduce variance
+            lcl_data[lid] = variance;
             __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-        }
-        regLDSreduce(&variance, lcl_data, lid, static_cast<FpPrecType>(INHW));
+            for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
+            {
+                if(lid < red)
+                    lcl_data[lid] += lcl_data[lid + red];
+                __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            regLDSreduce(&variance, lcl_data, lid, static_cast<FpPrecType>(INHW));
 #endif
+        }
+
+        __syncthreads();
+
+        variance    = fma(-mean, mean, variance);
+        invVariance = rsqrt(variance + FpPrecType(epsilon));
+
+        if(lid < mio_bn_config::hw)
+        {
+            FpPrecType pvscale = lcl_scale;
+            FpPrecType pvbias  = lcl_bias;
+            FpPrecType bn_out, act_out;
+
+            for(unsigned int n = 0; n < mio_bn_config::n; n++)
+            { // apply normalization
+                unsigned int index = n * mio_bn_config::chw + cidx + lid;
+                FpPrecType inhat   = [&]() {
+                    if constexpr(NormPerN)
+                    {
+                        return (minibatch[n] - mean) * invVariance;
+                    }
+                    else
+                    {
+                        return (cast<FpPrecType>(in[index]) - mean) * invVariance;
+                    }
+                }();
+
+                bn_out = fma(pvscale, inhat, pvbias);
+                ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                                  *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                                  miopen::batchnorm::cast<FpPrecType>(gamma),
+                                                  miopen::batchnorm::cast<FpPrecType>(beta),
+                                                  miopen::batchnorm::cast<FpPrecType>(alpha));
+                out[index] = miopen::batchnorm::cast<FpPrecType>(act_out);
+            } // end for
+        } // end if
     }
-
-    __syncthreads();
-
-    variance    = fma(-mean, mean, variance);
-    invVariance = rsqrt(variance + FpPrecType(epsilon));
-
-    if(lid < mio_bn_config::hw)
-    {
-        FpPrecType pvscale = lcl_scale;
-        FpPrecType pvbias  = lcl_bias;
-        FpPrecType bn_out, act_out;
-
-        for(unsigned int n = 0; n < mio_bn_config::n; n++)
-        { // apply normalization
-            unsigned int index  = n * mio_bn_config::chw + cidx + lid;
-            FpPrecType inhat = [&]() {
-                if constexpr(NormPerN)
-                {
-                    return (minibatch[n] - mean) * invVariance;
-                }
-                else
-                {
-                    return (cast<FpPrecType>(in[index]) - mean) * invVariance;
-                }
-            }();
-
-            bn_out = fma(pvscale, inhat, pvbias);
-            ActivationFunction<FpPrecType, 1>(reinterpret_cast<FpPrecType(*)[1]>(&act_out),
-                                              reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
-                                              miopen::batchnorm::cast<FpPrecType>(gamma),
-                                              miopen::batchnorm::cast<FpPrecType>(beta),
-                                              miopen::batchnorm::cast<FpPrecType>(alpha));
-            out[index] = miopen::batchnorm::cast<FpPrecType>(act_out);
-        } // end for
-    }     // end if
-}
-
 };
 
-}
-}
+} // namespace batchnorm
+} // namespace miopen
 
+/// C interfaces
 
-// #if(MIO_BN_VARIANT == 3)
-
-// This kernel implies the image is greater than a wavefront, but smaller than 257
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
     MIOpenBatchNormActivFwdTrainSpatial(
@@ -649,30 +652,30 @@ extern "C" __global__ void __launch_bounds__(
         const typename mio_bn_config::fp_type beta,
         const typename mio_bn_config::fp_type gamma,
         double epsilon,
-#if(MIO_RUNNING_RESULT == 1)
+#if (MIO_RUNNING_RESULT == 1)
         double expAvgFactor,
 #endif
         const typename mio_bn_config::fp_type* __restrict in,
         typename mio_bn_config::fp_type* __restrict out,
         const typename mio_bn_config::fp_prec_type* __restrict bias,
         const typename mio_bn_config::fp_prec_type* __restrict scale
-#if(MIO_RUNNING_RESULT == 1)
+#if (MIO_RUNNING_RESULT == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict runningMean,
         typename mio_bn_config::fp_prec_type* __restrict runningVariance
 #endif
-#if(MIO_SAVE_MEAN_VARIANCE == 1)
+#if (MIO_SAVE_MEAN_VARIANCE == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict savedInvVariance,
         typename mio_bn_config::fp_prec_type* __restrict savedMean
 #endif
-)
+    )
 {
-    using fp_type          = typename mio_bn_config::fp_type;
-    using fp_prec_type     = typename mio_bn_config::fp_prec_type;
-    using fp_accum_type    = typename mio_bn_config::fp_accum_type;
-    using fp_accum_c_type  = typename mio_bn_config::fp_accum_c_type;
-    using fp_prec_c_type   = typename mio_bn_config::fp_prec_c_type;
+    using fp_type         = typename mio_bn_config::fp_type;
+    using fp_prec_type    = typename mio_bn_config::fp_prec_type;
+    using fp_accum_type   = typename mio_bn_config::fp_accum_type;
+    using fp_accum_c_type = typename mio_bn_config::fp_accum_c_type;
+    using fp_prec_c_type  = typename mio_bn_config::fp_prec_c_type;
 
     using ActivFwdTrainSpatialImpl =
         miopen::batchnorm::MIOpenBatchNormActivFwdTrainSpatialHIPImpl<mio_bn_config::variant,
@@ -689,24 +692,18 @@ extern "C" __global__ void __launch_bounds__(
 
     if(lid == 0)
     {
-#if(MIO_RUNNING_RESULT == 1)
+#if (MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
-        StashUpdater updater(
-            miopen::batchnorm::cast<fp_accum_c_type>(mean),
-            miopen::batchnorm::cast<fp_accum_c_type>(variance),
-            miopen::batchnorm::cast<fp_accum_c_type>(expAvgFactor));
+        StashUpdater updater(miopen::batchnorm::cast<fp_accum_c_type>(mean),
+                             miopen::batchnorm::cast<fp_accum_c_type>(variance),
+                             miopen::batchnorm::cast<fp_accum_c_type>(expAvgFactor));
 
         miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
             runningMean, runningVariance, updater, grpid);
 #endif
-#if(MIO_SAVE_MEAN_VARIANCE == 1)
+#if (MIO_SAVE_MEAN_VARIANCE == 1)
         miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
             savedMean, savedInvVariance, mean, invVariance, grpid);
 #endif
     }
 }
-
-// #endif
-
-/// C interfaces
-
