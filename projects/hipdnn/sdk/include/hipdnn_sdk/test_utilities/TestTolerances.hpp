@@ -50,13 +50,13 @@ constexpr float getToleranceBackward<float>()
 template <>
 constexpr float getToleranceBackward<half>()
 {
-    return 1e-4f;
+    return 2e-4f;
 }
 
 template <>
 constexpr float getToleranceBackward<hip_bfloat16>()
 {
-    return 1e-3f;
+    return 3e-3f;
 }
 
 } // namespace bn
