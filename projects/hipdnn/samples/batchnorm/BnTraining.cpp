@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <iostream>
@@ -14,7 +15,7 @@
 #include <unordered_map>
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk;
 
 // TODO: verify this sample when applicable engines are added
 template <typename InputType, typename IntermediateType>
@@ -73,19 +74,19 @@ void SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
 
-    Tensor<InputType> xTensor(x->get_dim(), layout);
-    Tensor<IntermediateType> scaleTensor(scale->get_dim());
-    Tensor<IntermediateType> biasTensor(bias->get_dim());
-    Tensor<IntermediateType> prevMeanTensor(prevRunningMean->get_dim());
-    Tensor<IntermediateType> prevVarTensor(prevRunningVar->get_dim());
-    Tensor<IntermediateType> momentumTensor(momentum->get_dim());
-    Tensor<IntermediateType> epsilonTensor(epsilon->get_dim());
+    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
+    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
+    utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
+    utilities::Tensor<IntermediateType> prevMeanTensor(prevRunningMean->get_dim());
+    utilities::Tensor<IntermediateType> prevVarTensor(prevRunningVar->get_dim());
+    utilities::Tensor<IntermediateType> momentumTensor(momentum->get_dim());
+    utilities::Tensor<IntermediateType> epsilonTensor(epsilon->get_dim());
 
-    Tensor<InputType> yTensor(y->get_dim(), layout);
-    Tensor<IntermediateType> nextMeanTensor(nextRunningMean->get_dim());
-    Tensor<IntermediateType> nextVarTensor(nextRunningVar->get_dim());
-    Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
-    Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
+    utilities::Tensor<InputType> yTensor(y->get_dim(), layout);
+    utilities::Tensor<IntermediateType> nextMeanTensor(nextRunningMean->get_dim());
+    utilities::Tensor<IntermediateType> nextVarTensor(nextRunningVar->get_dim());
+    utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
+    utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
 
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
@@ -129,11 +130,11 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        Tensor<InputType> yRefTensor(y->get_dim(), layout);
-        Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
-        Tensor<IntermediateType> nextVarRefTensor(nextRunningVar->get_dim());
-        Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
-        Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
+        utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
+        utilities::Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
+        utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVar->get_dim());
+        utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
+        utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
         // TODO: Uncomment when CPU reference implemented
         // CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnorm_fwd_training(x_tensor,
@@ -149,15 +150,15 @@ void SampleRunner::operator()(const TensorLayout& layout)
         //                                saved_mean_ref_tensor,
         //                                saved_inv_var_ref_tensor);
 
-        // auto epsilon = get_epsilon<InputType>();
+        // auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
         //
         // auto y_validator
-        //     = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<InputType>(
-        //         static_cast<InputType>(epsilon), static_cast<InputType>(epsilon));
+        //     = test_utilities::CpuFpReferenceValidation<InputType>(
+        //         static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
         //
         // auto stats_validator
-        //     = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<IntermediateType>(
-        //         static_cast<IntermediateType>(epsilon), static_cast<IntermediateType>(epsilon));
+        //     = test_utilities::CpuFpReferenceValidation<IntermediateType>(
+        //         static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
         // bool y_valid = y_validator.allClose(y_ref_tensor.memory(), y_tensor.memory());
         // bool next_mean_valid = stats_validator.allClose(next_mean_ref_tensor.memory(),
         //                                                        next_mean_tensor.memory());

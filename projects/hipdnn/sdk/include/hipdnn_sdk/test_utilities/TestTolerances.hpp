@@ -11,6 +11,62 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
+namespace batchnorm
+{
+
+template <typename T>
+constexpr float getToleranceInference();
+
+template <typename T>
+constexpr float getToleranceTraining();
+
+template <typename T>
+constexpr float getToleranceBackward();
+
+template <>
+constexpr float getToleranceInference<float>()
+{
+    //return 1e-5f;
+    return 1e-7f;
+}
+
+template <>
+constexpr float getToleranceInference<half>()
+{
+    //return 1e-3f;
+    return 1e-7f;
+}
+
+template <>
+constexpr float getToleranceInference<hip_bfloat16>()
+{
+    //return 1e-2f;
+    return 1e-7f;
+}
+
+template <>
+constexpr float getToleranceBackward<float>()
+{
+    //return 1e-5f;
+    return 1e-7f;
+}
+
+template <>
+constexpr float getToleranceBackward<half>()
+{
+    //return 1e-3f;
+    return 1e-7f;
+}
+
+template <>
+constexpr float getToleranceBackward<hip_bfloat16>()
+{
+    //return 1e-2f;
+    return 1e-7f;
+}
+
+} // namespace bn
+
 namespace conv
 {
 
