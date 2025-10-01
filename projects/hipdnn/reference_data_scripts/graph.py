@@ -12,9 +12,6 @@ def node_from_dict(node_dict: dict, tensors: dict[int, TensorAttributes]):
     else:
         raise RuntimeError("Unsupported node type: "+ node_dict["type"])
 
-
-
-
 class Graph:
     def  __init__(self, nodes,
                   dtype: torch.dtype = None,
