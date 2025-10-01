@@ -16,14 +16,12 @@ namespace hipdnn_sdk::test_utilities
 /*
  * For each new op we add to our Plan registry we need to update this variant key to support it.
  * This way, we can have a single registry for all operations which simplifies the graph executor.
- * Each key must have a hashSelf() and equal() method to support hashing and equality comparison.
- * 
- * Additionally for new new key: 
- * - we need to update the CpuReferenceGraphExecutor::buildSignatureKey to 
- *   properly build the key so we can look up the plan builder in the registry.
- * - Add a templated plan builder function similar to registerBatchnormFwdInferencePlanBuilders
- *   to the registry class and call it in initializePlanBuilders().
- * - A constexpr array of all supported signatures for the new op.
+ * Each key must have a 
+ *  - hashSelf() method
+ *  - equality operator
+ *  - hash operator
+ *  - Constructor to build the key from a data_object::Node && tensorMap
+ *  - A static method getPlanBuilders() which returns a map of keys to plan builders for that key
  * 
 */
 using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
