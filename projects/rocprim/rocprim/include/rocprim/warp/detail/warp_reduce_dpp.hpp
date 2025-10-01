@@ -81,7 +81,7 @@ public:
             if(VirtualWaveSize > 16)
             {
                 // row_bcast:15
-                output = reduce_op(warp_swizzle<T, 0x1e0, 0xf, 0xf, true>(output), output);
+                output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
             }
 
 #if !ROCPRIM_TARGET_SPIRV
