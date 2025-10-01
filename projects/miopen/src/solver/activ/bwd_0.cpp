@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2021-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -124,14 +124,16 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     const auto read_len = (packed) ? x_elem_sz : dx_width2D;
 
     const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
-    const auto MAP_RD    = read_len / read_unit;
     const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
+    const auto map_size_aligned = (x_elem_sz + read_unit - 1) / read_unit;
 
     auto compiler_options = KernelBuildParameters{
         {"LITE"},
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
+        {"MIOPEN_MAP_SZ", x_elem_sz},
+        {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
     };
 
     if(xDesc.GetType() == miopenFloat)
@@ -152,13 +154,17 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         kernel.kernel_file  = "MIOpenNeuron.cpp";
         kernel.kernel_name  = (packed) ? "MIOpenActiveBwdLite" : "MIOpenActiveBwd2DLite";
 
-        kernel.l_wk.push_back(256);
+        const auto local_work_size = 256;
+
+        kernel.l_wk.push_back(local_work_size);
         kernel.l_wk.push_back(1);
         kernel.l_wk.push_back(1);
 
         // first dimension looks similar but for the packed it is a full image for the
         // non-packed 2D it's width
-        kernel.g_wk.push_back(MAP_RD);
+        const auto global_work_size =
+            ((map_size_aligned + local_work_size - 1) / local_work_size) * local_work_size;
+        kernel.g_wk.push_back(global_work_size);
         kernel.g_wk.push_back(packed ? 1 : height);
         kernel.g_wk.push_back(1);
 
