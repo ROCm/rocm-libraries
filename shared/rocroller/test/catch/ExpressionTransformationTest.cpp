@@ -947,3 +947,77 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
         CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
     }
 }
+
+TEST_CASE("BitfieldCombine epxression and lowering", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    Register::AllocationOptions allocOptions{.contiguousChunkWidth = Register::FULLY_CONTIGUOUS};
+
+    auto src = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    src->allocateNow();
+    auto srcExpr = src->expression();
+
+    auto dst = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    dst->allocateNow();
+    auto dstExpr = dst->expression();
+
+    auto const srcOffset = 10u;
+    auto const dstOffset = 4u;
+    auto const width     = 7u;
+
+    auto offsetDiff = Expression::literal(srcOffset - dstOffset);
+
+    SECTION("Lowering Basic")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
+
+        auto expected
+            = logicalShiftR(
+                  (Expression::literal(Raw32(((1u << width) - 1u) << srcOffset)) & srcExpr),
+                  offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with srcIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
+
+        auto expected
+            = logicalShiftR(srcExpr, offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with dstIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
+
+        auto expected = logicalShiftR((Expression::literal(Raw32(((1u << width) - 1u) << srcOffset))
+                                       & srcExpr),
+                                      offsetDiff)
+                        | dstExpr;
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with srcIsZero & dstIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
+
+        auto expected = logicalShiftR(srcExpr, offsetDiff) | dstExpr;
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+}

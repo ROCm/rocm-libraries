@@ -29,7 +29,7 @@ import stat
 import subprocess
 import sys
 
-BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials', 'seed', 'skip_gathered'])
+BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials', 'seed', 'skip_gathered', 'iteration_info_output_dir', 'benchmark_min_time'])
 
 def run_benchmarks(benchmark_context):
     def is_benchmark_executable(filename):
@@ -76,6 +76,10 @@ def run_benchmarks(benchmark_context):
             args += ['--trials', benchmark_context.trials]
         if benchmark_context.seed:
             args += ['--seed', benchmark_context.seed]
+        if benchmark_context.iteration_info_output_dir:
+            args += ['--iteration_info_out', os.path.join(benchmark_context.iteration_info_output_dir, results_json_name)]
+        if benchmark_context.benchmark_min_time:
+            args += ['--benchmark_min_time', benchmark_context.benchmark_min_time]
         try:
             subprocess.check_call(args)
         except subprocess.CalledProcessError as error:
@@ -121,6 +125,12 @@ def main():
         default=False,
         action='store_true',
         required=False)
+    parser.add_argument('--iteration_info_output_dir',
+        help='The directory to write the benchmark iteration info to',
+        required=False)
+    parser.add_argument('--benchmark_min_time', # TODO: Remove this option once the benchmarks don't use Google Benchmark anymore.
+        help='The minimum amount of time for Google Benchmark to run a benchmark for, where the value \'0s\' means no minimum time',
+        required=False)
 
     args = parser.parse_args()
 
@@ -133,7 +143,9 @@ def main():
         args.size,
         args.trials,
         args.seed,
-        args.skip_gathered)
+        args.skip_gathered,
+        args.iteration_info_output_dir,
+        args.benchmark_min_time)
 
     benchmark_run_successful = run_benchmarks(benchmark_context)
 
