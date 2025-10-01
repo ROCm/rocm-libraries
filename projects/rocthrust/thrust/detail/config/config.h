@@ -20,10 +20,20 @@
 
 #pragma once
 
-#if defined(__CUDACC__)
+#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
+
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
-#  include <cuda/__cccl_config> // IWYU pragma: export
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
 #endif
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 // NOTE: The order of these #includes matters.
 
@@ -39,7 +49,6 @@
 #include <thrust/detail/config/diagnostic.h> // IWYU pragma: export
 #include <thrust/detail/config/execution_space.h> // IWYU pragma: export
 #include <thrust/detail/config/global_workarounds.h> // IWYU pragma: export
-#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
 #include <thrust/detail/config/namespace.h> // IWYU pragma: export
 #include <thrust/detail/config/rtti.h> // IWYU pragma: export
 #include <thrust/detail/config/visibility.h> // IWYU pragma: export
