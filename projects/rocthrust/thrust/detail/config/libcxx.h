@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <thrust/detail/config/config.h>
+#include <thrust/detail/config/preprocessor.h>
 
 // This is a utility file that helps managing which
 // 'std' implementation we're using. The provided
@@ -33,33 +33,36 @@
 //     #include _THRUST_STD_INCLUDE(optional)
 //     using optional_int = _THRUST_STD::optional<int>;
 
-// When targeting CUDA, we want to use 'libcudacxx'. This
-// should always be available, since we are also dependent
-// on CCCL/thrust, which is a sibling of CCCL/libcudacxx.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+// If 'libcudacxx' is available
+// clang-format off
+#if THRUST_HAS_INCLUDE(<cuda/std/cassert>)
+// clang-format on
+#  define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
 #  define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
+#  define _THRUST_LIBCXX                ::cuda
 #  define _THRUST_STD                   _CUDA_VSTD
 #  define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #  define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
 #  define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
 
-// When targeting HIP, we want to use 'libhipcxx' if
-// available. We can do this by checking the existance
-// of a known include.
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#  if defined(__has_include) && __has_include(<hip/std/cassert>)
-#    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
-#    define _THRUST_STD                   ::hip::std
-#    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
-#    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
-#    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
-#  endif
+// If 'libhipcxx' is available
+// clang-format off
+#elif THRUST_HAS_INCLUDE(<hip/std/cassert>)
+// clang-format on
+#  define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
+#  define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
+#  define _THRUST_LIBCXX                ::hip
+#  define _THRUST_STD                   ::hip::std
+#  define _THRUST_HAS_DEVICE_SYSTEM_STD 1
+#  define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
+#  define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
 #endif
 
-// If not using GPU backend or GPU vendor's STD is not
-// found, use fallback.
+// If 'libcudacxx' or 'libhipcxx' is not found, use fallback.
 #ifndef _THRUST_HAS_DEVICE_SYSTEM_STD
-#  define _THRUST_STD_INCLUDE(LIB)      <LIB>
+#  define _THRUST_LIBCXX_INCLUDE(LIB)
+#  define _THRUST_STD_INCLUDE(LIB) <LIB>
+#  define _THRUST_LIBCXX
 #  define _THRUST_STD                   ::std
 #  define _THRUST_HAS_DEVICE_SYSTEM_STD 0
 #  define _THRUST_STD_NAMESPACE_BEGIN \
