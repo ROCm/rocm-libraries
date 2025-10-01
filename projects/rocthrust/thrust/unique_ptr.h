@@ -192,6 +192,34 @@ struct unique_ptr_deleter_sfinae<Deleter&>
 
 } // namespace detail
 
+/*! \p thrust::unique_ptr is a smart pointer that owns and manages another object,
+ *  allocated in device memory, via a pointer and subsequently disposes of that
+ *  object when the \p unique_ptr goes out of scope.
+ *
+ *  The object is disposed of using the associated `Deleter` when either of the
+ *  following happens:
+ *  - the managing `unique_ptr` object is destroyed.
+ *  - the managing `unique_ptr` object is assigned another pointer via `operator=` or `reset()`.
+ *
+ *  The object is disposed of by calling `get_deleter()(get())`. The default deleter,
+ *  `thrust::default_delete`, deallocates the memory using `thrust::device_free`.
+ *  For non-trivially destructible types, Deleter invokes the destructor of the
+ *  managed object on the device before deallocation.
+ *
+ *  A `unique_ptr` may alternatively own no object, in which case it is described as
+ *  *empty*.
+ *
+ *  There are two versions of `thrust::unique_ptr`:
+ *  1. Manages a single object
+ *  2. Manages a dynamically-allocated array of objects
+ *
+ *
+ *  \tparam T The type of the managed object.
+ *  \tparam D The type of the deleter.
+ *
+ *  \see https://en.cppreference.com/w/cpp/memory/unique_ptr
+ */
+
 template <class T, class D = default_delete<T>>
 class __attribute__((trivial_abi)) unique_ptr
 {
