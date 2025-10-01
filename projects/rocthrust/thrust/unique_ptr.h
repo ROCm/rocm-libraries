@@ -413,6 +413,8 @@ public:
   //==========================================================================
   // Destructor
   //==========================================================================
+  /*! Destroys the \p unique_ptr, the managed object is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
   {
     reset();
