@@ -88,7 +88,7 @@ boost::optional<DbRecord> PlainTextDb::FindRecord(const std::string& key)
 {
     if(DisableUserDbFileIO)
         return {};
-    const auto lock = shared_lock(lock_file, GetLockTimeout());
+    const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
     return FindRecordUnsafe(key, nullptr);
 }
