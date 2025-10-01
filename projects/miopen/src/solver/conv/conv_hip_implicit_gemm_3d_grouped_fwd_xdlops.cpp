@@ -586,6 +586,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         if(ai_success)
         {
             MIOPEN_LOG_I("Step 3: AI heuristics selected kernel: " << kernel_id);
+            return;
         }
         else
         {
