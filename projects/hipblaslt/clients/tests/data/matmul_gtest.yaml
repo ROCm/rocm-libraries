@@ -1829,6 +1829,7 @@ Tests:
   function:
     matmul: *i8_precision_dst_i32
   matrix_size:
+    - { M:    6,  N:   65,  K:    1  }
     - { M:  1,    N:  131,  K:  131  }
     - { M:  131,  N:  1,    K:  131  }
     - { M:  128,  N:  128,  K:  128  }
@@ -1846,6 +1847,7 @@ Tests:
   function:
     matmul: *i8_precision_dst_i32
   matrix_size:
+    - { M:    6,  N:   65,  K:    1  }
     - { M:  1,    N:  131,  K:  131  }
     - { M:  131,  N:  1,    K:  131  }
     - { M:  128,  N:  128,  K:  128  }
@@ -1865,7 +1867,6 @@ Tests:
   function:
     matmul: *i8_precision_dst_i8
   matrix_size:
-    - { M:    6,  N:   65,  K:    1  }
     - { M:  128,  N:  128,  K:  128  }
     - { M:  131,  N:  131,  K:  131  }
     - { M:  1024, N:  1024, K:  1024 }
@@ -1881,7 +1882,6 @@ Tests:
   function:
     matmul: *i8_precision_dst_i8
   matrix_size:
-    - { M:    6,  N:   65,  K:    1  }
     - { M:  128,  N:  128,  K:  128  }
     - { M:  131,  N:  131,  K:  131  }
     - { M:  1024, N:  1024, K:  1024 }
