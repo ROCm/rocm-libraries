@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
+
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
+
 project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
 
 if(POLICY CMP0135)
@@ -36,8 +39,6 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 # --- Build options and validation ---
-
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
 cmake_dependent_option(
