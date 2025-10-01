@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 #include <sstream>
 
-TEST(TestTypes, DataTypeConversion)
+TEST(TestTypes, ToSdkTypeDataTypes)
 {
     using namespace hipdnn_frontend;
 
@@ -16,6 +16,19 @@ TEST(TestTypes, DataTypeConversion)
     EXPECT_EQ(toSdkType(DataType::UINT8), hipdnn_sdk::data_objects::DataType::UINT8);
     EXPECT_EQ(toSdkType(DataType::INT32), hipdnn_sdk::data_objects::DataType::INT32);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_sdk::data_objects::DataType::UNSET);
+}
+
+TEST(TestTypes, FromSdkTypeDataTypes)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::FLOAT), DataType::FLOAT);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::HALF), DataType::HALF);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::BFLOAT16), DataType::BFLOAT16);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::DOUBLE), DataType::DOUBLE);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::UINT8), DataType::UINT8);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::INT32), DataType::INT32);
+    EXPECT_EQ(fromSdkType(hipdnn_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
 TEST(TestTypes, ConvolutionModeConversion)

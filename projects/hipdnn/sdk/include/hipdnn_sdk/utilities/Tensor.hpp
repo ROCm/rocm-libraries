@@ -81,7 +81,8 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0});
+        return throwIfOutOfBounds(
+            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
     template <typename... Args>
@@ -118,6 +119,49 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+protected:
+    bool isPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) const
+    {
+        // Item count = largest stride * item count in that dimension
+        return (calculateItemCount(dims) == calculateElementSpace(dims, strides));
+    }
+
+    static size_t calculateElementSpace(const std::vector<int64_t>& dims,
+                                        const std::vector<int64_t>& strides)
+    {
+        return static_cast<size_t>(
+            std::inner_product(dims.begin(),
+                               dims.end(),
+                               strides.begin(),
+                               1,
+                               std::plus<>(),
+                               [](size_t len, size_t stride) { return (len - 1) * stride; }));
+    }
+
+    static size_t calculateItemCount(const std::vector<int64_t>& dims)
+    {
+        if(dims.empty())
+        {
+            return 0;
+        }
+
+        return static_cast<size_t>(
+            std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
+    }
+
+    int64_t throwIfOutOfBounds(int64_t index) const
+    {
+#ifndef NDEBUG
+        if(static_cast<size_t>(index) >= memory().count())
+        {
+            throw std::out_of_range("Index " + std::to_string(index)
+                                    + " is out of range for tensor with "
+                                    + std::to_string(memory().count()) + " elements");
+        }
+#endif
+        return index;
+    }
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
@@ -127,11 +171,11 @@ class Tensor : public TensorBase<T>
 {
 public:
     Tensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
-        : _memory(calculateItemCount(dims))
+        : _memory(TensorBase<T>::calculateItemCount(dims))
         , _dims(dims)
         , _strides(strides)
     {
-        if(!isPacked(dims, strides))
+        if(!TensorBase<T>::isPacked(dims, strides))
         {
             throw std::invalid_argument("Tensor must be packed");
         }
@@ -193,35 +237,6 @@ public:
     }
 
 private:
-    bool isPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) const
-    {
-        // Item count = largest stride * item count in that dimension
-        return (calculateItemCount(dims) == calculateElementSpace(dims, strides));
-    }
-
-    static size_t calculateElementSpace(const std::vector<int64_t>& dims,
-                                        const std::vector<int64_t>& strides)
-    {
-        return static_cast<size_t>(
-            std::inner_product(dims.begin(),
-                               dims.end(),
-                               strides.begin(),
-                               1,
-                               std::plus<>(),
-                               [](size_t len, size_t stride) { return (len - 1) * stride; }));
-    }
-
-    static size_t calculateItemCount(const std::vector<int64_t>& dims)
-    {
-        if(dims.empty())
-        {
-            return 0;
-        }
-
-        return static_cast<size_t>(
-            std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
-    }
-
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
