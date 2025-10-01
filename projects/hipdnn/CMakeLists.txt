@@ -49,13 +49,16 @@ set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/lib/test_plugins" CACHE INTERNAL
 
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
-option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
+option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema durinb build" ON)
+option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 list(
     APPEND
