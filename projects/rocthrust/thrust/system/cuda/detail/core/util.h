@@ -60,33 +60,24 @@ namespace core
 
 #ifdef _NVHPC_CUDA
 #  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm60
 #  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm52
 #  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm35
 #  else
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  endif
 #else
 #  if (__CUDA_ARCH__ >= 600)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm60
 #  elif (__CUDA_ARCH__ >= 520)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm52
 #  elif (__CUDA_ARCH__ >= 350)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm35
 #  elif (__CUDA_ARCH__ >= 300)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  elif !defined(__CUDA_ARCH__)
-// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  endif
 #endif
@@ -690,10 +681,9 @@ THRUST_RUNTIME_FUNCTION inline cudaError_t sync_stream(cudaStream_t stream)
 
 inline void _CCCL_DEVICE sync_threadblock()
 {
-  __syncthreads();
+  cub::CTA_SYNC();
 }
 
-// Deprecated [Since 2.8]
 #define CUDA_CUB_RET_IF_FAIL(e)                \
   {                                            \
     auto const error = (e);                    \
@@ -814,7 +804,7 @@ template <int ALLOCATIONS>
 THRUST_RUNTIME_FUNCTION cudaError_t alias_storage(
   void* storage_ptr, size_t& storage_size, void* (&allocations)[ALLOCATIONS], size_t (&allocation_sizes)[ALLOCATIONS])
 {
-  return cub::detail::AliasTemporaries(storage_ptr, storage_size, allocations, allocation_sizes);
+  return cub::AliasTemporaries(storage_ptr, storage_size, allocations, allocation_sizes);
 }
 
 } // namespace core

@@ -31,9 +31,6 @@ THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
   b                = temp;
 } // end swap()
 
-// We can ignore deprecated 'null_type' usage here.
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 // forward declaration for tuple
 template <
   class T0 = null_type, class T1 = null_type, class T2 = null_type,
@@ -992,7 +989,5 @@ inline bool operator>=(const detail::cons<T1, T2>& lhs, const detail::cons<S1, S
 
   return detail::gte(lhs, rhs);
 } // end operator>=()
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END

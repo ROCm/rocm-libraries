@@ -215,8 +215,6 @@ typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 // Ad-hoc testing for other functionals
 TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   int i    = 42;
@@ -248,7 +246,6 @@ TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value,
                 "");
-  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -256,9 +253,10 @@ TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
   Vector input{0, 1, 2, 3};
   Vector output(4);
-  thrust::transform(input.begin(), input.end(), output.begin(), ::internal::identity{});
+  thrust::transform(input.begin(), input.end(), output.begin(), thrust::identity<T>());
   ASSERT_EQ(input, output);
 }
 
@@ -337,12 +335,13 @@ TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
   Vector input{1, 0, 1, 1, 0};
 
   Vector output(5);
 
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(::internal::identity{}));
+  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(thrust::identity<T>()));
 
   Vector ref{0, 1, 0, 0, 1};
   ASSERT_EQ(output, ref);

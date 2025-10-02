@@ -31,10 +31,6 @@
 #include <random>
 #include <type_traits>
 #include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-#  include <limits>
-#endif
 
 #include "test_seed.hpp"
 
@@ -745,21 +741,17 @@ thrust::host_vector<T> random_samples(const size_t N)
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename THRUST_NS_QUALIFIER::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
+typename thrust::detail::disable_if<::std::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-  return static_cast<T>(
-    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max())));
+  return thrust::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value, T>
-truncate_to_max_representable(std::size_t n)
+typename ::std::enable_if<::std::is_floating_point<T>::value, T>::type truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), _THRUST_STD::numeric_limits<T>::max());
+  return thrust::min<T>(n, thrust::numeric_limits<T>::max());
 }
 
 enum threw_status

@@ -64,8 +64,6 @@
 #  include <type_traits>
 #endif
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER == 1900
 #  define THRUST_OPTIONAL_MSVC2015
 #endif
@@ -88,11 +86,11 @@ THRUST_NAMESPACE_BEGIN
 #ifndef THRUST_MONOSTATE_INPLACE_MUTEX
 #  define THRUST_MONOSTATE_INPLACE_MUTEX
 /// \brief Used to represent an optional with no data; essentially a bool
-class THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::monostate instead") monostate
+class monostate
 {};
 
 /// \brief A tag type to tell optional to construct its value in-place
-struct THRUST_DEPRECATED in_place_t
+struct in_place_t
 {
   explicit in_place_t() = default;
 };
@@ -101,7 +99,7 @@ static constexpr in_place_t in_place{};
 #endif
 
 template <class T>
-class THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::optional") optional;
+class optional;
 
 /// \exclude
 namespace detail
@@ -751,7 +749,7 @@ struct optional_delete_assign_base<T, false, false>
 } // namespace detail
 
 /// \brief A tag type to represent an empty optional
-struct THRUST_DEPRECATED nullopt_t
+struct nullopt_t
 {
   struct do_not_use
   {};
@@ -775,7 +773,7 @@ static constexpr
 #endif // __CUDA_ARCH__
   nullopt_t nullopt{nullopt_t::do_not_use{}, nullopt_t::do_not_use{}};
 
-class THRUST_DEPRECATED bad_optional_access : public std::exception
+class bad_optional_access : public std::exception
 {
 public:
   bad_optional_access() = default;
@@ -1989,7 +1987,6 @@ THRUST_EXEC_CHECK_DISABLE
 template <class T = detail::i_am_secret,
           class U,
           class Ret = detail::conditional_t<std::is_same<T, detail::i_am_secret>::value, detail::decay_t<U>, T>>
-THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::make_optional")
 THRUST_HOST_DEVICE inline constexpr optional<Ret> make_optional(U&& v)
 {
   return optional<Ret>(std::forward<U>(v));
@@ -1997,14 +1994,12 @@ THRUST_HOST_DEVICE inline constexpr optional<Ret> make_optional(U&& v)
 
 THRUST_EXEC_CHECK_DISABLE
 template <class T, class... Args>
-THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::make_optional")
 THRUST_HOST_DEVICE inline constexpr optional<T> make_optional(Args&&... args)
 {
   return optional<T>(in_place, std::forward<Args>(args)...);
 }
 THRUST_EXEC_CHECK_DISABLE
 template <class T, class U, class... Args>
-THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::make_optional")
 THRUST_HOST_DEVICE inline constexpr optional<T> make_optional(std::initializer_list<U> il, Args&&... args)
 {
   return optional<T>(in_place, il, std::forward<Args>(args)...);
@@ -2041,22 +2036,7 @@ THRUST_HOST_DEVICE auto optional_map_impl(Opt&& opt, F&& f)
   if (opt.has_value())
   {
     detail::invoke(std::forward<F>(f), *std::forward<Opt>(opt));
-#    if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-    // MSVC fails to suppress the warning on make_optional
-    THRUST_SUPPRESS_DEPRECATED_PUSH
-    return optional<monostate>(monostate{});
-    THRUST_SUPPRESS_DEPRECATED_POP
-#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-    // NVHPC cannot have a diagnostic pop after a return statement
-    THRUST_SUPPRESS_DEPRECATED_PUSH
-    auto o = optional<monostate>(monostate{});
-    THRUST_SUPPRESS_DEPRECATED_POP
-    return _THRUST_STD::move(o);
-#    else
-    THRUST_SUPPRESS_DEPRECATED_PUSH
     return make_optional(monostate{});
-    THRUST_SUPPRESS_DEPRECATED_POP
-#    endif
   }
 
   return optional<monostate>(nullopt);
@@ -2875,5 +2855,3 @@ struct hash<THRUST_NS_QUALIFIER::optional<T>>
   }
 };
 } // namespace std
-
-THRUST_SUPPRESS_DEPRECATED_POP

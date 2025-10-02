@@ -26,13 +26,8 @@
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/universal_memory_resource.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(limits)
-#endif
-
 #include <cstdio>
 #include <iostream>
-#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -221,30 +216,22 @@ private:
   }
 };
 
-namespace std
-{
-template <>
-struct numeric_limits<custom_numeric> : numeric_limits<int>
-{};
-} // namespace std
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-_THRUST_STD_NAMESPACE_BEGIN
-template <>
-struct numeric_limits<custom_numeric> : numeric_limits<int>
-{};
-_THRUST_STD_NAMESPACE_END
-#endif
-
 THRUST_NAMESPACE_BEGIN
+
+template <>
+struct numeric_limits<custom_numeric> : numeric_limits<int>
+{};
+
 namespace detail
 {
+
 // For random number generation
 template <>
 class integer_traits<custom_numeric> : public integer_traits_base<int, INT_MIN, INT_MAX>
 {};
 
 } // namespace detail
+
 THRUST_NAMESPACE_END
 
 using NumericTypes = unittest::type_list<

@@ -49,14 +49,12 @@
 #    include <thrust/system/cuda/detail/async/customization.h>
 #    include <thrust/system/cuda/detail/util.h>
 #    include <thrust/system/cuda/future.h>
-
-#    include <cuda/std/type_traits>
+#    include <thrust/type_traits/remove_cvref.h>
 
 #    include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -139,26 +137,24 @@ unique_eager_event async_inclusive_scan_n(
     __accumulator_t<BinaryOp, typename ::cuda::std::iterator_traits<ForwardIt>::value_type, InitialValueType>;
   constexpr bool ForceInclusive = true;
 
-  using Dispatch32 = cub::DispatchScan<
-    ForwardIt,
-    OutputIt,
-    BinaryOp,
-    InputValueT,
-    std::int32_t,
-    AccumT,
-    cub::detail::scan::
-      policy_hub<cub::detail::value_t<ForwardIt>, cub::detail::value_t<OutputIt>, AccumT, std::int32_t, BinaryOp>,
-    ForceInclusive>;
-  using Dispatch64 = cub::DispatchScan<
-    ForwardIt,
-    OutputIt,
-    BinaryOp,
-    InputValueT,
-    std::int64_t,
-    AccumT,
-    cub::detail::scan::
-      policy_hub<cub::detail::value_t<ForwardIt>, cub::detail::value_t<OutputIt>, AccumT, std::int64_t, BinaryOp>,
-    ForceInclusive>;
+  using Dispatch32 =
+    cub::DispatchScan<ForwardIt,
+                      OutputIt,
+                      BinaryOp,
+                      InputValueT,
+                      std::int32_t,
+                      AccumT,
+                      cub::detail::scan::policy_hub<AccumT, BinaryOp>,
+                      ForceInclusive>;
+  using Dispatch64 =
+    cub::DispatchScan<ForwardIt,
+                      OutputIt,
+                      BinaryOp,
+                      InputValueT,
+                      std::int64_t,
+                      AccumT,
+                      cub::detail::scan::policy_hub<AccumT, BinaryOp>,
+                      ForceInclusive>;
 
   InputValueT init_value(init);
 
@@ -247,7 +243,6 @@ auto async_inclusive_scan(
 
 } // namespace cuda_cub
 
-_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER

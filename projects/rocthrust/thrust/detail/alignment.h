@@ -29,7 +29,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(cstddef) // For `std::size_t` and `std::max_align_t`.
 #include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
@@ -37,6 +36,8 @@
 #elif _THRUST_USE_ROCPRIM
 #  include <rocprim/detail/various.hpp>
 #endif
+
+#include <cstddef> // For `std::size_t` and `std::max_align_t`.
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -53,7 +54,7 @@ using alignment_of = _THRUST_STD::alignment_of<T>;
 /// type whose alignment requirement is a divisor of `Align`.
 ///
 /// The behavior is undefined if `Align` is not a power of 2.
-template <_THRUST_STD::size_t Align>
+template <std::size_t Align>
 struct aligned_type
 {
   struct alignas(Align) type
@@ -78,7 +79,7 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
   return reinterpret_cast<T>(reinterpret_cast<void*>(u));
 }
 
-THRUST_HOST_DEVICE inline _THRUST_STD::size_t aligned_storage_size(_THRUST_STD::size_t n, _THRUST_STD::size_t align)
+THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   return _THRUST_LIBCXX::ceil_div(n, align) * align;

@@ -79,9 +79,8 @@ THRUST_HOST void return_temporary_buffer(
   alloc_traits::deallocate(system.get_allocator(), to_ptr, num_elements);
 }
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename T, template <typename> class BaseSystem, typename Allocator, typename... Dependencies>
-THRUST_DEPRECATED THRUST_HOST thrust::pair<T*, std::ptrdiff_t> get_temporary_buffer(
+THRUST_HOST thrust::pair<T*, std::ptrdiff_t> get_temporary_buffer(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system,
   std::ptrdiff_t n)
 {
@@ -119,7 +118,6 @@ THRUST_HOST void return_temporary_buffer(
   pointer to_ptr = thrust::reinterpret_pointer_cast<pointer>(p);
   alloc_traits::deallocate(system.get_allocator(), to_ptr, num_elements);
 }
-THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace detail
 

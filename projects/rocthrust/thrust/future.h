@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
 #if THRUST_CPP_DIALECT >= 2017
@@ -68,7 +61,6 @@
 /*! \endcond
  */
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 /*! \cond
@@ -86,16 +78,16 @@ THRUST_NAMESPACE_BEGIN
 namespace unimplemented
 {
 
-struct THRUST_DEPRECATED no_unique_eager_event_type_found
+struct no_unique_eager_event_type_found
 {};
 
-THRUST_DEPRECATED THRUST_HOST inline no_unique_eager_event_type_found unique_eager_event_type(...) noexcept;
+inline THRUST_HOST no_unique_eager_event_type_found unique_eager_event_type(...) noexcept;
 
-struct THRUST_DEPRECATED no_unique_eager_future_type_found
+struct no_unique_eager_future_type_found
 {};
 
 template <typename T>
-THRUST_DEPRECATED THRUST_HOST no_unique_eager_future_type_found unique_eager_future_type(...) noexcept;
+THRUST_HOST no_unique_eager_future_type_found unique_eager_future_type(...) noexcept;
 
 } // namespace unimplemented
 
@@ -105,7 +97,7 @@ namespace unique_eager_event_type_detail
 using unimplemented::unique_eager_event_type;
 
 template <typename System>
-using select THRUST_DEPRECATED = decltype(unique_eager_event_type(std::declval<System>()));
+using select = decltype(unique_eager_event_type(std::declval<System>()));
 
 } // namespace unique_eager_event_type_detail
 
@@ -115,25 +107,25 @@ namespace unique_eager_future_type_detail
 using unimplemented::unique_eager_future_type;
 
 template <typename System, typename T>
-using select THRUST_DEPRECATED = decltype(unique_eager_future_type<T>(std::declval<System>()));
+using select = decltype(unique_eager_future_type<T>(std::declval<System>()));
 
 } // namespace unique_eager_future_type_detail
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename System>
-using unique_eager_event THRUST_DEPRECATED = unique_eager_event_type_detail::select<System>;
+using unique_eager_event = unique_eager_event_type_detail::select<System>;
 
 template <typename System>
-using event THRUST_DEPRECATED = unique_eager_event<System>;
+using event = unique_eager_event<System>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename System, typename T>
-using unique_eager_future THRUST_DEPRECATED = unique_eager_future_type_detail::select<System, T>;
+using unique_eager_future = unique_eager_future_type_detail::select<System, T>;
 
 template <typename System, typename T>
-using future THRUST_DEPRECATED = unique_eager_future<System, T>;
+using future = unique_eager_future<System, T>;
 
 /*
 ///////////////////////////////////////////////////////////////////////////////
@@ -155,30 +147,26 @@ using host_future = host_unique_eager_future<T>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using device_unique_eager_event THRUST_DEPRECATED =
+using device_unique_eager_event =
   unique_eager_event_type_detail::select<thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag>;
 
-using device_event THRUST_DEPRECATED = device_unique_eager_event;
+using device_event = device_unique_eager_event;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-using device_unique_eager_future THRUST_DEPRECATED =
+using device_unique_eager_future =
   unique_eager_future_type_detail::select<thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag, T>;
 
 template <typename T>
-using device_future THRUST_DEPRECATED = device_unique_eager_future<T>;
+using device_future = device_unique_eager_future<T>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct THRUST_DEPRECATED new_stream_t final
+struct new_stream_t final
 {};
 
-#  ifndef CCCL_HEADER_MACRO_CHECK
-// when building header tests, we get a deprecation warning from cudafe1.stub.c if we deprecate a global variable
-THRUST_DEPRECATED
-#  endif
-  THRUST_INLINE_CONSTANT new_stream_t new_stream{};
+THRUST_INLINE_CONSTANT new_stream_t new_stream{};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -189,7 +177,6 @@ using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::when_all;
 /*! \endcond
  */
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #endif

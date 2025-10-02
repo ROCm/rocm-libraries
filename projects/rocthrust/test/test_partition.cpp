@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -166,6 +165,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionSimple)
 TYPED_TEST(PartitionVectorTests, TestStablePartitionStencilSimple)
 {
   using Vector   = typename TestFixture::input_type;
+  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -174,7 +174,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionStencilSimple)
 
   Vector stencil{0, 1, 0, 0, 1};
 
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
   Vector ref{2, 2, 1, 1, 3};
 
@@ -210,17 +210,19 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopySimple)
 TYPED_TEST(PartitionVectorTests, TestStablePartitionCopyStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector data{1, 2, 1, 1, 2};
+
   Vector stencil{false, true, false, false, true};
 
   Vector true_results(2);
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), thrust::identity<T>());
 
   Vector true_ref(2, 2);
 

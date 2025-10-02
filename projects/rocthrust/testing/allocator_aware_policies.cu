@@ -15,11 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
-// need to suppress deprecation warnings for execute_with_allocator_and_dependencies here and inside type traits
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
 #include <thrust/system/hip/detail/par.h>
@@ -133,5 +128,3 @@ using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip
 SimpleUnitTest<TestAllocatorAttachment,
                unittest::type_list<sequential_info, hip_par_info, cpp_par_info, omp_par_info, tbb_par_info>>
   TestAllocatorAttachmentInstance;
-
-THRUST_SUPPRESS_DEPRECATED_POP

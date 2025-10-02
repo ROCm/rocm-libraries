@@ -132,7 +132,7 @@ class THRUST_DECLSPEC_EMPTY_BASES permutation_iterator
 private:
   using super_t = typename detail::permutation_iterator_base<ElementIterator, IndexIterator>::type;
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
   /*! \endcond
    */
 

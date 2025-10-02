@@ -39,7 +39,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-
 #include <thrust/detail/attributes.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_categories.h>
@@ -124,7 +123,7 @@ THRUST_NAMESPACE_BEGIN
  *                                               thrust::make_counting_iterator(8),
  *                                               stencil.begin(),
  *                                               indices.begin(),
- *                                               ::internal::identity{});
+ *                                               thrust::identity<int>());
  *   // indices now contains [1,2,5,7]
  *
  *   return 0;
@@ -144,7 +143,7 @@ class THRUST_DECLSPEC_EMPTY_BASES counting_iterator
    */
   using super_t = typename detail::counting_iterator_base<Incrementable, System, Traversal, Difference>::type;
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
 
 public:
   using reference       = typename super_t::reference;

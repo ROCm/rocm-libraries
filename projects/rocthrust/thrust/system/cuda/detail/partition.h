@@ -113,7 +113,7 @@ struct DispatchPartitionIf
                            stream);
     CUDA_CUB_RET_IF_FAIL(status);
 
-    status = cub::detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
+    status = cub::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
     CUDA_CUB_RET_IF_FAIL(status);
 
     // Return if we're only querying temporary storage requirements
@@ -230,7 +230,7 @@ THRUST_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> stable_partition_copy
     return thrust::make_pair(selected_result, rejected_result);
   }
 
-  using output_it_wrapper_t = cub::detail::select::partition_distinct_output_t<SelectedOutIt, RejectedOutIt>;
+  using output_it_wrapper_t = cub::detail::partition_distinct_output_t<SelectedOutIt, RejectedOutIt>;
   std::size_t num_items     = static_cast<std::size_t>(thrust::distance(first, last));
   std::size_t num_selected =
     partition(policy, first, last, stencil, output_it_wrapper_t{selected_result, rejected_result}, predicate);

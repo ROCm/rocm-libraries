@@ -28,7 +28,7 @@ TESTS_DEFINE(PartitionPointVectorTests, VectorSignedIntegerTestsParams);
 template <typename T>
 struct is_even
 {
-  THRUST_HOST_DEVICE bool operator()(T x) const
+  __host__ __device__ bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -37,21 +37,26 @@ struct is_even
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
 {
   using Vector   = typename TestFixture::input_type;
+  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v{1, 1, 1, 0};
+  Vector v(4);
+  v[0] = 1;
+  v[1] = 1;
+  v[2] = 1;
+  v[3] = 0;
 
   Iterator first = v.begin();
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
 }
 
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
@@ -77,7 +82,7 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
 }
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator partition_point(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+__host__ __device__ ForwardIterator partition_point(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -96,7 +101,7 @@ TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator partition_point(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+__host__ __device__ ForwardIterator partition_point(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -111,35 +116,4 @@ TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
   thrust::partition_point(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
 
   ASSERT_EQ(13, vec.front());
-}
-
-struct test_less_than
-{
-  long long expected;
-
-  THRUST_DEVICE bool operator()(long long y)
-  {
-    return y < expected;
-  }
-};
-
-void TestPartitionPointWithBigIndexesHelper(int magnitude)
-{
-  thrust::counting_iterator<long long> begin(0);
-  thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
-
-  test_less_than fn = {(1ll << magnitude) - 17};
-
-  ASSERT_EQ(thrust::distance(begin, thrust::partition_point(thrust::device, begin, end, fn)), (1ll << magnitude) - 17);
-}
-
-TEST(PartitionPointTests, TestPartitionPointWithBigIndexes)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  TestPartitionPointWithBigIndexesHelper(30);
-  TestPartitionPointWithBigIndexesHelper(31);
-  TestPartitionPointWithBigIndexesHelper(32);
-  TestPartitionPointWithBigIndexesHelper(33);
 }

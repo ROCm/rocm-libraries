@@ -133,7 +133,7 @@ class THRUST_DECLSPEC_EMPTY_BASES iterator_adaptor
   /*! \cond
    */
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
 
 protected:
   using super_t =

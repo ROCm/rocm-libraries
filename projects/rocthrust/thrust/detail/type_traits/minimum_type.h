@@ -84,7 +84,7 @@ struct primitive_minimum_type<T, T>
 struct any_conversion
 {
   template <typename T>
-  THRUST_HOST_DEVICE operator T();
+  operator T();
 };
 
 } // namespace minimum_type_detail

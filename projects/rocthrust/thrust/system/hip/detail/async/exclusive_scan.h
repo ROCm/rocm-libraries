@@ -50,12 +50,12 @@
 #    include <thrust/system/hip/detail/async/customization.h>
 #    include <thrust/system/hip/detail/util.h>
 #    include <thrust/system/hip/future.h>
+#    include <thrust/type_traits/remove_cvref.h>
 
 #    include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. ExclusiveSum instead of ExcScan
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -142,7 +142,6 @@ auto async_exclusive_scan(
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

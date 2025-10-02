@@ -86,11 +86,10 @@ auto get_async_device_allocator(thrust::detail::execution_policy_base<DerivedPol
     auto get_async_device_allocator(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec)
       THRUST_RETURNS(exec.get_allocator())
 
-        THRUST_SUPPRESS_DEPRECATED_PUSH
-  template <typename Allocator, template <typename> class BaseSystem>
-  THRUST_DEPRECATED auto get_async_device_allocator(
-    thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
-    THRUST_RETURNS(exec.get_allocator()) THRUST_SUPPRESS_DEPRECATED_POP
+        template <typename Allocator, template <typename> class BaseSystem>
+        auto get_async_device_allocator(
+          thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
+          THRUST_RETURNS(exec.get_allocator())
 
   ///////////////////////////////////////////////////////////////////////////////
 
