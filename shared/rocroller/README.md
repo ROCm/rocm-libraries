@@ -40,6 +40,8 @@ rocRoller is a software library for generating AMDGPU kernels.
 
 ### Quick start instructions
 
+
+
 The rocRoller CMake support should configure out of the box assuming
 project dependencies are installed in a location discoverable
 by CMake by default. In the event that this is not the case, the
@@ -50,11 +52,11 @@ setting common configurations a `CMakePresets.json` file is provided
 in the project root directory. Two presets are provided with the following
 options:
 
-1. opt-rocm (used to emulate current dev workflow)
+1. `default:release` (used to emulate current dev workflow)
   1. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
   2. ROCROLLER_ENABLE_FETCH: "ON"
   3. CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
-2. precheckin (same config used for ci pipelines)
+2. `precheckin` (same config used for ci pipelines)
   1. ROCROLLER_ENABLE_CPPCHECK: "ON"
   2. ROCROLLER_ENABLE_YAML_CPP: "OFF"
   3. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
@@ -62,15 +64,16 @@ options:
   5. ROCROLLER_ENABLE_FETCH: "ON"
   6. ROCROLLER_TESTS_SKIP_SLOW: "OFF"
   7. CMAKE_PREFIX_PATH: "/opt/rocm;/opt/rocm/llvm"
-3. asan (See CMakePresets.json for details)
-4. amd-mrisa (See CMakePresets.json for details)
-5. coverage (See CMakePresets.json for details)
-5. docs (See CMakePresets.json for details)
+3. `asan` (See CMakePresets.json for details)
+4. `amd-mrisa` (See CMakePresets.json for details)
+5. `coverage` (See CMakePresets.json for details)
+5. `docs` (See CMakePresets.json for details)
 
 One can use the presets as follows:
 
 ```
-cmake --preset opt-rocm -B build -S . <any additional cmake options>
+cmake --list-presets
+cmake --preset default:release -B build -S . <any additional cmake options>
 cmake --preset precheckin -B build -S . <any additional cmake options>
 ```
 
@@ -81,14 +84,12 @@ building dependencies (off by default).
 
 To build rocRoller using Docker:
 ```
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
-cd rocRoller
 ./docker/user-image/start_user_container
 docker exec -ti -u ${USER} ${USER}_dev_clang bash
 cd /data
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON ..
 make -j
 ```
 
@@ -99,11 +100,9 @@ apt update
 apt install -y libopenblas-dev ninja-build
 
 # As regular user:
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
-cd rocRoller
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON ..
 make -j
 ```
 
@@ -114,18 +113,27 @@ ctest --test-dir build/test <additional ctest options>
 
 ### Detailed commandline instructions
 
+The simplest way to retrieve the rocroller project is to clone all of [rocm-libraries](https://github.com/ROCm/rocm-libraries) and navigate to rocroller:
+
+```bash
+git clone https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries/shared/rocroller
+```
+
+For a shorter download process, use sparse checkout to only clone rocroller:
+
+```bash
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set shared/rocroller
+git checkout develop # or the branch you are starting from
+```
+
 The rocRoller repository includes several Docker files.  We recommend
 using these for development work.
 
 [Instructions for building and launching docker](docker/README.md) are available.
-
-The rocRoller repo can be cloned from the internal GitHub repo. The
-tip of the `master` branch contains the latest commits:
-https://github.com/ROCm/rocRoller
-
-```
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
-```
 
 From inside the docker container launched previously, the library can
 be built using these steps.  The cloned directory should be available

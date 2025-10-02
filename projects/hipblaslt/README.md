@@ -66,7 +66,7 @@ This section provides usage examples on how to configure, build and install hipB
 It assumes the user has a ROCm installation (conventionally installed to `/opt/rocm`), Python 3.8 or newer, 
 and a CMake version greater than or equal to the `cmake_minimum_required` defined at [CMakeLists.txt](CMakeLists.txt#L4).
 
-### Using CMake presets
+#### Using CMake presets
 
 > [!NOTE]
 > When using presets, assumptions are made about search paths, built-in CMake variables, and output directories. 
@@ -95,7 +95,7 @@ cmake --preset gemm-libs
 cmake --build build --parallel
 ```
 
-### Using CMake variables directly
+#### Using CMake variables directly
 
 **Full build for gfx950**
 
@@ -111,7 +111,7 @@ cmake -B build -S .                                  \
 cmake --build build --parallel
 ```
 
-### Using the installation script
+#### Using the installation script
 
 Refer to the available build options using `./install.sh --help`:
 

@@ -3,7 +3,7 @@
     "configurePresets": [
         {
             "name": "default:release",
-            "displayName": "Configure preset for release build with installation to /opt/rocm",
+            "displayName": "Configure release build with installation to /opt/rocm",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
