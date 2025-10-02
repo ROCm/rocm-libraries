@@ -6,6 +6,7 @@
 #include <functional>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -17,6 +18,7 @@ struct ConvolutionFwdSignatureKey
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType accumulatorDataType;
 
+    ConvolutionFwdSignatureKey() = default;
     constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
                                          hipdnn_sdk::data_objects::DataType accumulator)
         : inputDataType(input)
@@ -54,6 +56,11 @@ struct ConvolutionFwdSignatureKey
         accumulatorDataType = hipdnn_sdk::data_objects::DataType::FLOAT;
     }
 
+    std::size_t operator()(const ConvolutionFwdSignatureKey& k) const noexcept
+    {
+        return k.hashSelf();
+    }
+
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
@@ -65,6 +72,37 @@ struct ConvolutionFwdSignatureKey
     {
         return nodeType == other.nodeType && inputDataType == other.inputDataType
                && accumulatorDataType == other.accumulatorDataType;
+    }
+
+    static std::unordered_map<ConvolutionFwdSignatureKey,
+                              std::unique_ptr<IGraphNodePlanBuilder>,
+                              ConvolutionFwdSignatureKey>
+        getPlanBuilders()
+    {
+        std::unordered_map<ConvolutionFwdSignatureKey,
+                           std::unique_ptr<IGraphNodePlanBuilder>,
+                           ConvolutionFwdSignatureKey>
+            map;
+
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+
+        return map;
+    }
+
+    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum>
+    static void addPlanBuilder(std::unordered_map<ConvolutionFwdSignatureKey,
+                                                  std::unique_ptr<IGraphNodePlanBuilder>,
+                                                  ConvolutionFwdSignatureKey>& map)
+    {
+        map[ConvolutionFwdSignatureKey(InputDataTypeEnum, AccumulatorDataTypeEnum)]
+            = std::make_unique<
+                ConvolutionFwdPlanBuilder<InputDataTypeEnum, AccumulatorDataTypeEnum>>();
     }
 };
 
