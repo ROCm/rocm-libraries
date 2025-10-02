@@ -3,8 +3,6 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-include(GNUInstallDirs)
-
 # hipDNN dependency versions to use
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
@@ -19,6 +17,13 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE 
 
 set(HIPDNN_VERSION "0.0.1")
 
+project(
+    hipDNN
+    VERSION ${HIPDNN_VERSION}
+    LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
 if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
         message(STATUS "The CMake generator is Ninja.")
@@ -26,11 +31,6 @@ if(NOT WIN32)
         message(WARNING "The CMake generator is not Ninja. Ninja is preferred over Make.")
     endif()
 endif()
-
-project(
-    hipDNN
-    VERSION ${HIPDNN_VERSION}
-    LANGUAGES CXX)
 
 if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix")
