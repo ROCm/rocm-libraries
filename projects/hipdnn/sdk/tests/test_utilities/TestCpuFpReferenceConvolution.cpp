@@ -1973,6 +1973,93 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiChannel)
     EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(1, 1, 0, 0), 5.2f);
 }
 
+TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightGrouped)
+{
+    // Test convBwdWeight with groups (minimal size)
+    // Input: 1x2x2x2 (1 batch, 2 input channels, 2x2 spatial)
+    // Weight: 2x1x1x1 (2 output channels, 1 input channel per group, 1x1 kernel)
+    // GradOutput: 1x2x2x2 (1 batch, 2 output channels, 2x2 spatial)
+    Tensor<float> inputTensor({1, 2, 2, 2});
+    Tensor<float> gradWeightTensor({2, 1, 1, 1});
+    Tensor<float> gradOutputTensor({1, 2, 2, 2});
+
+    // Input channel 0: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Input channel 1: [5, 6; 7, 8]
+    inputTensor.setHostValue(5.0f, 0, 1, 0, 0);
+    inputTensor.setHostValue(6.0f, 0, 1, 0, 1);
+    inputTensor.setHostValue(7.0f, 0, 1, 1, 0);
+    inputTensor.setHostValue(8.0f, 0, 1, 1, 1);
+
+    // GradOutput channel 0: all 0.1
+    // GradOutput channel 1: all 0.2
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int w = 0; w < 2; ++w)
+        {
+            gradOutputTensor.setHostValue(0.1f, 0, 0, h, w);
+            gradOutputTensor.setHostValue(0.2f, 0, 1, h, w);
+        }
+    }
+
+    // Initialize weights to zero
+    gradWeightTensor.fillWithValue(0.0f);
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(
+        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected gradients:
+    // gradWeight[0,0] = sum(input[0] * gradOutput[0]) = (1+2+3+4) * 0.1 = 1.0
+    // gradWeight[1,0] = sum(input[1] * gradOutput[1]) = (5+6+7+8) * 0.2 = 5.2
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 1.0f);
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(1, 0, 0, 0), 5.2f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightAsymmetricPadding)
+{
+    // Test convBwdWeight with asymmetric padding (minimal tensor sizes)
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x3x4 (1 batch, 1 output channel, 3x4 spatial with asymmetric padding)
+    Tensor<float> inputTensor({1, 1, 2, 2});
+    Tensor<float> gradWeightTensor({1, 1, 1, 1});
+    Tensor<float> gradOutputTensor({1, 1, 4, 5});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Set uniform gradient output values: all 0.1
+    gradOutputTensor.fillWithValue(0.1f);
+
+    // Initialize weight gradient to zero
+    gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> prePadding = {1, 1}; // 1 padding at top/left
+    std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(inputTensor,
+                                                               gradWeightTensor,
+                                                               gradOutputTensor,
+                                                               strides,
+                                                               dilations,
+                                                               prePadding,
+                                                               postPadding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.1 = 1.0
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 1.0f);
+}
+
 TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightStrides)
 {
     // Test convBwdWeight with strides (minimal size)
