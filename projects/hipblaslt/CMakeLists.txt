@@ -545,10 +545,10 @@ endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PRIVATE -fprofile-instr-generate)
+    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PRIVATE -fprofile-instr-generate)
+    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
