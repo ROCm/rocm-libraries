@@ -45,6 +45,7 @@
 #include <rocRoller/DataTypes/DataTypes_Half.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
+#include <rocRoller/DataTypes/DataTypes_Raw32.hpp>
 #include <rocRoller/DataTypes/DataTypes_Scale_Utils.hpp>
 #include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
 
@@ -442,10 +443,6 @@ namespace rocRoller
     };
 
     struct BFloat16x2 : public DistinctType<uint32_t, BFloat16x2>
-    {
-    };
-
-    struct Raw32 : public DistinctType<uint32_t, Raw32>
     {
     };
 

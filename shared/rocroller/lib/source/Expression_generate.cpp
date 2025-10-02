@@ -54,6 +54,13 @@ namespace rocRoller
     {
         struct ExpressionHasDFTagVisitor
         {
+            template <CNary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return std::ranges::any_of(expr.operands,
+                                           [this](auto const& operand) { return call(operand); });
+            }
+
             template <CTernary Expr>
             bool operator()(Expr const& expr) const
             {
