@@ -50,10 +50,6 @@ set( fortran_language "Fortran" )
 
 project( hipblas LANGUAGES CXX ${fortran_language} )
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
-
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_DIR}/cmake )
