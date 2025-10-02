@@ -823,6 +823,15 @@ inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T,
 //==============================================================================
 // Comparison Operators
 //==============================================================================
+/*! \brief Compares two \p unique_ptr objects for equality.
+ *
+ *  Two \p unique_ptr objects are considered equal if they point to the same
+ *  memory address or are both null.
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if the pointers are equal, `false` otherwise.
+ */
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
@@ -831,12 +840,26 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr
 
 #if THRUST_STD_VER <= 17
 template <class T1, class D1, class T2, class D2>
+/*! \brief Compares two \p unique_ptr objects for inequality (C++17 and earlier).
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if the pointers are not equal, `false` otherwise.
+ */
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(x == y);
 }
 #endif
 
+/*! \brief Compares two \p unique_ptr objects using less-than ordering.
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if the pointer stored in \p x is less than the pointer stored in \p y, `false` otherwise.
+ *  
+ *  \note Operators `>`, `<=`, and `>=` are also provided and defined in terms of this operator.
+ */
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
@@ -959,6 +982,19 @@ template <class T, class D>
 //==============================================================================
 // Make unique
 //==============================================================================
+/*! \brief Constructs an object of type \p T in device memory and wraps it in a \p unique_ptr.
+ *
+ *  Allocates device memory for a single object of type \p T, constructs the object
+ *  by forwarding the provided arguments, and returns a \p unique_ptr managing the
+ *  allocated object.
+ *
+ *  This overload participates in overload resolution only if \p T is not an array type.
+ *
+ *  \tparam T The type of object to construct (must not be an array).
+ *  \tparam Args The types of arguments to forward to the constructor of \p T.
+ *  \param args Arguments to forward to the constructor of \p T.
+ *  \return A \p unique_ptr<T> managing the newly created object.
+ */
 template <class T, class... Args, class = std::enable_if_t<!std::is_array_v<T>>>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&... args)
 {
@@ -966,6 +1002,18 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&
   return unique_ptr<T>(thrust::device_new<T>(p, T(std::forward<Args>(args)...), 1));
 }
 
+/*! \brief Constructs an array of objects of type \p T in device memory and wraps it in a \p unique_ptr.
+ *
+ *  Allocates device memory for an array of \p n objects of type \p U (where \p T is \p U[]),
+ *  and returns a \p unique_ptr managing the allocated array.
+ *
+ *  This overload participates in overload resolution only if \p T is an array of unknown
+ *  bound (e.g., \p T[]).
+ *
+ *  \tparam T The array type (e.g., \p int[], \p MyClass[]).
+ *  \param n The number of elements in the array.
+ *  \return A \p unique_ptr<T> managing the newly created array.
+ */
 template <class T, class = std::enable_if_t<thrust::detail::is_unbounded_array<T>::value>>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t n)
 {
@@ -978,12 +1026,36 @@ THRUST_HOST void make_unique(Args&&...) = delete;
 
 #if THRUST_STD_VER >= 20
 
+/*! \brief Constructs an object of type \p T in device memory without initialization (C++20).
+ *
+ *  Allocates device memory for a single object of type \p T without initializing it,
+ *  and returns a \p unique_ptr managing the allocated memory. The object has
+ *  indeterminate value.
+ *
+ *  This overload participates in overload resolution only if \p T is not an array type.
+ *
+ *  \tparam T The type of object to allocate (must not be an array).
+ *  \return A \p unique_ptr<T> managing the uninitialized memory.
+ */
 template <class T, class = std::enable_if_t<!std::is_array_v<T>>>
 THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite()
 {
   return unique_ptr<T>(thrust::device_malloc<T>(1));
 }
 
+/*! \brief Constructs an array without initialization (C++20).
+ *
+ *  Allocates device memory for an array of \p n objects of type \p U (where \p T is \p U[])
+ *  without initializing the elements, and returns a \p unique_ptr managing the allocated
+ *  array. The elements have indeterminate values.
+ *
+ *  This overload participates in overload resolution only if \p T is an array of unknown
+ *  bound (e.g., \p T[]).
+ * 
+ *  \tparam T The array type (e.g., \p int[], \p MyClass[]).
+ *  \param n The number of elements in the array.
+ *  \return A \p unique_ptr<T> managing the uninitialized array.
+ */
 template <class T, class = std::enable_if_t<thrust::detail::is_unbounded_array<T>::value>>
 THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite(size_t n)
 {
