@@ -189,9 +189,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                          GPUArchitectureGFX           gfx);
 
         /**
-         * @brief Get the number of LDS banks for a given GPU architecture
+         * @brief Get the number of LDS banks for a given GPU architecture and memory operation
+         * 
+         * @param gfx The GPU architecture
+         * @param memoryOp The memory operation (read or write)
+         * @param dwords Number of dwords (1 for b32, 2 for b64, 3 for b96, 4 for b128)
+         * @return Number of LDS banks (64 for ds_read_b64/b128 on GFX950, otherwise 32)
          */
-        static uint getNumLDSBanks(GPUArchitectureGFX gfx);
+        static uint
+            getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, uint dwords);
 
         /**
          * @brief Returns the number of threads that can operate per clock for a given memory operation
@@ -221,10 +227,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
          *
          * @param baseAddresses Vector of base addresses.
          * @param dwords Number of dwords accessed starting from each base address
+         * @param gfx The GPU architecture
+         * @param memoryOp The memory operation (read or write)
          * @return A map, where the key is the bank index and the value is the count of addresses accessing that bank
          */
-        static std::map<uint, uint> createBankToAddressCounts(
-            const std::vector<uint32_t>& baseAddresses, uint dwords, GPUArchitectureGFX gfx);
+        static std::map<uint, uint>
+            createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
+                                      uint                         dwords,
+                                      GPUArchitectureGFX           gfx,
+                                      const MemoryOpLDS&           memoryOp);
 
         /**
          * @brief Calculate the number of clock cycles needed to resolve bank conflicts

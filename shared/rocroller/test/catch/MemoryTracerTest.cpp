@@ -39,6 +39,42 @@
 
 namespace MemoryTracerTest
 {
+    using namespace rocRoller::KernelGraph::MemoryTracer;
+
+    // GFX950 measured latency data
+    // Key: {direction, dwords, stride} -> Value: median s_waitcnt latency
+    static const std::map<std::tuple<LdsDirection, uint, uint>, uint> gfx950LatencyMap = {
+        // ds_read_b32
+        {{LdsDirection::Read, 1, 1}, 4},
+        {{LdsDirection::Read, 1, 2}, 4},
+        {{LdsDirection::Read, 1, 4}, 8},
+        {{LdsDirection::Read, 1, 8}, 16},
+        // ds_read_b64
+        {{LdsDirection::Read, 2, 1}, 4},
+        {{LdsDirection::Read, 2, 2}, 4},
+        {{LdsDirection::Read, 2, 4}, 8},
+        {{LdsDirection::Read, 2, 8}, 16},
+        // ds_read_b128
+        {{LdsDirection::Read, 4, 1}, 8},
+        {{LdsDirection::Read, 4, 2}, 8},
+        {{LdsDirection::Read, 4, 4}, 16},
+        {{LdsDirection::Read, 4, 8}, 32},
+        // ds_write_b32
+        {{LdsDirection::Write, 1, 1}, 8},
+        {{LdsDirection::Write, 1, 2}, 8},
+        {{LdsDirection::Write, 1, 4}, 8},
+        {{LdsDirection::Write, 1, 8}, 16},
+        // ds_write_b64
+        {{LdsDirection::Write, 2, 1}, 12},
+        {{LdsDirection::Write, 2, 2}, 12},
+        {{LdsDirection::Write, 2, 4}, 16},
+        {{LdsDirection::Write, 2, 8}, 32},
+        // ds_write_b128
+        {{LdsDirection::Write, 4, 1}, 20},
+        {{LdsDirection::Write, 4, 2}, 20},
+        {{LdsDirection::Write, 4, 4}, 32},
+        {{LdsDirection::Write, 4, 8}, 64}};
+
     TEST_CASE("LDS model kernel graph bank conflicts", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
@@ -108,10 +144,10 @@ namespace MemoryTracerTest
 
         SECTION("bank model")
         {
-            auto tracer = MemoryTracer::MemoryTracer(kgraph);
+            auto tracer = rocRoller::KernelGraph::MemoryTracer::MemoryTracer(kgraph);
             tracer.trace();
 
-            auto model = MemoryTracer::LDSBankModel(4, 32, 512);
+            auto model = LDSBankModel(4, 32, 512);
 
             auto workgroups            = 1;
             auto workitemsPerWorkgroup = product(inv.workgroupSize);
@@ -224,9 +260,10 @@ namespace MemoryTracerTest
             // Test multiple addresses accessing the same bank
             std::vector<uint32_t> addresses = {0, 128, 256}; // x / 4 mod 32 = 0 for all addresses
             uint                  dwords    = 1;
+            auto                  ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, GPUArchitectureGFX::GFX942);
+                addresses, dwords, GPUArchitectureGFX::GFX942, ldsRead);
 
             CHECK(bankCounts.size() == 1);
             CHECK(bankCounts[0] == 3);
@@ -235,7 +272,7 @@ namespace MemoryTracerTest
             addresses.insert(addresses.end(), more.begin(), more.end());
 
             bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, GPUArchitectureGFX::GFX942);
+                addresses, dwords, GPUArchitectureGFX::GFX942, ldsRead);
 
             CHECK(bankCounts.size() == 3);
             CHECK(bankCounts[0] == 3);
@@ -247,9 +284,10 @@ namespace MemoryTracerTest
         {
             std::vector<uint32_t> addresses = {124}; // 124 / 4 mod 32 = 31
             uint                  dwords    = 4; // Accesses banks 31, 0, 1, 2
+            auto                  ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, GPUArchitectureGFX::GFX942);
+                addresses, dwords, GPUArchitectureGFX::GFX942, ldsRead);
 
             CHECK(bankCounts.size() == 4);
             CHECK(bankCounts[31] == 1);
@@ -419,7 +457,7 @@ namespace MemoryTracerTest
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
-        const auto gfx = GPUArchitectureGFX::GFX942;
+        const auto gfx = GPUArchitectureGFX::GFX950;
 
         // n-way bank conflict: n threads access the same bank
         auto generateAddresses = [](uint dwords, uint conflictWays) -> std::vector<uint32_t> {
@@ -454,6 +492,25 @@ namespace MemoryTracerTest
 
                     uint actualCycles = LDSBankModel::getInstructionCycles(instr, gfx);
                     CHECK(actualCycles == expectedCycles);
+
+                    // For GFX950, verify against measured latency data
+                    if(gfx == GPUArchitectureGFX::GFX950)
+                    {
+                        auto key = std::make_tuple(direction, dwords, conflictWays);
+                        auto it  = gfx950LatencyMap.find(key);
+                        if(it != gfx950LatencyMap.end())
+                        {
+                            uint measuredLatency = it->second;
+                            CHECK(actualCycles == measuredLatency);
+                            std::cout << fmt::format(
+                                "Verified against measured data - Dwords: {}, Direction: {}, "
+                                "Stride: {}, Measured Latency: {}\n",
+                                dwords,
+                                (direction == LdsDirection::Read ? "Read" : "Write"),
+                                conflictWays,
+                                measuredLatency);
+                        }
+                    }
 
                     std::cout << fmt::format("Dwords: {}, Direction: {}, ConflictWays: {}, "
                                              "IssueCycles: {}, DataCycles: {}, TotalCycles: {}\n",

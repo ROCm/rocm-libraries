@@ -218,9 +218,16 @@ namespace rocRoller::KernelGraph::MemoryTracer
         Throw<FatalError>("Unsupported dword count: ", dwords);
     }
 
-    uint LDSBankModel::getNumLDSBanks(GPUArchitectureGFX gfx)
+    uint LDSBankModel::getNumLDSBanks(GPUArchitectureGFX gfx,
+                                      const MemoryOpLDS& memoryOp,
+                                      uint               dwords)
     {
-        return (gfx == GPUArchitectureGFX::GFX950) ? 64 : 32;
+        if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == LdsDirection::Read
+           && (dwords == 2 || dwords == 4))
+        {
+            return 64;
+        }
+        return 32;
     }
 
     std::vector<std::vector<uint32_t>>
@@ -245,11 +252,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroups;
     }
 
-    std::map<uint, uint> LDSBankModel::createBankToAddressCounts(
-        const std::vector<uint32_t>& baseAddresses, uint dwords, GPUArchitectureGFX gfx)
+    std::map<uint, uint>
+        LDSBankModel::createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
+                                                uint                         dwords,
+                                                GPUArchitectureGFX           gfx,
+                                                const MemoryOpLDS&           memoryOp)
     {
         std::map<uint, uint> bankToAddressCounts;
-        uint                 numBanks = getNumLDSBanks(gfx);
+        uint                 numBanks = getNumLDSBanks(gfx, memoryOp, dwords);
 
         for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
@@ -300,7 +310,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         for(const auto& groupAddresses : threadGroupAddresses)
         {
             threadGroupBankMappings.push_back(
-                createBankToAddressCounts(groupAddresses, instr.dwords, gfx));
+                createBankToAddressCounts(groupAddresses, instr.dwords, gfx, instr.memoryOp));
         }
 
         return threadGroupBankMappings;
@@ -426,8 +436,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
             for(const auto& groupAddresses :
                 LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
             {
-                const auto bankToAddressCounts
-                    = LDSBankModel::createBankToAddressCounts(groupAddresses, instr.dwords, gfx);
+                const auto bankToAddressCounts = LDSBankModel::createBankToAddressCounts(
+                    groupAddresses, instr.dwords, gfx, instr.memoryOp);
                 uint groupCycles = LDSBankModel::calculateBankConflictCycles(bankToAddressCounts);
                 ss << fmt::format("    Group {}: threads {}-{}\n",
                                   i,
@@ -520,7 +530,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         tracer.trace();
 
         Log::info("MemoryTracer::OperationBankConflicts()");
-        uint numBanks = LDSBankModel::getNumLDSBanks(gfx);
+        uint numBanks = LDSBankModel::getNumLDSBanks(gfx, MemoryOpLDS{LdsDirection::Write}, 1);
         auto model    = OperationBankConflicts(4, numBanks);
 
         // For LDS, just simulate using 1 workgroup
