@@ -173,5 +173,17 @@ static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
     return fullIndices;
 }
 
+static inline std::vector<int64_t> buildWeightIndices(int64_t weightChannelIdx,
+                                                      int64_t channelIdx,
+                                                      const std::vector<int64_t>& spatialIndices,
+                                                      size_t spatialOffset = 0)
+{
+    std::vector<int64_t> fullIndices = {weightChannelIdx, channelIdx};
+    fullIndices.insert(fullIndices.end(),
+                       spatialIndices.begin() + static_cast<std::ptrdiff_t>(spatialOffset),
+                       spatialIndices.end());
+    return fullIndices;
+}
+
 } // namespace test_utilities
 } // namespace hipdnn_sdk
