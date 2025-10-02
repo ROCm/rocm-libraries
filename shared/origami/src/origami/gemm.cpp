@@ -592,11 +592,17 @@ namespace origami
         return std::max(0.0, std::min(mall_hit_rate, 1.0));
     }
 
-    /** */
-    *@brief Computes the L2 hit rate from a global,
-        problem - wide perspective.**This function models the       macro
-            - level data reuse across the entire grid of            CUs
-                  .*It also includes a crucial check against the L2 cache's total capacity. * / double compute_l2_hit_rate_global(size_t M, size_t N, size_t MT_M, size_t MT_N, size_t MT_K, size_t element_size, size_t l2_capacity_bytes)
+    /**
+    @brief Computes the L2 hit rate from a global,
+    problem - wide perspective.
+    **/
+    double compute_l2_hit_rate_global(size_t M,
+                                      size_t N,
+                                      size_t MT_M,
+                                      size_t MT_N,
+                                      size_t MT_K,
+                                      size_t element_size,
+                                      size_t l2_capacity_bytes)
     {
         // --- Hardware Parameters (as requested, defined locally) ---
         // You would normally get l2_capacity_bytes from your hardware_t struct.
