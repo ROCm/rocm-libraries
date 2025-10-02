@@ -215,6 +215,11 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # Make test executables relocatable so they can find libraries when build directory is moved
     MakeExecutableRelocatable(${TARGET})
 
+    # Install test executables to bin directory
+    install(TARGETS ${TARGET}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+
     add_dependencies(check_ctest ${TARGET})
     add_test(
         NAME ${TARGET}
