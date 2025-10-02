@@ -81,8 +81,7 @@ namespace origami
                            size_t            MT_K,
                            size_t            element_size,
                            int               WGM,
-                           size_t            splittingFactor,
-                           bool              debug);
+                           size_t            splittingFactor);
 
     // Estimates the mall hit-rate
     double estimate_mall_hit(const hardware_t& hardware,
@@ -189,10 +188,10 @@ namespace origami
                                  data_type_t       mi_datatype,
                                  size_t            mx_block_size,
                                  int               WGM,
-                                 size_t            non_temporal_a,
-                                 size_t            non_temporal_b,
-                                 size_t            occupancy,
-                                 size_t            split = 0);
+                                 size_t            non_temporal_a = 0,
+                                 size_t            non_temporal_b = 0,
+                                 size_t            occupancy      = 1,
+                                 size_t            split          = 0);
 
     // Compute the performance from the latency.
     // IMPORTANT : This program is NOT meant to be an analytical model for performance, but rather a way to rank different macro tile sizes.

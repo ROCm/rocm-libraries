@@ -204,8 +204,8 @@ namespace origami
         std::vector<result_tuple> valid_results;
         valid_results.reserve(MT_list.size());
 
-        bool tf32_emu = ((mi_datatype == data_type_t::XFloat32)
-                         && (hardware.arch == hardware_t::architecture_t::gfx950));
+        // bool tf32_emu = ((mi_datatype == data_type_t::XFloat32)
+        //                  && (hardware.arch == hardware_t::architecture_t::gfx950));
 
         for(const auto& mt : MT_list)
         {
@@ -399,8 +399,7 @@ namespace origami
                                                  MT_K,
                                                  element_size,
                                                  static_cast<int>(candidate_wgm),
-                                                 1 /* splittingFactor */,
-                                                 false);
+                                                 1 /* splittingFactor */);
 
             valid_results.emplace_back(current_hit, candidate_wgm);
         }
