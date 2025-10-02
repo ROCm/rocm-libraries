@@ -56,9 +56,9 @@ if(BUILD_CODE_COVERAGE)
     coverage_analysis
     DEPENDS hiprand
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
-    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/hiprand-coverage_%m.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/hiprand-coverage_%p.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
@@ -82,9 +82,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${CMAKE_BINARY_DIR}/coverage-report/profraw/hiprand-coverage_*.profraw -o ${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
-    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/src/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
-    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/src/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/src/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=lcov > ${CMAKE_BINARY_DIR}/coverage-report/coverage.info
+    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=html -output-dir=${CMAKE_BINARY_DIR}/coverage-report
+    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=lcov > ${CMAKE_BINARY_DIR}/coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
