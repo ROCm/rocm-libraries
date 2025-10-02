@@ -3,6 +3,7 @@
 
 #include "origami/gemm.hpp"
 
+#include "origami/streamk.hpp"
 #include <algorithm>
 #include <chrono> // For timing
 #include <cmath>
@@ -10,9 +11,8 @@
 #include <iostream>
 #include <numeric>
 #include <set>
+#include <stdexcept>
 #include <tuple>
-
-#include "origami/streamk.hpp"
 
 namespace origami
 {
@@ -70,11 +70,9 @@ namespace origami
         if(M == 0 || N == 0 || MT_M == 0 || MT_N == 0)
             return 1.0;
 
-        const auto ceil_div = [](size_t a, size_t b) { return (a + b - 1) / b; };
-
         // Tiled coverage in M/N
-        const double launched_M = static_cast<double>(ceil_div(M, MT_M)) * MT_M;
-        const double launched_N = static_cast<double>(ceil_div(N, MT_N)) * MT_N;
+        const double launched_M = static_cast<double>(safe_ceil_div(M, MT_M)) * MT_M;
+        const double launched_N = static_cast<double>(safe_ceil_div(N, MT_N)) * MT_N;
 
         // Optional: model vectorization/alignment remainders (e.g., ld/st width)
         // This assumes vectors must be fully inside bounds; tail elements are scalarized.
@@ -446,7 +444,7 @@ namespace origami
         // Concurrently executing workgroups are limited by the number of CUs.a
         const size_t concurrent_workgroups = std::min(total_workgroups, hardware.N_CU);
         if(concurrent_workgroups == 0)
-            return 0.0;
+            throw std::runtime_error("#Workgroups is zero in estimate l2 hit");
 
         // Number of CUs that might share the same K-tiles, adjusted for K-splitting.
         // This affects contention on the L2 cache partitions (XCDs).
@@ -533,7 +531,7 @@ namespace origami
                              size_t            MT_M,
                              size_t            MT_N,
                              size_t            MT_K,
-                             size_t            element_size, // CRITICAL: Added parameter
+                             size_t            element_size,
                              int               WGM,
                              size_t            numActiveCUs,
                              size_t            splittingFactor)
@@ -542,7 +540,7 @@ namespace origami
         const size_t workgroups_n = safe_ceil_div(N, MT_N);
 
         if(numActiveCUs == 0)
-            return 0.0;
+            throw std::runtime_error("Number of Active CUs was 0");
 
         // --- Initial Tile Sizing based on Concurrency ---
         // Use ceiling division for a more accurate initial guess.
@@ -611,14 +609,16 @@ namespace origami
         // --- Hardware Parameters (as requested, defined locally) ---
         // You would normally get l2_capacity_bytes from your hardware_t struct.
         if(l2_capacity_bytes == 0)
-            return 0.0;
+            throw std::runtime_error("L2 Capacity is zero");
+        ;
 
         // 1. Calculate the grid dimensions in terms of macro-tiles
         const size_t grid_m = safe_ceil_div(M, MT_M);
         const size_t grid_n = safe_ceil_div(N, MT_N);
 
         if(grid_m == 0 || grid_n == 0)
-            return 0.0;
+            throw std::runtime_error("estimate_l2_hit grid dimensions can not be zero");
+        ;
 
         // 2. Calculate the working set size for one full pass of global reuse
         // This is the data needed by one full column of CUs (for A) and one full row (for B).
@@ -997,10 +997,8 @@ namespace origami
         // num_iter      = std::max(num_iter, 1L);
         long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
         long num_iter  = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
-        if(num_iter < 1)
-        {
-            num_iter = 1;
-        }
+        long num_iter
+            = std::max(static_cast<long>(safe_ceil_div(splittedK, MT_K) - 1), static_cast<long>(1));
         // Zero Padding in the K dimension on last iteration
         if(K % MT_K != 0)
         {
