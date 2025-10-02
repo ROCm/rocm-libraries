@@ -841,10 +841,8 @@ namespace rocRoller
                 msg << '"' << prefix << pair.first << '"' << "[label=\"";
                 if(getElementType(pair.second) == ElementType::Node)
                 {
-                    auto x   = std::get<Node>(pair.second);
-                    auto str = toString(x);
-                    msg << str.substr(0, std::min(100, static_cast<int>(str.length()))) << "("
-                        << pair.first << ")\"";
+                    auto x = std::get<Node>(pair.second);
+                    msg << toString(x) << "(" << pair.first << ")\"";
                 }
                 else
                 {
@@ -915,9 +913,7 @@ namespace rocRoller
                 {
                     auto x = std::get<Node>(pair.second);
                     msg << '"' << prefix << pair.first << '"' << "[label=\"";
-                    auto str = toString(x);
-                    msg << str.substr(0, std::min(100, static_cast<int>(str.length()))) << "("
-                        << pair.first << ")\"";
+                    msg << toString(x) << "(" << pair.first << ")\"";
                     msg << "];" << std::endl;
                 }
                 else
