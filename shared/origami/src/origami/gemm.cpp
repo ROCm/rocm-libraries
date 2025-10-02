@@ -196,11 +196,11 @@ namespace origami
         const double wave_tile_n = MT_N / 2.0;
         const double wave_tile_k = MT_K / MI_K;
 
-        // MFMA count and cycles
+        // MFMA count
         const double N_MI = (wave_tile_m / MI_M) * (wave_tile_n / MI_N) * wave_tile_k;
 
         // overhead: every cvt_pk op has a latency of 4
-        const double cvt = 4 * N_MI;
+        const double cvt = 4 * 2 * N_MI;
 
         return cvt;
     }
@@ -851,6 +851,14 @@ namespace origami
 
         // 5) Single-tile latency (always additive)
         double L_tile_single = std::max(L_compute, L_mem) + L_cvt;
+
+        // 5') We add the cvt overhead directly to memory path
+        if((element_size_A == 32) && (element_size_B == 32)
+                 && (mi_datatype == data_type_t::BFloat16)
+                 && (hardware.arch == hardware_t::architecture_t::gfx950)) // SS_BSS on GFX950
+        {
+            L_tile_single = std::max(L_compute, L_mem + L_cvt);
+        }
 
         // 6) Number of K-iterations (excluding epilogue), at least 1
         // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
