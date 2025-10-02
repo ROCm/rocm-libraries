@@ -50,7 +50,7 @@ setting common configurations a `CMakePresets.json` file is provided
 in the project root directory. Two presets are provided with the following
 options:
 
-1. opt-rocm (used to emulate current dev workflow)
+1. default:release (used to emulate current dev workflow)
   1. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
   2. ROCROLLER_ENABLE_FETCH: "ON"
   3. CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
@@ -70,7 +70,7 @@ options:
 One can use the presets as follows:
 
 ```
-cmake --preset opt-rocm -B build -S . <any additional cmake options>
+cmake --preset default:release -B build -S . <any additional cmake options>
 cmake --preset precheckin -B build -S . <any additional cmake options>
 ```
 
@@ -88,7 +88,7 @@ docker exec -ti -u ${USER} ${USER}_dev_clang bash
 cd /data
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
@@ -103,7 +103,7 @@ git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
 cd rocRoller
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
@@ -394,22 +394,7 @@ The use of `Throw<FatalError>("message")` can also be used to catch incorrect co
 
 ## Profiling
 
-On Linux, we can use the "perf" tool to sample the callgraph and
-generate a flame graph.
-
-Using FlameGraph: https://github.com/brendangregg/FlameGraph
-
-CMake configure with `-DROCROLLER_ENABLE_TIMERS=ON` and compile.
-
-Then run with the steps outlined in [scripts/flamegraph.py](scripts/flamegraph.py):
-```
-  perf record -F 99 -g ./bin/rocroller-tests --gtest_filter="KernelGraph*03"
-  perf script > out.perf
-  ~/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
-  ~/FlameGraph/flamegraph.pl out.folded > kernel.svg
-```
-
-Additionally, when using the trace Dockerfile, you can invoke rrperf to profile RocRoller or Tensile guideposts with Omniperf.
+When using the trace Dockerfile, you can invoke rrperf to profile RocRoller or Tensile guideposts with Omniperf.
 To see how this works, check rrperf's help documentation:
 ```
   ./scripts/rrperf profile --help

@@ -283,6 +283,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
 
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
+
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/MetaObserver.hpp"
