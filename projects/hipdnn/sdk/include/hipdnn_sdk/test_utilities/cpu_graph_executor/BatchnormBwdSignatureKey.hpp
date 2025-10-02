@@ -6,6 +6,7 @@
 #include <functional>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -18,6 +19,7 @@ struct BatchnormBwdSignatureKey
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
 
+    BatchnormBwdSignatureKey() = default;
     constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
                                        hipdnn_sdk::data_objects::DataType scaleBias,
                                        hipdnn_sdk::data_objects::DataType meanVariance)
@@ -54,6 +56,11 @@ struct BatchnormBwdSignatureKey
         meanVarianceDataType = meanTensorAttr->data_type();
     }
 
+    std::size_t operator()(const BatchnormBwdSignatureKey& k) const noexcept
+    {
+        return k.hashSelf();
+    }
+
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
@@ -68,5 +75,43 @@ struct BatchnormBwdSignatureKey
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType;
     }
+
+    static std::unordered_map<BatchnormBwdSignatureKey,
+                              std::unique_ptr<IGraphNodePlanBuilder>,
+                              BatchnormBwdSignatureKey>
+        getPlanBuilders()
+    {
+        std::unordered_map<BatchnormBwdSignatureKey,
+                           std::unique_ptr<IGraphNodePlanBuilder>,
+                           BatchnormBwdSignatureKey>
+            map;
+
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+
+        return map;
+    }
+
+    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
+    static void addPlanBuilder(std::unordered_map<BatchnormBwdSignatureKey,
+                                                  std::unique_ptr<IGraphNodePlanBuilder>,
+                                                  BatchnormBwdSignatureKey>& map)
+    {
+        map[BatchnormBwdSignatureKey(
+            InputDataTypeEnum, ScaleBiasDataTypeEnum, MeanVarianceDataTypeEnum)]
+            = std::make_unique<BatchnormBwdPlanBuilder<InputDataTypeEnum,
+                                                       ScaleBiasDataTypeEnum,
+                                                       MeanVarianceDataTypeEnum>>();
+    }
 };
+
 }
