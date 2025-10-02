@@ -1,5 +1,12 @@
 import torch
 
+NODE_REGISTRY = {}
+
+def register_node(node_class):
+    NODE_REGISTRY[node_class.type_str] = node_class
+    return node_class
+
+
 class IncrementalId:
     def __init__(self):
         self.__id = -1

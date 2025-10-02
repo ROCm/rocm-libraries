@@ -1,16 +1,16 @@
 import torch
 from tensor import TensorAttributes, dump_data_as_binary, load_data_from_binary
-from common import DTypeConverter
+from common import DTypeConverter, NODE_REGISTRY
 from batchnorm_inference import BatchnormInference
 from itertools import chain
 import json
 import os
 
 def node_from_dict(node_dict: dict, tensors: dict[int, TensorAttributes]):
-    if node_dict["type"] == "BatchnormInferenceAttributes":
-        return BatchnormInference.from_dict(node_dict, tensors)
-    else:
+    if node_dict["type"] not in NODE_REGISTRY.keys():
         raise RuntimeError("Unsupported node type: "+ node_dict["type"])
+
+    return NODE_REGISTRY[node_dict["type"]].from_dict(node_dict, tensors)
 
 class Graph:
     def  __init__(self, nodes,

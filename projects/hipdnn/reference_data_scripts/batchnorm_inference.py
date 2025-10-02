@@ -1,7 +1,10 @@
 import torch.nn.functional as functional;
 from tensor import TensorAttributes
+from common import register_node
 
+@register_node
 class BatchnormInference:
+    type_str = "BatchnormInferenceAttributes"
     class Input:
         def __init__(self,
                      x: TensorAttributes,
@@ -29,7 +32,6 @@ class BatchnormInference:
         self.inputs = BatchnormInference.Input(x, mean, inv_variance, scale, bias)
         self.outputs = BatchnormInference.Output(y)
         self.name = name
-        self.type = "BatchnormInferenceAttributes"
 
     def as_dict(self):
         return {
@@ -43,7 +45,7 @@ class BatchnormInference:
             "outputs":{
                 "y_tensor_uid": self.outputs.y.uid
             },
-            "type": self.type,
+            "type": BatchnormInference.type_str,
             "name": self.name
         }
     def execute(self):
