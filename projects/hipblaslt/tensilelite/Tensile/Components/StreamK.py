@@ -128,7 +128,11 @@ class StreamK(Component):
         module.addComment0("StreamK calculate tile idx and map to WG")
 
         # sTmp = tile index
-        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(sTmp+2)))
+        tmpVgpr = writer.vgprPool.checkOut(2, "div")
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        module.add(scalarUInt32DivideAndRemainder(qReg=sTmp, dReg="StreamKIter", divReg="ItersPerTile", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="StreamKIter // ItersPerTile"))
+        tmpVgprRes = None
+        writer.vgprPool.checkIn(tmpVgpr)
         # sTmp+1 = tile start
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Tile start iteration"))
         # sTmp+2 = tile end
@@ -164,7 +168,7 @@ class StreamK(Component):
         module = Module("StreamK skExtraIters")
         module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile")))
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("SKItersPerWG"), src1=sgpr("skGrid")))
-        module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sTmp), src1=sgpr(sSkExtraIters), comment="skTiles * ItersPerTile - SKItersPerWG * skGrid"))
+        module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sSkExtraIters), src1=sgpr(sTmp), comment="skTiles * ItersPerTile - SKItersPerWG * skGrid"))
 
         return module
 
@@ -353,10 +357,8 @@ class StreamK(Component):
         tmpSgpr3 = writer.sgprPool.checkOut(1, "tmpsgpr3", preventOverflow=False)
         sPartialIdx = writer.sgprPool.checkOut(1, "SK_Fixup_Partial_idx", preventOverflow=False)
 
-        # TODO: reuse from elsewhere?
         sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters", preventOverflow=False)
-        module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("skTiles"), src1=sgpr("SKItersPerWG")))
-        module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr("ItersPerTile"), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - skTiles * skItersPerWG"))
+        module.add(self.skExtraIters(writer, kernel, sSkExtraIters, tmpSgpr1))
 
         # Skip to global write if WG started and finished tile
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
@@ -378,7 +380,7 @@ class StreamK(Component):
         module.add(SAddU32(dst=sgpr(tmpSgpr1), src0=sgpr("SKItersPerWG"), src1=1))
         module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr3, dReg=tmpSgpr2, divReg=tmpSgpr1, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgCount = tileStart / (itersPerWG+1)"))
         module.add(SCmpLtU32(src0=sgpr(tmpSgpr3), src1=sgpr(sSkExtraIters), comment="find co-op group start"))
-        module.add(SCBranchSCC1(labelName=skFixupCalcPartialIdx.getLabelName(), comment="No extra calcs. due to extraIters"))
+        module.add(SCBranchSCC1(labelName=skFixupCalcPartialIdx.getLabelName(), comment="No extra calcs due to extraIters"))
         module.add(SSubU32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr2), src1=sgpr(sSkExtraIters), comment="tileStart - extraIters"))
         module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr3, dReg=tmpSgpr1, divReg="SKItersPerWG", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgExtraIters = (tileStart - extraIters) / itersPerWG"))
         module.add(skFixupCalcPartialIdx)
@@ -407,11 +409,11 @@ class StreamK(Component):
         module.add(SMinU32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr2), comment="min of above and (offset-1)"))
         module.add(SCmpLtU32(src0=sgpr(sFlagIdx), src1=sgpr(sSkExtraIters), comment="TargetWG < extraIters?"))
         module.add(SCSelectB32(dst=sgpr(tmpSgpr1), src0=0, src1=sgpr(tmpSgpr1), comment="If True, don't sub any iters"))
-        module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(sIdxOffset), src1=sgpr(tmpSgpr1)))
-        module.add(SAddU32(dst=sgpr(tmpSgpr3), src0=sgpr(tmpSgpr3), src1=sgpr(tmpSgpr2)))
+        module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=sgpr(tmpSgpr1), comment="extras = (offset-1) - (possible extras)"))
+        module.add(SAddU32(dst=sgpr(tmpSgpr3), src0=sgpr(tmpSgpr3), src1=sgpr(tmpSgpr2), comment="Add possible extra iters"))
         module.add(SAddU32(dst=sgpr(tmpSgpr1), src0=sgpr("StreamKLocalEnd"), src1=1, comment="Start of next wg"))
         module.add(SAddU32(dst=sgpr(tmpSgpr3), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr3)))
-        module.add(SCmpGeU32(src0=sgpr(tmpSgpr3), src1=sgpr("ItersPerTile")))
+        module.add(SCmpGtU32(src0=sgpr(tmpSgpr3), src1=sgpr("ItersPerTile")))
         module.add(SCBranchSCC1(labelName=endFixupLoop.getLabelName()))
 
         # check flag
