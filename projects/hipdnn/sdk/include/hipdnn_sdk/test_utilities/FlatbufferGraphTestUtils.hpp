@@ -298,14 +298,15 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
                                                    1.f, // relu_lower_clip
                                                    2.f, // relu_upper_clip
                                                    3.f, // relu_lower_clip_slope
-                                                   4.f, // swish_beta
-                                                   5.f, // elu_alpha
-                                                   6.f, // softplus_beta
                                                    0, // axis_tensor_uid
                                                    1, // in_0_tensor_uid
                                                    2, // in_1_tensor_uid
                                                    3, // in_2_tensor_uid
-                                                   4); // out_0_tensor_uid
+                                                   4, // out_0_tensor_uid
+                                                   4.f, // swish_beta
+                                                   5.f, // elu_alpha
+                                                   6.f); // softplus_beta
+
     nodes.push_back(CreateNodeDirect(
         builder, "Node", NodeAttributes::PointwiseAttributes, pointwiseNode.Union()));
 

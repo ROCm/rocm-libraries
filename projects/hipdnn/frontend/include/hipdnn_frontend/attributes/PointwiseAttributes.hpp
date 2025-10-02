@@ -79,51 +79,51 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_mode(PointwiseMode const value)
+    PointwiseAttributes& set_mode(PointwiseMode value)
     {
         mode = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip(float const value)
+    PointwiseAttributes& set_relu_lower_clip(float value)
     {
         relu_lower_clip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_upper_clip(float const value)
+    PointwiseAttributes& set_relu_upper_clip(float value)
     {
         relu_upper_clip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip_slope(float const value)
+    PointwiseAttributes& set_relu_lower_clip_slope(float value)
     {
         relu_lower_clip_slope = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_swish_beta(float const value)
+    PointwiseAttributes& set_swish_beta(float value)
     {
         swish_beta = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_elu_alpha(float const value)
+    PointwiseAttributes& set_elu_alpha(float value)
     {
         elu_alpha = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_softplus_beta(float const value)
+    PointwiseAttributes& set_softplus_beta(float value)
     {
         softplus_beta = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_axis(int64_t const value)
+    PointwiseAttributes& set_axis(int64_t value)
     {
-        this->axis = value;
+        axis = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -196,10 +196,10 @@ public:
     std::optional<float> relu_lower_clip = std::nullopt;
     std::optional<float> relu_upper_clip = std::nullopt;
     std::optional<float> relu_lower_clip_slope = std::nullopt;
+    std::optional<int64_t> axis = std::nullopt;
     std::optional<float> swish_beta = std::nullopt;
     std::optional<float> elu_alpha = std::nullopt;
     std::optional<float> softplus_beta = std::nullopt;
-    std::optional<int64_t> axis = std::nullopt;
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
@@ -215,14 +215,14 @@ public:
             relu_lower_clip,
             relu_upper_clip,
             relu_lower_clip_slope,
-            swish_beta,
-            elu_alpha,
-            softplus_beta,
             axis,
             in0->get_uid(),
             in1 ? flatbuffers::Optional<int64_t>(in1->get_uid()) : flatbuffers::nullopt,
             in2 ? flatbuffers::Optional<int64_t>(in2->get_uid()) : flatbuffers::nullopt,
-            ot0->get_uid());
+            ot0->get_uid(),
+            swish_beta,
+            elu_alpha,
+            softplus_beta);
     }
 
 private:
