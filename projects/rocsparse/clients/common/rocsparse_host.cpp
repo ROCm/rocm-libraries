@@ -52,7 +52,7 @@ void host_axpby(
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - base] = std::fma(alpha, x_val[i], y[x_ind[i] - base]);
+        y[x_ind[i] - base] = std::fma(static_cast<T>(alpha), static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - base]));
     }
 }
 
