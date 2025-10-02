@@ -211,7 +211,7 @@ inline auto scan_impl(void*               temporary_storage,
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            using scan_state_type = detail::lookback_scan_state<unsigned int, use_sleepy_scan>;
+            using scan_state_type = detail::lookback_scan_state<AccType, use_sleepy_scan>;
             using block_id_type   = detail::block_id_wrapper<unsigned int, use_atomic_block_id>;
             scan_state_type scan_state;
             block_id_type   block_id;
@@ -396,6 +396,7 @@ inline auto scan_impl(void*               temporary_storage,
                                                 stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
             }
+            return hipSuccess;
         },
         use_sleepy_scan_variant,
         use_atomic_block_id_variant));
