@@ -2,48 +2,47 @@ import torch
 from tensor import TensorAttributes
 from batchnorm_inference import BatchnormInference
 from graph import Graph
-import sys
+from common import DTypeConverter
+import argparse
 
 def save_batchnorm_inference_execution(x_size: list[int], dtype: torch.dtype, min_val, max_val, base_filename: str):
-    other_sizes = [x_size[1]]
+    channel_idx = 1
+    derived_sizes = [1, x_size[channel_idx], 1, 1]
 
     x            = TensorAttributes.random(min_val, max_val, dtype, x_size)
-    mean         = TensorAttributes.random(min_val, max_val, dtype, other_sizes)
-    inv_variance = TensorAttributes.random(min_val, max_val, dtype, other_sizes)
-    scale        = TensorAttributes.random(min_val, max_val, dtype, other_sizes)
-    bias         = TensorAttributes.random(min_val, max_val, dtype, other_sizes)
+    mean         = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
+    inv_variance = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
+    scale        = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
+    bias         = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
     y            = TensorAttributes.empty()
 
     node = BatchnormInference(x, mean, inv_variance, scale, bias, y)
 
     node.execute()
 
-    modified_filename = "{}_{}_{}_to_{}".format(base_filename, dtype, min_val, max_val)
-
     graph = Graph([node], dtype)
-    graph.save(modified_filename)
+    graph.save(base_filename)
 
-    return modified_filename
+def main():
+    parser = argparse.ArgumentParser(
+        prog="generate_batchnorm_reference", 
+        description="Executes batchnorm problem in pytorch, and saves the execution data in a hipDNN readable format"
+    )
+    parser.add_argument("-f", "--base-filename", required=True, type=str,
+                        help="base file name and path for output files (without extensions)")
+    parser.add_argument("-d", "--datatype", required=True, type=str, 
+                        help="datatype for batch norm operations (float, half, bfloat16, double, uint8, int32)")
+    parser.add_argument("-s", "--size", required=True, nargs="+", type=int, 
+                        help="size of x tensor (ex: --size 2 4 6 8)")
+    parser.add_argument("--min", default=-1.0, type=float, help="minimum value in tensor")
+    parser.add_argument("--max", default=1.0, type=float, help="maximum value in tensor")
+    parser.add_argument("--seed", default=0, type=int, help="seed for random data in tensors")
 
-def main(args):
-    if len(args) == 0:
-        print("Usage: batchnorm_reference.py <destination_path>")
-        exit()
+    args = parser.parse_args()
 
-    torch.manual_seed(121)
-    base_file_path = args[0] + "BatchnormInferencePytorchRef"
-
-    save_batchnorm_inference_execution([3, 7, 100, 100], torch.float,    -100.0, 100.0, base_file_path)
-    save_batchnorm_inference_execution([3, 7, 100, 100], torch.half,     -100.0, 100.0, base_file_path)
-    save_batchnorm_inference_execution([3, 7, 100, 100], torch.bfloat16, -100.0, 100.0, base_file_path)
-
-    filepath = save_batchnorm_inference_execution([3, 7, 100, 100], torch.bfloat16, -10.0, 10.0, base_file_path)
-
-    # TODO Figure out organization and testing structure
-    # graph = Graph.from_file(filepath)
-    # for node in graph.nodes:
-    #     node.execute()
+    torch.manual_seed(args.seed)
+    save_batchnorm_inference_execution(args.size, DTypeConverter.from_string(args.datatype), args.min, args.max, args.base_filename)
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()
 

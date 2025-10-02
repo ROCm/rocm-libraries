@@ -50,14 +50,41 @@ class BatchnormInference:
         }
     def execute(self):
         inputs = self.inputs
-        self.outputs.y.tensor = functional.batch_norm(
-            inputs.x.tensor, inputs.mean.tensor, inputs.inv_variance.tensor, inputs.scale.tensor, inputs.bias.tensor, training=False
-        )
+
+        # pytorch and hipdnn disagree on the dimension of mean, inv_variance, etc...
+        # hipdnn requires the same dimension as x, with 1's in every dimension aside from the channel
+        # pytorch requires they have a dimension of 1 with the size being the number of channels
+        original_dims = inputs.mean.tensor.size()
+        new_dims = [original_dims[1]]
+        
+        inputs.mean.tensor.resize_(new_dims)
+        inputs.scale.tensor.resize_(new_dims)
+        inputs.bias.tensor.resize_(new_dims)
+        inputs.inv_variance.tensor.resize_(new_dims)
+
+        saved_exception = None
+        
+        try:
+            self.outputs.y.tensor = functional.batch_norm(
+                inputs.x.tensor, inputs.mean.tensor, inputs.inv_variance.tensor, inputs.scale.tensor, inputs.bias.tensor, training=False
+            )
+        except Exception as e:
+            saved_exception = e
+        finally:
+            # Restore to original sizes
+            inputs.mean.tensor.resize_(original_dims)
+            inputs.scale.tensor.resize_(original_dims)
+            inputs.bias.tensor.resize_(original_dims)
+            inputs.inv_variance.tensor.resize_(original_dims)
+
+        if saved_exception != None:
+            raise e
 
     @staticmethod
     def from_dict(d: dict, tensors: dict[int, TensorAttributes]):
         inputs = d["inputs"]
         outputs = d["outputs"]
+        
         return BatchnormInference(tensors[inputs["x_tensor_uid"]],
                                   tensors[inputs["mean_tensor_uid"]],
                                   tensors[inputs["inv_variance_tensor_uid"]],
