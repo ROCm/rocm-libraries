@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include <hip/hip_bfloat16.h>
-#include <hip/hip_fp16.h>
+#include <type_traits>
+
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 namespace hipdnn_sdk
 {
@@ -15,60 +17,56 @@ namespace batchnorm
 {
 
 template <typename T>
-constexpr float getToleranceInference();
+constexpr T getToleranceInference()
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7; // this needs to be changed when double is supported
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 2e-4f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 5e-4_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 5e-3_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
 
 template <typename T>
-constexpr float getToleranceTraining();
+constexpr T getToleranceTraining();
 
 template <typename T>
-constexpr float getToleranceBackward();
-
-template <>
-constexpr float getToleranceInference<double>()
+constexpr T getToleranceBackward()
 {
-    return 1e-7f; // this needs to be changed when double is supported
-}
-
-template <>
-constexpr float getToleranceInference<float>()
-{
-    return 2e-4f;
-}
-
-template <>
-constexpr float getToleranceInference<half>()
-{
-    return 5e-4f;
-}
-
-template <>
-constexpr float getToleranceInference<hip_bfloat16>()
-{
-    return 5e-3f;
-}
-
-template <>
-constexpr float getToleranceBackward<double>()
-{
-    return 1e-7f; // this needs to be changed when double is supported
-}
-
-template <>
-constexpr float getToleranceBackward<float>()
-{
-    return 2e-3f;
-}
-
-template <>
-constexpr float getToleranceBackward<half>()
-{
-    return 4e-4f;
-}
-
-template <>
-constexpr float getToleranceBackward<hip_bfloat16>()
-{
-    return 3e-3f;
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7; // this needs to be changed when double is supported
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 2e-3f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 4e-4_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 3e-3_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
 }
 
 } // namespace bn
@@ -77,24 +75,24 @@ namespace conv
 {
 
 template <typename T>
-constexpr float getToleranceFwd();
-
-template <>
-constexpr float getToleranceFwd<float>()
+constexpr T getToleranceFwd()
 {
-    return 8.5e-6f;
-}
-
-template <>
-constexpr float getToleranceFwd<half>()
-{
-    return 1e-2f;
-}
-
-template <>
-constexpr float getToleranceFwd<hip_bfloat16>()
-{
-    return 1e-2f;
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 8.5e-6f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 1e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
 }
 
 } // namespace conv
@@ -103,30 +101,28 @@ namespace pointwise
 {
 
 template <typename T>
-constexpr float getTolerance();
-
-template <>
-constexpr float getTolerance<double>()
+constexpr T getTolerance()
 {
-    return 1e-7f;
-}
-
-template <>
-constexpr float getTolerance<float>()
-{
-    return 1e-5f;
-}
-
-template <>
-constexpr float getTolerance<half>()
-{
-    return 1e-3f;
-}
-
-template <>
-constexpr float getTolerance<hip_bfloat16>()
-{
-    return 1e-2f;
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7;
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-3_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 1e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
 }
 
 } // namespace pointwise

@@ -168,7 +168,7 @@ protected:
                                                                          testCase._convPrePadding);
     }
 
-    void runConvTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    void runConvTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const ConvTestCase& testCase = GetParam();
 
@@ -183,8 +183,8 @@ protected:
 
         runCpuConvFwd(testCase, cpuTensorBundle);
 
-        CpuFpReferenceValidation<DataType> cpuRefValidation(static_cast<DataType>(tolerance),
-                                                            static_cast<DataType>(tolerance));
+        CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance,
+                                                            tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
                                               graphTensorBundle.yTensor.memory()));
     }

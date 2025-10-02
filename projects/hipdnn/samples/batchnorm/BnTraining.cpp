@@ -6,8 +6,6 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -154,7 +152,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         //
         // auto y_validator
         //     = test_utilities::CpuFpReferenceValidation<InputType>(
-        //         static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+        //         tolerance, tolerance);
         //
         // auto stats_validator
         //     = test_utilities::CpuFpReferenceValidation<IntermediateType>(

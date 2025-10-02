@@ -259,7 +259,7 @@ protected:
             1e-3);
     }
 
-    void runBatchnormTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         TestCaseType testCase = this->GetParam();
 
@@ -277,8 +277,8 @@ protected:
 
         runCpuBatchnormFwd(cpuTensorBundle);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidation(static_cast<InputType>(tolerance),
-                                                             static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance,
+                                                             tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
                                               graphTensorBundle.yTensor.memory()));
     }

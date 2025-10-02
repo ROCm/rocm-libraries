@@ -6,8 +6,6 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
@@ -117,7 +115,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
 
         auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+            tolerance, tolerance);
 
         bool yValid = yValidator.allClose(yRefTensor.memory(), yTensor.memory());
 

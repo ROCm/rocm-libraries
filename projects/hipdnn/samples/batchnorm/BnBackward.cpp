@@ -6,8 +6,6 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
@@ -129,7 +127,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 
         auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+            tolerance, tolerance);
         auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 

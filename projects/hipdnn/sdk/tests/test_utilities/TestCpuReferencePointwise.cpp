@@ -8,8 +8,6 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
@@ -65,8 +63,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -86,8 +84,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -121,8 +119,8 @@ protected:
             static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -159,8 +157,8 @@ protected:
             static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -180,8 +178,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -201,8 +199,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -223,8 +221,8 @@ protected:
                               0); // e² - e
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -245,8 +243,8 @@ protected:
             static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -274,8 +272,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -317,8 +315,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -353,8 +351,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -390,8 +388,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -442,8 +440,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -497,8 +495,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
@@ -562,8 +560,8 @@ protected:
         }
 
         auto tolerance = pointwise::getTolerance<OutputType>();
-        CpuFpReferenceValidation<OutputType> validator(static_cast<OutputType>(tolerance),
-                                                       static_cast<OutputType>(tolerance));
+        CpuFpReferenceValidation<OutputType> validator(tolerance,
+                                                       tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 };

@@ -12,8 +12,6 @@
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 
@@ -55,7 +53,7 @@ protected:
 
     void runFwdBatchnormGraph(Batchnorm2dTestCase testCase,
                               hipdnn_sdk::data_objects::DataType inputDataType,
-                              float tolerance)
+                              InputType tolerance)
     {
         auto dims = std::vector<int64_t>{testCase.n, testCase.c, testCase.h, testCase.w};
 
@@ -158,8 +156,8 @@ protected:
             yTensorCpu,
             1e-3);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidation(static_cast<InputType>(tolerance),
-                                                             static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance,
+                                                             tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu.memory(), yTensor.memory()));
     }
 
