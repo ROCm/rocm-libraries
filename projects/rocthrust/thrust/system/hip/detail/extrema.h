@@ -44,8 +44,6 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/extrema.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
@@ -240,10 +238,10 @@ element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPr
 
   IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-  using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
+  using iterator_tuple = tuple<ItemsIt, counting_iterator_t<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
 
-  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator<IndexType>(0));
+  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
 
   using arg_min_t = ArgFunctor<InputType, IndexType, BinaryPred>;
   using T         = tuple<InputType, IndexType>;
@@ -314,13 +312,13 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
   using InputType = typename iterator_traits<ItemsIt>::value_type;
   using IndexType = typename iterator_traits<ItemsIt>::difference_type;
 
-  using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
+  using iterator_tuple = tuple<ItemsIt, hip_rocprim::counting_iterator_t<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
 
   using arg_minmax_t   = __extrema::arg_minmax_f<InputType, IndexType, BinaryPred>;
   using two_pairs_type = typename arg_minmax_t::two_pairs_type;
   using duplicate_t    = typename arg_minmax_t::duplicate_tuple;
-  using transform_t    = transform_iterator<duplicate_t, zip_iterator, two_pairs_type, two_pairs_type>;
+  using transform_t    = transform_input_iterator_t<two_pairs_type, zip_iterator, duplicate_t>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>) );
@@ -332,7 +330,7 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 
   const auto num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator<IndexType>(0));
+  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
 
   zip_iterator begin    = make_zip_iterator(iter_tuple);
   two_pairs_type result = __extrema::extrema(

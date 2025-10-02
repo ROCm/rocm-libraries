@@ -38,6 +38,11 @@
 
 THRUST_NAMESPACE_BEGIN
 
+//! \addtogroup utility
+//! \{
+//! \addtogroup type_traits Type Traits
+//! \{
+
 using _THRUST_STD::conjunction;
 using _THRUST_STD::conjunction_v;
 using _THRUST_STD::disjunction;
@@ -45,28 +50,58 @@ using _THRUST_STD::disjunction_v;
 using _THRUST_STD::negation;
 using _THRUST_STD::negation_v;
 
+//! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
+//! whose value is <tt>(... && Bs)</tt>.
+//!
+//! \see conjunction_value_v
+//! \see conjunction
+//! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
-using conjunction_value THRUST_DEPRECATED_BECAUSE("Use: _THRUST_STD::bool_constant<(Bs && ...)>") =
-  conjunction<_THRUST_STD::bool_constant<Bs>...>;
+using conjunction_value = conjunction<_THRUST_STD::bool_constant<Bs>...>;
 
+//! \brief <tt>constexpr bool</tt> whose value is <tt>(... && Bs)</tt>.
+//!
+//! \see conjunction_value
+//! \see conjunction
+//! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
-using disjunction_value THRUST_DEPRECATED_BECAUSE("Use: _THRUST_STD::bool_constant<(Bs || ...)>") =
-  disjunction<_THRUST_STD::bool_constant<Bs>...>;
+constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
 
+//! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
+//! whose value is <tt>(... || Bs)</tt>.
+//!
+//! \see disjunction_value_v
+//! \see disjunction
+//! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
+template <bool... Bs>
+using disjunction_value = disjunction<_THRUST_STD::bool_constant<Bs>...>;
+
+//! \brief <tt>constexpr bool</tt> whose value is <tt>(... || Bs)</tt>.
+//!
+//! \see disjunction_value
+//! \see disjunction
+//! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
+template <bool... Bs>
+constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
+
+//! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
+//! whose value is <tt>!Bs</tt>.
+//!
+//! \see negation_value_v
+//! \see negation
+//! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
-using negation_value THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::bool_constant<!B>") = _THRUST_STD::bool_constant<!B>;
+using negation_value = _THRUST_STD::bool_constant<!B>;
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-template <bool... Bs>
-constexpr bool
-  conjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs && ...") = conjunction_value<Bs...>::value;
-
-template <bool... Bs>
-constexpr bool
-  disjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs || ...") = disjunction_value<Bs...>::value;
-
+//! \brief <tt>constexpr bool</tt> whose value is <tt>!Bs</tt>.
+//!
+//! \see negation_value
+//! \see negation
+//! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
-constexpr bool negation_value_v THRUST_DEPRECATED_BECAUSE("Use a plain negation !B") = negation_value<B>::value;
-THRUST_SUPPRESS_DEPRECATED_POP
+constexpr bool negation_value_v = negation_value<B>::value;
+
+//! \} // type traits
+//! \} // utility
 
 THRUST_NAMESPACE_END

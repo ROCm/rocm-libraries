@@ -485,7 +485,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -560,7 +560,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -1052,7 +1052,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -1129,7 +1129,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}

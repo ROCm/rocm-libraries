@@ -45,7 +45,6 @@
 #include <thrust/iterator/detail/iterator_facade_category.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
 #  include <type_traits>
 #endif
 
@@ -311,7 +310,7 @@ template <typename Derived,
           typename System,
           typename Traversal,
           typename Reference,
-          typename Difference = _THRUST_STD::ptrdiff_t>
+          typename Difference = std::ptrdiff_t>
 class iterator_facade
 {
 private:

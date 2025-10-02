@@ -419,20 +419,20 @@ TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), thrust::identity<>{}, thrust::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), thrust::identity<>{}, T{}, thrust::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
   thrust::transform_exclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), thrust::identity<>{}, T{}, thrust::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{0, 5, 5, 5, 8, 8, 8, 8, 8, 8}), vec);
 }

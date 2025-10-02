@@ -52,8 +52,7 @@
 #  include <thrust/system/cuda/detail/par_to_seq.h>
 #  include <thrust/system/cuda/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
-
-#  include <cuda/std/type_traits>
+#  include <thrust/type_traits/remove_cvref.h>
 
 #  include <cstdint>
 

@@ -53,7 +53,6 @@
 
 #  include <type_traits> // IWYU pragma: export
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -126,7 +125,6 @@ auto async_for_each(execution_policy<DerivedPolicy>& policy, ForwardIt first, Se
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

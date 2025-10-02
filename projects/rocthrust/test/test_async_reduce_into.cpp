@@ -33,8 +33,6 @@
 
 TESTS_DEFINE(AsyncReduceIntoTests, NumericalTestsParams);
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template <typename T>
 struct custom_plus
 {

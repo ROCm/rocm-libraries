@@ -319,6 +319,7 @@ transform(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, Ou
  *  };
  *
  *  thrust::negate<int> op;
+ *  thrust::identity<int> identity;
  *
  *  // negate odd elements
  *  thrust::transform_if(thrust::host, data, data + 10, data, op, is_odd()); // in-place transformation
@@ -393,6 +394,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  };
  *
  *  thrust::negate<int> op;
+ *  thrust::identity<int> identity;
  *
  *  // negate odd elements
  *  thrust::transform_if(data, data + 10, data, op, is_odd()); // in-place transformation
@@ -462,7 +464,7 @@ transform_if(InputIterator first, InputIterator last, ForwardIterator result, Un
  *  int stencil[10] = { 1, 0, 1,  0, 1, 0, 1,  0, 1, 0};
  *
  *  thrust::negate<int> op;
- *  ::internal::identity identity;
+ *  thrust::identity<int> identity;
  *
  *  thrust::transform_if(thrust::host, data, data + 10, stencil, data, op, identity); // in-place transformation
  *
@@ -535,7 +537,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  int stencil[10] = { 1, 0, 1,  0, 1, 0, 1,  0, 1, 0};
  *
  *  thrust::negate<int> op;
- *  ::internal::identity identity;
+ *  thrust::identity<int> identity;
  *
  *  thrust::transform_if(data, data + 10, stencil, data, op, identity); // in-place transformation
  *
@@ -618,7 +620,7 @@ ForwardIterator transform_if(
  *  int output[6];
  *
  *  thrust::plus<int> op;
- *  ::internal::identity identity;
+ *  thrust::identity<int> identity;
  *
  *  thrust::transform_if(thrust::host, input1, input1 + 6, input2, stencil, output, op, identity);
  *
@@ -699,7 +701,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  int output[6];
  *
  *  thrust::plus<int> op;
- *  ::internal::identity identity;
+ *  thrust::identity<int> identity;
  *
  *  thrust::transform_if(input1, input1 + 6, input2, stencil, output, op, identity);
  *

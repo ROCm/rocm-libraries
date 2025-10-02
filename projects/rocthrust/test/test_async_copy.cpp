@@ -17,9 +17,6 @@
 
 #include <thrust/detail/config.h>
 
-// need to suppress deprecation warnings inside a lot of thrust headers
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/copy.h>
@@ -336,6 +333,30 @@ TYPED_TEST(AsyncCopyTests, test_async_copy_trivially_relocatable_elements_roundt
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#  define ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, FILE_, LINE_)                  \
+    {                                                                                                     \
+      threw_status THRUST_PP_CAT2(__s, LINE_) = did_not_throw;                                            \
+      try                                                                                                 \
+      {                                                                                                   \
+        EXPR;                                                                                             \
+      }                                                                                                   \
+      catch (EXCEPTION_TYPE const& THRUST_PP_CAT2(__e, LINE_))                                            \
+      {                                                                                                   \
+        if (VALUE == THRUST_PP_CAT2(__e, LINE_))                                                          \
+          THRUST_PP_CAT2(__s, LINE_) = threw_right_type;                                                  \
+        else                                                                                              \
+          THRUST_PP_CAT2(__s, LINE_) = threw_right_type_but_wrong_value;                                  \
+      }                                                                                                   \
+      catch (...)                                                                                         \
+      {                                                                                                   \
+        THRUST_PP_CAT2(__s, LINE_) = threw_wrong_type;                                                    \
+      }                                                                                                   \
+      check_assert_throws(THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE), FILE_, LINE_); \
+    }
+
+#  define ASSERT_THROWS_EQ(EXPR, EXCEPTION_TYPE, VALUE) \
+    ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, __FILE__, __LINE__)
+
 template <typename T>
 THRUST_HOST void test_async_copy_after()
 {
@@ -415,8 +436,3 @@ TYPED_TEST(AsyncCopyTests, test_async_copy_after_test)
 // Can't do this today because we can't do cross-system with explicit policies.
 
 #endif
-
-// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

@@ -46,19 +46,18 @@
 
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/async/customization.h>
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/future.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
 #  include <type_traits> // IWYU pragma: export
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -69,10 +68,10 @@ namespace detail
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Size, typename T, typename BinaryOp>
-unique_eager_future<::internal::remove_cvref_t<T>>
+unique_eager_future<remove_cvref_t<T>>
 async_reduce_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, T init, BinaryOp op)
 {
-  using U = ::internal::remove_cvref_t<T>;
+  using U = remove_cvref_t<T>;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
@@ -168,7 +167,7 @@ template <typename DerivedPolicy, typename ForwardIt, typename Size, typename Ou
 unique_eager_event async_reduce_into_n(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, T init, BinaryOp op)
 {
-  using U = ::internal::remove_cvref_t<T>;
+  using U = remove_cvref_t<T>;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
@@ -244,7 +243,6 @@ auto async_reduce_into(
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

@@ -1179,7 +1179,7 @@ struct bit_xor : public _THRUST_STD::bit_xor<T>
  */
 // TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to _THRUST_STD::identity
 template <typename T = void>
-struct THRUST_DEPRECATED_BECAUSE("use ::internal::identity instead") identity
+struct identity
 {
   /*! \typedef argument_type
    *  \brief The type of the function object's first argument.
@@ -1219,11 +1219,9 @@ struct THRUST_DEPRECATED_BECAUSE("use ::internal::identity instead") identity
   }
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 template <>
-struct THRUST_DEPRECATED_BECAUSE("use ::internal::identity instead") identity<void> : ::internal::identity
+struct identity<void> : ::internal::identity
 {};
-THRUST_SUPPRESS_DEPRECATED_POP
 
 /*! \p maximum is a function object that takes two arguments and returns the greater
  *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an

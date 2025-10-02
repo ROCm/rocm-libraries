@@ -34,16 +34,16 @@ TYPED_TEST(LogicalTests, TestAllOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
   v[1] = T{0};
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -92,16 +92,16 @@ TYPED_TEST(LogicalTests, TestAnyOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -150,16 +150,16 @@ TYPED_TEST(LogicalTests, TestNoneOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), true);
 }
 
 template <class InputIterator, class Predicate>

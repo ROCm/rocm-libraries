@@ -35,8 +35,6 @@
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
-
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -107,13 +105,13 @@ struct iterator_facade_default_category_std
         _THRUST_STD::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
         thrust::detail::eval_if<
           _THRUST_STD::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
-          thrust::detail::identity_<_THRUST_STD::random_access_iterator_tag>,
+          thrust::detail::identity_<std::random_access_iterator_tag>,
           thrust::detail::eval_if<_THRUST_STD::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
-                                  thrust::detail::identity_<_THRUST_STD::bidirectional_iterator_tag>,
-                                  thrust::detail::identity_<_THRUST_STD::forward_iterator_tag>>>,
+                                  thrust::detail::identity_<std::bidirectional_iterator_tag>,
+                                  thrust::detail::identity_<std::forward_iterator_tag>>>,
         thrust::detail::eval_if< // XXX note we differ from Boost here
           _THRUST_STD::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
-          thrust::detail::identity_<_THRUST_STD::input_iterator_tag>,
+          thrust::detail::identity_<std::input_iterator_tag>,
           thrust::detail::identity_<Traversal>>>
 {}; // end iterator_facade_default_category_std
 

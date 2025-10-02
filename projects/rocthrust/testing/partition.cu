@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -157,13 +156,14 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionSimple);
 template <typename Vector>
 void TestStablePartitionStencilSimple()
 {
+  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   Vector data{1, 2, 1, 3, 2};
 
   Vector stencil{0, 1, 0, 0, 1};
 
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
   Vector ref{2, 2, 1, 1, 3};
 
@@ -199,14 +199,17 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionCopySimple);
 template <typename Vector>
 void TestStablePartitionCopyStencilSimple()
 {
+  using T = typename Vector::value_type;
+
   Vector data{1, 2, 1, 1, 2};
+
   Vector stencil{false, true, false, false, true};
 
   Vector true_results(2);
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), thrust::identity<T>());
 
   Vector true_ref(2, 2);
 

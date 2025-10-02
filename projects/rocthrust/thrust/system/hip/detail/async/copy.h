@@ -48,7 +48,6 @@
 #  include <thrust/advance.h>
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/distance.h>
-#  include <thrust/functional.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/async/customization.h>
 #  include <thrust/system/hip/detail/async/transform.h>
@@ -61,7 +60,6 @@
 
 #  include <type_traits>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -126,7 +124,9 @@ auto async_copy_n(thrust::hip::execution_policy<FromPolicy>& from_exec,
                                       decltype(is_device_to_device_copy(from_exec, to_exec))>::value,
                           unique_eager_event>::type
 {
-  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, ::internal::identity{});
+  using T = typename iterator_traits<ForwardIt>::value_type;
+
+  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, thrust::identity<T>());
 }
 
 template <typename OutputIt>
@@ -351,7 +351,6 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
