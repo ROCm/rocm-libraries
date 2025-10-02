@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "data_types_generated.h"
-#include "graph_generated.h"
-#include "hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp"
-#include "tensor_attributes_generated.h"
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
-#include <spdlog/fmt/bundled/format.h>
 
 using namespace hipdnn_sdk::data_objects;
 
@@ -104,7 +103,6 @@ void enumTestSuite(T value, const std::string& stringRep, const std::string& con
     EXPECT_EQ(value, jsonValue.get<T>()) << context;
     EXPECT_EQ(jsonValue.dump(), std::string{jsonStringRep}) << context;
     EXPECT_EQ(nlohmann::json(stringRep).get<T>(), value) << context;
-    std::cout << nlohmann::json{stringRep} << "\n";
 }
 
 TEST(TestJson, Enum)

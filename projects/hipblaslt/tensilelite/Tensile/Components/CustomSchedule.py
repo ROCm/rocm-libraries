@@ -217,9 +217,9 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         if needIfMacro:
             for codepath in range(numCodePath):
                 if codepath == 0:
-                    module.add(TextBlock(".if     \ID == %u\n"%codepath))
+                    module.add(TextBlock(".if     \\ID == %u\n"%codepath))
                 else:
-                    module.add(TextBlock(".elseif \ID == %u\n"%codepath))
+                    module.add(TextBlock(".elseif \\ID == %u\n"%codepath))
 
                 def scheduleInst2(instList, macroGuard=""):
                     if len(instList) == numCodePath:

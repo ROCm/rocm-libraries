@@ -38,27 +38,30 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestCpuFpReferenceUtilities.cpp
     test_utilities/TestCpuFpReferenceValidation.cpp
     test_utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
+    test_utilities/TestCpuReferencePointwise.cpp
     test_utilities/TestTempDirectory.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
     test_utilities/TestLoggingUtils.cpp
     test_utilities/TestFlatbufferDatatypeMapping.cpp
+    test_utilities/TestFlatbufferTensorAttributesUtils.cpp
     test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestTensorVariant.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormSignatureRegistryKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
+    test_utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormTrainPlan.cpp
 
-
-
-)
-
-target_compile_definitions(hipdnn_sdk_tests PRIVATE
-    COMPONENT_NAME="hipdnn_sdk_tests"
 )
 
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(hipdnn_sdk_tests 
     GTest::gtest
+    GTest::gmock
     Threads::Threads
     hipdnn_sdk
+    hipdnn_frontend
     hip::host
     spdlog_header_only
     ${CMAKE_DL_LIBS}

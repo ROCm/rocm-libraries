@@ -276,8 +276,7 @@ namespace rocRoller
                 {
                     auto edge = graph.coordinates.getElement(output);
                     auto outTags
-                        = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output)
-                              .to<std::vector>();
+                        = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output);
                     graph.coordinates.addElement(edge, std::vector<int>{nMac0}, outTags);
                 }
 
@@ -289,8 +288,7 @@ namespace rocRoller
                 {
                     auto edge = graph.coordinates.getElement(output);
                     auto outTags
-                        = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output)
-                              .to<std::vector>();
+                        = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output);
                     graph.coordinates.addElement(edge, std::vector<int>{nMac1}, outTags);
                 }
 
