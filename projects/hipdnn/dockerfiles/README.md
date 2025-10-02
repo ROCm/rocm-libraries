@@ -46,7 +46,9 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified) |
-| `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when building TheRock |
+| `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types) |
+| `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset |
+| `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores |
 
 > **Note**: Fullbuild mode clones and compiles TheRock from source (slower but more flexible)
 
@@ -69,6 +71,21 @@ docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg 
 **Default fullbuild** (gfx90a, default branch):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
+```
+
+**Debug build** (gfx90a, debug mode):
+```bash
+docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Debug -t hipdnn:debug .
+```
+
+**Release build with limited cores** (gfx90a, release mode, 4 cores):
+```bash
+docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Release --build-arg BUILD_JOBS=4 -t hipdnn:release .
+```
+
+**Custom preset with all cores** (gfx90a, custom preset):
+```bash
+docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t hipdnn:custom-preset .
 ```
 
 **Custom ASIC and Git Hash** (gfx950, hash abcd1234):

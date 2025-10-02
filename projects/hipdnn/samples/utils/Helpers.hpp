@@ -93,24 +93,6 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
     return config;
 }
 
-template <typename T>
-constexpr float getEpsilon()
-{
-    return 1e-5f;
-}
-
-template <>
-constexpr float getEpsilon<half>()
-{
-    return 1e-3f;
-}
-
-template <>
-constexpr float getEpsilon<hip_bfloat16>()
-{
-    return 1e-2f;
-}
-
 template <typename F>
 void run(F&& f)
 {

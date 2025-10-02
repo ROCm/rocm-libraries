@@ -92,52 +92,7 @@ extern "C" {
 *              pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int ld        = 3;
-*    int nnz       = 8;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * ld * n);
-*
-*    hipsparseScsr2dense(handle, m, n, descr, dcsrVal, dcsrRowPtr, dcsrColInd, ddense_A, ld);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(ddense_A);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_csr2dense.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

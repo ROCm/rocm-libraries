@@ -116,61 +116,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in COO format (with unsorted row indices)
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcooRowInd[8] = {0, 2, 0, 1, 1, 0, 2, 2};
-*    int hcooColInd[8] = {0, 0, 1, 1, 2, 3, 3, 4};
-*    float hcooVal[8]   = {1.0f, 6.0f, 2.0f, 4.0f, 5.0f, 3.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    int* dcooRowInd = nullptr;
-*    int* dcooColInd = nullptr;
-*    float* dcooVal = nullptr;
-*    hipMalloc((void**)&dcooRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcooRowInd, hcooRowInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooColInd, hcooColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooVal, hcooVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    size_t bufferSize;
-*    hipsparseXcoosort_bufferSizeExt(handle, m, n, nnz, dcooRowInd, dcooColInd, &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int* dperm = nullptr;
-*    hipMalloc((void**)&dperm, sizeof(int) * nnz);
-*    hipsparseCreateIdentityPermutation(handle, nnz, dperm);
-*
-*    hipsparseXcoosortByRow(handle, m, n, nnz, dcooRowInd, dcooColInd, dperm, dbuffer);
-*
-*    float* dcooValSorted = nullptr;
-*    hipMalloc((void**)&dcooValSorted, sizeof(float) * nnz);
-*    hipsparseSgthr(handle, nnz, dcooVal, dcooValSorted, dperm, base);
-*
-*    hipFree(dcooRowInd);
-*    hipFree(dcooColInd);
-*    hipFree(dcooVal);
-*    hipFree(dcooValSorted);
-*    hipFree(dperm);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_coosort_by_row.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
@@ -230,61 +176,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in COO format (with unsorted column indices)
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcooRowInd[8] = {0, 0, 0, 1, 1, 2, 2, 2};
-*    int hcooColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcooVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    int* dcooRowInd = nullptr;
-*    int* dcooColInd = nullptr;
-*    float* dcooVal = nullptr;
-*    hipMalloc((void**)&dcooRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcooRowInd, hcooRowInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooColInd, hcooColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooVal, hcooVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    size_t bufferSize;
-*    hipsparseXcoosort_bufferSizeExt(handle, m, n, nnz, dcooRowInd, dcooColInd, &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int* dperm = nullptr;
-*    hipMalloc((void**)&dperm, sizeof(int) * nnz);
-*    hipsparseCreateIdentityPermutation(handle, nnz, dperm);
-*
-*    hipsparseXcoosortByColumn(handle, m, n, nnz, dcooRowInd, dcooColInd, dperm, dbuffer);
-*
-*    float* dcooValSorted = nullptr;
-*    hipMalloc((void**)&dcooValSorted, sizeof(float) * nnz);
-*    hipsparseSgthr(handle, nnz, dcooVal, dcooValSorted, dperm, base);
-*
-*    hipFree(dcooRowInd);
-*    hipFree(dcooColInd);
-*    hipFree(dcooVal);
-*    hipFree(dcooValSorted);
-*    hipFree(dperm);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_coosort_by_column.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByColumn(hipsparseHandle_t handle,

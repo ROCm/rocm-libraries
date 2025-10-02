@@ -75,51 +75,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      int nnz = 3;
-*
-*      // Sparse index vector
-*      int hxInd[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      float hxVal[3] = {1.0f, 2.0f, 3.0f};
-*
-*      // Dense vector
-*      float hy[9] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*      // Index base
-*      hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*      // Offload data to device
-*      int* dxInd;
-*      float*        dxVal;
-*      float*        dy;
-*
-*      hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*      hipMalloc((void**)&dy, sizeof(float) * 9);
-*
-*      hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dxVal, hxVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice);
-*
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // Call sdoti to compute the dot product
-*      float dot;
-*      hipsparseSdoti(handle, nnz, dxVal, dxInd, dy, &dot, idxBase);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dxInd);
-*      hipFree(dxVal);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_doti.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
@@ -36,6 +37,7 @@ protected:
 
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
+    auto tolerance = batchnorm::getToleranceInference<float>();
     double epsilon = 1e-3;
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = 1;
@@ -74,8 +76,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(epsilon),
-                                                           static_cast<float>(epsilon));
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.yTensor.memory(),
                                                 planTensorBundle.yTensor.memory()));

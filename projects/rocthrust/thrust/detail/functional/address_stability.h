@@ -23,7 +23,7 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
-#  include _THRUST_STD_INCLUDE(__functional/address_stability.h)
+#  include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
 // clang-format on
 #else
 #  include <functional>
@@ -38,21 +38,17 @@ namespace detail
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::proclaim_copyable_arguments;
-using ::cuda::proclaims_copyable_arguments;
-#  else
-using ::hip::proclaim_copyable_arguments;
-using ::hip::proclaims_copyable_arguments;
-#  endif
+using _THRUST_LIBCXX::__has_builtin_operators;
+using _THRUST_LIBCXX::proclaim_copyable_arguments;
+using _THRUST_LIBCXX::proclaims_copyable_arguments;
 #  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
     /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
     template <typename T>                                                                      \
-    struct proclaims_copyable_arguments<functor<T>> : has_builtin_operators<T>                 \
+    struct proclaims_copyable_arguments<functor<T>> : __has_builtin_operators<T>               \
     {};                                                                                        \
     /*we do not know what plus<void> etc. does, which depends on the types it is invoked on */ \
     template <>                                                                                \
-    struct proclaims_copyable_arguments<functor<void>> : ::std::false_type                     \
+    struct proclaims_copyable_arguments<functor<void>> : _THRUST_STD::false_type               \
     {};
 
 #else

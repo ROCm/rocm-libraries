@@ -20,27 +20,27 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseMode get_mode() const
     {
-        return _mode;
+        return mode;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip() const
     {
-        return _reluLowerClip;
+        return reluLowerClip;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_upper_clip() const
     {
-        return _reluUpperClip;
+        return reluUpperClip;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_slope() const
     {
-        return _reluLowerSlope;
+        return reluLowerSlope;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<int64_t> get_axis() const
     {
-        return _axis;
+        return axis;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_input_0() const
@@ -64,33 +64,33 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_mode(PointwiseMode mode)
+    PointwiseAttributes& set_mode(PointwiseMode modeValue)
     {
-        _mode = mode;
+        mode = modeValue;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip(float reluLowerClip)
+    PointwiseAttributes& set_relu_lower_clip(float value)
     {
-        _reluLowerClip = reluLowerClip;
+        reluLowerClip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_upper_clip(float reluUpperClip)
+    PointwiseAttributes& set_relu_upper_clip(float value)
     {
-        _reluUpperClip = reluUpperClip;
+        reluUpperClip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip_slope(float reluLowerSlope)
+    PointwiseAttributes& set_relu_lower_clip_slope(float value)
     {
-        _reluLowerSlope = reluLowerSlope;
+        reluLowerSlope = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_axis(std::optional<int64_t> axis)
+    PointwiseAttributes& set_axis(std::optional<int64_t> axisValue)
     {
-        _axis = axis;
+        axis = axisValue;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -159,6 +159,12 @@ public:
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
+    PointwiseMode mode = PointwiseMode::NOT_SET;
+    std::optional<float> reluLowerClip = std::nullopt;
+    std::optional<float> reluUpperClip = std::nullopt;
+    std::optional<float> reluLowerSlope = std::nullopt;
+    std::optional<int64_t> axis = std::nullopt;
+
     flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
@@ -169,11 +175,11 @@ public:
 
         return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
             builder,
-            toSdkType(_mode),
-            _reluLowerClip,
-            _reluUpperClip,
-            _reluLowerSlope,
-            _axis,
+            toSdkType(mode),
+            reluLowerClip,
+            reluUpperClip,
+            reluLowerSlope,
+            axis,
             in0->get_uid(),
             in1 ? flatbuffers::Optional<int64_t>(in1->get_uid()) : flatbuffers::nullopt,
             in2 ? flatbuffers::Optional<int64_t>(in2->get_uid()) : flatbuffers::nullopt,
@@ -199,11 +205,6 @@ private:
         }
         return nullptr;
     }
-    PointwiseMode _mode = PointwiseMode::NOT_SET;
-    std::optional<float> _reluLowerClip = std::nullopt;
-    std::optional<float> _reluUpperClip = std::nullopt;
-    std::optional<float> _reluLowerSlope = std::nullopt;
-    std::optional<int64_t> _axis = std::nullopt;
 };
 typedef PointwiseAttributes Pointwise_attributes;
 }

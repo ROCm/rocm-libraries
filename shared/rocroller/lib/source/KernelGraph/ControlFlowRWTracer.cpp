@@ -50,64 +50,31 @@ namespace rocRoller::KernelGraph
         template <Expression::CUnary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.arg)
-            {
-                call(expr.arg);
-            }
+            call(expr.arg);
         }
 
         template <Expression::CBinary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.rhs)
-            {
-                call(expr.rhs);
-            }
+            call(expr.lhs);
+            call(expr.rhs);
         }
 
         void operator()(Expression::ScaledMatrixMultiply const& expr)
         {
-            if(expr.matA)
-            {
-                call(expr.matA);
-            }
-            if(expr.matB)
-            {
-                call(expr.matB);
-            }
-            if(expr.matC)
-            {
-                call(expr.matC);
-            }
-            if(expr.scaleA)
-            {
-                call(expr.scaleA);
-            }
-            if(expr.scaleB)
-            {
-                call(expr.scaleB);
-            }
+            call(expr.matA);
+            call(expr.matB);
+            call(expr.matC);
+            call(expr.scaleA);
+            call(expr.scaleB);
         }
 
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.r1hs)
-            {
-                call(expr.r1hs);
-            }
-            if(expr.r2hs)
-            {
-                call(expr.r2hs);
-            }
+            call(expr.lhs);
+            call(expr.r1hs);
+            call(expr.r2hs);
         }
 
         template <Expression::CNary Expr>
