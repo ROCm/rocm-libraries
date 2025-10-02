@@ -378,7 +378,7 @@ public:
   //==========================================================================
   // Assignment
   //==========================================================================
-  /*! Move assignment operator. Replaces the managed object with the one from \p u.
+  /*! \brief Move assignment operator. Replaces the managed object with the one from \p u.
    *  \param u The \p unique_ptr to move from.
    *  \return `*this`
    */
@@ -389,7 +389,7 @@ public:
     return *this;
   }
 
-  /*! Converting assignment operator.. Replaces the managed object with the one from \p u.
+  /*! \brief Converting assignment operator.. Replaces the managed object with the one from \p u.
    *  \param u The \p unique_ptr to move from.
    *  \return `*this`
    */
@@ -401,7 +401,7 @@ public:
     return *this;
   }
 
-  /*! Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
+  /*! \brief Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
    *  \return `*this`
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
@@ -413,7 +413,7 @@ public:
   //==========================================================================
   // Destructor
   //==========================================================================
-  /*! Destroys the \p unique_ptr, the managed object is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
+  /*! \brief Destroys the \p unique_ptr, the managed object is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
   {
@@ -423,7 +423,7 @@ public:
   //==========================================================================
   // Observers
   //==========================================================================
-  /*! Returns a pointer to the managed object or `nullptr` if no object is owned.
+  /*! \brief Returns a pointer to the managed object or `nullptr` if no object is owned.
    *  \return Pointer to the managed object.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
@@ -431,7 +431,7 @@ public:
     return m_ptr;
   }
 
-  /*! Returns a raw pointer to the managed object or `nullptr` if no object is owned.
+  /*! \brief Returns a raw pointer to the managed object or `nullptr` if no object is owned.
    *  \return Raw pointer to the managed object.
    */
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
@@ -440,7 +440,7 @@ public:
     return raw_pointer_cast(m_ptr);
   }
 
-  /*! Returns a reference to the deleter object which would be used for destruction of the managed object.
+  /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed object.
    *  \return A reference to the stored deleter.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
@@ -448,7 +448,7 @@ public:
     return m_deleter;
   }
 
-  /*! Returns a reference to the deleter object which would be used for destruction of the managed object.
+  /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed object.
    *  \return A reference to the stored deleter.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
@@ -456,7 +456,7 @@ public:
     return m_deleter;
   }
 
-  /*! Checks if the \p unique_ptr owns an object.
+  /*! \brief Checks if the \p unique_ptr owns an object.
    *  \return `true` if an object is owned, `false` otherwise.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
@@ -464,7 +464,7 @@ public:
     return m_ptr != nullptr;
   }
 
-  /*! Dereferences the stored pointer.
+  /*! \brief Dereferences the stored pointer.
    * 
    *  The default `unique_ptr` implementation uses `thrust::device_ptr`.
    *  Dereferencing this pointer in host code is a valid operation that
@@ -491,7 +491,7 @@ public:
   //==========================================================================
   // Modifiers
   //==========================================================================
-  /*! Releases ownership of the managed object, if any.
+  /*! \brief Releases ownership of the managed object, if any.
    *  \return A pointer to the released object.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
@@ -501,7 +501,7 @@ public:
     return temp;
   }
 
-  /*! Replaces the managed object.
+  /*! \brief Replaces the managed object.
    *  \param p The new object to manage.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
@@ -514,7 +514,7 @@ public:
     }
   }
 
-  /*! Swaps the managed object and deleter with another \p unique_ptr.
+  /*! \brief Swaps the managed object and deleter with another \p unique_ptr.
    *  \param u The \p unique_ptr to swap with.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
