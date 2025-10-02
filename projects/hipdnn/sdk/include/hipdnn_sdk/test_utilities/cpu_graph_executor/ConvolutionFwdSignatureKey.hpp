@@ -40,10 +40,7 @@ struct ConvolutionFwdSignatureKey
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
-        auto wTensorAttr = tensorMap.at(nodeAttributes->w_tensor_uid());
-        auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
-
-        if(xTensorAttr == nullptr || wTensorAttr == nullptr || yTensorAttr == nullptr)
+        if(xTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
