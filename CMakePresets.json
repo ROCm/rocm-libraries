@@ -8,8 +8,7 @@
     "configurePresets": [
         {
             "name": "release:all",
-            "displayName": "Release build (all libraries)",
-            "description": "Configure preset for release builds with installation to /opt/rocm",
+            "description": "Configure preset for release build (all libraries) with installation to /opt/rocm",
             "toolchainFile": "${sourceDir}/cmake/toolchains/linux-amdclang.cmake",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
