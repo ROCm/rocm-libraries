@@ -167,6 +167,7 @@ void ComputeTileLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            1,
                                                                             numActiveCUs,
                                                                             splittingFactor);
 
@@ -256,6 +257,7 @@ void ComputeWaveLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            1,
                                                                             numActiveCUs,
                                                                             splittingFactor);
     EXPECT_DOUBLE_EQ(wave_latency, tile_latency);
@@ -394,6 +396,7 @@ void EstimateMallHit(const origami::hardware_t& hardware,
                                  int             MT_M,
                                  int             MT_N,
                                  int             MT_K,
+                                 size_t          element_size,
                                  size_t          numActiveCUs,
                                  size_t          splittingFactor,
                                  const std::optional<int>                 expected_gt)
@@ -402,7 +405,7 @@ void EstimateMallHit(const origami::hardware_t& hardware,
     for(int i = 1; i < 1025; i++)
     {
         mall_hit = origami::estimate_mall_hit(
-            hardware, M, N, K, batch, MT_M, MT_N, MT_K, i, numActiveCUs, splittingFactor);
+            hardware, M, N, K, batch, MT_M, MT_N, MT_K,element_size, i, numActiveCUs, splittingFactor);
         EXPECT_GT(mall_hit, expected_gt);
     }
 }
