@@ -723,4 +723,30 @@ Tests:
   orderB: [R]
   orderC: [R]
   orderD: [R]
+
+- name: spmm_bert_sizes_nn
+  category: pre_checkin
+  function:
+    spmm: *real_precisions_2b
+  matrix_size: *bert_row_nn_sizes
+  transA: N
+  transB: N
+  sparse_b: false
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: spmm_bert_sizes_nt
+  category: pre_checkin
+  function:
+    spmm: *real_precisions_2b
+  matrix_size: *bert_row_nt_sizes
+  transA: N
+  transB: T
+  sparse_b: false
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
 ...

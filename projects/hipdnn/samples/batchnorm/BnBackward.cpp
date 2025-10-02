@@ -1,24 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../utils/Helpers.hpp"
-
-#include <hipdnn_frontend.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-
 #include <iostream>
 #include <string>
 #include <unordered_map>
 
-using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
+#include <hipdnn_frontend.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
+#include <hipdnn_sdk/utilities/Tensor.hpp>
 
-// TODO: verify this sample when applicable engines are added
+#include "../utils/Helpers.hpp"
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_sdk;
+
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -69,15 +66,15 @@ void SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
 
-    Tensor<InputType> dyTensor(dy->get_dim(), layout);
-    Tensor<InputType> xTensor(x->get_dim(), layout);
-    Tensor<IntermediateType> scaleTensor(scale->get_dim());
-    Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
-    Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
+    utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
+    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
+    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
+    utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
+    utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
 
-    Tensor<InputType> dxTensor(dx->get_dim(), layout);
-    Tensor<IntermediateType> dscaleTensor(dscale->get_dim());
-    Tensor<IntermediateType> dbiasTensor(dbias->get_dim());
+    utilities::Tensor<InputType> dxTensor(dx->get_dim(), layout);
+    utilities::Tensor<IntermediateType> dscaleTensor(dscale->get_dim());
+    utilities::Tensor<IntermediateType> dbiasTensor(dbias->get_dim());
 
     dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
@@ -113,27 +110,26 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        Tensor<InputType> dxRefTensor(dx->get_dim(), layout);
-        Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
-        Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
+        utilities::Tensor<InputType> dxRefTensor(dx->get_dim(), layout);
+        utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
+        utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        hipdnn_sdk::test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
-            batchnormBwd(dyTensor,
-                         xTensor,
-                         savedMeanTensor,
-                         savedInvVarTensor,
-                         scaleTensor,
-                         dxRefTensor,
-                         dscaleRefTensor,
-                         dbiasRefTensor);
+        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
+            dyTensor,
+            xTensor,
+            savedMeanTensor,
+            savedInvVarTensor,
+            scaleTensor,
+            dxRefTensor,
+            dscaleRefTensor,
+            dbiasRefTensor);
 
-        auto epsilon = getEpsilon<InputType>();
+        auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 
-        auto dxValidator = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(epsilon), static_cast<InputType>(epsilon));
-        auto dscaleDbiasValidator
-            = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(epsilon), static_cast<IntermediateType>(epsilon));
+        auto dxValidator
+            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
+            static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
         bool dxValid = dxValidator.allClose(dxRefTensor.memory(), dxTensor.memory());
         bool dscaleValid
@@ -179,6 +175,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All batch normalization backwards runs completed successfully.\n";
+    std::cout << "All batch normalization backwards runs completed.\n";
     return 0;
 }

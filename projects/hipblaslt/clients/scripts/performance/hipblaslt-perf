@@ -309,6 +309,11 @@ def main():
                         type=str,
                         action='append')
 
+    parser.add_argument('--targetArch',
+                        type=str,
+                        help='specify the target arch, mainly used when --suite all for PTS. If None, will use rocm_agent_enumerator to query',
+                        default=None)
+
     parser.add_argument('--tag',
                         type=str,
                         help='subfolder under workspace, (optional, useful for comparing two commits)',
@@ -330,6 +335,8 @@ def main():
                         default=False)
 
     arguments = parser.parse_args()
+
+    SuiteProblemGenerator.target_arch_static = arguments.targetArch
 
     if arguments.run_sh is not None:
         run_sh_bench(arguments)

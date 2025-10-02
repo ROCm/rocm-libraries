@@ -5,36 +5,48 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestConstants.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+
 using namespace hipdnn_sdk::test_utilities;
-using namespace hipdnn_sdk::test_utilities::constants;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
+
+namespace
+{
+
+// Mathematical constants
+constexpr float PI = 3.14159265f;
+constexpr float E = 2.71828183f;
+constexpr float SQRT_2 = 1.41421356f;
+constexpr float SQRT_3 = 1.73205081f;
+constexpr float SQRT_5 = 2.23606798f;
+constexpr float GOLDEN_RATIO = 1.61803399f; // φ
+constexpr float LN_2 = 0.69314718f;
+
+// Common test values
+constexpr float TEST_VALUE_1 = 1.0f;
+constexpr float TEST_VALUE_2 = 2.0f;
+constexpr float TEST_VALUE_3 = 3.0f;
+constexpr float TEST_VALUE_5 = 5.0f;
+constexpr float TEST_VALUE_2_5 = 2.5f;
+constexpr float TEST_VALUE_1_5 = 1.5f;
+constexpr float TEST_VALUE_4 = 4.0f;
+
+// Precision test values
+constexpr float PRECISION_TEST_A = 0.123456789f;
+constexpr float PRECISION_TEST_B = 0.987654321f;
+
+// Broadcasting test values
+constexpr float BROADCAST_MULTIPLIER_10 = 10.0f;
+
+} // namespace
 
 template <typename Input1Type, typename Input2Type = Input1Type, typename OutputType = Input1Type>
 class CpuReferencePointwiseBinaryTemplate : public ::testing::Test
 {
 protected:
-    OutputType getTolerance() const
-    {
-        if constexpr(std::is_same_v<OutputType, half>)
-        {
-            return static_cast<OutputType>(TOLERANCE_HALF);
-        }
-        else if constexpr(std::is_same_v<OutputType, hip_bfloat16>)
-        {
-            return static_cast<OutputType>(TOLERANCE_BFLOAT16);
-        }
-        else
-        {
-            return static_cast<OutputType>(TOLERANCE_FLOAT);
-        }
-    }
-
     void testBinaryAddOperation()
     {
         Tensor<Input1Type> input1({1, 3, 2, 2});
@@ -50,7 +62,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -70,7 +82,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -104,7 +116,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -141,7 +153,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -161,7 +173,7 @@ protected:
         Tensor<OutputType> expected({4, 3});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -181,7 +193,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 10});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -202,7 +214,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
                               0); // e² - e
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -223,7 +235,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -251,7 +263,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(10)), 3);
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -293,7 +305,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -328,7 +340,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -364,7 +376,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -415,7 +427,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -469,7 +481,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -533,7 +545,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = pointwise::getTolerance<OutputType>();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }

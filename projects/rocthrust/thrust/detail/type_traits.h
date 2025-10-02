@@ -253,7 +253,7 @@ namespace internal
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename... Tp>
-using promoted_numerical_type = _THRUST_STD::common_type_t<Tp...>;
+using promoted_numerical_type = _THRUST_STD::common_type<Tp...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 

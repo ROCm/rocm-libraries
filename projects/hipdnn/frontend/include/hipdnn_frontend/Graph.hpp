@@ -160,10 +160,8 @@ public:
         return validateSubtree();
     }
 
-    Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
+    flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        HIPDNN_FE_LOG_INFO("Building operation graph {}", graph_attributes.get_name());
-
         std::unordered_set<int64_t> usedTensorUids;
         gatherHipdnnTensorIdsSubtree(usedTensorUids);
 
@@ -201,7 +199,14 @@ public:
             &nodes);
 
         builder.Finish(graph);
-        auto serializedGraph = builder.Release();
+        return builder.Release();
+    }
+
+    Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
+    {
+        HIPDNN_FE_LOG_INFO("Building operation graph {}", graph_attributes.get_name());
+
+        auto serializedGraph = buildFlatbufferOperationGraph();
         _graphDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(serializedGraph.data(),
                                                                      serializedGraph.size());
 
@@ -612,10 +617,11 @@ public:
         return out0;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming)
+    // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_fprop(std::shared_ptr<TensorAttributes> x,
                                                  std::shared_ptr<TensorAttributes> w,
                                                  ConvFpropAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
         {
@@ -642,10 +648,11 @@ public:
         return y;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming)
+    // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> conv_dgrad(std::shared_ptr<TensorAttributes> dy,
                                                  std::shared_ptr<TensorAttributes> w,
                                                  ConvDgradAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
         {

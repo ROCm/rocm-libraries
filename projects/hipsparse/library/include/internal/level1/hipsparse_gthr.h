@@ -66,52 +66,7 @@ extern "C" {
 *              invalid.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      int nnz = 3;
-*
-*      // Sparse index vector
-*      int hxInd[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      float hxVal[3];
-*
-*      // Dense vector
-*      float hy[9] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-*
-*      // Index base
-*      hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*      // Offload data to device
-*      int* dxInd;
-*      float*         dxVal;
-*      float*         dy;
-*
-*      hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*      hipMalloc((void**)&dy, sizeof(float) * 9);
-*
-*      hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice);
-*
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // Call sgthr
-*      hipsparseSgthr(handle, nnz, dy, dxVal, dxInd, idxBase);
-*
-*      // Copy result back to host
-*      hipMemcpy(hxVal, dxVal, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dxInd);
-*      hipFree(dxVal);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_gthr.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

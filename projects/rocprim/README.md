@@ -42,12 +42,13 @@ You can build and install rocPRIM on Linux or Windows.
 
   # Configure rocPRIM, setup options for your system.
   # Build options:
-  #   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
-  #   BUILD_TEST - OFF by default,
-  #   BUILD_EXAMPLE - OFF by default,
+  #   ONLY_INSTALL - OFF by default. If this flag is on, the build ignores the BUILD_* flags.
+  #   BUILD_TEST - OFF by default.
+  #   BUILD_EXAMPLE - OFF by default.
   #   BUILD_BENCHMARK - OFF by default.
   #   BENCHMARK_CONFIG_TUNING - OFF by default. The purpose of this flag to find the best kernel config parameters.
   #     At ON the compilation time can be increased significantly.
+  #   BENCHMARK_USE_AMDSMI - OFF by default. Set to ON to let benchmarks use AMD SMI to output more GPU statistics.
   #   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906;gfx908.
   #     You can make compilation faster if you want to test/benchmark only on one architecture,
   #     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.

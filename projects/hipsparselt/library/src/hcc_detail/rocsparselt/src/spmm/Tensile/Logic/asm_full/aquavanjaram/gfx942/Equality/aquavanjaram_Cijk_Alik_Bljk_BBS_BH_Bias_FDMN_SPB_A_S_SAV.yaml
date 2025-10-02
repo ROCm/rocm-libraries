@@ -1879,7 +1879,7 @@
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
     GlobalSplitU: 4
-    GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+    GlobalSplitUAlgorithm: MultipleBuffer
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
     GlobalWriteVectorWidth: 1

@@ -13,26 +13,7 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanExecutor.hpp>
-
-#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
-    do                                              \
-    {                                               \
-        auto it = (tensor_map).find((tensor_uid));  \
-        if(it == (tensor_map).end())                \
-        {                                           \
-            return false;                           \
-        }                                           \
-    } while(0)
-
-#define CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum) \
-    do                                                           \
-    {                                                            \
-        auto tensor = (tensor_map).at((tensor_uid));             \
-        if(tensor->data_type() != (datatype_enum))               \
-        {                                                        \
-            return false;                                        \
-        }                                                        \
-    } while(0)
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanUtils.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -151,7 +132,7 @@ public:
 
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node) override
+                      const hipdnn_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
         if(nodeAttributes == nullptr)

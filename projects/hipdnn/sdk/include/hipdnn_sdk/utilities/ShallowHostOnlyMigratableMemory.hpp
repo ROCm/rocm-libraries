@@ -19,8 +19,9 @@ template <class T>
 class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
 {
 public:
-    ShallowHostOnlyMigratableMemory(void* memory)
+    ShallowHostOnlyMigratableMemory(void* memory, size_t count)
         : _memory(static_cast<T*>(memory))
+        , _count(count)
     {
     }
 
@@ -63,13 +64,11 @@ public:
 
     size_t count() const override
     {
-        throwNotSupported();
-        return 0;
+        return _count;
     }
     bool empty() const override
     {
-        throwNotSupported();
-        return true;
+        return _count == 0;
     }
     MemoryLocation location() const override
     {
@@ -94,6 +93,7 @@ private:
     }
 
     T* _memory;
+    size_t _count;
 };
 
 }

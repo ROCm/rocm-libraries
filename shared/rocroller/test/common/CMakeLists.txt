@@ -19,7 +19,6 @@ endif()
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(common-test-utilities PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(common-test-utilities PUBLIC -pg -fno-omit-frame-pointer)
 endif()
 
 target_include_directories(common-test-utilities

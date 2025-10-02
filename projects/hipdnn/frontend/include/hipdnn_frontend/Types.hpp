@@ -161,6 +161,27 @@ inline hipdnn_sdk::data_objects::DataType toSdkType(const DataType& type)
     }
 }
 
+inline hipdnn_frontend::DataType fromSdkType(const hipdnn_sdk::data_objects::DataType& type)
+{
+    switch(type)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return hipdnn_frontend::DataType::FLOAT;
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return hipdnn_frontend::DataType::HALF;
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return hipdnn_frontend::DataType::BFLOAT16;
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return hipdnn_frontend::DataType::DOUBLE;
+    case hipdnn_sdk::data_objects::DataType::UINT8:
+        return hipdnn_frontend::DataType::UINT8;
+    case hipdnn_sdk::data_objects::DataType::INT32:
+        return hipdnn_frontend::DataType::INT32;
+    default:
+        return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
 inline hipdnn_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMode& type)
 {
     switch(type)

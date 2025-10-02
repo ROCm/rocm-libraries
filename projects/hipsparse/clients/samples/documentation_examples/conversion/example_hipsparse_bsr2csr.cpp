@@ -1,0 +1,163 @@
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#include "utility.hpp"
+
+#include <hip/hip_runtime_api.h>
+#include <hipsparse/hipsparse.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define HIP_CHECK(stat)                                               \
+    {                                                                 \
+        if(stat != hipSuccess)                                        \
+        {                                                             \
+            fprintf(stderr, "Error: hip error in line %d", __LINE__); \
+            return -1;                                                \
+        }                                                             \
+    }
+
+#define HIPSPARSE_CHECK(stat)                                               \
+    {                                                                       \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
+        {                                                                   \
+            fprintf(stderr, "Error: hipsparse error in line %d", __LINE__); \
+            return -1;                                                      \
+        }                                                                   \
+    }
+
+//! [doc example]
+int main(int argc, char* argv[])
+{
+    // hipSPARSE handle
+    hipsparseHandle_t handle;
+    HIPSPARSE_CHECK(hipsparseCreate(&handle));
+
+    hipsparseMatDescr_t csr_descr;
+    HIPSPARSE_CHECK(hipsparseCreateMatDescr(&csr_descr));
+
+    hipsparseMatDescr_t bsr_descr;
+    HIPSPARSE_CHECK(hipsparseCreateMatDescr(&bsr_descr));
+
+    // Sparse matrix in BSR format
+    //     1 2 | 0 3 | 0 0
+    //     0 4 | 5 0 | 0 1
+    //     ---------------
+    // A = 6 0 | 0 7 | 8 0
+    //     0 0 | 3 0 | 2 2
+    //     ---------------
+    //     1 0 | 0 0 | 4 3
+    //     7 2 | 0 0 | 1 4
+    int   hbsrRowPtr[4] = {0, 3, 6, 8};
+    int   hbsrColInd[8] = {0, 1, 2, 0, 1, 2, 0, 2};
+    float hbsrVal[32]   = {1.0f, 2.0f, 0.0f, 4.0f, 0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                         1.0f, 6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 7.0f, 3.0f, 0.0f, 8.0f, 0.0f,
+                         2.0f, 2.0f, 1.0f, 0.0f, 7.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
+
+    int                  m        = 6;
+    int                  n        = 6;
+    int                  nnz      = 32;
+    int                  mb       = 3;
+    int                  nb       = 3;
+    int                  nnzb     = 8;
+    int                  blockDim = 2;
+    hipsparseDirection_t dir      = HIPSPARSE_DIRECTION_ROW;
+
+    int*   dbsrRowPtr = nullptr;
+    int*   dbsrColInd = nullptr;
+    float* dbsrVal    = nullptr;
+    HIP_CHECK(hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1)));
+    HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
+    HIP_CHECK(hipMalloc((void**)&dbsrVal, sizeof(float) * blockDim * blockDim * nnzb));
+
+    HIP_CHECK(hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(
+        dbsrVal, hbsrVal, sizeof(float) * blockDim * blockDim * nnzb, hipMemcpyHostToDevice));
+
+    int*   dcsrRowPtr = nullptr;
+    int*   dcsrColInd = nullptr;
+    float* dcsrVal    = nullptr;
+    HIP_CHECK(hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1)));
+    HIP_CHECK(hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz));
+    HIP_CHECK(hipMalloc((void**)&dcsrVal, sizeof(float) * nnz));
+
+    HIPSPARSE_CHECK(hipsparseSbsr2csr(handle,
+                                      dir,
+                                      mb,
+                                      nb,
+                                      bsr_descr,
+                                      dbsrVal,
+                                      dbsrRowPtr,
+                                      dbsrColInd,
+                                      blockDim,
+                                      csr_descr,
+                                      dcsrVal,
+                                      dcsrRowPtr,
+                                      dcsrColInd));
+
+    std::vector<int>   hcsrRowPtr(m + 1);
+    std::vector<int>   hcsrColInd(nnz);
+    std::vector<float> hcsrVal(nnz);
+
+    // Copy back to the host
+    HIP_CHECK(
+        hipMemcpy(hcsrRowPtr.data(), dcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrColInd.data(), dcsrColInd, sizeof(int) * nnz, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrVal.data(), dcsrVal, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+
+    std::cout << "C" << std::endl;
+    for(int i = 0; i < m; i++)
+    {
+        int start = hcsrRowPtr[i];
+        int end   = hcsrRowPtr[i + 1];
+
+        std::vector<float> temp(n, 0.0f);
+        for(int j = start; j < end; j++)
+        {
+            temp[hcsrColInd[j]] = hcsrVal[j];
+        }
+
+        for(int j = 0; j < n; j++)
+        {
+            std::cout << temp[j] << " ";
+        }
+        std::cout << "" << std::endl;
+    }
+    std::cout << "" << std::endl;
+
+    HIP_CHECK(hipFree(dbsrRowPtr));
+    HIP_CHECK(hipFree(dbsrColInd));
+    HIP_CHECK(hipFree(dbsrVal));
+
+    HIP_CHECK(hipFree(dcsrRowPtr));
+    HIP_CHECK(hipFree(dcsrColInd));
+    HIP_CHECK(hipFree(dcsrVal));
+
+    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(csr_descr));
+    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(bsr_descr));
+    HIPSPARSE_CHECK(hipsparseDestroy(handle));
+
+    return 0;
+}
+//! [doc example]

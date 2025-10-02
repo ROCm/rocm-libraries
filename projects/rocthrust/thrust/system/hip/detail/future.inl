@@ -43,7 +43,7 @@
 #  include _THRUST_STD_INCLUDE(__memory/unique_ptr.h)
 // clang-format on
 #else
-#  include <memory>
+#  include <thrust/detail/memory_wrapper.h>
 #endif
 
 #  include <type_traits>

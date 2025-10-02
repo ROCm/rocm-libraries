@@ -58,20 +58,7 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p n or \p p pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    int n = 10;
-*
-*    int* dperm = nullptr;
-*    hipMalloc((void**)&dperm, sizeof(int) * n);
-*
-*    hipsparseCreateIdentityPermutation(handle, n, dperm);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_create_identity_permutation.cpp doc example
 */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT

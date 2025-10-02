@@ -160,7 +160,12 @@ public:
 
         for(auto& [_, tensor] : self().attributes.outputs)
         {
-            if(tensor && !tensor->has_uid())
+            if(!tensor)
+            {
+                continue;
+            }
+
+            if(!tensor->has_uid())
             {
                 tensor->set_uid(get_unused_tensor_uid(currentTensorId, usedIds));
             }

@@ -66,7 +66,6 @@ target_compile_definitions(GPUArchitectureGenerator
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(GPUArchitectureGenerator PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)

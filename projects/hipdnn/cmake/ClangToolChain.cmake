@@ -26,8 +26,6 @@ if(UNIX)
         message(FATAL_ERROR "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot auto select clang compilers.")
     endif()
 
-    add_compile_options(-fPIC) # Position Independent Code (not needed/supported on Windows)
-
 elseif(WIN32)
     # Windows: Use Clang from TheRock build
     set(WINDOWS_ROCM_DIR "C:/src/TheRock/build/dist/rocm" CACHE PATH "Path to Windows ROCm installation")
