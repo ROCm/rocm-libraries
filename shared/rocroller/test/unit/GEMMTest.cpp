@@ -2304,32 +2304,25 @@ namespace GEMMDriverTest
                 if(unrollK == 4 && waveK == 128)
                     continue;
                 gemm.unrollK = unrollK;
+                if(unrollK > 1)
+                    gemm.swizzleK = 4 * unrollK;
                 basicGEMM<FP4, FP4, float>(gemm);
 
                 std::string generatedCode = m_context->instructions()->toString();
                 EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
                 if(unrollK == 0)
                 {
-                    gemm.swizzleM = 64;
-                    gemm.swizzleN = 64;
-                    gemm.swizzleK = 4;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
                 }
                 else if(unrollK == 2)
                 {
-                    gemm.swizzleM = 64;
-                    gemm.swizzleN = 64;
-                    gemm.swizzleK = 8;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
                 }
                 else if(unrollK == 4)
                 {
-                    gemm.swizzleM = 64;
-                    gemm.swizzleN = 64;
-                    gemm.swizzleK = 16;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
                 }

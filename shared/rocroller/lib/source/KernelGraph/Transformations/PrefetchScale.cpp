@@ -582,22 +582,27 @@ namespace rocRoller
                     auto unroll1 = graph.mapper.get<Unroll>(loadTag, 1);
                     auto unroll2 = graph.mapper.get<Unroll>(loadTag, 2);
 
-                    unsigned int xyUnrollSize, macKUnrollSize;
+                    unsigned int xyUnrollSize = 0, macKUnrollSize = 0;
                     if(macTile.layoutType == LayoutType::MATRIX_A)
                     {
                         // A : M x K
-                        auto xyUnrollSize   = getUnrollSize(graph, unroll0);
-                        auto macKUnrollSize = getUnrollSize(graph, unroll1);
+                        xyUnrollSize   = getUnrollSize(graph, unroll0);
+                        macKUnrollSize = getUnrollSize(graph, unroll1);
                     }
                     else
                     {
                         // B : K x N
-                        auto xyUnrollSize   = getUnrollSize(graph, unroll1);
-                        auto macKUnrollSize = getUnrollSize(graph, unroll0);
+                        xyUnrollSize   = getUnrollSize(graph, unroll1);
+                        macKUnrollSize = getUnrollSize(graph, unroll0);
                     }
 
                     // if unroll2 is -1, this returns 1.
                     auto unrollKSize = getUnrollSize(graph, unroll2);
+
+                    AssertFatal(xyUnrollSize != 0 && macKUnrollSize != 0 && unrollKSize != 0,
+                                ShowValue(xyUnrollSize),
+                                ShowValue(macKUnrollSize),
+                                ShowValue(unrollKSize));
 
                     auto waveM = macTile.subTileSizes.at(0);
                     auto waveN = macTile.subTileSizes.at(1);
@@ -615,13 +620,14 @@ namespace rocRoller
                     auto factorMN = waveM / miM;
                     auto factorK  = waveK / miK;
 
-                    std::cout << factorMN << " " << xyUnrollSize << std::endl;
-                    std::cout << factorK << " " << macKUnrollSize << std::endl;
                     if(xyUnrollSize % factorMN == 0 && macKUnrollSize % factorK == 0)
                         prefetchScaleLoadsPerUnroll(graph, loads, colouring, context);
                     else if(xyUnrollSize % factorMN == 0
                             && (macKUnrollSize * unrollKSize) % factorK == 0)
                         prefetchScaleLoads(graph, loads, colouring, context);
+                    else
+                        Throw<FatalError>(
+                            "Prefetch Scale not supported for the given swizzled tile.");
 
                     break;
                 }

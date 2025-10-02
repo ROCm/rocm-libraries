@@ -370,8 +370,7 @@ namespace rocRoller
                     graph.coordinates.addElement(Tile(), {nWave0}, {wave0, jammedWaveTile0});
                     connections.push_back(DC<JammedWaveTileNumber>(jammedWaveTile0, 0));
 
-                    auto unroll0 = graph.coordinates.addElement(
-                        Unroll(getUnrollSize(graph, existingUnroll0) / factor));
+                    auto unroll0 = existingUnroll0;
                     graph.coordinates.addElement(PassThrough(), {jammedWaveTile0}, {unroll0});
                     connections.push_back(DC<Unroll>(unroll0, 0));
                     unrolls[existingUnroll0] = unroll0;
@@ -380,8 +379,7 @@ namespace rocRoller
                 {
                     auto factor = macTile.subTileSizes.at(2) / existingMacTile.subTileSizes.at(2);
 
-                    auto unroll1 = graph.coordinates.addElement(
-                        Unroll(getUnrollSize(graph, existingUnroll1) / factor));
+                    auto unroll1 = existingUnroll1;
                     graph.coordinates.addElement(PassThrough(), {nWave1}, {unroll1});
                     connections.push_back(DC<Unroll>(unroll1, 1));
                     unrolls[existingUnroll1] = unroll1;
@@ -406,8 +404,7 @@ namespace rocRoller
                     graph.coordinates.addElement(Tile(), {nWave1}, {wave1, jammedWaveTile1});
                     connections.push_back(DC<JammedWaveTileNumber>(jammedWaveTile1, 1));
 
-                    auto unroll1 = graph.coordinates.addElement(
-                        Unroll(getUnrollSize(graph, existingUnroll1) / factor));
+                    auto unroll1 = existingUnroll1;
                     graph.coordinates.addElement(PassThrough(), {jammedWaveTile1}, {unroll1});
                     connections.push_back(DC<Unroll>(unroll1, 1));
                     unrolls[existingUnroll1] = unroll1;
@@ -416,8 +413,7 @@ namespace rocRoller
                 {
                     auto factor = macTile.subTileSizes.at(2) / existingMacTile.subTileSizes.at(2);
 
-                    auto unroll0 = graph.coordinates.addElement(
-                        Unroll(getUnrollSize(graph, existingUnroll0) / factor));
+                    auto unroll0 = existingUnroll0;
                     graph.coordinates.addElement(PassThrough(), {nWave0}, {unroll0});
                     connections.push_back(DC<Unroll>(unroll0, 0));
                     unrolls[existingUnroll0] = unroll0;
