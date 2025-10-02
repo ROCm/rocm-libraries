@@ -771,6 +771,14 @@ public:
   //==========================================================================
   // Assignment
   //==========================================================================
+  /*! \brief Move assignment operator. Replaces the managed object with the one from \p u.
+   *
+   *  Releases the currently managed array (if any) and takes ownership of
+   *  the array managed by \p p.
+   *
+   *  \param p The \p unique_ptr to move from.
+   *  \return `*this`
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr&& p) noexcept
   {
     reset(p.release());
@@ -778,6 +786,10 @@ public:
     return *this;
   }
 
+  /*! \brief Converting assignment operator. Replaces the managed object with the one from \p u.
+   *  \param u The \p unique_ptr to move from.
+   *  \return `*this`
+   */
   template <class Up,
             class Ep,
             class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
@@ -789,6 +801,9 @@ public:
     return *this;
   }
 
+  /*! \brief Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
+   *  \return `*this`
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
   {
     reset();
