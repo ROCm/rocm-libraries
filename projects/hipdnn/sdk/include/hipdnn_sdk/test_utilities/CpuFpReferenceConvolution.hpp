@@ -401,9 +401,8 @@ public:
                     }
                 });
 
-            auto weightChannelIdx = (gIdx * outputChannelsPerGroup) + kIdx;
-            auto weightFullIndices
-                = buildWeightIndices(weightChannelIdx, cIdx, kernelSpatialIndices);
+            auto weightN = (gIdx * outputChannelsPerGroup) + kIdx;
+            auto weightFullIndices = buildTensorIndices(weightN, cIdx, kernelSpatialIndices);
 
             gradWeight.setHostValue(static_cast<InputDataType>(vAcc), weightFullIndices);
         };

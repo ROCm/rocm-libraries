@@ -2184,6 +2184,92 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightAsymmetricKernel)
     EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 1, 0), 5.0f);
 }
 
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight1D)
+{
+    // Test 1D backward weight convolution
+    Tensor<float> inputTensor({1, 1, 6});
+    Tensor<float> weightTensor({1, 1, 3});
+    Tensor<float> outputTensor({1, 1, 4});
+
+    // Set input values
+    for(int i = 0; i < 6; ++i)
+    {
+        inputTensor.setHostValue(static_cast<float>(i + 1), 0, 0, i);
+    }
+
+    // Set gradient output values
+    for(int i = 0; i < 4; ++i)
+    {
+        outputTensor.setHostValue(static_cast<float>(i + 1), 0, 0, i);
+    }
+
+    std::vector<int64_t> strides = {1};
+    std::vector<int64_t> dilations = {1};
+    std::vector<int64_t> padding = {0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify weight gradient computation
+    // Weight[0] = sum(input[0:3] * output) = 1*1 + 2*2 + 3*3 + 4*4 = 30
+    // Weight[1] = sum(input[1:4] * output) = 2*1 + 3*2 + 4*3 + 5*4 = 40
+    // Weight[2] = sum(input[2:5] * output) = 3*1 + 4*2 + 5*3 + 6*4 = 50
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 0), 30.0f);
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 1), 40.0f);
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 2), 50.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight3D)
+{
+    // Test 3D backward weight convolution with minimal tensor sizes
+    // Input: 1x1x2x2x2 (1 batch, 1 input channel, 2x2x2 spatial)
+    // Weight: 1x1x2x2x2 (1 output channel, 1 input channel, 2x2x2 kernel)
+    // GradOutput: 1x1x1x1x1 (1 batch, 1 output channel, 1x1x1 spatial)
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> gradWeightTensor({1, 1, 2, 2, 2});
+    Tensor<float> gradOutputTensor({1, 1, 1, 1, 1});
+
+    // Set input values sequentially: [1, 2, 3, 4, 5, 6, 7, 8]
+    // This creates a simple pattern for verification
+    float inputValue = 1.0f;
+    for(int d = 0; d < 2; ++d)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                inputTensor.setHostValue(inputValue, 0, 0, d, h, w);
+                inputValue += 1.0f;
+            }
+        }
+    }
+
+    // Set uniform gradient output: 1.0
+    // This simplifies the calculation: weight gradient = input value * 1.0 = input value
+    gradOutputTensor.setHostValue(1.0f, 0, 0, 0, 0, 0);
+
+    // Initialize weight gradients to zero
+    gradWeightTensor.fillWithValue(0.0f);
+
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> padding = {0, 0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(
+        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Verify weight gradients: each should equal the corresponding input value
+    // Since gradOutput = 1.0, weight_grad[d,h,w] = input[d,h,w] * gradOutput = input[d,h,w]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0, 0), 1.0f); // input[0,0,0]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0, 1), 2.0f); // input[0,0,1]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 1, 0), 3.0f); // input[0,1,0]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 1, 1), 4.0f); // input[0,1,1]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 1, 0, 0), 5.0f); // input[1,0,0]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 1, 0, 1), 6.0f); // input[1,0,1]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 1, 1, 0), 7.0f); // input[1,1,0]
+    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 1, 1, 1), 8.0f); // input[1,1,1]
+}
+
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData1D)
 {
     // Test 1D backward data convolution
@@ -2498,6 +2584,26 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
 
     EXPECT_THROW(
         (CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+            inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding)),
+        std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdWeight3DInvalidOutputDim)
+{
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> prePadding = {1, 0, 1};
+    std::vector<int64_t> postPadding = {1, 0, 2};
+
+    // Test 3D backward weight convolution with asymmetric padding
+    // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
+    // The expected output height is 1. This test verifies that an exception is thrown.
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+
+    EXPECT_THROW(
+        (CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(
             inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding)),
         std::invalid_argument);
 }
