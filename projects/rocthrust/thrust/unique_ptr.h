@@ -600,17 +600,27 @@ public:
   // Constructors
   //==========================================================================
 
+  /*! \brief Constructs an empty \p unique_ptr that does not own an array.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
   THRUST_HOST constexpr unique_ptr() noexcept
       : m_ptr()
       , m_deleter()
   {}
 
+  /*! \brief Constructs an empty \p unique_ptr that does not own an array.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
   THRUST_HOST constexpr unique_ptr(std::nullptr_t) noexcept
       : unique_ptr()
   {}
 
+  /*! \brief Constructs a \p unique_ptr that owns the object pointed to by \p p.
+   *
+   *  This overload is only available for arrays of trivially-destructible types.
+   *
+   *  \param p A pointer to an array in device memory to manage.
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
@@ -621,6 +631,12 @@ public:
       , m_deleter()
   {}
 
+  /*! \brief Constructs a \p unique_ptr from a raw device array pointer.
+   *
+   *  This overload is only available for arrays of trivially-destructible types.
+   * 
+   * \param raw_p A raw pointer to an array in device memory to manage.
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
@@ -632,6 +648,14 @@ public:
       , m_deleter()
   {}
 
+  /*! \brief Constructs a \p unique_ptr that owns the object pointed to by \p p with known size. 
+   *
+   *  For arrays of non-trivially-destructible types, the size is required to ensure
+   *  all element destructors are properly called during deletion.
+   *
+   *  \param p A pointer to an array in device memory to manage.
+   *  \param size The number of elements in the array.
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
@@ -641,6 +665,14 @@ public:
       , m_deleter(size)
   {}
 
+  /*! \brief Constructs a \p unique_ptr from a raw device array pointer with known size.
+   *
+   *  For arrays of non-trivially-destructible types, the size is required to ensure
+   *  all element destructors are properly called during deletion.
+   *
+   *  \param raw_p A raw pointer to an array in device memory to manage.
+   *  \param size The number of elements in the array.
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
@@ -651,6 +683,11 @@ public:
       , m_deleter(size)
   {}
 
+  /*! \brief Constructs a \p unique_ptr with a custom deleter (lvalue reference).
+   *
+   *  \param p A pointer to the array in device memory to manage.
+   *  \param deleter The deleter to use for destroying the array.
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterConstructible<LValRefType<Dummy>>,
@@ -660,12 +697,21 @@ public:
       , m_deleter(deleter)
   {}
 
+  /*! \brief Constructs an empty \p unique_ptr with a custom deleter (lvalue reference).
+   *
+   *  \param deleter The deleter to store.
+   */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, LValRefType<Dummy> deleter) noexcept
       : m_ptr(nullptr)
       , m_deleter(deleter)
   {}
 
+  /*! \brief Constructs a \p unique_ptr with a custom deleter (rvalue reference).
+   *
+   *  \param p A pointer to the array in device memory to manage.
+   *  \param deleter The deleter to use for destroying the array (moved).
+   */
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>,
@@ -677,6 +723,10 @@ public:
     static_assert(!std::is_reference_v<deleter_type>, "rvalue deleter bound to reference");
   }
 
+  /*! \brief Constructs an empty \p unique_ptr with a custom deleter (rvalue reference).
+   *
+   *  \param deleter The deleter to store (moved).
+   */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, GoodRValRefType<Dummy> deleter) noexcept
       : m_ptr(nullptr)
@@ -691,11 +741,24 @@ public:
             class      = EnableIfPointerConvertible<Pp>>
   THRUST_HOST unique_ptr(Pp ptr, BadRValRefType<Dummy> deleter) = delete;
 
+  /*! \brief Move constructor that transfers ownership from another array \p unique_ptr.
+   *
+   *  \param u The \p unique_ptr to move from.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<deleter_type>(u.get_deleter()))
   {}
 
+  /*! \brief Converting move constructor from a compatible array \p unique_ptr.
+   *
+   *  Allows converting from \p unique_ptr<U[], E> to \p unique_ptr<T[], D> when
+   *  the array element types and deleter types are compatible (e.g., derived to base).
+   *
+   *  \tparam Up An array element type convertible to \p T.
+   *  \tparam Ep A deleter type convertible to \p D.
+   *  \param u The \p unique_ptr to move from.
+   */
   template <class Up,
             class Ep,
             class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
