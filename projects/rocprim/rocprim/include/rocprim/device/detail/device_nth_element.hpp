@@ -480,7 +480,6 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     } storage;
 
     auto block_id = ordered_bid.get(threadIdx.x, storage.ordered_bid);
-    syncthreads();
 
     uint8_t buckets[num_items_per_thread];
 

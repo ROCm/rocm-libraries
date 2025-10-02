@@ -542,7 +542,7 @@ template<class Config = default_config,
          class RejectedOutputIterator,
          class SelectedCountOutputIterator,
          class Predicate,
-         bool UsingOrderedBlockId = true>
+         bool UsingOrderedBlockId = false>
 inline hipError_t partition_two_way(void*                       temporary_storage,
                                     size_t&                     storage_size,
                                     InputIterator               input,
@@ -687,7 +687,7 @@ template<class Config = default_config,
          typename SelectedOutputIterator,
          typename RejectedOutputIterator,
          typename SelectedCountOutputIterator,
-         bool UsingOrderedBlockId = true>
+         bool UsingOrderedBlockId = false>
 inline hipError_t partition_two_way(void*                       temporary_storage,
                                     size_t&                     storage_size,
                                     InputIterator               input,
@@ -815,7 +815,7 @@ template<class Config = default_config,
          class FlagIterator,
          class OutputIterator,
          class SelectedCountOutputIterator,
-         bool UsingOrderedBlockId = true>
+         bool UsingOrderedBlockId = false>
 inline hipError_t partition(void*                       temporary_storage,
                             size_t&                     storage_size,
                             InputIterator               input,
@@ -949,7 +949,7 @@ template<class Config = default_config,
          class OutputIterator,
          class SelectedCountOutputIterator,
          class UnaryPredicate,
-         bool UsingOrderedBlockId = true>
+         bool UsingOrderedBlockId = false>
 inline hipError_t partition(void*                       temporary_storage,
                             size_t&                     storage_size,
                             InputIterator               input,
@@ -1128,7 +1128,7 @@ template<class Config = default_config,
          typename SelectedCountOutputIterator,
          typename FirstUnaryPredicate,
          typename SecondUnaryPredicate,
-         bool UsingOrderedBlockId = true>
+         bool UsingOrderedBlockId = false>
 inline hipError_t partition_three_way(void*                       temporary_storage,
                                       size_t&                     storage_size,
                                       InputIterator               input,

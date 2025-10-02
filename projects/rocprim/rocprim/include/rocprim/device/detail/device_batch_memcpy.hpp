@@ -981,7 +981,6 @@ public:
 
         auto tile_id = ordered_bid.get(rocprim::flat_tile_thread_id(),
                                        temp_storage.get().shared.ordered_bid);
-        rocprim::syncthreads();
 
         non_blev_memcpy<ArchConfig>{}.copy(temp_storage.get(),
                                            buffers,
