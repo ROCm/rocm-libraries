@@ -210,7 +210,7 @@ class StreamK(Component):
         module.add(SCmpEQU32(src0=sgpr("skTiles"), src1=1, comment="split == 1 ?"))
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
         # Parallel reduction: adjust output buffer address to per split buffer
-        with writer.allocTmpSgpr(5, alignment=1) as tmpSgprInfo:
+        with writer.allocTmpSgpr(4, alignment=1) as tmpSgprInfo:
             if tmpSgprInfo.idx % 2 == 0:
                 tmpSgprX2  = tmpSgprInfo.idx+0
                 tmpSgpr0   = tmpSgprInfo.idx+0
