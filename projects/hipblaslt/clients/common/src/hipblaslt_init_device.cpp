@@ -194,6 +194,14 @@ __device__ hipblaslt_bf6x16 random_int<hipblaslt_bf6x16>(size_t idx)
                             float(r[15]));
 }
 
+/*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
+template <>
+__device__ hipblaslt_e8 random_int<hipblaslt_e8>(size_t idx)
+{
+    hipblaslt_e8 val;
+    val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
+    return val;
+}
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <typename T>
@@ -304,6 +312,14 @@ __device__ hipblaslt_bf6x16 random_hpl(size_t idx)
                             r[15]);
 }
 
+/*! \brief  generate a random number in range [2^-3,2^-2,2^-1,2^0,]2^1,2^2,2^3]] */
+template <>
+__device__ hipblaslt_e8 random_hpl<hipblaslt_e8>(size_t idx)
+{
+    hipblaslt_e8 val;
+    val.data = ((pseudo_random_device(idx) % 7 - 3) + 127);
+    return val;
+}
 
 /*! \brief  generate a float value using trig function (e.g., sin or cos) based on logical 3D index. */
 template <typename T, typename Func>
