@@ -106,7 +106,7 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback) {
 
   hipdnn::logging::initializeCallbackLogging(FUSILLI_PLUGIN_NAME, callback);
 
-  LOG_API_SUCCESS_AUTO("logging callback initialized");
+  LOG_API_SUCCESS_AUTO("{}", "logging callback initialized");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -164,7 +164,7 @@ hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle) {
 
   delete handle;
 
-  LOG_API_SUCCESS_AUTO("");
+  LOG_API_SUCCESS_AUTO("", "");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -180,7 +180,7 @@ hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle,
   // a default IREE runtime device and execute programs on a stream associated
   // with that device. The passed in stream is ignored.
 
-  LOG_API_SUCCESS_AUTO("");
+  LOG_API_SUCCESS_AUTO("", "");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -424,7 +424,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContext(
 
   delete executionContext;
 
-  LOG_API_SUCCESS_AUTO("destroyed executionContext");
+  LOG_API_SUCCESS_AUTO("", "destroyed executionContext");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -528,7 +528,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
 
   FUSILLI_PLUGIN_CHECK_ERROR(executionContext->graph.execute(variantPack));
 
-  LOG_API_SUCCESS_AUTO("executed graph");
+  LOG_API_SUCCESS_AUTO("{}", "executed graph");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 

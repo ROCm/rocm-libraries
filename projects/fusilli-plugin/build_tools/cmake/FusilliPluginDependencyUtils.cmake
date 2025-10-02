@@ -133,30 +133,46 @@ macro(_fetch_hipdnn_frontend)
         message(FATAL_ERROR "Argument error: passing both LOCAL_PATH and HIP_DNN_HASH is ambiguous.")
     endif()
 
-    if (DEFINED ARG_HIP_DNN_HASH)
-        FetchContent_Declare(
-            hipdnn_frontend
-            GIT_REPOSITORY https://github.com/ROCm/hipDNN.git
-            GIT_TAG        ${ARG_HIP_DNN_HASH}
-            # When FIND_PACKAGE_ARGS is passed, FetchContent_Declare tries to
-            # find_package an installed version before downloading.
-            FIND_PACKAGE_ARGS CONFIG
-        )
-    else()
-        FetchContent_Declare(
-            hipdnn_frontend
-            SOURCE_DIR ${ARG_LOCAL_PATH}
-        )
-    endif()
+    # We would normally check for, and preferentially use, an installed config
+    # package using FIND_PACKAGE_ARGS CONFIG on FetchContent_Declare. But, CMake
+    # throws an error if both FIND_PACKAGE_ARGS and DOWNLOAD_COMMAND arguments
+    # are passed, it's one or the other.
+    find_package(
+        hipdnn_frontend QUIET ${PARSE_FIND_PACKAGE_ARGS}
+    )
+    if(NOT hipdnn_frontend_FOUND) # we can't early return in a macro
+        if (DEFINED ARG_HIP_DNN_HASH)
+            FetchContent_Declare(
+                hipdnn_frontend
+                # location of hipdnn CMakeLists.txt in rocm-libraries
+                SOURCE_SUBDIR  projects/hipdnn
+                # rocm-libraries takes 10+ min to fetch  without sparse checkout
+                # (even with a shallow clone). We provide a custom
+                # DOWNLOAD_COMMAND until such time as CMAKE natively supports
+                # sparse checkouts.
+                DOWNLOAD_COMMAND
+                    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git <SOURCE_DIR> &&
+                    cd <SOURCE_DIR> &&
+                    git sparse-checkout init --cone &&
+                    git sparse-checkout set projects/hipdnn &&
+                    git checkout ${ARG_HIP_DNN_HASH}
+            )
+        else()
+            FetchContent_Declare(
+                hipdnn_frontend
+                SOURCE_DIR ${ARG_LOCAL_PATH}
+            )
+        endif()
 
-    set(HIP_DNN_BUILD_BACKEND ON)
-    set(HIP_DNN_BUILD_FRONTEND ON)
-    set(HIP_DNN_SKIP_TESTS ON)
-    set(HIP_DNN_BUILD_PLUGINS OFF)
-    set(ENABLE_CLANG_TIDY OFF)
-    # PIC required to link static library into shared object.
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    FetchContent_MakeAvailable(hipdnn_frontend)
+        set(HIP_DNN_BUILD_BACKEND ON)
+        set(HIP_DNN_BUILD_FRONTEND ON)
+        set(HIP_DNN_SKIP_TESTS ON)
+        set(HIP_DNN_BUILD_PLUGINS OFF)
+        set(ENABLE_CLANG_TIDY OFF)
+        # PIC required to link static library into shared object.
+        set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+        FetchContent_MakeAvailable(hipdnn_frontend)
+    endif()
 endmacro()
 
 # IREERuntime

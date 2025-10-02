@@ -35,7 +35,7 @@ set(HIP_PLATFORM "amd")
 find_package(hip REQUIRED)
 fusilli_plugin_dependency(GTest GTEST_VERSION 1.16.0)
 fusilli_plugin_dependency(IREERuntime)
-fusilli_plugin_dependency(hipdnn_frontend HIP_DNN_HASH 8a49655a7cc73f1c766256a7ead3a987e830efe9)
+fusilli_plugin_dependency(hipdnn_frontend HIP_DNN_HASH 4e0a0452cfcb8fdb86e9c40a6e43debab4d4ecbc)
 fusilli_plugin_dependency(Fusilli USE_LOCAL ${FUSILLI_PLUGIN_USE_LOCAL_FUSILLI})
 
 # Includes
