@@ -598,7 +598,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 
     ROCPRIM_SHARED_MEMORY union
     {
-        typename ordered_block_id<>::storage_type ordered_bid;
+        typename BlockIdWrapper::storage_type ordered_bid;
         typename tile_processor::storage_type tile;
     } storage;
 

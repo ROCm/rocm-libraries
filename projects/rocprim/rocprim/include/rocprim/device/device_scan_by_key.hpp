@@ -212,195 +212,146 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
 
-    using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
+    bool use_atomic_block_id;
+    ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
+    const auto use_atomic_block_id_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, true, false>::create(
+            use_atomic_block_id);
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const scan_by_key_config_params params = dispatch_target_arch<config, false>(target_arch);
+    bool use_sleepy_scan;
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));
+    const auto use_sleepy_scan_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, true, false>::create(use_sleepy_scan);
 
-    using wrapped_type = ::rocprim::tuple<AccType, bool>;
-
-    using scan_state_type            = detail::lookback_scan_state<wrapped_type>;
-    using scan_state_with_sleep_type = detail::lookback_scan_state<wrapped_type, true>;
-
-    const unsigned int block_size       = params.kernel_config.block_size;
-    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-    const unsigned int items_per_block  = block_size * items_per_thread;
-
-    const unsigned int size_limit = params.kernel_config.size_limit;
-    const unsigned int aligned_size_limit
-        = std::max(size_limit - size_limit % items_per_block, items_per_block);
-
-    const unsigned int limited_size
-        = static_cast<unsigned int>(std::min<size_t>(size, aligned_size_limit));
-    const bool use_limited_size = limited_size == aligned_size_limit;
-
-    // Number of blocks in a single launch (or the only launch if it fits)
-    const unsigned int number_of_blocks = ceiling_div(limited_size, items_per_block);
-
-    void*         scan_state_storage;
-    wrapped_type* previous_last_value;
-
-    detail::temp_storage::layout layout{};
-    ROCPRIM_RETURN_ON_ERROR(
-        scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
-
-    using ordered_bid_type = block_id_wrapper<unsigned int, /*UsingOrderedBlockId*/ true>;
-    ordered_bid_type::id_type* ordered_bid_storage;
-
-    key_type*  last_keys_of_each_block;
-    const auto last_keys_of_each_block_size_byte
-        = items_per_thread ? detect_reusing_keys<Exclusive>(keys,
-                                                            output,
-                                                            size,
-                                                            ceiling_div(size, items_per_block))
-                           : 0;
-
-    const hipError_t partition_result = detail::temp_storage::partition(
-        temporary_storage,
-        storage_size,
-        detail::temp_storage::make_linear_partition(
-            // This is valid even with offset_scan_state_with_sleep_type
-            detail::temp_storage::make_partition(&scan_state_storage, layout),
-            detail::temp_storage::ptr_aligned_array(&previous_last_value, use_limited_size ? 1 : 0),
-            detail::temp_storage::ptr_aligned_array(&last_keys_of_each_block,
-                                                    last_keys_of_each_block_size_byte),
-            detail::temp_storage::make_partition(&ordered_bid_storage,
-                                                 ordered_bid_type::get_temp_storage_layout())));
-    if(partition_result != hipSuccess || temporary_storage == nullptr)
-    {
-        return partition_result;
-    }
-
-    if(number_of_blocks == 0u)
-    {
-        return hipSuccess;
-    }
-
-    bool use_sleep;
-    if(const hipError_t error = is_sleep_scan_state_used(stream, use_sleep))
-    {
-        return error;
-    }
-
-    scan_state_type scan_state{};
-    hipError_t      scan_state_result
-        = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
-    scan_state_with_sleep_type scan_state_with_sleep{};
-    scan_state_result = scan_state_with_sleep_type::create(scan_state_with_sleep,
-                                                           scan_state_storage,
-                                                           number_of_blocks,
-                                                           stream);
-    if(scan_state_result != hipSuccess)
-    {
-        return scan_state_result;
-    }
-
-    // Call the provided function with either scan_state or scan_state_with_sleep based on
-    // the value of use_sleep
-    auto with_scan_state
-        = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
-    {
-        if(use_sleep)
+    ROCPRIM_RETURN_ON_ERROR(std::visit(
+        [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            return func(scan_state_with_sleep);
-        }
-        else
-        {
-            return func(scan_state);
-        }
-    };
+            using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
 
-    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+            detail::target_arch target_arch;
+            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+            const scan_by_key_config_params params
+                = dispatch_target_arch<config, false>(target_arch);
 
-    // Total number of blocks in all launches
-    const auto   total_number_of_blocks = ceiling_div(size, items_per_block);
-    const size_t number_of_launch       = ceiling_div(size, limited_size);
+            using wrapped_type     = ::rocprim::tuple<AccType, bool>;
+            using scan_state_type  = detail::lookback_scan_state<wrapped_type, use_sleepy_scan>;
+            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
 
-    if(debug_synchronous)
-    {
-        std::cout << "----------------------------------\n";
-        std::cout << "size:               " << size << '\n';
-        std::cout << "aligned_size_limit: " << aligned_size_limit << '\n';
-        std::cout << "use_limited_size:   " << std::boolalpha << use_limited_size << '\n';
-        std::cout << "number_of_launch:   " << number_of_launch << '\n';
-        std::cout << "block_size:         " << block_size << '\n';
-        std::cout << "items_per_block:    " << items_per_block << '\n';
-        std::cout << "----------------------------------\n";
-    }
+            const unsigned int block_size       = params.kernel_config.block_size;
+            const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+            const unsigned int items_per_block  = block_size * items_per_thread;
 
-    for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
-    {
-        // limited_size is of type unsigned int, so current_size also fits in an unsigned int
-        // size_t is necessary as type of std::min because 'size - offset' can exceed the
-        // upper limit of unsigned int and converting it can lead to wrong results
-        const unsigned int current_size
-            = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
-        const unsigned int scan_blocks    = ceiling_div(current_size, items_per_block);
-        const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
+            const unsigned int size_limit = params.kernel_config.size_limit;
+            const unsigned int aligned_size_limit
+                = std::max(size_limit - (size_limit % items_per_block), items_per_block);
 
-        // Start point for time measurements
-        std::chrono::steady_clock::time_point start;
-        if(debug_synchronous)
-        {
-            std::cout << "index:            " << i << '\n';
-            std::cout << "current_size:     " << current_size << '\n';
-            std::cout << "number of blocks: " << scan_blocks << '\n';
+            const unsigned int limited_size
+                = static_cast<unsigned int>(std::min<size_t>(size, aligned_size_limit));
+            const bool use_limited_size = limited_size == aligned_size_limit;
 
-            start = std::chrono::steady_clock::now();
-        }
+            // Number of blocks in a single launch (or the only launch if it fits)
+            const unsigned int number_of_blocks = ceiling_div(limited_size, items_per_block);
 
-        with_scan_state(
-            [&](const auto scan_state)
+            void*         scan_state_storage;
+            wrapped_type* previous_last_value;
+
+            detail::temp_storage::layout layout{};
+            ROCPRIM_RETURN_ON_ERROR(
+                scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
+
+            typename ordered_bid_type::id_type* ordered_bid_storage;
+
+            key_type*  last_keys_of_each_block;
+            const auto last_keys_of_each_block_size_byte
+                = items_per_thread
+                      ? detect_reusing_keys<Exclusive>(keys,
+                                                       output,
+                                                       size,
+                                                       ceiling_div(size, items_per_block))
+                      : 0;
+
+            const hipError_t partition_result = detail::temp_storage::partition(
+                temporary_storage,
+                storage_size,
+                detail::temp_storage::make_linear_partition(
+                    // This is valid even with offset_scan_state_with_sleep_type
+                    detail::temp_storage::make_partition(&scan_state_storage, layout),
+                    detail::temp_storage::ptr_aligned_array(&previous_last_value,
+                                                            use_limited_size ? 1 : 0),
+                    detail::temp_storage::ptr_aligned_array(&last_keys_of_each_block,
+                                                            last_keys_of_each_block_size_byte),
+                    detail::temp_storage::make_partition(
+                        &ordered_bid_storage,
+                        ordered_bid_type::get_temp_storage_layout())));
+            if(partition_result != hipSuccess || temporary_storage == nullptr)
             {
+                return partition_result;
+            }
 
-                    // only when in-place inclusive scan is needed, we initialize the last_keys_of_each_block
-                    if(!Exclusive && last_keys_of_each_block_size_byte != 0 && i == 0)
-                    {
-                        init_device_scan_by_key_kernel<<<dim3(init_grid_size),
-                                                         dim3(block_size),
-                                                         0,
-                                                         stream>>>(
-                            scan_state,
-                            scan_blocks,
-                            number_of_blocks - 1,
-                            i > 0 ? previous_last_value : nullptr,
-                            keys,
-                            last_keys_of_each_block,
-                            last_keys_of_each_block_size_byte
-                                / sizeof(decltype(*last_keys_of_each_block)),
-                            items_per_block,
-                            ordered_bid);
-                    }
-                    else
-                    {
-                        init_device_scan_by_key_kernel<<<dim3(init_grid_size),
-                                                         dim3(block_size),
-                                                         0,
-                                                         stream>>>(scan_state,
-                                                                   scan_blocks,
-                                                                   number_of_blocks - 1,
-                                                                   i > 0 ? previous_last_value
-                                                                         : nullptr,
-                                                                   ordered_bid);
-                    }
-            });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_device_scan_by_key_kernel",
-                                                    scan_blocks,
-                                                    start);
-
-        if(debug_synchronous)
-        {
-            start = std::chrono::steady_clock::now();
-        }
-        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
-            [&](auto& scan_state)
+            if(number_of_blocks == 0u)
             {
-                return launch_device_scan_by_key<config, Determinism, Exclusive>(
+                return hipSuccess;
+            }
+
+            scan_state_type scan_state{};
+            ROCPRIM_RETURN_ON_ERROR(
+                scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream));
+
+            auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+
+            // Total number of blocks in all launches
+            const auto   total_number_of_blocks = ceiling_div(size, items_per_block);
+            const size_t number_of_launch       = ceiling_div(size, limited_size);
+
+            if(debug_synchronous)
+            {
+                std::cout << "----------------------------------\n";
+                std::cout << "size:               " << size << '\n';
+                std::cout << "aligned_size_limit: " << aligned_size_limit << '\n';
+                std::cout << "use_limited_size:   " << std::boolalpha << use_limited_size << '\n';
+                std::cout << "number_of_launch:   " << number_of_launch << '\n';
+                std::cout << "block_size:         " << block_size << '\n';
+                std::cout << "items_per_block:    " << items_per_block << '\n';
+                std::cout << "----------------------------------\n";
+            }
+
+            for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
+            {
+                // limited_size is of type unsigned int, so current_size also fits in an unsigned int
+                // size_t is necessary as type of std::min because 'size - offset' can exceed the
+                // upper limit of unsigned int and converting it can lead to wrong results
+                const unsigned int current_size
+                    = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
+                const unsigned int scan_blocks    = ceiling_div(current_size, items_per_block);
+                const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
+
+                // Start point for time measurements
+                std::chrono::steady_clock::time_point start;
+                if(debug_synchronous)
+                {
+                    std::cout << "index:            " << i << '\n';
+                    std::cout << "current_size:     " << current_size << '\n';
+                    std::cout << "number of blocks: " << scan_blocks << '\n';
+
+                    start = std::chrono::steady_clock::now();
+                }
+                init_lookback_scan_state_kernel<<<dim3(init_grid_size),
+                                                  dim3(block_size),
+                                                  0,
+                                                  stream>>>(scan_state,
+                                                            scan_blocks,
+                                                            ordered_bid,
+                                                            number_of_blocks - 1,
+                                                            i > 0 ? previous_last_value : nullptr);
+                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+                                                            scan_blocks,
+                                                            start);
+
+                if(debug_synchronous)
+                {
+                    start = std::chrono::steady_clock::now();
+                }
+                ROCPRIM_RETURN_ON_ERROR(launch_device_scan_by_key<config, Determinism, Exclusive>(
                     target_arch,
                     keys + offset,
                     input + offset,
@@ -419,13 +370,15 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                     dim3(scan_blocks),
                     dim3(block_size),
                     0,
-                    stream);
-            }));
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
-                                                    current_size,
-                                                    start);
-    }
-
+                    stream));
+                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
+                                                            current_size,
+                                                            start);
+            }
+            return hipSuccess;
+        },
+        use_sleepy_scan_variant,
+        use_atomic_block_id_variant));
     return hipSuccess;
 }
 

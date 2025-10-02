@@ -131,7 +131,7 @@ struct block_id_wrapper<T, false>
     {};
 
     ROCPRIM_HOST
-    static inline block_id_wrapper create(id_type* /*id*/)
+    static inline block_id_wrapper create(void* /*id*/)
     {
         block_id_wrapper ordered_id;
         return ordered_id;
@@ -174,10 +174,11 @@ struct block_id_wrapper<T, true>
     using storage_type = typename ::rocprim::detail::ordered_block_id<id_type>::storage_type;
 
     ROCPRIM_HOST
-    static inline block_id_wrapper create(id_type* id)
+    static inline block_id_wrapper create(void* id)
     {
         block_id_wrapper id_wrapper;
-        id_wrapper.ordered_id = detail::ordered_block_id<id_type>::create(id);
+        id_wrapper.ordered_id
+            = detail::ordered_block_id<id_type>::create(static_cast<id_type*>(id));
         return id_wrapper;
     }
 

@@ -343,7 +343,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 
         ROCPRIM_SHARED_MEMORY union
         {
-            ordered_block_id<unsigned int>::storage_type ordered_bid;
+            typename WrappedBlockId::storage_type  ordered_bid;
             typename load_flagged::storage_type    load;
             typename block_scan_type::storage_type scan;
             typename store_unwrap::storage_type    store;

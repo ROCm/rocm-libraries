@@ -886,7 +886,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
         ROCPRIM_SHARED_MEMORY
-    typename ordered_block_id<>::storage_type ordered_bid_storage;
+    typename BlockIdWrapper::storage_type ordered_bid_storage;
     const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;

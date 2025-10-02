@@ -133,13 +133,13 @@ void init_lookback_scan_state_kernel_impl(LookBackScanState  lookback_scan_state
     init_lookback_scan_state(lookback_scan_state, number_of_blocks, flat_thread_id);
 }
 
-template<typename LookBackScanState>
+template<class LookBackScanState, class WrappedBlockId>
 ROCPRIM_KERNEL
     ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
-    init_lookback_scan_state_kernel(LookBackScanState              lookback_scan_state,
-                                    const unsigned int             number_of_blocks,
-                                    ordered_block_id<unsigned int> ordered_bid,
-                                    unsigned int                   save_index = 0,
+    init_lookback_scan_state_kernel(LookBackScanState  lookback_scan_state,
+                                    const unsigned int number_of_blocks,
+                                    WrappedBlockId     ordered_bid,
+                                    unsigned int       save_index = 0,
                                     typename LookBackScanState::value_type* const save_dest
                                     = nullptr)
 {

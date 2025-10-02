@@ -476,7 +476,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         typename block_rank::storage_type         rank;
         typename block_load_element::storage_type load_element;
         size_t                                    buckets_block_offsets_shared[num_partitions];
-        ordered_block_id<>::storage_type          ordered_bid;
+        typename WrappedBlockId::storage_type     ordered_bid;
     } storage;
 
     auto block_id = ordered_bid.get(threadIdx.x, storage.ordered_bid);
