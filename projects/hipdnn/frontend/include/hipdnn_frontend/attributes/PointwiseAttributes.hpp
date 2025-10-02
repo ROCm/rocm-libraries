@@ -38,6 +38,21 @@ public:
         return relu_lower_clip_slope;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_swish_beta() const
+    {
+        return swish_beta;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_elu_alpha() const
+    {
+        return elu_alpha;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_softplus_beta() const
+    {
+        return softplus_beta;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<int64_t> get_axis() const
     {
         return axis;
@@ -88,12 +103,6 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_axis(int64_t const value)
-    {
-        this->axis = value;
-        return *this;
-    }
-    // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_swish_beta(float const value)
     {
         swish_beta = value;
@@ -109,6 +118,12 @@ public:
     PointwiseAttributes& set_softplus_beta(float const value)
     {
         softplus_beta = value;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    PointwiseAttributes& set_axis(int64_t const value)
+    {
+        this->axis = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -181,10 +196,10 @@ public:
     std::optional<float> relu_lower_clip = std::nullopt;
     std::optional<float> relu_upper_clip = std::nullopt;
     std::optional<float> relu_lower_clip_slope = std::nullopt;
-    std::optional<int64_t> axis = std::nullopt;
     std::optional<float> swish_beta = std::nullopt;
     std::optional<float> elu_alpha = std::nullopt;
     std::optional<float> softplus_beta = std::nullopt;
+    std::optional<int64_t> axis = std::nullopt;
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
@@ -200,6 +215,9 @@ public:
             relu_lower_clip,
             relu_upper_clip,
             relu_lower_clip_slope,
+            swish_beta,
+            elu_alpha,
+            softplus_beta,
             axis,
             in0->get_uid(),
             in1 ? flatbuffers::Optional<int64_t>(in1->get_uid()) : flatbuffers::nullopt,
