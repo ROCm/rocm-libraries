@@ -91,7 +91,7 @@ TEST(TestConvolutionFwdPlanBuilder, PlanConstruction)
 
     ConvolutionFwdTensorBundle<float> tensorBundle(xDims, wDims, yDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT);
+    auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -114,7 +114,7 @@ TEST(TestConvolutionFwdPlanBuilder, IsApplicable)
 
     ConvolutionFwdTensorBundle<float> tensorBundle(xDims, wDims, yDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT);
+    auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();

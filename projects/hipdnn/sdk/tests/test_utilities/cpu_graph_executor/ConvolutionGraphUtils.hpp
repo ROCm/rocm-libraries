@@ -19,7 +19,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildConvolutionFwdGraph(ConvolutionFwdTensorBundle<InputType>& tensorBundle,
-                             hipdnn_sdk::data_objects::DataType inputDataType)
+                             hipdnn_sdk::data_objects::DataType inputDataType,
+                             hipdnn_sdk::data_objects::DataType accumulatorDataType)
 {
     std::vector<int64_t> strides = {1, 1};
     std::vector<int64_t> dilation = {1, 1};
@@ -27,6 +28,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionFwdTest");
+    graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -65,7 +67,8 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildConvolutionBwdGraph(ConvolutionBwdTensorBundle<InputType>& tensorBundle,
-                             hipdnn_sdk::data_objects::DataType inputDataType)
+                             hipdnn_sdk::data_objects::DataType inputDataType,
+                             hipdnn_sdk::data_objects::DataType accumulatorDataType)
 {
     std::vector<int64_t> strides = {1, 1};
     std::vector<int64_t> dilation = {1, 1};
@@ -73,6 +76,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionBwdTest");
+    graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
 
     int64_t uid = 1;
 

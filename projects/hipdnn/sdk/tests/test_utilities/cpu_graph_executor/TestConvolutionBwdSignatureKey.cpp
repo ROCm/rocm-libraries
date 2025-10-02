@@ -68,14 +68,15 @@ TEST(TestConvolutionBwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
 
     ConvolutionBwdTensorBundle<float> tensorBundle(dxDims, wDims, dyDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT);
+    auto graphTuple = buildConvolutionBwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    ConvolutionBwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    ConvolutionBwdSignatureKey keyFromNode(
+        graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

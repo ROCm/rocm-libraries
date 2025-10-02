@@ -30,7 +30,8 @@ struct ConvolutionBwdSignatureKey
     ConvolutionBwdSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
+            tensorMap,
+        const hipdnn_sdk::data_objects::DataType computeType)
     {
         const auto* nodeAttributes = node.attributes_as_ConvolutionBwdAttributes();
         if(nodeAttributes == nullptr)
@@ -50,11 +51,7 @@ struct ConvolutionBwdSignatureKey
         }
 
         inputDataType = xTensorAttr->data_type();
-
-        // TODO: We can't infer the data type from any of the incoming tensors, so for now we
-        // hardcode it to FLOAT. This means we won't be able to differentiate between
-        // convolution plans that differ only by accumulator type.
-        accumulatorDataType = hipdnn_sdk::data_objects::DataType::FLOAT;
+        accumulatorDataType = computeType;
     }
 
     std::size_t operator()(const ConvolutionBwdSignatureKey& k) const noexcept
@@ -88,9 +85,9 @@ struct ConvolutionBwdSignatureKey
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
-                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
