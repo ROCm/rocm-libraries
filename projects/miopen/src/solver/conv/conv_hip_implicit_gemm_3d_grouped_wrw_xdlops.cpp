@@ -439,8 +439,6 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                 MIOPEN_LOG_I2("Step 1: AI heuristics internal failure");
             else if(result.IsEmpty())
                 MIOPEN_LOG_I2("Step 1: AI heuristics returned empty result");
-            else if(valid_kernels.empty())
-                ai_success = false;
         }
     }
     else

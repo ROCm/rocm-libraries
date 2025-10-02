@@ -322,10 +322,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    bool ai_success = false;
-    miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
-
-    std::tie(ai_success, result) = miopen::solver::conv::RunParameterPredictionModel<float>(
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
         ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
 
     ASSERT_TRUE(ai_success);
@@ -343,11 +340,8 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    bool ai_success = false;
-    miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
-
-    std::tie(ai_success, result) = miopen::solver::conv::RunParameterPredictionModel<float>(
-        ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
+        ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
 
     ASSERT_FALSE(ai_success);
     ASSERT_TRUE(kernel_id.empty());

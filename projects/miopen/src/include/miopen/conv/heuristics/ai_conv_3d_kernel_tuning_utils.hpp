@@ -39,7 +39,7 @@
 namespace miopen {
 namespace solver {
 namespace conv {
-
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 const miopen::ExecutionContext& GetDummyCtx();
 
 MIOPEN_INTERNALS_EXPORT std::map<std::string, float>
@@ -52,19 +52,20 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 template <typename DataType>
-MIOPEN_INTERNALS_EXPORT std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel(
-    const miopen::ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem,
-    std::vector<std::string>& valid_kernels,
-    int& index,
-    int& split_k,
-    std::string& kernel_id,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-        fill_valid_kernels,
-    std::string solver_name);
+MIOPEN_INTERNALS_EXPORT
+    std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+    RunParameterPredictionModel(
+        const miopen::ExecutionContext& ctx,
+        const miopen::conv::ProblemDescription& problem,
+        std::vector<std::string>& valid_kernels,
+        int& index,
+        int& split_k,
+        std::string& kernel_id,
+        std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
+            fill_valid_kernels,
+        std::string solver_name);
 
-extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<float>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
@@ -74,8 +75,20 @@ RunParameterPredictionModel<float>(
     std::string&,
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
+
+extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<int8_t>(
+    const miopen::ExecutionContext&,
+    const miopen::conv::ProblemDescription&,
+    std::vector<std::string>&,
+    int&,
+    int&,
+    std::string&,
+    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
+    std::string);
+
 #if MIOPEN_USE_COMPOSABLEKERNEL
-extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<ck::half_t>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
@@ -86,7 +99,7 @@ RunParameterPredictionModel<ck::half_t>(
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
 
-extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<ck::bhalf_t>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
@@ -100,3 +113,4 @@ RunParameterPredictionModel<ck::bhalf_t>(
 } // namespace conv
 } // namespace solver
 } // namespace miopen
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

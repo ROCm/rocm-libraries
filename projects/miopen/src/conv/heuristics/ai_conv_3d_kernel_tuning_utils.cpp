@@ -209,16 +209,15 @@ std::vector<int> GenerateSplitK(int max_split_k)
 
 // Main template implementation
 template <typename DataType>
-std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem,
+    const ProblemDescription& problem,
     std::vector<std::string>& valid_kernels,
     int& index,
     int& split_k,
     std::string& kernel_id,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-        fill_valid_kernels,
+    std::function<std::vector<std::string>(const ProblemDescription&)> fill_valid_kernels,
     std::string solver_name)
 {
     valid_kernels = fill_valid_kernels(problem);
@@ -274,14 +273,14 @@ RunParameterPredictionModel(
     catch(const miopen::Exception& ex)
     {
         MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
-        return {false, ai::tuning::candidate_selection::CandidateSelectionResult{}};
+        return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }
 }
 
 // Explicit template instantiations for common types
-template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<float>(
-    const ExecutionContext&,
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
@@ -290,9 +289,9 @@ RunParameterPredictionModel<float>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<int8_t>(
-    const ExecutionContext&,
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
@@ -302,9 +301,9 @@ RunParameterPredictionModel<int8_t>(
     std::string);
 #if MIOPEN_USE_COMPOSABLEKERNEL
 
-template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<ck::half_t>(
-    const ExecutionContext&,
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
@@ -313,9 +312,9 @@ RunParameterPredictionModel<ck::half_t>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel<ck::bhalf_t>(
-    const ExecutionContext&,
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
