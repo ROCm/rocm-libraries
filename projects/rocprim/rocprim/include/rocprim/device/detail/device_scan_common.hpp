@@ -71,9 +71,10 @@ void init_lookback_scan_state(LookBackScanState  lookback_scan_state,
 }
 
 template<class LookBackScanState>
-ROCPRIM_DEVICE ROCPRIM_INLINE void init_lookback_scan_state(LookBackScanState  lookback_scan_state,
-                                                            const unsigned int number_of_blocks,
-                                                            unsigned int       flat_thread_id)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void init_lookback_scan_state(LookBackScanState  lookback_scan_state,
+                              const unsigned int number_of_blocks,
+                              unsigned int       flat_thread_id)
 {
 
     // Initialize lookback scan status.

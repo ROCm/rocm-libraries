@@ -217,7 +217,8 @@ struct block_id_wrapper<T, true>
     ::rocprim::detail::ordered_block_id<id_type> ordered_id;
 };
 
-ROCPRIM_INLINE ROCPRIM_HOST hipError_t check_if_using_atomic_block_id(hipStream_t stream, bool& enable)
+ROCPRIM_INLINE ROCPRIM_HOST
+hipError_t check_if_using_atomic_block_id(hipStream_t stream, bool& enable)
 {
     // Define possible options
     enum class use_atomic_block_id : int
@@ -264,7 +265,7 @@ ROCPRIM_INLINE ROCPRIM_HOST hipError_t check_if_using_atomic_block_id(hipStream_
 
     // Now we have our data, we need to check what the behaviour is.
     bool needs_hotfix = false;
-    if (data.option == use_atomic_block_id::hotfix)
+    if(data.option == use_atomic_block_id::hotfix)
     {
         // First get the device ID.
         int device_id;
@@ -279,7 +280,7 @@ ROCPRIM_INLINE ROCPRIM_HOST hipError_t check_if_using_atomic_block_id(hipStream_
 
     switch(data.option)
     {
-        // clang-format off
+            // clang-format off
         case use_atomic_block_id::never:
             enable = false;
             break;

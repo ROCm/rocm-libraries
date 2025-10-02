@@ -1389,7 +1389,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      Decomposer,
                                                                      BlockIdWrapper>;
 
-    ROCPRIM_SHARED_MEMORY typename onesweep_iteration_helper_type::storage_type storage;
+    ROCPRIM_SHARED_MEMORY
+    typename onesweep_iteration_helper_type::storage_type storage;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     thread_id       = ::rocprim::detail::block_thread_id<0>();

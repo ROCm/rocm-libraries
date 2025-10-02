@@ -350,7 +350,11 @@ struct AliasType<true, InputBufferItType>
 };
 
 // TODO: make UseOrderedBlockId dynamic
-template<bool IsMemCpy, class InputBufferItType, class OutputBufferItType, class BufferSizeItType, class WrappedBlockId>
+template<bool IsMemCpy,
+         class InputBufferItType,
+         class OutputBufferItType,
+         class BufferSizeItType,
+         class WrappedBlockId>
 struct batch_memcpy_impl
 {
     using input_buffer_type  = typename std::iterator_traits<InputBufferItType>::value_type;
@@ -369,7 +373,6 @@ struct batch_memcpy_impl
     // The byte offset within a thread-level buffer. Must fit at least `wlev_size_threshold`.
     using tlev_byte_offset_type = uint16_t;
 
-    
     using ordered_bid_type = WrappedBlockId;
 
     struct copyable_buffers
