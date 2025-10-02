@@ -40,8 +40,6 @@ rocRoller is a software library for generating AMDGPU kernels.
 
 ### Quick start instructions
 
-
-
 The rocRoller CMake support should configure out of the box assuming
 project dependencies are installed in a location discoverable
 by CMake by default. In the event that this is not the case, the
