@@ -883,6 +883,9 @@ public:
   //==========================================================================
   // Modifiers
   //==========================================================================
+  /*! \brief Releases ownership of the managed array, if any.
+   *  \return A pointer to the released array.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
   {
     pointer temp = m_ptr;
@@ -890,6 +893,9 @@ public:
     return temp;
   }
 
+  /*! \brief Replaces the managed array.
+   *  \param p The new array to manage.
+   */
   template <class Pp, class = EnableIfPointerConvertible<Pp>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(Pp p) noexcept
   {
@@ -901,6 +907,10 @@ public:
     }
   }
 
+  /*! \brief Replaces the managed array with \p nullptr.
+   *
+   *  Destroys the currently managed array (if any) and resets to empty state.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(std::nullptr_t = nullptr) noexcept
   {
     pointer temp = m_ptr;
@@ -911,6 +921,9 @@ public:
     }
   }
 
+  /*! \brief Swaps the managed array and deleter with another array \p unique_ptr.
+   *  \param u The \p unique_ptr to swap with.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
   {
     using std::swap;
