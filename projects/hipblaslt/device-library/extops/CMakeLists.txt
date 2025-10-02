@@ -40,7 +40,6 @@ foreach(arch IN LISTS archs)
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s"
     )
-
     add_custom_command(
         OUTPUT
             "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s"
