@@ -813,6 +813,9 @@ public:
   //==========================================================================
   // Destructor
   //==========================================================================
+  /*! \brief Destroys the \p unique_ptr, the managed array is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
+   *  For non-trivially-destructible types, this calls the destructor for each element.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
   {
     reset();
@@ -821,33 +824,57 @@ public:
   //==========================================================================
   // Observers
   //==========================================================================
-
+  /*! \brief Accesses an element of the managed array.
+   *
+   *  For device arrays, accessing an element from host code triggers a copy
+   *  from device to host memory.
+   *
+   *  \param i The index of the element to access.
+   *  \return A reference to (or copy of) the element at index \p i.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator[](size_t i) const noexcept
   {
     return m_ptr[i];
   }
 
+  /*! \brief Returns a pointer to the managed array or `nullptr` if no object is owned.
+   *  
+   *  \return Pointer to the managed array.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
   {
     return m_ptr;
   }
 
+  /*! \brief Returns a raw pointer to the managed array or `nullptr` if no object is owned.
+   *  
+   *  \return Pointer to the managed array.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
     return raw_pointer_cast(m_ptr);
   }
 
+  /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed array.
+   *  \return A reference to the stored deleter.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
   {
     return m_deleter;
   }
 
+  /*! \brief Returns a constreference to the deleter object which would be used for destruction of the managed array.
+   *  \return A reference to the stored deleter.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
   {
     return m_deleter;
   }
 
+  /*! \brief Checks if the \p unique_ptr owns an array.
+   *  \return `true` if an array is owned, `false` otherwise.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
   {
     return m_ptr != nullptr;
