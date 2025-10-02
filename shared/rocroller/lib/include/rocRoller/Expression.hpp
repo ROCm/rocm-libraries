@@ -594,7 +594,7 @@ namespace rocRoller
             constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
             constexpr static inline int             Complexity = 1;
 
-            DataType destinationType = DataType::None;
+            VariableType destinationType;
 
             inline Concatenate& copyParams(const Concatenate& other)
             {
