@@ -144,12 +144,11 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
   )
 
   template <typename... Args>
-  THRUST_DEPRECATED
   #if !(defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG)
   // clang in CUDA mode can only handle one attribute
   THRUST_NODISCARD THRUST_HOST
   #endif
-  auto operator()(Args&&... args) const
+ THRUST_DEPRECATED auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
@@ -268,12 +267,11 @@ struct sort_fn final
   )
 
   template <typename... Args>
-  THRUST_DEPRECATED
   #if !(defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG)
   // clang in CUDA mode can only handle one attribute
   THRUST_NODISCARD THRUST_HOST
   #endif
-  auto operator()(Args&&... args) const
+ THRUST_DEPRECATED auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )

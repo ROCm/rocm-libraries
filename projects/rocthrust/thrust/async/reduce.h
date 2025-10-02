@@ -162,7 +162,7 @@ struct reduce_fn final
             ::internal::remove_cvref_t<typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type>>{}))
 
           template <typename... Args>
-          THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const
+          THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const
     THRUST_RETURNS(call(THRUST_FWD(args)...))
 };
 
@@ -310,7 +310,7 @@ struct reduce_into_fn final
         thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{}))
 
         template <typename... Args>
-        THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const
+        THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const
     THRUST_RETURNS(call(THRUST_FWD(args)...))
 };
 

@@ -115,7 +115,7 @@ struct copy_fn final
           THRUST_FWD(output)))
 
           template <typename... Args>
-          THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const
+          THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const
     THRUST_RETURNS(call(THRUST_FWD(args)...))
 };
 
