@@ -123,7 +123,7 @@ struct transform_fn final
   )
 
   template <typename... Args>
-  THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST
+  THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST
  auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
