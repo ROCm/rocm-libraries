@@ -98,18 +98,12 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
     do                                                                                              \
     {                                                                                               \
-        double start_time, end_time;                                                            \
-        start_time = get_time_us_no_sync();                                                   \
         std::unique_ptr<rocsolver_logger::scope_guard<T>> _kernel_log_token;                        \
         if(rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
         {                                                                                           \
             rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name);                     \
             _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
         }                                                                                           \
-        hipDeviceSynchronize();                                                                     \
-        end_time = get_time_us_no_sync();                                                     \ 
-        printf("Kernel %s took %f us\n", #name, end_time - start_time); \
-        rocsolver_logger::instance()->kernel_launch_time += end_time - start_time; \
         hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
     } while(0)
 
@@ -196,12 +190,7 @@ struct rocsolver_profile_entry
  ***************************************************************************/
 class rocsolver_logger
 {
-public:
-    // total amount of time between entering macro and launching kernel
-    double kernel_launch_time = 0;
 private:
-    // total amount of time spent in hipEventRecord
-    double event_record_time = 0;
     // static singleton instance
     static rocsolver_logger* _instance;
     // static mutex for multithreading
@@ -266,9 +255,9 @@ private:
     template <typename T, typename... Ts>
     void log_bench(int level, const char* func_prefix, const char* func_name, Ts... args)
     {
-        // fmt::print(*bench_os, "./rocsolver-bench -f {} -r {} {}\n", func_name,
-        //            rocblas2char_precision<T>, fmt::join(std::tie(args...), " "));
-        // bench_os->flush();
+        fmt::print(*bench_os, "./rocsolver-bench -f {} -r {} {}\n", func_name,
+                   rocblas2char_precision<T>, fmt::join(std::tie(args...), " "));
+        bench_os->flush();
     }
 
     // outputs trace logging
@@ -303,7 +292,7 @@ private:
         rocblas_get_stream(handle, &stream);
         double elapsed_time = get_time_us_sync(stream) - from_stack.start_time;
 #endif
-        // const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
+        const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
         for (const std::string& caller_name : from_stack.callers) {
@@ -367,40 +356,38 @@ public:
                              const char* func_name,
                              Ts... args)
     {
-        // auto lock = acquire_lock();
-        // auto entry = push_log_entry(handle, get_func_name<T>(func_prefix, func_name));
-        // auto entry = push_log_entry(handle, func_name);
+        auto lock = acquire_lock();
+        auto entry = push_log_entry(handle, get_func_name<T>(func_prefix, func_name));
         bool bench_enabled = layer_mode & rocblas_layer_mode_log_bench;
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
-        // lock.unlock();
-        // ROCSOLVER_ASSUME(entry.level == 0);
+        lock.unlock();
+        ROCSOLVER_ASSUME(entry.level == 0);
 
-        // if(bench_enabled)
-        //     log_bench<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
+        if(bench_enabled)
+            log_bench<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
 
-        // if(trace_enabled)
-        //     trace_str += fmt::format("------- ENTER {} trace tree -------\n", entry.name);
+        if(trace_enabled)
+            trace_str += fmt::format("------- ENTER {} trace tree -------\n", entry.name);
     }
 
     // logging function to be called before exiting a top-level (i.e. impl) function
     template <typename T>
     void log_exit_top_level(rocblas_handle handle)
     {
-        printf("event record time: %f\n", event_record_time);
-        // auto lock = acquire_lock();
-        // auto entry = pop_log_entry(handle);
+        auto lock = acquire_lock();
+        auto entry = pop_log_entry(handle);
         bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace;
         bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
-        // lock.unlock();
-        // ROCSOLVER_ASSUME(entry.level == 0);
+        lock.unlock();
+        ROCSOLVER_ASSUME(entry.level == 0);
 
-        // if(trace_enabled)
-        // {
-        //     trace_str += fmt::format("------- EXIT {} trace tree -------\n\n", entry.name);
-        //     *trace_os << trace_str;
-        //     trace_str.clear();
-        //     trace_os->flush();
-        // }
+        if(trace_enabled)
+        {
+            trace_str += fmt::format("------- EXIT {} trace tree -------\n\n", entry.name);
+            *trace_os << trace_str;
+            trace_str.clear();
+            trace_os->flush();
+        }
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
         if(profile_enabled)
@@ -408,11 +395,11 @@ public:
             // Synchronize the stream and accumulate times for immediate profiling
             hipStream_t stream;
             rocblas_get_stream(handle, &stream);
-            // THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
             
-            // auto profile_lock = acquire_lock();
-            // accumulate_times(profile);
-            // profile_lock.unlock();
+            auto profile_lock = acquire_lock();
+            accumulate_times(profile);
+            profile_lock.unlock();
         }
 #endif
     }
@@ -421,27 +408,26 @@ public:
     template <typename T, typename... Ts>
     void log_enter(rocblas_handle handle, const char* func_prefix, const char* func_name, Ts... args)
     {
-        // auto lock = acquire_lock();
-        // auto entry = push_log_entry(handle, get_template_name(func_prefix, func_name));
-        auto entry = push_log_entry(handle, func_name);
-        // bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace && entry.level <= max_levels;
-        // lock.unlock();
+        auto lock = acquire_lock();
+        auto entry = push_log_entry(handle, get_template_name(func_prefix, func_name));
+        bool trace_enabled = layer_mode & rocblas_layer_mode_log_trace && entry.level <= max_levels;
+        lock.unlock();
 
-        // if(trace_enabled)
-        //     log_trace<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
+        if(trace_enabled)
+            log_trace<T>(entry.level, func_prefix, func_name, rocsolver_make_logvalue(args)...);
     }
 
     // logging function to be called before exiting a sub-level (i.e. template) function
     template <typename T>
     void log_exit(rocblas_handle handle)
     {
-        // auto lock = acquire_lock();
+        auto lock = acquire_lock();
         auto entry = pop_log_entry(handle);
-        // bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
-        // lock.unlock();
+        bool profile_enabled = layer_mode & rocblas_layer_mode_log_profile;
+        lock.unlock();
 
-        // if(profile_enabled)
-        //     log_profile<T>(handle, entry);
+        if(profile_enabled)
+            log_profile<T>(handle, entry);
     }
 
     /***************************************************************************
