@@ -69,37 +69,37 @@ namespace origami
         else // as what StreamK predicts
         {
             streamk::reduction_type rt = streamk::select_reduction(M, 
-                                                                            N, 
-                                                                            K, 
-                                                                            batch, 
-                                                                            MT_M, 
-                                                                            MT_N, 
-                                                                            MT_K, 
-                                                                            hardware, 
-                                                                            dynamic_grid_version);
+                                                                   N, 
+                                                                   K, 
+                                                                   batch, 
+                                                                   MT_M, 
+                                                                   MT_N, 
+                                                                   MT_K, 
+                                                                   hardware, 
+                                                                   dynamic_grid_version);
             numWGs = streamk::select_grid(M,
-                                                    N,
-                                                    K,
-                                                    batch,
-                                                    transA,
-                                                    transB,
-                                                    element_size_A,
-                                                    element_size_B,
-                                                    element_size_out,
-                                                    mi_datatype,
-                                                    workspace_size,
-                                                    MT_M,
-                                                    MT_N,
-                                                    MT_K,
-                                                    MI_M,
-                                                    MI_N,
-                                                    MI_K,
-                                                    WGM,
-                                                    workspace_size_per_elem_c,
-                                                    occupancy,
-                                                    hardware,
-                                                    dynamic_grid_version,
-                                                    rt);
+                                          N,
+                                          K,
+                                          batch,
+                                          transA,
+                                          transB,
+                                          element_size_A,
+                                          element_size_B,
+                                          element_size_out,
+                                          mi_datatype,
+                                          workspace_size,
+                                          MT_M,
+                                          MT_N,
+                                          MT_K,
+                                          MI_M,
+                                          MI_N,
+                                          MI_K,
+                                          WGM,
+                                          workspace_size_per_elem_c,
+                                          occupancy,
+                                          hardware,
+                                          dynamic_grid_version,
+                                          rt);
 
             // output variables
             numActiveCUs = numWGs < hardware.N_CU ? numWGs : hardware.N_CU;
@@ -161,10 +161,7 @@ namespace origami
         return numerator / denominator;
     }
 
-    /**
-     * Computes Emulated arithmetic intensity for TF32 (assumes 3xBF16).
-     * 
-     */
+    // Computes Emulated arithmetic intensity for TF32 (assumes 3xBF16).
     double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element)
     {
         // Numerator: 3.0 * 2.0 * m * n * k
@@ -173,6 +170,39 @@ namespace origami
         double denominator = (m * n + n * k + m * k) * bytes_per_element;
 
         return numerator / denominator;
+    }
+
+    // Compute cvt overhead in x1 tf32 emulation
+    // TODO: We can generalize the same routine to cover more GEMMs that perform conversion
+    static inline double compute_cvt_overhead_x1(const hardware_t& hardware,
+                                                 size_t          MT_M,
+                                                 size_t          MT_N,
+                                                 size_t          MT_K,
+                                                 size_t          MI_M,
+                                                 size_t          MI_N,
+                                                 size_t          MI_K,
+                                                 size_t          element_size_A,
+                                                 size_t          element_size_B)
+    {
+        // In X1 TF32 GEMMs, we do:
+        // v_cvt_pk_bf16_f32  (convert/pack fp32 to bf16)
+        // v_cvt_pk_bf16_f32  (convert/pack fp32 to bf16)
+        // ds_write_b64
+        // That is, the extra instructions that we need to account for are the two cvt_pk ops
+        // per wave tile
+
+        // TODO: Use kernel's actual wavetiles.
+        const double wave_tile_m = MT_M / 2.0;
+        const double wave_tile_n = MT_N / 2.0;
+        const double wave_tile_k = MT_K / MI_K;
+
+        // MFMA count and cycles
+        const double N_MI = (wave_tile_m / MI_M) * (wave_tile_n / MI_N) * wave_tile_k;
+
+        // overhead: every cvt_pk op has a latency of 4
+        const double cvt = 4 * N_MI;
+
+        return cvt;
     }
 
     // Compute cvt overhead in tf32 emulation
@@ -790,9 +820,8 @@ namespace origami
 
         // 4'') tf32 emu has some more overhead
         double L_cvt    = 0;
-        bool   tf32_emu = ((mi_datatype == data_type_t::XFloat32)
-                            && (hardware.arch == hardware_t::architecture_t::gfx950));
-        if(tf32_emu)
+        if((mi_datatype == data_type_t::XFloat32)
+            && (hardware.arch == hardware_t::architecture_t::gfx950))
         {
             L_cvt = compute_cvt_overhead(hardware,
                                             MT_M,
@@ -804,6 +833,21 @@ namespace origami
                                             element_size_A,
                                             element_size_B);
         }
+        else if((element_size_A == 32) && (element_size_B == 32)
+                 && (mi_datatype == data_type_t::BFloat16)
+                 && (hardware.arch == hardware_t::architecture_t::gfx950)) // SS_BSS on GFX950
+        {
+            L_cvt = compute_cvt_overhead_x1(hardware,
+                                            MT_M,
+                                            MT_N,
+                                            MT_K,
+                                            MI_M,
+                                            MI_N,
+                                            MI_K,
+                                            element_size_A,
+                                            element_size_B);
+        }
+
 
         // 5) Single-tile latency (always additive)
         double L_tile_single = std::max(L_compute, L_mem) + L_cvt;
