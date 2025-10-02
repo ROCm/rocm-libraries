@@ -9,12 +9,14 @@ set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
-message(STATUS "Architectures to process: ${archs}")  # Log architectures for debugging
+message(STATUS "Architectures to process: ${archs}")
 
-set(previous_target "")  # Track previous target for dependency chain
+# Track previous target for dependency chain
+set(previous_target "")
 
 foreach(arch IN LISTS archs)
-    message(STATUS "Configuring target for architecture: ${arch}")  # Log start of arch configuration
+    #  Start of arch configuration
+    message(STATUS "Configuring target for architecture: ${arch}")
     set(WAVEFRONT "-mwavefrontsize64")
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
         set(WAVEFRONT "-mno-wavefrontsize64")
@@ -88,5 +90,6 @@ foreach(arch IN LISTS archs)
         COMMAND ${CMAKE_COMMAND} -E echo "Completed extop-library-${arch} for ${arch}"
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
     )
-    set(previous_target "extop-library-${arch}")  # Update previous target for next iteration
+    # Update previous target for next iteration
+    set(previous_target "extop-library-${arch}")
 endforeach()
