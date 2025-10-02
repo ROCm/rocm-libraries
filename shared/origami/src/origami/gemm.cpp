@@ -87,21 +87,6 @@ namespace origami
         return useful / launched;
     }
 
-    inline const char* rtype_to_string(streamk::reduction_type r)
-    {
-        switch(r)
-        {
-        case streamk::reduction_type::Tree:
-            return "Tree";
-        case streamk::reduction_type::Parallel:
-            return "Parallel";
-        case streamk::reduction_type::None:
-            return "None";
-        default:
-            return "Unknown";
-        }
-    }
-
     // Computes the number of active compute units if there is only one wave and it is partial
     // Otherwise, returns hardware.N_CU
     std::tuple<size_t, size_t, size_t> compute_CU_occupancy(const hardware_t& hardware,
@@ -190,7 +175,7 @@ namespace origami
 
             if(hardware_t::is_debug_enabled())
             {
-                hardware.log_debug("reduction type", rtype_to_string(rt));
+                hardware.log_debug("reduction type", streamk::rtype_to_string(rt));
             }
         }
 
@@ -981,11 +966,6 @@ namespace origami
         // 5) Single-tile latency (always additive)
         // Calculate the fraction of the work that is useful (not padding).
 
-        if(MT_K == 1024)
-        {
-            L_prologue = L_prologue * 100;
-        }
-
         // 5) Single-tile latency (apply penalty after finding the bottleneck)
         double L_tile_single = (std::max(L_compute, L_mem) * effective_tile_penalty) + L_cvt;
         L_prologue *= effective_tile_penalty;
@@ -1000,7 +980,9 @@ namespace origami
         if(K % MT_K != 0)
         {
             double problem_k_quant = ((K % MT_K) / (double)K);
-            L_epilogue += problem_k_quant * 50000; // Scale by remainder proportion of problem
+            L_epilogue
+                += problem_k_quant
+                   * 50000; // Scale by remainder proportion of problem. 50k cycle penalty if have to zero pad all except 1.
             //(Scale Determined Empirically)
         }
         //L_epilogue *= output_utilization_penalty;
@@ -1009,6 +991,11 @@ namespace origami
         double L_tile_total
             = (L_tile_single * num_iter) + L_prologue + L_epilogue * 2 + L_WG_setup
               + (500 * num_iter); // 7 instructions (each with 4 cycles) at the end of the loop
+
+        if(MT_K == 1024)
+        {
+            L_prologue = L_prologue * 100;
+        }
 
         if(hardware_t::is_debug_enabled())
         {
