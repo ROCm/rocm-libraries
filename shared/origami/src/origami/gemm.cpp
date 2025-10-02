@@ -135,11 +135,6 @@ namespace origami
 
         size_t numWGs, numActiveCUs, numWaves, splitFactor;
 
-        if(hardware_t::is_debug_enabled())
-        {
-            hardware.log_debug("reduction type", "None");
-        }
-
         if(split) // if it is given
         {
             split        = split > 1 ? split : 1;
@@ -147,6 +142,11 @@ namespace origami
             numActiveCUs = numWGs < hardware.N_CU ? numWGs : hardware.N_CU;
             numWaves     = safe_ceil_div(numWGs, hardware.N_CU);
             splitFactor  = split;
+
+            if(hardware_t::is_debug_enabled())
+            {
+                hardware.log_debug("reduction type", "Origami");
+            }
         }
         else // as what StreamK predicts
         {
@@ -592,19 +592,11 @@ namespace origami
         return std::max(0.0, std::min(mall_hit_rate, 1.0));
     }
 
-    /**
- * @brief Computes the L2 hit rate from a global, problem-wide perspective.
- *
- * This function models the macro-level data reuse across the entire grid of CUs.
- * It also includes a crucial check against the L2 cache's total capacity.
- */
-    double compute_l2_hit_rate_global(size_t M,
-                                      size_t N,
-                                      size_t MT_M,
-                                      size_t MT_N,
-                                      size_t MT_K,
-                                      size_t element_size,
-                                      size_t l2_capacity_bytes)
+    /** */
+    *@brief Computes the L2 hit rate from a global,
+        problem - wide perspective.**This function models the       macro
+            - level data reuse across the entire grid of            CUs
+                  .*It also includes a crucial check against the L2 cache's total capacity. * / double compute_l2_hit_rate_global(size_t M, size_t N, size_t MT_M, size_t MT_N, size_t MT_K, size_t element_size, size_t l2_capacity_bytes)
     {
         // --- Hardware Parameters (as requested, defined locally) ---
         // You would normally get l2_capacity_bytes from your hardware_t struct.
@@ -996,7 +988,6 @@ namespace origami
         // num_iter      = std::ceil(num_iter / splittingFactor);
         // num_iter      = std::max(num_iter, 1L);
         long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
-        long num_iter  = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
         long num_iter
             = std::max(static_cast<long>(safe_ceil_div(splittedK, MT_K) - 1), static_cast<long>(1));
         // Zero Padding in the K dimension on last iteration
