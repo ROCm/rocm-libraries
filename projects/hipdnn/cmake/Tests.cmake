@@ -161,8 +161,9 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     set_property(GLOBAL APPEND PROPERTY HIPDNN_TEST_TARGETS ${TARGET})
     
     # Make test executables relocatable so they can find libraries when build directory is moved
+    # Include both the main lib directory and the engine plugin directories
     set_target_properties(${TARGET} PROPERTIES
-        INSTALL_RPATH "\$ORIGIN/../lib"
+        INSTALL_RPATH "\$ORIGIN/../lib;\$ORIGIN/../lib/hipdnn_plugins/engines"
         INSTALL_RPATH_USE_LINK_PATH TRUE
         BUILD_RPATH_USE_ORIGIN TRUE
     )

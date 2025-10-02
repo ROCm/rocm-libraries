@@ -50,7 +50,6 @@ target_include_directories(miopen_legacy_plugin_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_tests)
     
