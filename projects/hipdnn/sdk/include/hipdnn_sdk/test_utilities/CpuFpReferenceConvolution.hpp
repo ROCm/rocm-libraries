@@ -363,7 +363,8 @@ public:
                         auto dimIdx = static_cast<size_t>(dim);
 
                         int64_t tmp = (outputSpatialIndices[dimIdx] * strides[dimIdx])
-                                      + (cIdx * dilations[dimIdx]) - prePadding[dimIdx];
+                                      + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                      - prePadding[dimIdx];
 
                         inputSpatialIndices[dimIdx] = tmp;
 
