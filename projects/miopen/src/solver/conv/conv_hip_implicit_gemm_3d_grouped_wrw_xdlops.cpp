@@ -398,9 +398,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         MIOPEN_LOG_I2(
             "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
 
-        bool ai_success         = false;
         std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+
+        bool ai_success = false;
         miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
+
         auto run_ai_heuristics = [&](auto CKDataType) {
             using T = decltype(CKDataType);
             auto fill_valid_kernels =
@@ -418,82 +420,27 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         };
         switch(problem.GetInDataType())
         {
-        case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
-        case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
-        case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
+        case miopenHalf: std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}); break;
+        case miopenFloat: std::tie(ai_success, result) = run_ai_heuristics(float{}); break;
+        case miopenBFloat16: std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}); break;
         default: break;
         }
 
         if(ai_success && !result.IsEmpty())
         {
-            // Helper function to check if kernel is blacklisted
-            auto IsBlacklistedKernel = [](const std::string& kernel_id) -> bool {
-                return kernel_id.find(
-                           "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<256, 64, 64, 64, "
-                           "Default, 8, 1, 1, 2, 8, 2, 8, 1, 1,") != std::string::npos &&
-                       kernel_id.find("BlkGemmPipelineScheduler: Intrawave") != std::string::npos;
-            };
-
-            // Try candidates in order until we find a non-blacklisted one
-            bool found_valid_candidate = false;
-            size_t fallback_level      = 0;
-
-            while(fallback_level < result.GetNumCandidates())
-            {
-                int candidate_index   = (fallback_level == 0)
-                                            ? result.GetBestKernelIndex()
-                                            : result.GetFallbackKernelIndex(fallback_level);
-                int candidate_split_k = (fallback_level == 0)
-                                            ? result.GetBestSplitK()
-                                            : result.GetFallbackSplitK(fallback_level);
-
-                if(candidate_index < 0 || candidate_index >= static_cast<int>(valid_kernels.size()))
-                {
-                    fallback_level++;
-                    continue;
-                }
-
-                std::string candidate_kernel_id =
-                    valid_kernels[candidate_index] + "+" + std::to_string(candidate_split_k);
-
-                if(!IsBlacklistedKernel(candidate_kernel_id))
-                {
-                    // Found a valid candidate
-                    index                 = candidate_index;
-                    split_k               = candidate_split_k;
-                    kernel_id             = candidate_kernel_id;
-                    found_valid_candidate = true;
-
-                    if(fallback_level == 0)
-                    {
-                        MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
-                    }
-                    else
-                    {
-                        MIOPEN_LOG_I("Step 1: AI heuristics selected fallback kernel (level "
-                                     << fallback_level << "): " << kernel_id);
-                    }
-                    return;
-                }
-                else
-                {
-                    MIOPEN_LOG_I2("Step 1: AI candidate "
-                                  << fallback_level << " is blacklisted: " << candidate_kernel_id
-                                  << " - trying next candidate");
-                    fallback_level++;
-                }
-            }
-
-            if(!found_valid_candidate)
-            {
-                MIOPEN_LOG_I2("Step 1: All AI candidates are blacklisted, falling back to default");
-                ai_success = false; // Fall back to default initialization
-            }
+            MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
+            return;
         }
         else
         {
             MIOPEN_LOG_I2("Step 1: AI heuristics failed, proceeding to default initialization");
-            ai_success = false;
+            // print results to log to help debugging
+            if(!ai_success)
+                MIOPEN_LOG_I2("Step 1: AI heuristics internal failure");
+            else if(result.IsEmpty())
+                MIOPEN_LOG_I2("Step 1: AI heuristics returned empty result");
+            else if(valid_kernels.empty())
+                ai_success = false;
         }
     }
     else

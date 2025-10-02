@@ -209,7 +209,8 @@ std::vector<int> GenerateSplitK(int max_split_k)
 
 // Main template implementation
 template <typename DataType>
-bool RunParameterPredictionModel(
+std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
     const miopen::conv::ProblemDescription& problem,
     std::vector<std::string>& valid_kernels,
@@ -264,21 +265,22 @@ bool RunParameterPredictionModel(
                 {
                     kernel_id = valid_kernels[index];
                 }
-                return true;
+                return {true, result};
             }
         }
         MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
-        return false;
+        return {false, result};
     }
     catch(const miopen::Exception& ex)
     {
         MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
-        return false;
+        return {false, ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }
 }
 
 // Explicit template instantiations for common types
-template bool RunParameterPredictionModel<float>(
+template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<float>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -288,7 +290,8 @@ template bool RunParameterPredictionModel<float>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-template bool RunParameterPredictionModel<int8_t>(
+template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<int8_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -299,7 +302,8 @@ template bool RunParameterPredictionModel<int8_t>(
     std::string);
 #if MIOPEN_USE_COMPOSABLEKERNEL
 
-template bool RunParameterPredictionModel<ck::half_t>(
+template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::half_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -309,7 +313,8 @@ template bool RunParameterPredictionModel<ck::half_t>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-template bool RunParameterPredictionModel<ck::bhalf_t>(
+template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::bhalf_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,

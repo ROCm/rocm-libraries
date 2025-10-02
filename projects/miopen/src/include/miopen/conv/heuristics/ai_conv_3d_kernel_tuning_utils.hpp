@@ -52,7 +52,8 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 template <typename DataType>
-MIOPEN_INTERNALS_EXPORT bool RunParameterPredictionModel(
+MIOPEN_INTERNALS_EXPORT std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
     const miopen::conv::ProblemDescription& problem,
     std::vector<std::string>& valid_kernels,
@@ -63,7 +64,8 @@ MIOPEN_INTERNALS_EXPORT bool RunParameterPredictionModel(
         fill_valid_kernels,
     std::string solver_name);
 
-extern template bool RunParameterPredictionModel<float>(
+extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<float>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
     std::vector<std::string>&,
@@ -73,7 +75,8 @@ extern template bool RunParameterPredictionModel<float>(
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
 #if MIOPEN_USE_COMPOSABLEKERNEL
-extern template bool RunParameterPredictionModel<ck::half_t>(
+extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::half_t>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
     std::vector<std::string>&,
@@ -83,7 +86,8 @@ extern template bool RunParameterPredictionModel<ck::half_t>(
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
 
-extern template bool RunParameterPredictionModel<ck::bhalf_t>(
+extern template std::pair<bool, ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::bhalf_t>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
     std::vector<std::string>&,

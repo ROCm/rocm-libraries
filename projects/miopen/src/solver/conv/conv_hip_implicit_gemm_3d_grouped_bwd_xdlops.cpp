@@ -434,8 +434,10 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2(
             "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
 
-        bool ai_success         = false;
         std::string solver_name = "ConvHipImplicitGemm3DGroupBwdXdlops";
+
+        bool ai_success = false;
+        miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
 
         auto run_ai_heuristics = [&](auto CKDataType) {
             using T = decltype(CKDataType);
@@ -454,13 +456,13 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         };
         switch(problem.GetInDataType())
         {
-        case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
-        case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
-        case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
+        case miopenHalf: std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}); break;
+        case miopenFloat: std::tie(ai_success, result) = run_ai_heuristics(float{}); break;
+        case miopenBFloat16: std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}); break;
         default: break;
         }
 
-        if(ai_success)
+        if(ai_success && !result.IsEmpty())
         {
             MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
             return;
