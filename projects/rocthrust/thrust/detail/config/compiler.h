@@ -21,6 +21,9 @@
 
 #pragma once
 
+// TODO(libhipcxx): need to check this file, and usage of THRUST_PRAGMA and all compiler check in rocThrust
+// once libhipcxx gets ready
+
 // Internal config header that is only included through thrust/detail/config/config.h
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
@@ -150,4 +153,4 @@
 #  define THRUST_PRAGMA(x) __pragma(x)
 #else
 #  define THRUST_PRAGMA(x) _Pragma(THRUST_TO_STRING(x))
-#endif // defined(_CCCL_COMPILER_MSVC)
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC

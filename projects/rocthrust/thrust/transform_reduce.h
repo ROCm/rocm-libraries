@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -79,7 +86,7 @@ THRUST_NAMESPACE_BEGIN
  *  template<typename T>
  *  struct absolute_value : public unary_function<T,T>
  *  {
- *    THRUST_HOST_DEVICE T operator()(const T &x) const
+ *    __host__ __device__ T operator()(const T &x) const
  *    {
  *      return x < T(0) ? -x : x;
  *    }
@@ -153,7 +160,7 @@ THRUST_HOST_DEVICE OutputType transform_reduce(
  *  template<typename T>
  *  struct absolute_value : public unary_function<T,T>
  *  {
- *    THRUST_HOST_DEVICE T operator()(const T &x) const
+ *    __host__ __device__ T operator()(const T &x) const
  *    {
  *      return x < T(0) ? -x : x;
  *    }

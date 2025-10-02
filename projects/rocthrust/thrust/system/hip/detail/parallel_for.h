@@ -41,6 +41,7 @@
 
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -168,11 +169,7 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
   };
   // clang-format on
 
-#  if __THRUST_HAS_HIPRT__
-  workaround::par(policy, f, count);
-#  else
-  workaround::seq(policy, f, count);
-#  endif
+  THRUST_CDP_DISPATCH((workaround::par(policy, f, count);), (workaround::seq(policy, f, count);));
 }
 
 } // namespace hip_rocprim

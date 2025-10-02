@@ -19,11 +19,19 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/nv_target.h>
 #include <thrust/detail/type_deduction.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 #include <limits>
-#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -33,6 +41,7 @@ template <typename Integer>
 THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
 {
   Integer result;
+
   NV_IF_TARGET(NV_IS_DEVICE,
                (result = ::__clz(x);),
                (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
@@ -43,6 +52,7 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
                     break;
                   }
                 }));
+
   return result;
 }
 

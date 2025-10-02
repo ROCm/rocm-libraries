@@ -5,6 +5,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/tabulate_output_iterator.h>
@@ -43,12 +51,12 @@ private:
 // Alias template for the iterator_adaptor instantiation to be used for tabulate_output_iterator
 template <typename BinaryFunction, typename System, typename DifferenceT>
 using tabulate_output_iterator_base =
-    thrust::iterator_adaptor<tabulate_output_iterator<BinaryFunction, System, DifferenceT>,
-                             counting_iterator<DifferenceT>,
-                             thrust::use_default,
-                             System,
-                             thrust::use_default,
-                             tabulate_output_iterator_proxy<BinaryFunction, DifferenceT>>;
+  thrust::iterator_adaptor<tabulate_output_iterator<BinaryFunction, System, DifferenceT>,
+                           counting_iterator<DifferenceT>,
+                           thrust::use_default,
+                           System,
+                           thrust::use_default,
+                           tabulate_output_iterator_proxy<BinaryFunction, DifferenceT>>;
 
 // Register tabulate_output_iterator_proxy with 'is_proxy_reference' from
 // type_traits to enable its use with algorithms.

@@ -249,11 +249,10 @@ merge(execution_policy<Derived>& policy,
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
-#  else
-  return workaround::seq(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
-#  endif
+
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);),
+    (return workaround::seq(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -332,31 +331,29 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(
-    policy,
-    keys1_begin,
-    keys1_end,
-    keys2_begin,
-    keys2_end,
-    items1_begin,
-    items2_begin,
-    keys_out_begin,
-    items_out_begin,
-    compare_op);
-#  else
-  return workaround::seq(
-    policy,
-    keys1_begin,
-    keys1_end,
-    keys2_begin,
-    keys2_end,
-    items1_begin,
-    items2_begin,
-    keys_out_begin,
-    items_out_begin,
-    compare_op);
-#  endif
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(
+              policy,
+              keys1_begin,
+              keys1_end,
+              keys2_begin,
+              keys2_end,
+              items1_begin,
+              items2_begin,
+              keys_out_begin,
+              items_out_begin,
+              compare_op);),
+    (return workaround::seq(
+              policy,
+              keys1_begin,
+              keys1_end,
+              keys2_begin,
+              keys2_end,
+              items1_begin,
+              items2_begin,
+              keys_out_begin,
+              items_out_begin,
+              compare_op);));
 }
 
 } // namespace hip_rocprim

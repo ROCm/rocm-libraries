@@ -11,15 +11,12 @@
 #ifndef DETAIL_FUNCTIONAL_ADDRESS_STABILITY_H
 #define DETAIL_FUNCTIONAL_ADDRESS_STABILITY_H
 
-#include <thrust/detail/config.h>
+// TODO(libhipcxx): remove this file, check all the usage of proclaim_copyable_arguments,
+// proclaims_copyable_arguments and THRUST_MARK_CAN_COPY_ARGUMENTS, and replace ::thrust::detail::*
+// and THRUST_MARK_CAN_COPY_ARGUMENTS with _THRUST_LIBCXX::* and _LIBCUDACXX_MARK_CAN_COPY_ARGUMENTS
+// in rocThrust once libhipcxx gets ready
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+#include <thrust/detail/config.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
@@ -38,18 +35,9 @@ namespace detail
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-using _THRUST_LIBCXX::__has_builtin_operators;
 using _THRUST_LIBCXX::proclaim_copyable_arguments;
 using _THRUST_LIBCXX::proclaims_copyable_arguments;
-#  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
-    /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
-    template <typename T>                                                                      \
-    struct proclaims_copyable_arguments<functor<T>> : __has_builtin_operators<T>               \
-    {};                                                                                        \
-    /*we do not know what plus<void> etc. does, which depends on the types it is invoked on */ \
-    template <>                                                                                \
-    struct proclaims_copyable_arguments<functor<void>> : _THRUST_STD::false_type               \
-    {};
+#  define THRUST_MARK_CAN_COPY_ARGUMENTS _LIBCUDACXX_MARK_CAN_COPY_ARGUMENTS
 
 #else
 

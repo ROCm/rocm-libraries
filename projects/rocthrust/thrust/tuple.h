@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2025 NVIDIA Corporation
+ *  Copyright 2008-2018 NVIDIA Corporation
  *  Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -305,7 +305,7 @@ struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER:
 
 _THRUST_STD_NAMESPACE_END
 
-#else
+#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
 
 #  include <thrust/detail/tuple.inl>
 #  include <thrust/pair.h>
@@ -408,7 +408,7 @@ get(const detail::cons<HT, TT>& t);
  *  \see tuple
  */
 template <class... Ts>
-THRUST_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
+tuple(Ts...) -> tuple<Ts...>;
 
 /*! \cond
  */
@@ -437,7 +437,7 @@ struct pair;
  *  \see tuple
  */
 template <class T1, class T2>
-THRUST_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
+tuple(pair<T1, T2>) -> tuple<T1, T2>;
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p

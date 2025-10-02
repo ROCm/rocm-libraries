@@ -8,8 +8,19 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/pointer.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
+
+#if THRUST_CPP_DIALECT >= 2014
+
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/pointer.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -62,4 +73,6 @@ unique_eager_future_type(thrust::hip::execution_policy<DerivedPolicy> const&) no
 
 THRUST_NAMESPACE_END
 
-#include <thrust/system/hip/detail/future.inl>
+#  include <thrust/system/hip/detail/future.inl>
+
+#endif // C++14

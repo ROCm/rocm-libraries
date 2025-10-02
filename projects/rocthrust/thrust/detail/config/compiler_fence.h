@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/preprocessor.h>
 
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
@@ -55,7 +63,7 @@
       do                              \
       {                               \
       } while (0)
-#  endif // THRUST_GCC_VERSION
+#  endif // THRUST_GCC_VERSION >= 40200
 
 // unknown case
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG

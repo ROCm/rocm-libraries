@@ -45,6 +45,7 @@
 #  include <thrust/distance.h>
 #  include <thrust/pair.h>
 #  include <thrust/partition.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/find.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -437,11 +438,10 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
-#  else
-  return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);),
+    (return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -482,11 +482,9 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
-#  else
-  return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, selected_result, rejected_result, predicate);),
+                      (return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -529,11 +527,10 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
-#  else
-  return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);),
+    (return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -574,11 +571,9 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
-#  else
-  return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, selected_result, rejected_result, predicate);),
+                      (return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);));
 }
 
 /// inplace
@@ -604,11 +599,9 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, stencil, predicate);
-#  else
-  return workaround::seq(policy, first, last, stencil, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, stencil, predicate);),
+                      (return workaround::seq(policy, first, last, stencil, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -632,11 +625,9 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, predicate);
-#  else
-  return workaround::seq(policy, first, last, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, predicate);),
+                      (return workaround::seq(policy, first, last, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -665,11 +656,9 @@ Iterator THRUST_HOST_DEVICE stable_partition(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, stencil, predicate);
-#  else
-  return workaround::seq(policy, first, last, stencil, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, stencil, predicate);),
+                      (return workaround::seq(policy, first, last, stencil, predicate);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -698,11 +687,9 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, predicate);
-#  else
-  return workaround::seq(policy, first, last, predicate);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, predicate);),
+                      (return workaround::seq(policy, first, last, predicate);));
 }
 
 template <class Derived, class ItemsIt, class Predicate>

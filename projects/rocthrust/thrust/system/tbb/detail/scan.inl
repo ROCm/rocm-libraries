@@ -33,9 +33,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/tbb/detail/scan.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
+#include <cuda/std/__functional/invoke.h>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
@@ -109,7 +107,7 @@ struct inclusive_body
 
     if (first_call)
     {
-      THRUST_IF_CONSTEXPR (HasInit)
+      _CCCL_IF_CONSTEXPR (HasInit)
       {
         *iter2 = sum = binary_op(sum, *iter1);
       }
@@ -267,8 +265,8 @@ OutputIterator inclusive_scan(
   using namespace thrust::detail;
 
   // Use the input iterator's value type and the initial value type per wg21.link/p2322
-  using ValueType = typename ::internal::
-    accumulator_t<BinaryFunction, typename _THRUST_STD::iterator_traits<InputIterator>::value_type, InitialValueType>;
+  using ValueType = typename ::cuda::std::
+    __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
   Size n     = thrust::distance(first, last);

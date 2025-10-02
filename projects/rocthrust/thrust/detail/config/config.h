@@ -40,15 +40,18 @@
 #include <thrust/detail/config/compiler.h> // IWYU pragma: export
 #include <thrust/detail/config/cpp_compatibility.h> // IWYU pragma: export
 #include <thrust/detail/config/cpp_dialect.h> // IWYU pragma: export
-#include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 #include <thrust/detail/config/simple_defines.h> // IWYU pragma: export
 // host_system.h & device_system.h must be #included as early as possible because other config headers depend on it
 #include <thrust/detail/config/host_system.h> // IWYU pragma: export
 
+#include <thrust/detail/config/attributes.h> // IWYU pragma: export
+#include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 #include <thrust/detail/config/device_system.h> // IWYU pragma: export
 #include <thrust/detail/config/diagnostic.h> // IWYU pragma: export
+#include <thrust/detail/config/dialect.h> // IWYU pragma: export
 #include <thrust/detail/config/execution_space.h> // IWYU pragma: export
 #include <thrust/detail/config/global_workarounds.h> // IWYU pragma: export
 #include <thrust/detail/config/namespace.h> // IWYU pragma: export
 #include <thrust/detail/config/rtti.h> // IWYU pragma: export
+#include <thrust/detail/config/sequence_access.h> // IWYU pragma: export
 #include <thrust/detail/config/visibility.h> // IWYU pragma: export

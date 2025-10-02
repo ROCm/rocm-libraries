@@ -206,8 +206,8 @@ copy_construct_range_n(
 }
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Pointer>
-THRUST_HOST_DEVICE
-  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
+THRUST_HOST_DEVICE _THRUST_STD::
+  enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range(thrust::execution_policy<FromSystem>& from_system,
                        Allocator& a,
                        InputIterator first,
@@ -218,8 +218,8 @@ THRUST_HOST_DEVICE
 }
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Size, typename Pointer>
-THRUST_HOST_DEVICE
-  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
+THRUST_HOST_DEVICE _THRUST_STD::
+  enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range_n(
     thrust::execution_policy<FromSystem>& from_system, Allocator& a, InputIterator first, Size n, Pointer result)
 {

@@ -47,6 +47,7 @@
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -106,7 +107,7 @@ ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFi
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION auto
+THRUST_HIP_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
 {
@@ -166,7 +167,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION auto
+THRUST_HIP_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
 {
@@ -206,7 +207,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION OutputIt copy_if(
+THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -289,11 +290,8 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, result, pred);
-#  else
-  return workaround::seq(policy, first, last, result, pred);
-#  endif
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, result, pred);),
+                      (return workaround::seq(policy, first, last, result, pred);));
 } // func copy_if
 
 THRUST_EXEC_CHECK_DISABLE
@@ -333,11 +331,8 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, stencil, result, pred);
-#  else
-  return workaround::seq(policy, first, last, stencil, result, pred);
-#  endif
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, stencil, result, pred);),
+                      (return workaround::seq(policy, first, last, stencil, result, pred);));
 } // func copy_if
 
 } // namespace hip_rocprim

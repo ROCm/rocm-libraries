@@ -30,10 +30,10 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/nv_target.h>
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/cross_system.h>
-#  include <thrust/system/hip/detail/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

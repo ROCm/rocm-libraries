@@ -5,11 +5,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef CONFIG_PREPROCESSOR_H
 #define CONFIG_PREPROCESSOR_H
+
+// TODO(libhipcxx): remove this file and replace THRUST_HAS_INCLUDE with _CCCL_HAS_INCLUDE in rocThrust
+// once libhipcxx gets ready
 
 #ifdef __has_include
 #  define THRUST_HAS_INCLUDE(_X) __has_include(_X)

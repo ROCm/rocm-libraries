@@ -38,7 +38,6 @@
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/reverse_iterator.h>
-#include <thrust/sequence_access.h>
 
 #include _THRUST_STD_INCLUDE(utility)
 

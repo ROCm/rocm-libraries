@@ -24,11 +24,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/sequence_access.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -70,7 +77,7 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
 
   THRUST_HOST_DEVICE friend iterator_type end(_trivial_sequence& sequence)
   {
-    return sequence.first;
+    return sequence.last;
   }
 };
 

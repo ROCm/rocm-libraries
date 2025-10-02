@@ -31,8 +31,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/preprocessor.h>
-
 #if THRUST_HAS_INCLUDE(<version>)
 #  include <version>
 #endif // THRUST_HAS_INCLUDE(<version>)

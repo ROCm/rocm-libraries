@@ -9,18 +9,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef THRUST_DETAIL_CONFIG_EXECUTION_SPACE_H
-#define THRUST_DETAIL_CONFIG_EXECUTION_SPACE_H
+#ifndef CONFIG_EXECUTION_SPACE_H
+#define CONFIG_EXECUTION_SPACE_H
+
+// TODO(libhipcxx): needs to check this file once libhipcxx gets ready
 
 #include <thrust/detail/config/compiler.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 
 // We need to ensure that we not only compile with a cuda or hip compiler but also compile cuda or hip source files
 #if (defined(__NVCC__) || defined(_NVHPC_CUDA)                                    \
@@ -48,4 +42,4 @@
 #  define THRUST_EXEC_CHECK_DISABLE
 #endif // !HIP
 
-#endif // THRUST_DETAIL_CONFIG_EXECUTION_SPACE_H
+#endif // CONFIG_EXECUTION_SPACE_H

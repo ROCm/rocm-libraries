@@ -37,15 +37,15 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/nv_target.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/nv/target.h>
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
 
 #include <cstdio>
 #include <exception>
-#include <utility>
 
 // Define the value to 0, if you want to disable printf on device side.
 #ifndef THRUST_HIP_PRINTF_ENABLED
@@ -118,23 +118,9 @@ template <class Derived>
 THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& policy)
 {
   hipError_t result;
-  // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
-  // instructions out of the target logic.
-#if __THRUST_HAS_HIPRT__
 
-#  define THRUST_TEMP_DEVICE_CODE result = hipDeviceSynchronize();
-
-#else
-
-#  define THRUST_TEMP_DEVICE_CODE result = hipSuccess
-
-#endif
-
-  NV_IF_TARGET(NV_IS_HOST,
-               (result = hipStreamSynchronize(stream(policy));),
-               (THRUST_UNUSED_VAR(policy); THRUST_TEMP_DEVICE_CODE;));
-
-#undef THRUST_TEMP_DEVICE_CODE
+  THRUST_CDP_DISPATCH((result = hipStreamSynchronize(stream(policy));),
+                      (THRUST_UNUSED_VAR(policy); result = hipSuccess;));
 
   return result;
 }
@@ -143,12 +129,8 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 template <class Policy>
 THRUST_HOST_DEVICE hipError_t synchronize(Policy& policy)
 {
-#if __THRUST_HAS_HIPRT__
-  return synchronize_stream(derived_cast(policy));
-#else
-  THRUST_UNUSED_VAR(policy);
-  return hipSuccess;
-#endif
+  THRUST_CDP_DISPATCH((return synchronize_stream(derived_cast(policy));),
+                      (THRUST_UNUSED_VAR(policy); return hipSuccess;));
 }
 
 // Fallback implementation of the customization point.
@@ -229,7 +211,7 @@ THRUST_HIP_HOST_FUNCTION hipError_t trivial_copy_to_device(Type* dst, Type const
 }
 
 template <class Policy, class Type>
-THRUST_RUNTIME_FUNCTION hipError_t
+THRUST_HIP_RUNTIME_FUNCTION hipError_t
 trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
 {
   hipError_t status = hipSuccess;
@@ -251,7 +233,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
 
 inline void THRUST_HOST_DEVICE terminate()
 {
-  NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
+  NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (__builtin_trap();));
 }
 
 THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
@@ -259,10 +241,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
 #ifdef THRUST_RDC_ENABLED
-  hipError_t clear_error_status = hipGetLastError();
-  THRUST_UNUSED_VAR(clear_error_status);
+  THRUST_UNUSED_VAR(hipGetLastError());
 #else
-  NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
+  NV_IF_TARGET(NV_IS_HOST, (THRUST_UNUSED_VAR(hipGetLastError());));
 #endif
 
   if (hipSuccess != status)
@@ -293,10 +274,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
 #ifdef THRUST_RDC_ENABLED
-  hipError_t clear_error_status = hipGetLastError();
-  THRUST_UNUSED_VAR(clear_error_status);
+  THRUST_UNUSED_VAR(hipGetLastError());
 #else
-  NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
+  NV_IF_TARGET(NV_IS_HOST, (THRUST_UNUSED_VAR(hipGetLastError());));
 #endif
 
   if (hipSuccess != status)

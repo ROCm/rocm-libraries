@@ -141,7 +141,7 @@ template <typename KeyType, typename Compare>
 struct use_primitive_sort
     : ::internal::_And<::internal::is_arithmetic<KeyType>,
                        _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, thrust::less<KeyType>>,
-                                               _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
+                                                _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
 {};
 
 } // end namespace sort_detail

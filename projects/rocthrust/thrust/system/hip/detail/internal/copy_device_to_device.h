@@ -58,7 +58,7 @@ transform(execution_policy<Derived>& policy, InputIt first, InputIt last, Output
 namespace __copy
 {
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
+OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
   execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::true_type)
 {
   using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
@@ -78,7 +78,7 @@ OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
+OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
   execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::false_type)
 {
   using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
@@ -86,7 +86,7 @@ OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 device_to_device(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   return device_to_device(

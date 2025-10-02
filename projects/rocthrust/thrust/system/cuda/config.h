@@ -33,13 +33,21 @@
 #  define THRUST_DEBUG_SYNC_FLAG false
 #endif
 
-#include <thrust/detail/config.h>
+#include <thrust/detail/config.h> // IWYU pragma: export
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 // We don't directly include <cub/version.cuh> since it doesn't exist in
 // older releases. This header will always pull in version info:
-#include <cub/detail/detect_cuda_runtime.cuh>
-#include <cub/util_debug.cuh>
-#include <cub/util_namespace.cuh>
+#include <cub/detail/detect_cuda_runtime.cuh> // IWYU pragma: export
+#include <cub/util_debug.cuh> // IWYU pragma: export
+#include <cub/util_namespace.cuh> // IWYU pragma: export
 
 /**
  * \def THRUST_RUNTIME_FUNCTION
@@ -115,7 +123,7 @@
 #  endif
 
 // Make sure the CUB namespace has been declared using the modern macros:
-CUB_NAMESPACE_BEGIN // cppcheck-suppress unknownMacro
+CUB_NAMESPACE_BEGIN
 CUB_NAMESPACE_END
 
 #else // THRUST_IGNORE_CUB_VERSION_CHECK

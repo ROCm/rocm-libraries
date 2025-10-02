@@ -39,7 +39,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/attributes.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/zip_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -131,7 +130,6 @@ THRUST_NAMESPACE_BEGIN
  *  \see tuple
  *  \see get
  */
-
 template <typename IteratorTuple>
 class THRUST_DECLSPEC_EMPTY_BASES zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
 {

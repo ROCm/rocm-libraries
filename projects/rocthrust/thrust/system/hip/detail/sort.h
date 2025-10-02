@@ -48,6 +48,7 @@
 #  include <thrust/extrema.h>
 #  include <thrust/sequence.h>
 #  include <thrust/sort.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -387,11 +388,9 @@ void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt f
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  workaround::par(policy, first, last, compare_op);
-#  else
-  workaround::seq(policy, first, last, compare_op);
-#  endif
+
+  THRUST_CDP_DISPATCH((workaround::par(policy, first, last, compare_op);),
+                      (workaround::seq(policy, first, last, compare_op);));
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -424,11 +423,8 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
-  workaround::par(policy, keys_first, keys_last, values, compare_op);
-#  else
-  workaround::seq(policy, keys_first, keys_last, values, compare_op);
-#  endif
+  THRUST_CDP_DISPATCH((workaround::par(policy, keys_first, keys_last, values, compare_op);),
+                      (workaround::seq(policy, keys_first, keys_last, values, compare_op);));
 }
 
 THRUST_EXEC_CHECK_DISABLE

@@ -17,6 +17,8 @@
 
 #pragma once
 
+// TODO(libhipcxx): need to check this file once libhipcxx gets ready
+
 // Internal config header that is only included through thrust/detail/config/config.h
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)

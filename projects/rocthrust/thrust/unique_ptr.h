@@ -23,6 +23,20 @@
 #include <type_traits>
 #include <utility>
 
+#ifndef THRUST_DOXYGEN_INVOKED
+namespace internal
+{
+struct destroy_device_functor
+{
+  template <typename T>
+  THRUST_DEVICE void operator()(T& x) const noexcept
+  {
+    x.~T();
+  }
+};
+} // namespace internal
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup memory_management Memory Management
@@ -56,7 +70,7 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
    */
   using pointer = thrust::device_ptr<T>;
 
-  THRUST_HOST constexpr default_delete() noexcept = default;
+  THRUST_HOST constexpr default_delete() noexcept;
 
   /*! \brief Converting constructor from compatible deleter.
    *
@@ -96,13 +110,14 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
     // `thrust::for_each_n` and then separately free the memory.
     if constexpr (!std::is_trivially_destructible_v<T>)
     {
-      thrust::for_each_n(ptr, 1, [] __device__(T & x) {
-        x.~T();
-      });
+      thrust::for_each_n(ptr, 1, ::internal::destroy_device_functor{});
     }
     thrust::device_free(ptr);
   }
 };
+
+template <class T>
+THRUST_HOST constexpr default_delete<T, std::enable_if_t<!std::is_array_v<T>>>::default_delete() noexcept = default;
 
 /*! \brief Default deleter specialization for arrays of non-trivially destructible types.
  *
@@ -137,9 +152,8 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
    *  \param other The deleter to copy from.
    */
   template <class U>
-  THRUST_HOST
-  default_delete(const default_delete<U[]>& other,
-                 std::enable_if_t<std::is_convertible_v<U (*)[], T (*)[]>>* = nullptr) noexcept
+  THRUST_HOST default_delete(const default_delete<U[]>& other,
+                             std::enable_if_t<std::is_convertible_v<U (*)[], T (*)[]>>* = nullptr) noexcept
       : m_size(other.m_size)
   {}
 
@@ -170,9 +184,7 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
     // using `thrust::for_each_n` and then separately free the memory.
     if (m_size)
     {
-      thrust::for_each_n(ptr, m_size, [] __device__(T & x) {
-        x.~T();
-      });
+      thrust::for_each_n(ptr, m_size, ::internal::destroy_device_functor{});
     }
     thrust::device_free(ptr);
   }
@@ -288,7 +300,7 @@ struct unique_ptr_deleter_sfinae<Deleter&>
  *  The object is disposed of by calling `get_deleter()(get())`. The default deleter,
  *  `thrust::default_delete`, calls the destructor (if needed) and deallocates memory
  *  using `thrust::device_free`.
- * 
+ *
  *  A `unique_ptr` may alternatively own no object, in which case it is described as
  *  *empty*.
  *
@@ -312,16 +324,19 @@ struct unique_ptr_deleter_sfinae<Deleter&>
  *  \see thrust::device_free
  *  \see https://en.cppreference.com/w/cpp/memory/unique_ptr
  */
-
 template <class T, class D = default_delete<T>>
+#if THRUST_HAS_ATTRIBUTE(trivial_abi)
 class __attribute__((trivial_abi)) unique_ptr
+#else
+class unique_ptr
+#endif
 {
 public:
   /*! \typedef pointer
    *  \brief The type of the stored pointer (defaults to `thrust::device_ptr<T>`).
    */
-  using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
-  
+  using pointer = typename thrust::detail::pointer_detector<T, D>::type;
+
   /*! \typedef element_type
    *  \brief The type of the managed object (`T`).
    */
@@ -337,7 +352,13 @@ public:
 
 private:
   pointer m_ptr;
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
+  [[msvc::no_unique_address]] deleter_type m_deleter;
+#elif THRUST_HAS_CPP_ATTRIBUTE(no_unique_address)
   [[no_unique_address]] deleter_type m_deleter;
+#else
+  deleter_type m_deleter;
+#endif
 
   using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
 
@@ -417,7 +438,7 @@ public:
    *  \param p A pointer to the object in device memory to manage.
    */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(pointer p) noexcept
       : m_ptr(p)
       , m_deleter()
   {}
@@ -428,7 +449,7 @@ public:
   template <bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfDeleterDefaultDelete<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(T* raw_p) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter()
   {}
@@ -438,7 +459,7 @@ public:
    *  \param d The deleter to use.
    */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, LValRefType<Dummy> d) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(pointer p, LValRefType<Dummy> d) noexcept
       : m_ptr(p)
       , m_deleter(d)
   {}
@@ -448,7 +469,7 @@ public:
    *  \param d The deleter to use.
    */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, GoodRValRefType<Dummy> d) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(pointer p, GoodRValRefType<Dummy> d) noexcept
       : m_ptr(p)
       , m_deleter(std::move(d))
   {
@@ -461,7 +482,7 @@ public:
   /*! \brief Move constructor. Constructs a \p unique_ptr by taking ownership of the object managed by \p u.
    *  \param u The \p unique_ptr to move from.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(unique_ptr&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<deleter_type>(u.get_deleter()))
   {}
@@ -474,7 +495,7 @@ public:
    *  \param u The \p unique_ptr to move from.
    */
   template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterConvertible<E>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<U, E>&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(unique_ptr<U, E>&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<E>(u.get_deleter()))
   {}
@@ -486,7 +507,7 @@ public:
    *  \param u The \p unique_ptr to move from.
    *  \return `*this`
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(unique_ptr&& u) noexcept
   {
     reset(u.release());
     m_deleter = std::forward<deleter_type>(u.get_deleter());
@@ -498,7 +519,7 @@ public:
    *  \return `*this`
    */
   template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterAssignable<E>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr<U, E>&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(unique_ptr<U, E>&& u) noexcept
   {
     reset(u.release());
     m_deleter = std::forward<E>(u.get_deleter());
@@ -508,7 +529,7 @@ public:
   /*! \brief Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
    *  \return `*this`
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
   {
     reset();
     return *this;
@@ -519,7 +540,7 @@ public:
   //==========================================================================
   /*! \brief Destroys the \p unique_ptr, the managed object is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 ~unique_ptr()
   {
     reset();
   }
@@ -530,7 +551,7 @@ public:
   /*! \brief Returns a pointer to the managed object or `nullptr` if no object is owned.
    *  \return Pointer to the managed object.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 pointer get() const noexcept
   {
     return m_ptr;
   }
@@ -539,7 +560,7 @@ public:
    *  \return Raw pointer to the managed object.
    */
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 T* get_raw() const noexcept
   {
     return raw_pointer_cast(m_ptr);
   }
@@ -547,7 +568,7 @@ public:
   /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed object.
    *  \return A reference to the stored deleter.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 deleter_type& get_deleter() noexcept
   {
     return m_deleter;
   }
@@ -555,7 +576,7 @@ public:
   /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed object.
    *  \return A reference to the stored deleter.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 const deleter_type& get_deleter() const noexcept
   {
     return m_deleter;
   }
@@ -566,7 +587,7 @@ public:
    *
    *  \return `true` if an object is owned, `false` otherwise.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit operator bool() const noexcept
   {
     return m_ptr != nullptr;
   }
@@ -579,7 +600,7 @@ public:
    *
    *  \return A reference to the managed object.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator*() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 auto operator*() const noexcept
   {
     return *m_ptr;
   }
@@ -596,9 +617,10 @@ public:
    *
    *  \return This function does not return; it triggers a compile-time error.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
+  template <bool NotUsed = false>
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 pointer operator->() const noexcept
   {
-    static_assert(false,
+    static_assert(NotUsed,
                   "thrust::unique_ptr<T>::operator->(): cannot dereference device memory from host. "
                   "Copy the object to host first (T host = *ptr) or access members inside device code.");
 
@@ -611,7 +633,7 @@ public:
   /*! \brief Releases ownership of the managed object, if any.
    *  \return A pointer to the released object.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 pointer release() noexcept
   {
     pointer temp = m_ptr;
     m_ptr        = pointer();
@@ -621,7 +643,7 @@ public:
   /*! \brief Replaces the managed object.
    *  \param p The new object to manage.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 void reset(pointer p = pointer()) noexcept
   {
     pointer temp = m_ptr;
     m_ptr        = p;
@@ -638,7 +660,7 @@ public:
    *
    *  \param u The \p unique_ptr to swap with.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 void swap(unique_ptr& u) noexcept
   {
     using std::swap;
     swap(m_ptr, u.m_ptr);
@@ -678,14 +700,18 @@ public:
  *  \see https://en.cppreference.com/w/cpp/memory/unique_ptr
  */
 template <class T, class D>
+#if THRUST_HAS_ATTRIBUTE(trivial_abi)
 class __attribute__((trivial_abi)) unique_ptr<T[], D>
+#else
+class unique_ptr<T[], D>
+#endif
 {
 public:
   /*! \typedef pointer
    *  \brief The type of the stored pointer (defaults to `thrust::device_ptr<T>`).
    */
-  using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
-  
+  using pointer = typename thrust::detail::pointer_detector<T, D>::type;
+
   /*! \typedef element_type
    *  \brief The type of the array elements (`T`).
    */
@@ -701,7 +727,13 @@ private:
   friend class unique_ptr;
 
   pointer m_ptr;
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
+  [[msvc::no_unique_address]] deleter_type m_deleter;
+#elif THRUST_HAS_CPP_ATTRIBUTE(no_unique_address)
   [[no_unique_address]] deleter_type m_deleter;
+#else
+  deleter_type m_deleter;
+#endif
 
   using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
 
@@ -739,15 +771,13 @@ private:
   using EnableIfNotTriviallyDestructible = std::enable_if_t<!std::is_trivially_destructible_v<Tp>>;
 
   template <class UPtr, class Up, class ElemT = typename UPtr::element_type>
-  using EnableIfMoveConvertible =
-    std::enable_if_t<std::is_array_v<Up> && std::is_same_v<pointer, element_type*>
-                            && std::is_same_v<typename UPtr::pointer, ElemT*>
-                            && std::is_convertible_v<ElemT (*)[], element_type (*)[]>>;
+  using EnableIfMoveConvertible = std::enable_if_t<
+    std::is_array_v<Up> && std::is_same_v<pointer, element_type*> && std::is_same_v<typename UPtr::pointer, ElemT*>
+    && std::is_convertible_v<ElemT (*)[], element_type (*)[]>>;
 
   template <class E>
-  using EnableIfDeleterConvertible =
-    std::enable_if_t<(std::is_reference_v<D> && std::is_same_v<D, E>)
-                            || (!std::is_reference_v<D> && std::is_convertible_v<E, D>)>;
+  using EnableIfDeleterConvertible = std::enable_if_t<
+    (std::is_reference_v<D> && std::is_same_v<D, E>) || (!std::is_reference_v<D> && std::is_convertible_v<E, D>)>;
 
   template <class E>
   using EnableIfDeleterAssignable = std::enable_if_t<std::is_assignable_v<D&, E&&>>;
@@ -789,7 +819,7 @@ public:
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfPointerConvertible<Pp>,
             class      = EnableIfTriviallyDestructible<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(Pp p) noexcept
       : m_ptr(p)
       , m_deleter()
   {}
@@ -806,7 +836,7 @@ public:
             class      = EnableIfPointerConvertible<device_ptr<T>>,
             class      = EnableIfTriviallyDestructible<Dummy>,
             class      = EnableIfDeleterDefaultDelete<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp* raw_p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(Pp* raw_p) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter()
   {}
@@ -823,7 +853,7 @@ public:
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfPointerConvertible<Pp>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp p, size_t size) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(Pp p, size_t size) noexcept
       : m_ptr(p)
       , m_deleter(size)
   {}
@@ -841,7 +871,7 @@ public:
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfPointerConvertible<device_ptr<T>>,
             class      = EnableIfDeleterDefaultDelete<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp* raw_p, size_t size) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit unique_ptr(Pp* raw_p, size_t size) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter(size)
   {}
@@ -855,7 +885,7 @@ public:
             bool Dummy = true,
             class      = EnableIfDeleterConstructible<LValRefType<Dummy>>,
             class      = EnableIfPointerConvertible<Pp>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(Pp p, LValRefType<Dummy> deleter) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(Pp p, LValRefType<Dummy> deleter) noexcept
       : m_ptr(p)
       , m_deleter(deleter)
   {}
@@ -865,7 +895,7 @@ public:
    *  \param deleter The deleter to store.
    */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, LValRefType<Dummy> deleter) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(std::nullptr_t, LValRefType<Dummy> deleter) noexcept
       : m_ptr(nullptr)
       , m_deleter(deleter)
   {}
@@ -879,7 +909,7 @@ public:
             bool Dummy = true,
             class      = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>,
             class      = EnableIfPointerConvertible<Pp>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(Pp p, GoodRValRefType<Dummy> deleter) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(Pp p, GoodRValRefType<Dummy> deleter) noexcept
       : m_ptr(p)
       , m_deleter(std::move(deleter))
   {
@@ -891,7 +921,7 @@ public:
    *  \param deleter The deleter to store (moved).
    */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, GoodRValRefType<Dummy> deleter) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(std::nullptr_t, GoodRValRefType<Dummy> deleter) noexcept
       : m_ptr(nullptr)
       , m_deleter(std::move(deleter))
   {
@@ -908,7 +938,7 @@ public:
    *
    *  \param u The \p unique_ptr to move from.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(unique_ptr&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<deleter_type>(u.get_deleter()))
   {}
@@ -926,7 +956,7 @@ public:
             class Ep,
             class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
             class = EnableIfDeleterConvertible<Ep>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<Up, Ep>&& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(unique_ptr<Up, Ep>&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<Ep>(u.get_deleter()))
   {}
@@ -942,7 +972,7 @@ public:
    *  \param p The \p unique_ptr to move from.
    *  \return `*this`
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr&& p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(unique_ptr&& p) noexcept
   {
     reset(p.release());
     m_deleter = std::forward<deleter_type>(p.get_deleter());
@@ -957,7 +987,7 @@ public:
             class Ep,
             class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
             class = EnableIfDeleterAssignable<Ep>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr<Up, Ep>&& p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(unique_ptr<Up, Ep>&& p) noexcept
   {
     reset(p.release());
     m_deleter = std::forward<Ep>(p.get_deleter());
@@ -967,7 +997,7 @@ public:
   /*! \brief Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
    *  \return `*this`
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
   {
     reset();
     return *this;
@@ -978,7 +1008,7 @@ public:
   //==========================================================================
   /*! \brief Destroys the \p unique_ptr, the managed array is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 ~unique_ptr()
   {
     reset();
   }
@@ -997,7 +1027,7 @@ public:
    *  \param i The index of the element to access.
    *  \return A reference to (or copy of) the element at index \p i.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator[](size_t i) const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 auto operator[](size_t i) const noexcept
   {
     return m_ptr[i];
   }
@@ -1006,7 +1036,7 @@ public:
    *  
    *  \return Pointer to the managed array.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 pointer get() const noexcept
   {
     return m_ptr;
   }
@@ -1016,7 +1046,7 @@ public:
    *  \return Pointer to the managed array.
    */
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 T* get_raw() const noexcept
   {
     return raw_pointer_cast(m_ptr);
   }
@@ -1024,7 +1054,7 @@ public:
   /*! \brief Returns a reference to the deleter object which would be used for destruction of the managed array.
    *  \return A reference to the stored deleter.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 deleter_type& get_deleter() noexcept
   {
     return m_deleter;
   }
@@ -1032,7 +1062,7 @@ public:
   /*! \brief Returns a const reference to the deleter object which would be used for destruction of the managed array.
    *  \return A const reference to the stored deleter.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 const deleter_type& get_deleter() const noexcept
   {
     return m_deleter;
   }
@@ -1040,7 +1070,7 @@ public:
   /*! \brief Checks if the \p unique_ptr owns an array.
    *  \return `true` if an array is owned, `false` otherwise.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 explicit operator bool() const noexcept
   {
     return m_ptr != nullptr;
   }
@@ -1051,7 +1081,7 @@ public:
   /*! \brief Releases ownership of the managed array, if any.
    *  \return A pointer to the released array.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 pointer release() noexcept
   {
     pointer temp = m_ptr;
     m_ptr        = pointer();
@@ -1062,7 +1092,7 @@ public:
    *  \param p The new array to manage.
    */
   template <class Pp, class = EnableIfPointerConvertible<Pp>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(Pp p) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 void reset(Pp p) noexcept
   {
     pointer temp = m_ptr;
     m_ptr        = p;
@@ -1076,7 +1106,7 @@ public:
    *
    *  Destroys the currently managed array (if any) and resets to empty state.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(std::nullptr_t = nullptr) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 void reset(std::nullptr_t = nullptr) noexcept
   {
     pointer temp = m_ptr;
     m_ptr        = nullptr;
@@ -1089,7 +1119,7 @@ public:
   /*! \brief Swaps the managed array and deleter with another array \p unique_ptr.
    *  \param u The \p unique_ptr to swap with.
    */
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_CXX23 void swap(unique_ptr& u) noexcept
   {
     using std::swap;
     swap(m_ptr, u.m_ptr);
@@ -1105,7 +1135,7 @@ public:
  *  \param y The second \p unique_ptr.
  */
 template <class T, class D, std::enable_if_t<std::is_swappable_v<D>, void>>
-inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
+inline THRUST_CONSTEXPR_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
 {
   x.swap(y);
 }
@@ -1123,12 +1153,12 @@ inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T,
  *  \return `true` if the pointers are equal, `false` otherwise.
  */
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return x.get() == y.get();
 }
 
-#if THRUST_STD_VER <= 17
+#if THRUST_CPP_DIALECT <= 2017
 template <class T1, class D1, class T2, class D2>
 /*! \brief Compares two \p unique_ptr objects for inequality (C++17 and earlier).
  *
@@ -1136,7 +1166,7 @@ template <class T1, class D1, class T2, class D2>
  *  \param y The second \p unique_ptr to compare.
  *  \return `true` if the pointers are not equal, `false` otherwise.
  */
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(x == y);
 }
@@ -1151,7 +1181,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr
  *  \note Operators `>`, `<=`, and `>=` are also provided and defined in terms of this operator.
  */
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   using P1 = typename unique_ptr<T1, D1>::element_type*;
   using P2 = typename unique_ptr<T2, D2>::element_type*;
@@ -1166,7 +1196,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<
  *  \return `true` if \p x is greater than \p y, `false` otherwise.
  */
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return y < x;
 }
@@ -1178,7 +1208,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<
  *  \return `true` if \p x is less than or equal to \p y, `false` otherwise.
  */
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(y < x);
 }
@@ -1190,12 +1220,12 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr
  *  \return `true` if \p x is greater than or equal to \p y, `false` otherwise.
  */
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(x < y);
 }
 
-#if THRUST_STD_VER >= 20
+#if THRUST_CPP_DIALECT >= 2020
 template <class T1, class D1, class T2, class D2>
   THRUST_HOST inline auto operator<=> (const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
@@ -1210,19 +1240,19 @@ template <class T1, class D1, class T2, class D2>
  *  \return `true` if \p x is empty, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
   return !x;
 }
 
-#if THRUST_STD_VER <= 17
+#if THRUST_CPP_DIALECT <= 2017
 /*! \brief Compares nullptr with a \p unique_ptr for equality (C++17 and earlier).
  *
  *  \param y The \p unique_ptr to compare.
  *  \return `true` if \p y is empty, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
   return !y;
 }
@@ -1233,7 +1263,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(std::nullptr_t, 
  *  \return `true` if \p x is not empty, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
   return static_cast<bool>(x);
 }
@@ -1244,7 +1274,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr
  *  \return `true` if \p y is not empty, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
   return static_cast<bool>(y);
 }
@@ -1256,7 +1286,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(std::nullptr_t, 
  *  \return `true` if the pointer in \p x is less than nullptr, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T, D>& x, std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return std::less<typename unique_ptr<T, D>::pointer>()(x.get(), nullptr); // x.get() < nullptr;
 }
@@ -1267,7 +1297,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<
  *  \return `true` if nullptr is less than the pointer in \p y, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t, const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return std::less<typename unique_ptr<T, D>::pointer>()(nullptr, y.get()); // nullptr < y.get();
 }
@@ -1278,7 +1308,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t, c
  *  \return `true` if the pointer in \p x is greater than nullptr, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T, D>& x, std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return nullptr < x;
 }
@@ -1289,7 +1319,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<
  *  \return `true` if nullptr is greater than the pointer in \p y, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t, const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return y < nullptr;
 }
@@ -1300,7 +1330,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t, c
  *  \return `true` if the pointer in \p x is less than or equal to nullptr, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T, D>& x, std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return !(nullptr < x);
 }
@@ -1311,7 +1341,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr
  *  \return `true` if nullptr is less than or equal to the pointer in \p y, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t, const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator<=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return !(y < nullptr);
 }
@@ -1322,7 +1352,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t, 
  *  \return `true` if the pointer in \p x is greater than or equal to nullptr, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T, D>& x, std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return !(x < nullptr);
 }
@@ -1333,12 +1363,12 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr
  *  \return `true` if nullptr is greater than or equal to the pointer in \p y, `false` otherwise.
  */
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return !(y < nullptr);
 }
 
-#if THRUST_STD_VER >= 20
+#if THRUST_CPP_DIALECT >= 2020
 template <class T, class D>
   THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
 {
@@ -1364,7 +1394,7 @@ template <class T, class D>
  *  \return A \p unique_ptr<T> managing the newly created object.
  */
 template <class T, class... Args, class = std::enable_if_t<!std::is_array_v<T>>>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&... args)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 unique_ptr<T> make_unique(Args&&... args)
 {
   thrust::device_ptr<T> p = thrust::device_malloc<T>(1);
   return unique_ptr<T>(thrust::device_new<T>(p, T(std::forward<Args>(args)...), 1));
@@ -1383,7 +1413,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&
  *  \return A \p unique_ptr<T> managing the newly created array.
  */
 template <class T, class = std::enable_if_t<thrust::detail::is_unbounded_array<T>::value>>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t n)
+THRUST_HOST inline THRUST_CONSTEXPR_CXX23 unique_ptr<T> make_unique(size_t n)
 {
   using U = typename std::remove_extent<T>::type;
   return unique_ptr<T>(thrust::device_new<U>(n), n);
@@ -1392,7 +1422,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t
 template <class T, class... Args, class = std::enable_if_t<thrust::detail::is_bounded_array<T>::value>>
 THRUST_HOST void make_unique(Args&&...) = delete;
 
-#if THRUST_STD_VER >= 20
+#if THRUST_CPP_DIALECT >= 2020
 
 /*! \brief Constructs an object of type \p T in device memory without initialization (C++20).
  *
@@ -1406,7 +1436,7 @@ THRUST_HOST void make_unique(Args&&...) = delete;
  *  \return A \p unique_ptr<T> managing the uninitialized memory.
  */
 template <class T, class = std::enable_if_t<!std::is_array_v<T>>>
-THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite()
+THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr<T> make_unique_for_overwrite()
 {
   return unique_ptr<T>(thrust::device_malloc<T>(1));
 }
@@ -1425,7 +1455,7 @@ THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite
  *  \return A \p unique_ptr<T> managing the uninitialized array.
  */
 template <class T, class = std::enable_if_t<thrust::detail::is_unbounded_array<T>::value>>
-THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite(size_t n)
+THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr<T> make_unique_for_overwrite(size_t n)
 {
   using U = typename std::remove_extent<T>::type;
 

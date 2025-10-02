@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -157,7 +164,7 @@ bool equal(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2);
  *
  *  struct compare_modulo_two
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x, int y) const
  *    {
  *      return (x % 2) == (y % 2);
@@ -211,7 +218,7 @@ equal(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *
  *  struct compare_modulo_two
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x, int y) const
  *    {
  *      return (x % 2) == (y % 2);

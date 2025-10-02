@@ -29,7 +29,6 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/normal_iterator.h>
-#include <thrust/sequence_access.h>
 
 THRUST_NAMESPACE_BEGIN
 

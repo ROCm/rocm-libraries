@@ -9,14 +9,33 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef THRUST_DETAIL_CONFIG_VISIBILITY_H
-#define THRUST_DETAIL_CONFIG_VISIBILITY_H
+#ifndef CONFIG_VISIBILITY_H
+#define CONFIG_VISIBILITY_H
 
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#  define THRUST_FORCEINLINE __forceinline
-#else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
-      // THRUST_HOST_COMPILER_MSVC vvv
-#  define THRUST_FORCEINLINE __inline__ __attribute__((__always_inline__))
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+// TODO(libhipcxx): remove this file and replace THRUST_FORCEINLINE with _CCCL_FORCEINLINE in rocThrust
+// once libhipcxx gets ready
 
-#endif // THRUST_DETAIL_CONFIG_VISIBILITY_H
+#include <thrust/detail/config/libcxx.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__cccl/visibility.h)
+// clang-format on
+
+#  define THRUST_FORCEINLINE _CCCL_FORCEINLINE
+
+#else
+
+#  include <thrust/detail/config/compiler.h>
+
+#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#    define THRUST_FORCEINLINE __forceinline
+#  else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
+        // THRUST_HOST_COMPILER_MSVC vvv
+#    define THRUST_FORCEINLINE __inline__ __attribute__((__always_inline__))
+#  endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+
+#endif
+
+#endif // CONFIG_VISIBILITY_H

@@ -40,18 +40,20 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_CPP_DIALECT >= 2014
 
-#  include <thrust/system/hip/config.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/advance.h>
-#  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/async/customization.h>
-#  include <thrust/system/hip/detail/parallel_for.h>
-#  include <thrust/system/hip/future.h>
+#    include <thrust/system/hip/config.h>
 
-#  include <type_traits>
+#    include <thrust/advance.h>
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/hip/detail/async/customization.h>
+#    include <thrust/system/hip/detail/parallel_for.h>
+#    include <thrust/system/hip/future.h>
+
+#    include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -131,4 +133,6 @@ auto async_transform(
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#endif

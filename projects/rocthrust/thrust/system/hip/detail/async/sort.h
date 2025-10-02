@@ -40,27 +40,29 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_CPP_DIALECT >= 2014
 
-#  include <thrust/system/hip/config.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/detail/alignment.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/async/copy.h>
-#  include <thrust/system/hip/detail/async/customization.h>
-#  include <thrust/system/hip/detail/sort.h>
-#  include <thrust/system/hip/future.h>
-#  include <thrust/type_traits/is_contiguous_iterator.h>
-#  include <thrust/type_traits/is_operator_less_or_greater_function_object.h>
-#  include <thrust/type_traits/is_trivially_relocatable.h>
-#  include <thrust/type_traits/logical_metafunctions.h>
+#    include <thrust/system/hip/config.h>
 
-#  include <type_traits>
+#    include <thrust/detail/alignment.h>
+#    include <thrust/detail/static_assert.h>
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/hip/detail/async/copy.h>
+#    include <thrust/system/hip/detail/async/customization.h>
+#    include <thrust/system/hip/detail/sort.h>
+#    include <thrust/system/hip/future.h>
+#    include <thrust/type_traits/is_contiguous_iterator.h>
+#    include <thrust/type_traits/is_operator_less_or_greater_function_object.h>
+#    include <thrust/type_traits/is_trivially_relocatable.h>
+#    include <thrust/type_traits/logical_metafunctions.h>
+
+#    include <type_traits>
 
 // rocprim include
-#  include <rocprim/rocprim.hpp>
+#    include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -318,4 +320,6 @@ auto async_stable_sort(execution_policy<DerivedPolicy>& policy, ForwardIt first,
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#endif

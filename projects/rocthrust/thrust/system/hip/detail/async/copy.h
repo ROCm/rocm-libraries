@@ -41,24 +41,26 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_CPP_DIALECT >= 2014
 
-#  include <thrust/system/hip/config.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/advance.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/async/customization.h>
-#  include <thrust/system/hip/detail/async/transform.h>
-#  include <thrust/system/hip/detail/cross_system.h>
-#  include <thrust/system/hip/future.h>
-#  include <thrust/type_traits/is_contiguous_iterator.h>
-#  include <thrust/type_traits/is_trivially_relocatable.h>
-#  include <thrust/type_traits/logical_metafunctions.h>
-#  include <thrust/uninitialized_copy.h>
+#    include <thrust/system/hip/config.h>
 
-#  include <type_traits>
+#    include <thrust/advance.h>
+#    include <thrust/detail/static_assert.h>
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/hip/detail/async/customization.h>
+#    include <thrust/system/hip/detail/async/transform.h>
+#    include <thrust/system/hip/detail/cross_system.h>
+#    include <thrust/system/hip/future.h>
+#    include <thrust/type_traits/is_contiguous_iterator.h>
+#    include <thrust/type_traits/is_trivially_relocatable.h>
+#    include <thrust/type_traits/logical_metafunctions.h>
+#    include <thrust/uninitialized_copy.h>
+
+#    include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -353,4 +355,6 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#endif

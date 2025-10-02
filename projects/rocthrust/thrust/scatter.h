@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -304,7 +311,7 @@ void scatter_if(
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
  * `[stencil,stencil + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
@@ -318,7 +325,7 @@ void scatter_if(
  *
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return (x % 2) == 0;
@@ -397,7 +404,7 @@ THRUST_HOST_DEVICE void scatter_if(
  *
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return (x % 2) == 0;

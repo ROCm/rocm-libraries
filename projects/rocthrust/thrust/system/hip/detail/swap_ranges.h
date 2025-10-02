@@ -44,6 +44,10 @@
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/transform.h>
 
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+#    include _THRUST_STD_INCLUDE(utility)
+#  endif
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
@@ -75,12 +79,16 @@ struct swap_f
     // TODO(bgruber): this should probably use _THRUST_STD::iter_swap(items1 + idx, items2 + idx);
     value1_type item1 = items1[idx];
     value2_type item2 = items2[idx];
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+    using _THRUST_STD::swap;
+#  else
     // XXX thrust::swap is buggy
     // if reference_type of ItemIt1/ItemsIt2
     // is a proxy reference, then KABOOM!
     // to avoid this, just copy the value first before swap
     // *todo* specialize on real & proxy references
     using thrust::swap;
+#  endif
     swap(item1, item2);
     items1[idx] = item1;
     items2[idx] = item2;

@@ -57,7 +57,7 @@ public:
       : alloc(alloc_)
   {}
 
-  THRUST_HOST_DEVICE _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
+  _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
   {
     return alloc;
   }

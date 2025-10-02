@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include <thrust/detail/config/config.h>
+
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
@@ -30,6 +32,72 @@
 #endif // no system header
 
 #include <thrust/detail/config/compiler.h> // IWYU pragma: export
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+
+// Deprecation warnings may be silenced by defining the following macros. These
+// may be combined.
+// - CCCL_IGNORE_DEPRECATED_CPP_DIALECT:
+//   Ignore all deprecated C++ dialects and outdated compilers.
+// - CCCL_IGNORE_DEPRECATED_CPP_11:
+//   Ignore deprecation warnings when compiling with C++11. C++03 and outdated
+//   compilers will still issue warnings.
+// - CCCL_IGNORE_DEPRECATED_CPP_14:
+//   Ignore deprecation warnings when compiling with C++14. C++03 and outdated
+//   compilers will still issue warnings.
+// - CCCL_IGNORE_DEPRECATED_COMPILER
+//   Ignore deprecation warnings when using deprecated compilers. Compiling
+//   with C++03, C++11 and C++14 will still issue warnings.
+
+#  define THRUST_CPP_DIALECT _CCCL_STD_VER
+
+// Define THRUST_COMPILER_DEPRECATION macro:
+#  if _CCCL_COMPILER(MSVC)
+#    define THRUST_COMP_DEPR_IMPL(msg) _CCCL_PRAGMA(message(__FILE__ ":" _CCCL_TO_STRING(__LINE__) ": warning: " #msg))
+#  else // clang / gcc:
+#    define THRUST_COMP_DEPR_IMPL(msg) _CCCL_PRAGMA(GCC warning #msg)
+#  endif
+
+// clang-format off
+#  define THRUST_COMPILER_DEPRECATION(REQ) \
+    THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define CCCL_IGNORE_DEPRECATED_COMPILER to suppress this message.)
+
+#  define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                        \
+    THRUST_COMP_DEPR_IMPL(                                                                                  \
+      Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a \
+        future release. Define CCCL_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+// clang-format on
+
+#  ifndef CCCL_IGNORE_DEPRECATED_COMPILER
+
+// Compiler checks:
+#    if _CCCL_COMPILER(GCC, <, 5)
+THRUST_COMPILER_DEPRECATION(GCC 5.0);
+#    elif _CCCL_COMPILER(CLANG, <, 7)
+THRUST_COMPILER_DEPRECATION(Clang 7.0);
+#    elif _CCCL_COMPILER(MSVC, <, 19, 10)
+// <2017. Hard upgrade message:
+THRUST_COMPILER_DEPRECATION(MSVC 2019(19.20 / 16.0 / 14.20));
+#    elif _CCCL_COMPILER(MSVC2017)
+// >=2017, <2019. Soft deprecation message:
+THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019(19.20 / 16.0 / 14.20), MSVC 2017);
+#    endif
+
+#  endif // CCCL_IGNORE_DEPRECATED_COMPILER
+
+#  if _CCCL_STD_VER < 2011
+// <C++11. Hard upgrade message:
+THRUST_COMPILER_DEPRECATION(C++ 17);
+#  elif _CCCL_STD_VER == 2011 && !defined(CCCL_IGNORE_DEPRECATED_CPP_11)
+// =C++11. Soft upgrade message:
+THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 11);
+#  elif _CCCL_STD_VER == 2014 && !defined(CCCL_IGNORE_DEPRECATED_CPP_14)
+// =C++14. Soft upgrade message:
+THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 14);
+#  endif // _CCCL_STD_VER >= 2017
+
+#else // TODO(libhipcxx): remove the code in this path and replace THRUST_CPP_DIALECT with _CCCL_STD_VER in rocThrust
+      // once libhipcxx gets ready
 
 // Deprecation warnings may be silenced by defining the following macros. These
 // may be combined.
@@ -45,142 +113,112 @@
 //   Ignore deprecation warnings when using deprecated compilers. Compiling
 //   with C++03, C++11 and C++14 will still issue warnings.
 
-// Define this to override the built-in detection.
-#ifndef THRUST_CPP_DIALECT
-
-// MSVC does not define __cplusplus correctly. _MSVC_LANG is used instead.
-// This macro is only defined in MSVC 2015U3+.
-#  if defined(_MSVC_LANG) && !defined(__HIP__) // Do not replace with THRUST_HOST_COMPILER test (see above)
-// MSVC2015 reports C++14 but lacks extended constexpr support. Treat as C++11.
-#    if THRUST_MSVC_VERSION < 1910 && _MSVC_LANG > 201103L /* MSVC < 2017 && CPP > 2011 */
-#      define THRUST_CPLUSPLUS 201103L /* Fix to 2011 */
-#    elif _MSVC_LANG <= 201103L
-#      define THRUST_CPLUSPLUS 201103L
-#    elif _MSVC_LANG > 202002L
-#      define THRUST_CPLUSPLUS 202302L
+#  if defined(_MSVC_LANG)
+#    if _MSVC_LANG <= 201103L
+#      define THRUST_CPP_DIALECT 2011
+#    elif _MSVC_LANG <= 201402L
+#      define THRUST_CPP_DIALECT 2014
+#    elif _MSVC_LANG <= 201703L
+#      define THRUST_CPP_DIALECT 2017
+#    elif _MSVC_LANG <= 202002L
+#      define THRUST_CPP_DIALECT 2020
 #    else
-#      define THRUST_CPLUSPLUS _MSVC_LANG /* We'll trust this for now. */
-#    endif // MSVC 2015 C++14 fix
-#  else
-#    define THRUST_CPLUSPLUS __cplusplus
-#  endif
-
-// Detect current dialect:
-#  if THRUST_CPLUSPLUS <= 199711L
-#    define THRUST_CPP_DIALECT 2003
-#  elif THRUST_CPLUSPLUS <= 201103L
-#    define THRUST_CPP_DIALECT 2011
-#  elif THRUST_CPLUSPLUS <= 201402L
-#    define THRUST_CPP_DIALECT 2014
-#  elif THRUST_CPLUSPLUS <= 201703L
-#    define THRUST_CPP_DIALECT 2017
-#  elif THRUST_CPLUSPLUS <= 202002L
-#    define THRUST_CPP_DIALECT 2020
-#  elif THRUST_CPLUSPLUS <= 202302L
-#    define THRUST_CPP_DIALECT 2023
-#  else
-#    define THRUST_CPP_DIALECT 2024 // current year, or date of c++2c ratification
-#  endif
-
-#  undef THRUST_CPLUSPLUS // cleanup
-
-#endif // !THRUST_CPP_DIALECT
+#      define THRUST_CPP_DIALECT 2023 // current year, or date of c++2b ratification
+#    endif
+#  else // ^^^ defined(_MSVC_LANG) ^^^ / vvv !defined(_MSVC_LANG) vvv
+#    if __cplusplus <= 199711L
+#      define THRUST_CPP_DIALECT 2003
+#    elif __cplusplus <= 201103L
+#      define THRUST_CPP_DIALECT 2011
+#    elif __cplusplus <= 201402L
+#      define THRUST_CPP_DIALECT 2014
+#    elif __cplusplus <= 201703L
+#      define THRUST_CPP_DIALECT 2017
+#    elif __cplusplus <= 202002L
+#      define THRUST_CPP_DIALECT 2020
+#    elif __cplusplus <= 202302L
+#      define THRUST_CPP_DIALECT 2023
+#    else
+#      define THRUST_CPP_DIALECT 2024 // current year, or date of c++2c ratification
+#    endif
+#  endif // !defined(_MSVC_LANG)
 
 // Macros to suppress deprecation compiler warnings, from "deprecated.h"
-// TODO: These macros start with `LIBCUDACXX`. So, when libhipcxx is
-// available in this scope, we should remove these macros and use the ones
-// from libhipcxx.
 // Check for deprecation opt-outs
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT) || defined(CCCL_IGNORE_DEPRECATED_CPP_DIALECT) \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
-#    define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
-#  endif
-#endif // suppress all dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(CCCL_IGNORE_DEPRECATED_CPP_14) \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
-#    define THRUST_IGNORE_DEPRECATED_CPP_14
-#  endif
-#endif // suppress all c++14 dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(CCCL_IGNORE_DEPRECATED_CPP_11)  \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
-  || defined(THRUST_IGNORE_DEPRECATED_CPP_14)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
-#    define THRUST_IGNORE_DEPRECATED_CPP_11
-#  endif
-#endif // suppress all c++11 dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_COMPILER) || defined(CCCL_IGNORE_DEPRECATED_COMPILER) \
-  || defined(CUB_IGNORE_DEPRECATED_COMPILER) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)  \
-  || defined(THRUST_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_11)
-#  if !defined(THRUST_IGNORE_DEPRECATED_COMPILER)
-#    define THRUST_IGNORE_DEPRECATED_COMPILER
-#  endif
-#endif // suppress all compiler deprecation warnings
-
-// Constexpr feature macros:
-#if THRUST_CPP_DIALECT >= 2023
-#    define THRUST_CONSTEXPR_SINCE_CXX23 constexpr
-#else
-#    define THRUST_CONSTEXPR_SINCE_CXX23
-#endif
-
-#if THRUST_CPP_DIALECT >= 2020
-#    define THRUST_CONSTEXPR_SINCE_CXX20 constexpr
-#else
-#    define THRUST_CONSTEXPR_SINCE_CXX20
-#endif
-
-#if THRUST_CPP_DIALECT >= 2017
-#    define THRUST_CONSTEXPR_SINCE_CXX17 constexpr
-#else
-#    define THRUST_CONSTEXPR_SINCE_CXX17
-#endif
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT) || defined(CCCL_IGNORE_DEPRECATED_CPP_DIALECT) \
+    || defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
+#    if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+#      define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
+#    endif
+#  endif // suppress all dialect deprecation warnings
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(CCCL_IGNORE_DEPRECATED_CPP_14) \
+    || defined(CUB_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+#    if !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#      define THRUST_IGNORE_DEPRECATED_CPP_14
+#    endif
+#  endif // suppress all c++14 dialect deprecation warnings
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(CCCL_IGNORE_DEPRECATED_CPP_11)  \
+    || defined(CUB_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
+    || defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#    if !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
+#      define THRUST_IGNORE_DEPRECATED_CPP_11
+#    endif
+#  endif // suppress all c++11 dialect deprecation warnings
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_COMPILER) || defined(CCCL_IGNORE_DEPRECATED_COMPILER) \
+    || defined(CUB_IGNORE_DEPRECATED_COMPILER) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)  \
+    || defined(THRUST_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_11)
+#    if !defined(THRUST_IGNORE_DEPRECATED_COMPILER)
+#      define THRUST_IGNORE_DEPRECATED_COMPILER
+#    endif
+#  endif // suppress all compiler deprecation warnings
 
 // Define THRUST_COMPILER_DEPRECATION macro:
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " #msg))
-#else // clang / gcc:
-#  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(GCC warning #msg)
-#endif
-
-// clang-format off
-#define THRUST_COMPILER_DEPRECATION(REQ) \
-  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
-
-#define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                        \
-  THRUST_COMP_DEPR_IMPL(                                                                                  \
-    Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a \
-      future release. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
-// clang-format on
-
-#ifndef THRUST_IGNORE_DEPRECATED_COMPILER
-
-// Compiler checks:
-#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION < 50000
-THRUST_COMPILER_DEPRECATION(GCC 5.0);
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && THRUST_CLANG_VERSION < 70000
-THRUST_COMPILER_DEPRECATION(Clang 7.0);
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1910
-// <2017. Hard upgrade message:
-THRUST_COMPILER_DEPRECATION(MSVC 2019(19.20 / 16.0 / 14.20));
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1920
-// >=2017, <2019. Soft deprecation message:
-THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019(19.20 / 16.0 / 14.20), MSVC 2017);
+#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#    define THRUST_COMP_DEPR_IMPL(msg) \
+      THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " #msg))
+#  else // clang / gcc:
+#    define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(GCC warning #msg)
 #  endif
 
-#endif // THRUST_IGNORE_DEPRECATED_COMPILER
+// clang-format off
+#  define THRUST_COMPILER_DEPRECATION(REQ) \
+    THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
 
-#if THRUST_CPP_DIALECT < 2011
+#  define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                        \
+    THRUST_COMP_DEPR_IMPL(                                                                                  \
+      Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a \
+        future release. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+// clang-format on
+
+#  ifndef THRUST_IGNORE_DEPRECATED_COMPILER
+
+// Compiler checks:
+#    if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION < 50000
+THRUST_COMPILER_DEPRECATION(GCC 5.0);
+#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && THRUST_CLANG_VERSION < 70000
+THRUST_COMPILER_DEPRECATION(Clang 7.0);
+#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1910
+// <2017. Hard upgrade message:
+THRUST_COMPILER_DEPRECATION(MSVC 2019(19.20 / 16.0 / 14.20));
+#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1920
+// >=2017, <2019. Soft deprecation message:
+THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019(19.20 / 16.0 / 14.20), MSVC 2017);
+#    endif
+
+#  endif // THRUST_IGNORE_DEPRECATED_COMPILER
+
+#  if THRUST_CPP_DIALECT < 2011
 // <C++11. Hard upgrade message:
 THRUST_COMPILER_DEPRECATION(C++ 17);
-#elif THRUST_CPP_DIALECT == 2011 && !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
+#  elif THRUST_CPP_DIALECT == 2011 && !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
 // =C++11. Soft upgrade message:
 THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 11);
-#elif THRUST_CPP_DIALECT == 2014 && !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#  elif THRUST_CPP_DIALECT == 2014 && !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
 // =C++14. Soft upgrade message:
 THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 14);
-#endif // THRUST_CPP_DIALECT < 2011
+#  endif // THRUST_CPP_DIALECT < 2011
+
+#endif
 
 #undef THRUST_COMPILER_DEPRECATION_SOFT
 #undef THRUST_COMPILER_DEPRECATION

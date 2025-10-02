@@ -38,20 +38,21 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(functional)
+#  include <functional>
 #else
 #  include <utility>
 #endif
 
-/*! \cond
- */
+// TODO(libhipcxx): remove this namespace once libhipcxx gets ready
+#ifndef THRUST_DOXYGEN_INVOKED
 namespace internal
 {
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
 using _THRUST_LIBCXX::maximum;
 using _THRUST_LIBCXX::minimum;
 using identity = _THRUST_STD::__identity;
-#else
+#  else
 // cuda::maximum or hip::maximum
 template <typename T = void>
 struct maximum
@@ -111,11 +112,10 @@ struct identity
 
   using is_transparent = void;
 };
-#endif
+#  endif
 
 } // namespace internal
-/*! \endcond
- */
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -290,19 +290,19 @@ struct plus : public _THRUST_STD::plus<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end plus
 
 /*! \p minus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -346,19 +346,19 @@ struct minus : public _THRUST_STD::minus<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end minus
 
 /*! \p multiplies is a function object. Specifically, it is an Adaptable Binary Function.
@@ -402,19 +402,19 @@ struct multiplies : public _THRUST_STD::multiplies<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end multiplies
 
 /*! \p divides is a function object. Specifically, it is an Adaptable Binary Function.
@@ -458,19 +458,19 @@ struct divides : public _THRUST_STD::divides<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end divides
 
 /*! \p modulus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -514,19 +514,19 @@ struct modulus : public _THRUST_STD::modulus<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end modulus
 
 /*! \p negate is a function object. Specifically, it is an Adaptable Unary Function.
@@ -566,12 +566,12 @@ struct negate : _THRUST_STD::negate<T>
   /*! \typedef argument_type
    *  \brief The type of the function object's argument.
    */
-  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end negate
 
 /*! \p square is a function object. Specifically, it is an Adaptable Unary Function.
@@ -610,12 +610,12 @@ struct square
   /*! \typedef argument_type
    *  \brief The type of the function object's argument.
    */
-  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! Function call operator. The return value is <tt>x*x</tt>.
    */
@@ -670,19 +670,19 @@ struct equal_to : public _THRUST_STD::equal_to<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end equal_to
 
 /*! \p not_equal_to is a function object. Specifically, it is an Adaptable Binary
@@ -704,19 +704,19 @@ struct not_equal_to : public _THRUST_STD::not_equal_to<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end not_equal_to
 
 /*! \p greater is a function object. Specifically, it is an Adaptable Binary
@@ -738,19 +738,19 @@ struct greater : public _THRUST_STD::greater<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end greater
 
 /*! \p less is a function object. Specifically, it is an Adaptable Binary
@@ -772,19 +772,19 @@ struct less : public _THRUST_STD::less<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end less
 
 /*! \p greater_equal is a function object. Specifically, it is an Adaptable Binary
@@ -806,19 +806,19 @@ struct greater_equal : public _THRUST_STD::greater_equal<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end greater_equal
 
 /*! \p less_equal is a function object. Specifically, it is an Adaptable Binary
@@ -840,19 +840,19 @@ struct less_equal : public _THRUST_STD::less_equal<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end less_equal
 
 /*! \}
@@ -881,19 +881,19 @@ struct logical_and : public _THRUST_STD::logical_and<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end logical_and
 
 /*! \p logical_or is a function object. Specifically, it is an Adaptable Binary Predicate,
@@ -914,19 +914,19 @@ struct logical_or : public _THRUST_STD::logical_or<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end logical_or
 
 /*! \p logical_not is a function object. Specifically, it is an Adaptable Predicate,
@@ -961,19 +961,19 @@ struct logical_not : public _THRUST_STD::logical_not<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end logical_not
 
 /*! \}
@@ -1024,19 +1024,19 @@ struct bit_and : public _THRUST_STD::bit_and<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end bit_and
 
 /*! \p bit_or is a function object. Specifically, it is an Adaptable Binary Function.
@@ -1079,19 +1079,19 @@ struct bit_or : public _THRUST_STD::bit_or<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end bit_or
 
 /*! \p bit_xor is a function object. Specifically, it is an Adaptable Binary Function.
@@ -1134,19 +1134,19 @@ struct bit_xor : public _THRUST_STD::bit_xor<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end bit_xor
 
 /*! \}
@@ -1184,12 +1184,12 @@ struct identity
   /*! \typedef argument_type
    *  \brief The type of the function object's first argument.
    */
-  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! Function call operator. The return value is <tt>x</tt>.
    */
@@ -1255,19 +1255,19 @@ struct maximum : ::internal::maximum<T>
    *  \brief The type of the function object's first argument.
    *  deprecated [Since 2.6]
    */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
    *  deprecated [Since 2.6]
    */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    *  deprecated [Since 2.6]
    */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
+  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
 }; // end maximum
 
 /*! \p minimum is a function object that takes two arguments and returns the lesser
@@ -1372,6 +1372,7 @@ struct project1st<void, void>
   /// Indicate that this functor is transparent: it accepts any argument that can be
   /// converted to the required type, and uses perfect forwarding.
   using is_transparent = void;
+
   /// \brief Invocation operator - returns its first argument.
   THRUST_EXEC_CHECK_DISABLE
   template <typename T1, typename T2>
@@ -1437,6 +1438,7 @@ struct project2nd<void, void>
   /// Indicate that this functor is transparent: it accepts any argument that can be
   /// converted to the required type, and uses perfect forwarding.
   using is_transparent = void;
+
   /// \brief Invocation operator - returns its second argument.
   THRUST_EXEC_CHECK_DISABLE
   template <typename T1, typename T2>

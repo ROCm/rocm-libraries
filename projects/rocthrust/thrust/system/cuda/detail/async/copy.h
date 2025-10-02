@@ -40,7 +40,7 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if _CCCL_STD_VER >= 2017
+#if _CCCL_STD_VER >= 2014
 
 #  if _CCCL_HAS_CUDA_COMPILER
 

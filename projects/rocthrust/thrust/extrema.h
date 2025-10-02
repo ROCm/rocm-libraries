@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/pair.h>
 
@@ -51,7 +58,7 @@ THRUST_NAMESPACE_BEGIN
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -125,7 +132,7 @@ THRUST_HOST_DEVICE T min THRUST_PREVENT_MACRO_SUBSTITUTION(const T& lhs, const T
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -302,7 +309,7 @@ ForwardIterator min_element(ForwardIterator first, ForwardIterator last);
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -364,7 +371,7 @@ THRUST_HOST_DEVICE ForwardIterator min_element(
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -504,7 +511,7 @@ ForwardIterator max_element(ForwardIterator first, ForwardIterator last);
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -566,7 +573,7 @@ THRUST_HOST_DEVICE ForwardIterator max_element(
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -696,7 +703,7 @@ thrust::pair<ForwardIterator, ForwardIterator> minmax_element(ForwardIterator fi
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;
@@ -757,7 +764,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> minmax_element
  *
  *  struct compare_key_value
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(key_value lhs, key_value rhs)
  *    {
  *      return lhs.key < rhs.key;

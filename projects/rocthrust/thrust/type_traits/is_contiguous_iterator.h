@@ -38,9 +38,6 @@
 #include <iterator>
 #include <type_traits>
 #include <utility>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER < 1916 // MSVC 2017 version 15.9
 #  include <array>
@@ -89,6 +86,7 @@ struct is_contiguous_iterator_impl;
 template <typename Iterator>
 using is_contiguous_iterator = detail::is_contiguous_iterator_impl<Iterator>;
 
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c Iterator satisfies
  *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
  *  aka it points to elements that are contiguous in memory, and \c false
@@ -100,6 +98,7 @@ using is_contiguous_iterator = detail::is_contiguous_iterator_impl<Iterator>;
  */
 template <typename Iterator>
 constexpr bool is_contiguous_iterator_v = is_contiguous_iterator<Iterator>::value;
+#endif
 
 /*! \brief Customization point that can be customized to indicate that an
  *  iterator type \c Iterator satisfies
@@ -160,6 +159,7 @@ struct is_libstdcxx_normal_iterator<::__gnu_cxx::__normal_iterator<Iterator, Con
 {};
 #endif
 
+// Use defined(_MSC_VER) due to Windows CI failures
 #if defined(_MSC_VER) && _MSC_VER >= 1916 // MSVC 2017 version 15.9.
 template <typename Iterator>
 struct is_msvc_contiguous_iterator : _THRUST_STD::is_pointer<::std::_Unwrapped_t<Iterator>>
@@ -193,9 +193,11 @@ template <typename T, std::size_t N>
 struct is_msvc_contiguous_iterator<::std::_Array_iterator<T, N>> : true_type
 {};
 
+#  if THRUST_CPP_DIALECT >= 2017
 template <typename Traits>
 struct is_msvc_contiguous_iterator<::std::_String_view_iterator<Traits>> : true_type
 {};
+#  endif
 #else
 template <typename Iterator>
 struct is_msvc_contiguous_iterator : false_type

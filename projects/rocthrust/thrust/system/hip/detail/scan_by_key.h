@@ -39,13 +39,19 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
+#  include <thrust/system/hip/config.h>
+
 #  include <thrust/detail/minmax.h>
 #  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
+#  include <thrust/functional.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
-#  include <thrust/system/hip/execution_policy.h>
+#  include <thrust/type_traits/is_contiguous_iterator.h>
 
 #  include <cstdint>
 
@@ -392,11 +398,10 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
-#  else
-  return workaround::seq(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
-#  endif
+
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);),
+    (return workaround::seq(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);));
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class BinaryPred>
@@ -473,11 +478,9 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
-#  else
-  return workaround::seq(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
-#  endif
+  THRUST_CDP_DISPATCH(
+    (return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);),
+    (return workaround::seq(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);));
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init, class BinaryPred>

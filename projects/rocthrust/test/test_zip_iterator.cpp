@@ -22,11 +22,11 @@
 #include <thrust/transform.h>
 #include <thrust/universal_vector.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(type_traits)
 
 using ZipIteratorTests32BitParams = ::testing::Types<Params<int>, Params<unsigned int>, Params<float>>;
 

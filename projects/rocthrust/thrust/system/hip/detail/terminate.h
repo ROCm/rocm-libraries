@@ -30,6 +30,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/hip/detail/util.h>
 
 #include <cstdio>
@@ -42,12 +49,12 @@ namespace hip
 namespace detail
 {
 
-void THRUST_HIP_DEVICE_FUNCTION terminate()
+inline THRUST_DEVICE void terminate()
 {
   thrust::hip_rocprim::terminate();
 }
 
-void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
+inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
   THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0

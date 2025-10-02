@@ -38,7 +38,7 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if _CCCL_STD_VER >= 2017
+#if _CCCL_STD_VER >= 2014
 
 #  if _CCCL_HAS_CUDA_COMPILER
 
@@ -160,4 +160,4 @@ THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER
 
-#endif // C++17
+#endif // C++14

@@ -26,7 +26,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/config.h>
 #include <thrust/system/cuda/config.h>
 
 #include <thrust/detail/malloc_and_free.h>

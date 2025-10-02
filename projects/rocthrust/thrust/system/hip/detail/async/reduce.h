@@ -42,21 +42,23 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_CPP_DIALECT >= 2014
 
-#  include <thrust/system/hip/config.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/async/customization.h>
-#  include <thrust/system/hip/detail/reduce.h>
-#  include <thrust/system/hip/future.h>
-#  include <thrust/type_traits/remove_cvref.h>
+#    include <thrust/system/hip/config.h>
 
-#  include <type_traits> // IWYU pragma: export
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/hip/detail/async/customization.h>
+#    include <thrust/system/hip/detail/reduce.h>
+#    include <thrust/system/hip/future.h>
+#    include <thrust/type_traits/remove_cvref.h>
+
+#    include <type_traits>
 
 // rocprim include
-#  include <rocprim/rocprim.hpp>
+#    include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -245,4 +247,6 @@ auto async_reduce_into(
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#endif

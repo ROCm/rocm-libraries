@@ -18,8 +18,16 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/iterator/reverse_iterator.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/iterator/reverse_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -27,64 +35,51 @@ namespace detail
 {
 
 THRUST_EXEC_CHECK_DISABLE
-template<typename Iterator>
-  THRUST_HOST_DEVICE
-  Iterator prior(Iterator x)
+template <typename Iterator>
+THRUST_HOST_DEVICE Iterator prior(Iterator x)
 {
   return --x;
 } // end prior()
 
-} // end detail
+} // namespace detail
 
-template<typename BidirectionalIterator>
-  THRUST_HOST_DEVICE
-  typename reverse_iterator<BidirectionalIterator>::super_t::reference
-    reverse_iterator<BidirectionalIterator>
-      ::dereference() const
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE typename reverse_iterator<BidirectionalIterator>::super_t::reference
+reverse_iterator<BidirectionalIterator>::dereference() const
 {
   return *thrust::detail::prior(this->base());
 } // end reverse_iterator::increment()
 
-template<typename BidirectionalIterator>
-  THRUST_HOST_DEVICE
-  void reverse_iterator<BidirectionalIterator>
-    ::increment()
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE void reverse_iterator<BidirectionalIterator>::increment()
 {
   --this->base_reference();
 } // end reverse_iterator::increment()
 
-template<typename BidirectionalIterator>
-  THRUST_HOST_DEVICE
-  void reverse_iterator<BidirectionalIterator>
-    ::decrement()
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE void reverse_iterator<BidirectionalIterator>::decrement()
 {
   ++this->base_reference();
 } // end reverse_iterator::decrement()
 
-template<typename BidirectionalIterator>
-  THRUST_HOST_DEVICE
-  void reverse_iterator<BidirectionalIterator>
-    ::advance(typename super_t::difference_type n)
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE void reverse_iterator<BidirectionalIterator>::advance(typename super_t::difference_type n)
 {
   this->base_reference() += -n;
 } // end reverse_iterator::advance()
 
-template<typename BidirectionalIterator>
-  template<typename OtherBidirectionalIterator>
-    THRUST_HOST_DEVICE
-    typename reverse_iterator<BidirectionalIterator>::super_t::difference_type
-      reverse_iterator<BidirectionalIterator>
-        ::distance_to(reverse_iterator<OtherBidirectionalIterator> const &y) const
+template <typename BidirectionalIterator>
+template <typename OtherBidirectionalIterator>
+THRUST_HOST_DEVICE typename reverse_iterator<BidirectionalIterator>::super_t::difference_type
+reverse_iterator<BidirectionalIterator>::distance_to(reverse_iterator<OtherBidirectionalIterator> const& y) const
 {
   return this->base_reference() - y.base();
 } // end reverse_iterator::distance_to()
 
-template<typename BidirectionalIterator>
-THRUST_HOST_DEVICE
-reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalIterator x)
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalIterator x)
 {
   return reverse_iterator<BidirectionalIterator>(x);
 } // end make_reverse_iterator()
-
 
 THRUST_NAMESPACE_END
