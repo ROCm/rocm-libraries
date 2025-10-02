@@ -302,8 +302,7 @@ protected:
 
         runCpuBatchnormBwd(cpuTensorBundle);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance,
-                                                             tolerance);
+        CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
                                               graphTensorBundle.dxTensor.memory()));
 

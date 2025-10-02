@@ -126,8 +126,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 
-        auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
-            tolerance, tolerance);
+        auto dxValidator
+            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
         auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 

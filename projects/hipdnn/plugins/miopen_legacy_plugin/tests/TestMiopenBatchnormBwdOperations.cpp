@@ -170,8 +170,7 @@ protected:
                                                                                dscaleTensorCpu,
                                                                                dbiasTensorCpu);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidationInput(
-            tolerance, tolerance);
+        CpuFpReferenceValidation<InputType> cpuRefValidationInput(tolerance, tolerance);
         CpuFpReferenceValidation<IntermediateType> cpuRefValidationIntermediate(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 

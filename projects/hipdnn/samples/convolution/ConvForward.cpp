@@ -114,8 +114,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
 
-        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(
-            tolerance, tolerance);
+        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool yValid = yValidator.allClose(yRefTensor.memory(), yTensor.memory());
 

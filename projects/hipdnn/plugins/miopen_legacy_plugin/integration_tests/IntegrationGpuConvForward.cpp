@@ -183,8 +183,7 @@ protected:
 
         runCpuConvFwd(testCase, cpuTensorBundle);
 
-        CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance,
-                                                            tolerance);
+        CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
                                               graphTensorBundle.yTensor.memory()));
     }

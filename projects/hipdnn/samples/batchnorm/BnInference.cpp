@@ -117,8 +117,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
             batchnormFwdInference(
                 xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, yRefTensor, epsilon);
 
-        auto validator = test_utilities::CpuFpReferenceValidation<InputType>(
-            tolerance, tolerance);
+        auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool yValid = validator.allClose(yRefTensor.memory(), yTensor.memory());
 
