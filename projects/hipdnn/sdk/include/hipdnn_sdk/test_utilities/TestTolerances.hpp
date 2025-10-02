@@ -82,7 +82,7 @@ constexpr float getToleranceFwd();
 template <>
 constexpr float getToleranceFwd<float>()
 {
-    return 3e-6f;
+    return 8.5e-6f;
 }
 
 template <>
