@@ -190,6 +190,7 @@ void ComputeTileLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            1,
                                                                             numActiveCUs,
                                                                             splittingFactor);
 
@@ -236,6 +237,7 @@ void ComputeWaveLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            1,
                                                                             numActiveCUs,
                                                                             splittingFactor);
     auto   wave_latency = origami::compute_wave_latency(hardware,
