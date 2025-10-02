@@ -17,7 +17,7 @@ hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 set(_hipdnn_sdk_local_export_targets)
 set(_hipdnn_sdk_local_export_includes)
 if(TARGET FlatBuffers)
-    # Add alis if it doesn't already exist
+    # Add alias if it doesn't already exist
     if(NOT TARGET flatbuffers::flatbuffers)
         add_library(flatbuffers::flatbuffers ALIAS FlatBuffers)
     endif()
@@ -42,7 +42,7 @@ if(TARGET FlatBuffers)
 endif()
 
 if(TARGET spdlog_header_only)
-    # Add alis if it doesn't already exist
+    # Add alias if it doesn't already exist
     if(NOT TARGET spdlog::spdlog_header_only)
         add_library(spdlog::spdlog_header_only ALIAS spdlog_header_only)
     endif()
@@ -56,7 +56,7 @@ if(TARGET spdlog_header_only)
 endif()
 
 if(TARGET nlohmann_json)
-    # Add alis if it doesn't already exist
+    # Add alias if it doesn't already exist
     if(TARGET nlohmann_json AND NOT TARGET nlohmann_json::nlohmann_json)
         add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
     endif()

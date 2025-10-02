@@ -3,7 +3,7 @@
 
 @PACKAGE_INIT@
 
-#include(CMakeFindDependencyMacro)
+include(CMakeFindDependencyMacro)
 
 find_dependency(flatbuffers REQUIRED)
 find_dependency(spdlog REQUIRED)
