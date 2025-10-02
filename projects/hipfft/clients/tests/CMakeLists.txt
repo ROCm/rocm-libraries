@@ -57,8 +57,52 @@ find_package( Boost REQUIRED)
 
 set( Boost_USE_STATIC_LIBS OFF )
 
+# searching FFTW with FindFFTW.cmake that is provided by project
+# because distro versions of FFTW does not include the cmake specific
+# helper files
+find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
+if( FFTW_FOUND )
+  message(STATUS "FFTW found by FindFFTW.cmake")
+else()
+  # searching fftw versions build from source code which contain
+  # cmake helper files like FFTW3Config.cmake
+  find_package(FFTW3 CONFIG QUIET )
+  find_package(FFTW3f CONFIG QUIET )
+  if( FFTW3_FOUND AND FFTW3f_FOUND )
+    message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+    get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+    get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
 
-find_package( FFTW 3.0 REQUIRED MODULE COMPONENTS FLOAT DOUBLE )
+    # Look for omp (preferred) or thread libraries. These are not a
+    # hard requirement, but are nice to have to make FFTW run faster.
+    # To simplify the testing, we will not accept a mixed combination
+    # where FFTW is only build agauns the OMP library support and
+    # FFTWF is only build with the THREADS library support.
+    find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
+    find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
+    if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
+      list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
+      list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
+      set( FFTW_MULTITHREAD TRUE )
+    else()
+      find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
+      find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
+      if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
+        list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
+        list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
+        set( FFTW_MULTITHREAD TRUE )
+      endif()
+    endif()
+
+    set (FFTW_FOUND ${FFTW3_FOUND})
+    set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+    set (FFTW_LIBRARIES ${fftw3_libs} )
+    list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+  endif()
+endif()
+message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
+message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
+message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
 
 set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" )
 
@@ -310,6 +354,8 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipfft-coverage_*.profraw -o ./coverage-report/hipfft.profdata
     COMMAND ${LLVM_COV} report -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata
     COMMAND ${LLVM_COV} show -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+
 endif()
