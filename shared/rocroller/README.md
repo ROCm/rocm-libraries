@@ -50,7 +50,7 @@ setting common configurations a `CMakePresets.json` file is provided
 in the project root directory. Two presets are provided with the following
 options:
 
-1. opt-rocm (used to emulate current dev workflow)
+1. default:release (used to emulate current dev workflow)
   1. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
   2. ROCROLLER_ENABLE_FETCH: "ON"
   3. CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
@@ -70,7 +70,7 @@ options:
 One can use the presets as follows:
 
 ```
-cmake --preset opt-rocm -B build -S . <any additional cmake options>
+cmake --preset default:release -B build -S . <any additional cmake options>
 cmake --preset precheckin -B build -S . <any additional cmake options>
 ```
 
@@ -88,7 +88,7 @@ docker exec -ti -u ${USER} ${USER}_dev_clang bash
 cd /data
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
@@ -103,7 +103,7 @@ git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
 cd rocRoller
 mkdir -p build
 cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 

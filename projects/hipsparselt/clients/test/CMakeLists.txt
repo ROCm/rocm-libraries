@@ -1,16 +1,15 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 include(FetchGoogleTest)
 
-set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/gtest")
-
 set(TEST_SOURCES
-    "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest_main.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_test.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/prune_gtest.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/compress_gtest.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/spmm_gtest.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/prune_gtest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/compress_gtest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/spmm_gtest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp"
 )
 
 add_executable(hipsparselt-test ${TEST_SOURCES})
@@ -29,45 +28,54 @@ target_link_libraries(
 )
 hipsparselt_link_blas_libraries(hipsparselt-test)
 
-if(HIPSPARSELT_ENABLE_CUDA)
-  target_link_libraries(hipsparselt-test PRIVATE -llapack -lcblas)
-else()
-  target_link_libraries(hipsparselt-test PRIVATE lapack cblas)
-endif()
-
 if(NOT WIN32)
   target_link_libraries(hipsparselt-test PRIVATE -lm -lstdc++fs)
 
-  if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
-    target_link_libraries(hipsparselt-test PRIVATE -lgfortran lapack)
-  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
-    target_link_libraries(hipsparselt-test PRIVATE -lflang_rt.runtime lapack)
-  else()
-    target_link_libraries(hipsparselt-test PRIVATE -lgfortran lapack)
+  if(HIPSPARSELT_ENABLE_FORTRAN)
+    if(CMAKE_Fortran_COMPILER_ID MATCH "Flang")
+      target_link_libraries(hipsparselt-bench PRIVATE -lflang_rt.runtime lapack)
+    else()
+      target_link_libraries(hipsparselt-bench PRIVATE -lgfortran lapack)
+    endif()
   endif()
 endif()
 
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_common.yaml" COPYONLY
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_template.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_template.yaml" COPYONLY
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gentest.py" COPYONLY
+)
+
 set(hipsparselt_test_install_program
-    "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
 )
 set(hipsparselt_test_install_data_file "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gtest.data")
 set(hipsparselt_test_install_yaml_files)
 list(
   APPEND
   hipsparselt_test_install_yaml_files
-  "${_CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
-  "${_CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_template.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_template.yaml"
 )
 
 add_custom_command(
   OUTPUT "${hipsparselt_test_install_data_file}"
   COMMAND
     ${Python3_EXECUTABLE} "${hipsparselt_test_install_program}" -I
-    "${_CMAKE_CURRENT_SOURCE_DIR}/../include" "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
     -o "${hipsparselt_test_install_data_file}"
   DEPENDS ${hipsparselt_test_install_yaml_files}
-          "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
-  WORKING_DIRECTORY "${_CMAKE_CURRENT_SOURCE_DIR}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   COMMENT "Generating test data for hipsparselt-test"
 )
 
