@@ -1172,9 +1172,6 @@ static void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& len
                                                   Tcomplex*                  input_data,
                                                   const hipDeviceProp_t&     deviceProp)
 {
-    if(length[0] < 2)
-        return;
-
     auto blockSize = DATA_GEN_THREADS;
     auto blockDim  = generate_blockDim(length, blockSize);
     auto gridDim   = generate_hermitian_gridDim(length, batch, blockSize);
