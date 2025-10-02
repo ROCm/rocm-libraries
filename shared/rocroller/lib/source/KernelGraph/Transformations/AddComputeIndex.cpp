@@ -517,6 +517,38 @@ namespace rocRoller::KernelGraph
             auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
 
+            auto hasReceiveTileLoop = false;
+            if(maybeForLoop)
+            {
+                auto forLoopOp = kgraph.control.get<ForLoopOp>(maybeForLoop.value());
+                if(forLoopOp->loopName == rocRoller::RECEIVE)
+                    hasReceiveTileLoop = true;
+            }
+
+            if(hasReceiveTileLoop)
+            {
+                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
+                // std::cout << "AddComputeIndex:: hasReceiveTileLoop (operation, forLoop, isUniform, topOfLoop) "
+                // << candidate << ", "
+                // << *maybeForLoop << ", "
+                // << isUniformLoop << ", "
+                // << *maybeTopOfLoop << " "
+                // << std::endl;
+                log->debug("  staged as: hasReceiveTileLoop, location {}, {}",
+                           *maybeForLoop,
+                           *maybeTopOfLoop);
+
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeTopOfLoop,
+                           GD::Upstream,
+                           isDirect2LDS,
+                           -1,
+                           false);
+                return;
+            }
+
             if(hasForLoop && isUniformLoop)
             {
                 log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",

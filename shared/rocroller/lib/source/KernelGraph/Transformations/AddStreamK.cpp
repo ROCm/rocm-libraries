@@ -506,19 +506,22 @@ namespace rocRoller
          *     WaitZero()
          *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *     if receiveTileExpr:
-         *       if WG + 1 < numScratch:
-         *         do:
-         *           LoadSGPR(flag)
-         *         while flag == 0
-         *         partiallyAccumulatedTile = LoadTiled()
-         *         fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
-         *         WaitZero()
+         *       for (i = 0; i < numFixupsExpr; i++)
+         *          nextWG = WG + 1 + i
+         *          Assert nextWG < numScratch
+         *          do:
+         *          LoadSGPR(flag[nextWG])
+         *          while flag[nextWG] == 0
+         *          partiallyAccumulatedTile = LoadTiled()
+         *          fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
+         *          WaitZero()
          *
          * Note this also update all subsequent references to
          * localPartiallyAccumulatedTile to fullyAccumulatedTile.
          */
         RecvInfo receiveTile(KernelGraph&                           graph,
                              ExpressionPtr                          receiveTileExpr,
+                             ExpressionPtr                          numFixupsExpr,
                              int                                    scratchTileTag,
                              std::vector<DeferredConnection> const& loadConnections,
                              int                                    flagsScratchTag,
@@ -545,13 +548,18 @@ namespace rocRoller
             auto receiveTileTag
                 = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
 
+            // For loop that sums up all the partial result
+            auto [forLoopCoord, forLoopOp] = rangeFor(
+                graph, numFixupsExpr, rocRoller::RECEIVE, resultVariableType(numFixupsExpr));
+
             // Read flag
             auto plusOneTag    = graph.coordinates.addElement(Linear(one, one));
             auto setPlusOneTag = graph.control.addElement(SetCoordinate(one));
             graph.mapper.connect<Linear>(setPlusOneTag, plusOneTag);
 
             auto nextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
-            graph.coordinates.addElement(Split(), {nextWorkgroupTag}, {workgroup, plusOneTag});
+            graph.coordinates.addElement(
+                Split(), {nextWorkgroupTag}, {workgroup, plusOneTag, forLoopCoord});
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
@@ -559,9 +567,13 @@ namespace rocRoller
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
-            auto numScratch     = argInfo.numWGs;
+            auto numScratch = argInfo.numWGs;
+
             auto boundsCheckTag = graph.control.addElement(
-                ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
+                AssertOp{"Bounds Check", (DF(nextWorkgroupTag) < numScratch)});
+
+            // auto boundsCheckTag = graph.control.addElement(
+            //     ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
 
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
@@ -608,7 +620,12 @@ namespace rocRoller
             // Attach epilogue operations after the fixup
             auto epilogueYLoop = only(graph.control.findNodes(
                 epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
+            auto epilogueXLoop = only(graph.control.findNodes(
+                epilogueOperations, makeFindLoopPredicate(graph, rocRoller::XLOOP)));
             AssertFatal(epilogueYLoop, "Must have exactly one Y loop in the epilogue");
+            AssertFatal(epilogueXLoop, "Must have exactly one X loop in the epilogue");
+            std::cout << "(epilogueXLoop, epilogueYLoop) " << *epilogueXLoop << ", "
+                      << *epilogueYLoop << std::endl;
             auto reindexer       = std::make_shared<GraphReindexer>();
             auto newEpilogueBody = duplicateControlNodes(
                 graph,
@@ -627,9 +644,19 @@ namespace rocRoller
                 }
             }
 
+            // duplicate the forLoop for epilogue operations
+            int epilogueForX = cloneForLoop(graph, *epilogueXLoop);
+            int epilogueForY = cloneForLoop(graph, *epilogueYLoop);
+            graph.control.addElement(Sequence(), {forLoopOp}, {epilogueForX});
+            graph.control.addElement(Body(), {epilogueForX}, {epilogueForY});
+
+            AssertFatal(newEpilogueBody.size() == 1);
             for(auto const& epilogueBody : newEpilogueBody)
             {
-                graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
+                // graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
+                graph.control.addElement(Body(), {epilogueForY}, {epilogueBody});
+                std::cout << "connect (fixupTag, epilogueBody) " << fixupTag << ", " << epilogueBody
+                          << std::endl;
             }
 
             // Add to control
@@ -638,8 +665,9 @@ namespace rocRoller
 
             graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
 
-            graph.control.addElement(Body(), {receiveTileTag}, {boundsCheckTag});
-            graph.control.addElement(Body(), {boundsCheckTag}, {doWhileTag});
+            graph.control.addElement(Body(), {receiveTileTag}, {forLoopOp});
+            graph.control.addElement(Body(), {forLoopOp}, {boundsCheckTag});
+            graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
             graph.control.chain<Sequence>(doWhileTag, loadAddForX, postWaitZeroTag);
@@ -1118,10 +1146,12 @@ namespace rocRoller
                                                             context);
 
                 // Add send
-                auto sendTileExpr
+                auto accumTileIdxStart
                     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
+
                 sendInfo = sendTile(graph,
-                                    sendTileExpr,
+                                    // if WG does not work on the first AccumTile, then sendTile
+                                    accumTileIdxStart > zero,
                                     storeConnections,
                                     flagsScratchTag,
                                     accumInfo.accumulatorVarType.dataType,
@@ -1130,22 +1160,38 @@ namespace rocRoller
                                     context);
 
                 // Add receive
-                auto receiveTileExpr
+                auto accumTileIdxEnd
                     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
                       % numAccumTiles;
-                receiveInfo = receiveTile(graph,
-                                          receiveTileExpr < (numAccumTiles - one),
-                                          scratchTileInfo.load,
-                                          loadConnections,
-                                          flagsScratchTag,
-                                          accumInfo.accumulatorTile,
-                                          accumInfo.usesAccumulatorTile,
-                                          accumInfo.accumulatorVarType.dataType,
-                                          epilogueOperations,
-                                          loopInfo,
-                                          argInfo,
-                                          params,
-                                          context);
+
+                // auto numRemainPartialResults = numAccumTiles/ numAccumTiles;
+                // auto numRemainPartialResults = one;
+                // auto numRemainPartialResults = Expression::literal(62, DataType::UInt32);
+                auto remainAccumTiles = numAccumTiles - accumTileIdxEnd - one;
+                auto numRemainPartialResults
+                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
+
+                std::cout << "numAccumTiles: " << toString(numAccumTiles) << ", " << std::endl
+                          << "numSKTilesPerWG: " << toString(argInfo.numSKTilesPerWG) << ", "
+                          << std::endl
+                          << "numFixups: " << toString(numRemainPartialResults) << std::endl;
+
+                receiveInfo = receiveTile(
+                    graph,
+                    // if WG does not work on the last AccumTile and work on the first AccumTile, then receive tile
+                    accumTileIdxEnd < (numAccumTiles - one) && accumTileIdxStart == zero,
+                    numRemainPartialResults,
+                    scratchTileInfo.load,
+                    loadConnections,
+                    flagsScratchTag,
+                    accumInfo.accumulatorTile,
+                    accumInfo.usesAccumulatorTile,
+                    accumInfo.accumulatorVarType.dataType,
+                    epilogueOperations,
+                    loopInfo,
+                    argInfo,
+                    params,
+                    context);
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
@@ -1255,9 +1301,12 @@ namespace rocRoller
             // Make sure receive happens before other operations after
             // the accumulator loop.
             //
+            AssertFatal(epilogueOperations.size() <= 1, ShowValue(epilogueOperations.size()));
             for(auto tag : epilogueOperations)
             {
                 graph.control.addElement(Body(), {postAccumulationCond}, {tag});
+                std::cout << "connect (postAccumulationCond, tag) " << postAccumulationCond << ", "
+                          << tag << std::endl;
             }
         }
 
@@ -1369,6 +1418,7 @@ namespace rocRoller
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
                     numDPTilesArgExpr      = zero;
                     numDPTilesPerWGArgExpr = zero;
+                    // numFixupsExpr =  numAccTiles / numSKTilesPerWGArgExpr;
                 }
             }
 

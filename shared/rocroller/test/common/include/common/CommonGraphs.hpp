@@ -201,6 +201,7 @@ namespace rocRollerTest
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
             void setUnroll(unsigned int unrollX, unsigned int unrollY);
+            void setStreamK(bool addStreamK);
             void setPrefetch(bool prefetch,
                              int  prefetchInFlight,
                              int  prefetchLDSFactor,
@@ -211,6 +212,8 @@ namespace rocRollerTest
                 return m_problem;
             };
             void setProblem(GEMMProblem const& problem);
+
+            int getTotalWorkgroupSize() const;
 
             CommandParametersPtr getCommandParameters() const;
 

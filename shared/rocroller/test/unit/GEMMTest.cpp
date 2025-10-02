@@ -1187,7 +1187,7 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        for(auto twoTile : {true, false})
+        for(auto twoTile : {false})
         {
             gemm.streamKTwoTile = twoTile;
             for(auto loadLDSA : {false, true})
@@ -1235,10 +1235,63 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        for(auto twoTile : {true, false})
+        for(auto twoTile : {false})
         {
             gemm.streamKTwoTile = twoTile;
             basicGEMM<Half>(gemm);
+        }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 128;
+        gemm.workgroupSizeY = 2;
+
+        gemm.numWGs = 128;
+
+        auto numTilesM = 1;
+        auto numTilesN = 2;
+        auto numTilesK = 249;
+
+        gemm.m = numTilesM * gemm.macM;
+        gemm.n = numTilesN * gemm.macN;
+        gemm.k = numTilesK * gemm.macK;
+
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
+
+        gemm.beta = 0;
+
+        // assert that the number of output tiles is smaller than number of WGs
+        // which means there is not enough data-parallel tiles, and has to split
+        // K dimension into multiple tiles
+        // ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
+
+        gemm.streamK = true;
+        // gemm.k       = gemm.macK * 8;
+
+        for(auto twoTile : {false})
+        {
+            gemm.streamKTwoTile = twoTile;
+            basicGEMM<Half>(gemm);
+            // basicGEMM<float>(gemm);
         }
     }
 

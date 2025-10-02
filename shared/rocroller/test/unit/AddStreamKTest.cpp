@@ -76,6 +76,10 @@ namespace AddStreamKTest
                 forTileIdx += forKIdx)
             {
                 uint tile = numSKTilesPerWG * wg + forTileIdx;
+                std::cout << "(tile, numTileK) " << tile << ", " << numTileK << std::endl;
+                bool sendTile    = (tile % numTileK) > 0;
+                bool receiveTile = false;
+                auto myTile      = -1;
 
                 auto nextNonAccum = ((tile) / numTileK + 1) * numTileK;
                 auto lastTile     = std::min(nextNonAccum, numTilesSK);
@@ -85,15 +89,27 @@ namespace AddStreamKTest
                 {
                     uint tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
 
-                    uint m = (tile / numTileK) / numTileN;
-                    uint n = (tile / numTileK) % numTileN;
-                    uint k = tile % numTileK;
+                    uint m      = (tile / numTileK) / numTileN;
+                    uint n      = (tile / numTileK) % numTileN;
+                    uint k      = tile % numTileK;
+                    receiveTile = ((tile % numTileK) < (numTileK - 1)) && (!sendTile);
+                    myTile      = tile;
 
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
                     std::cout << "SKTile (m, n, k, wg): " << m << ", " << n << ", " << k << ", "
                               << wg << std::endl;
                     //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
+                }
+                std::cout << "(myTile, myTile mod numTileK) " << myTile << ", " << myTile % numTileK
+                          << std::endl;
+
+                std::cout << "(send, receive) " << sendTile << ", " << receiveTile << std::endl;
+
+                if(receiveTile)
+                {
+                    std::cout << "!!! receiveTile (wg, numFixups) " << wg << ", "
+                              << numTileK / numSKTilesPerWG << std::endl;
                 }
             }
 
@@ -174,11 +190,11 @@ namespace AddStreamKTest
 
         uint numTileM = 1;
         uint numTileN = 2;
-        uint numTileK = 2977;
+        uint numTileK = 249;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numWGs = deviceProperties.multiProcessorCount;
+        uint numWGs = 128;
 
         auto k = m_context->kernel();
 
@@ -231,8 +247,8 @@ namespace AddStreamKTest
         kgraph.control.addElement(Sequence(), {assignWGNumber}, {storeOp});
         kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
 
-        std::cout << "kgraph original" << std::endl;
-        std::cout << kgraph.toDOT(true) << std::endl;
+        // std::cout << "kgraph original" << std::endl;
+        // std::cout << kgraph.toDOT(true) << std::endl;
 
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
