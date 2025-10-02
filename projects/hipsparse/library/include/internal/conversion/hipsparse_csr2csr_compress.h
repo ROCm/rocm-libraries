@@ -35,13 +35,13 @@ extern "C" {
 *  \p hipsparseXcsr2csr_compress converts a CSR matrix into a compressed CSR matrix by
 *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol:
 *
-*  \f[ 
+*  \f[
 *   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
 *  \f]
 *
-*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number 
-*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR 
-*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the 
+*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number
+*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR
+*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the
 *  values array \p csrValC. The user then calls \p hipsparseXcsr2csr_compress to complete the conversion.
 *
 *  \note
@@ -87,83 +87,7 @@ extern "C" {
 *              \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC or \p nnzPerRow pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtrA[4] = {0, 3, 5, 8};
-*    int hcsrColIndA[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrValA[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
-*
-*    int m    = 3;
-*    int n    = 5;
-*    int nnzA = 8;
-*
-*    float tol = 5.9f;
-*    
-*    int* dcsrRowPtrA = nullptr;
-*    int* dcsrColIndA = nullptr;
-*    float* dcsrValA = nullptr;
-*    hipMalloc((void**)&dcsrRowPtrA, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColIndA, sizeof(int) * nnzA);
-*    hipMalloc((void**)&dcsrValA, sizeof(float) * nnzA);
-*
-*    hipMemcpy(dcsrRowPtrA, hcsrRowPtrA, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndA, hcsrColIndA, sizeof(int) * nnzA, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValA, hcsrValA, sizeof(float) * nnzA, hipMemcpyHostToDevice);
-*
-*    // Allocate memory for the nnz_per_row array
-*    int* dnnz_per_row;
-*    hipMalloc((void**)&dnnz_per_row, sizeof(int) * m);
-*
-*    // Call snnz_compress() which fills in nnz_per_row array and finds the number
-*    // of entries that will be in the compressed CSR matrix
-*    int nnzC;
-*    hipsparseSnnz_compress(handle, m, descr, dcsrValA, dcsrRowPtrA, dnnz_per_row, &nnzC, tol);
-*
-*    int* dcsrRowPtrC = nullptr;
-*    int* dcsrColIndC = nullptr;
-*    float* dcsrValC = nullptr;
-*    hipMalloc((void**)&dcsrRowPtrC, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC);
-*    hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC);
-*
-*    hipsparseScsr2csr_compress(handle,
-*                               m,
-*                               n,
-*                               descr,
-*                               dcsrValA,
-*                               dcsrColIndA,
-*                               dcsrRowPtrA,
-*                               nnzA,
-*                               dnnz_per_row,
-*                               dcsrValC,
-*                               dcsrColIndC,
-*                               dcsrRowPtrC,
-*                               tol);
-*
-*    hipFree(dcsrRowPtrA);
-*    hipFree(dcsrColIndA);
-*    hipFree(dcsrValA);
-*    
-*    hipFree(dcsrRowPtrC);
-*    hipFree(dcsrColIndC);
-*    hipFree(dcsrValC);
-*
-*    hipFree(dnnz_per_row);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_csr2csr_compress.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

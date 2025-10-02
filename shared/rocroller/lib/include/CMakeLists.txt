@@ -21,6 +21,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExecutableKernel_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExpressionTransformations.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail_binary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelArguments.hpp"
@@ -121,9 +123,11 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Half.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Int8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Int8x4.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Raw32.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Scale_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_UInt8x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DistinctType.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/GPUArchitecture/GPUArchitecture.hpp"
@@ -145,6 +149,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/HypergraphIncidenceContainer.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/HypergraphIncidenceContainer_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/InstructionValues/LDSAllocator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/InstructionValues/LDSAllocator_fwd.hpp"
@@ -216,6 +222,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AliasDataFlowTags.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AliasDataFlowTags_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/All.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AssignComputeIndex.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/CleanArguments.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/CleanLoops.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp"
@@ -275,6 +282,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler_fwd.hpp"

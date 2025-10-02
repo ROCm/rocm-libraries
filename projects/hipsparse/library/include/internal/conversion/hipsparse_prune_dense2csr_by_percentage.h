@@ -31,8 +31,8 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csrByPercentage_bufferSize computes the size of the user allocated temporary 
-*  storage buffer used when converting a dense matrix to a pruned CSR matrix where the pruning is done 
+*  \p hipsparseXpruneDense2csrByPercentage_bufferSize computes the size of the user allocated temporary
+*  storage buffer used when converting a dense matrix to a pruned CSR matrix where the pruning is done
 *  based on a percantage.
 *
 *  \details
@@ -41,9 +41,9 @@ extern "C" {
 *  \p hipsparseXpruneDense2csrByPercentage_bufferSize which determines the size of the
 *  temporary storage buffer. Once determined, this buffer must be allocated by the user.
 *  Next the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
-*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()". 
-*  Finally the user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays 
-*  (whose size is determined by the value at \p nnzTotalDevHostPtr) and calling 
+*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()".
+*  Finally the user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays
+*  (whose size is determined by the value at \p nnzTotalDevHostPtr) and calling
 *  \ref hipsparseSpruneDense2csrByPercentage "hipsparseXpruneDense2csrByPercentage()".
 *
 *  The pruning by percentage works by first sorting the absolute values of the dense
@@ -56,10 +56,10 @@ extern "C" {
 *  \f]
 *
 *  Once we have this threshold we prune values in the dense matrix \p A as in
-*  \ref hipsparseSpruneDense2csr "hipsparseXpruneDense2csr()". 
+*  \ref hipsparseSpruneDense2csr "hipsparseXpruneDense2csr()".
 *
 *  \note
-*  It is executed asynchronously with respect to the host and may return control to the 
+*  It is executed asynchronously with respect to the host and may return control to the
 *  application on the host before the entire result is ready.
 *
 *  @param[in]
@@ -75,7 +75,7 @@ extern "C" {
 *  @param[in]
 *  percentage         \p percentage>=0 and \p percentage<=100.
 *  @param[in]
-*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *                     any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  csrVal             array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
@@ -137,9 +137,9 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
 *  \p hipsparseXpruneDense2csrByPercentage_bufferSizeExt which determines the size of the
 *  temporary storage buffer. Once determined, this buffer must be allocated by the user.
 *  Next the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
-*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()". 
-*  Finally the user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays 
-*  (whos size is determined by the value at \p nnzTotalDevHostPtr) and calling 
+*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()".
+*  Finally the user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays
+*  (whos size is determined by the value at \p nnzTotalDevHostPtr) and calling
 *  \ref hipsparseSpruneDense2csrByPercentage "hipsparseXpruneDense2csrByPercentage()".
 *
 *  The pruning by percentage works by first sorting the absolute values of the dense
@@ -152,10 +152,10 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
 *  \f]
 *
 *  Once we have this threshold we prune values in the dense matrix \p A as in
-*  \ref hipsparseSpruneDense2csr "hipsparseXpruneDense2csr()". 
+*  \ref hipsparseSpruneDense2csr "hipsparseXpruneDense2csr()".
 *
 *  \note
-*  It is executed asynchronously with respect to the host and may return control to the 
+*  It is executed asynchronously with respect to the host and may return control to the
 *  application on the host before the entire result is ready.
 *
 *  @param[in]
@@ -171,7 +171,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
 *  @param[in]
 *  percentage         \p percentage>=0 and \p percentage<=100.
 *  @param[in]
-*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr              the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *                     any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  csrVal             array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
@@ -234,12 +234,12 @@ hipsparseStatus_t
 *  \details
 *  When converting and pruning a dense matrix A to a CSR matrix by percentage the
 *  following steps are performed. First the user calls
-*  \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()" 
-*  which determines the size of the temporary storage buffer. Once determined, this buffer must be allocated 
+*  \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()"
+*  which determines the size of the temporary storage buffer. Once determined, this buffer must be allocated
 *  by the user. Next the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
 *  \p hipsparseXpruneDense2csrNnzByPercentage. Finally the user finishes the conversion
 *  by allocating the \p csrColInd and \p csrVal arrays (whos size is determined by the value
-*  at \p nnzTotalDevHostPtr) and calling \ref hipsparseSpruneDense2csrByPercentage 
+*  at \p nnzTotalDevHostPtr) and calling \ref hipsparseSpruneDense2csrByPercentage
 *  "hipsparseXpruneDense2csrByPercentage()".
 *
 *  The pruning by percentage works by first sorting the absolute values of the dense
@@ -278,8 +278,8 @@ hipsparseStatus_t
 *  @param[in]
 *  info               prune information structure
 *  @param[out]
-*  buffer             buffer allocated by the user whose size is determined by calling 
-*                     \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()" 
+*  buffer             buffer allocated by the user whose size is determined by calling
+*                     \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()"
 *                     or \ref hipsparseSpruneDense2csrByPercentage_bufferSizeExt "hipsparseXpruneDense2csrByPercentage_bufferSizeExt()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
@@ -326,12 +326,12 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *
 *  \details
 *  When converting and pruning a dense matrix A to a CSR matrix by percentage the
-*  following steps are performed. First the user calls \ref hipsparseSpruneDense2csrByPercentage_bufferSize 
+*  following steps are performed. First the user calls \ref hipsparseSpruneDense2csrByPercentage_bufferSize
 *  "hipsparseXpruneDense2csrByPercentage_bufferSize()" which determines the size of the
 *  temporary storage buffer. Once determined, this buffer must be allocated by the user.
 *  Next the user allocates the \p csrRowPtr array to have \p m+1 elements and calls
-*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()". Finally the 
-*  user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays (whos size is 
+*  \ref hipsparseSpruneDense2csrNnzByPercentage "hipsparseXpruneDense2csrNnzByPercentage()". Finally the
+*  user finishes the conversion by allocating the \p csrColInd and \p csrVal arrays (whos size is
 *  determined by the value at \p nnzTotalDevHostPtr) and calling \p hipsparseXpruneDense2csrByPercentage.
 *
 *  The pruning by percentage works by first sorting the absolute values of the dense
@@ -362,7 +362,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *  @param[in]
 *  percentage  \p percentage>=0 and \p percentage<=100.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
 *              also any valid value of the \ref hipsparseIndexBase_t.
 *  @param[out]
 *  csrVal      array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
@@ -374,7 +374,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *  info prune  information structure
 *  @param[in]
 *  buffer      temporary storage buffer allocated by the user, size is returned by
-*              \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()" or 
+*              \ref hipsparseSpruneDense2csrByPercentage_bufferSize "hipsparseXpruneDense2csrByPercentage_bufferSize()" or
 *              \ref hipsparseSpruneDense2csrByPercentage_bufferSizeExt "hipsparseXpruneDense2csrByPercentage_bufferSizeExt()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
@@ -382,63 +382,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *              \p csrRowPtr, \p csrColInd or \p buffer pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Dense matrix in column order
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float hdense_A[15] = {1.0f, 0.0f, 6.0f, 2.0f, 4.0f, 0.0f, 0.0f, 5.0f, 0.0f, 3.0f, 0.0f, 7.0f, 0.0f, 0.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int lda       = m;
-*    float percentage = 70.0f;
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * lda * n);
-*    hipMemcpy(ddense_A, hdense_A, sizeof(float) * lda * n, hipMemcpyHostToDevice);
-*
-*    // Allocate sparse CSR matrix
-*    int* dcsrRowPtr = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*
-*    pruneInfo_t info;
-*    hipsparseCreatePruneInfo(&info);
-*
-*    size_t bufferSize;
-*    hipsparseSpruneDense2csrByPercentage_bufferSize(handle, m, n, ddense_A, lda, percentage, descr, nullptr, dcsrRowPtr, nullptr, info, &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnz_A;
-*    hipsparseSpruneDense2csrNnzByPercentage(handle, m, n, ddense_A, lda, percentage, descr, dcsrRowPtr, &nnz_A, info, dbuffer);
-*
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipsparseSpruneDense2csrByPercentage(handle, m, n, ddense_A, lda, percentage, descr, dcsrVal, dcsrRowPtr, dcsrColInd, info, dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(ddense_A);
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyPruneInfo(info);
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_prune_dense2csr_by_percentage.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

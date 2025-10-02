@@ -94,57 +94,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
-*  \code{.c}
-*
-*      // It assumes the CSR arrays (ptr, ind, val) have already been allocated and filled.
-*      // Build Source
-*      rocsparse_spmat_descr source;
-*      rocsparse_create_csr_descr(&source, M, N, nnz, ptr, ind, val, rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_index_base_zero, rocsparse_datatype_f32_r);
-*
-*      // Build target
-*      void * ell_ind, * ell_val;
-*      int64_t ell_width = 0;
-*      rocsparse_spmat_descr target;
-*      rocsparse_create_ell_descr(&target, M, N, ell_ind, ell_val, ell_width, rocsparse_indextype_i32, rocsparse_index_base_zero, rocsparse_datatype_f32_r);
-*
-*      // Create descriptor
-*      rocsparse_sparse_to_sparse_descr descr;
-*      rocsparse_create_sparse_to_sparse_descr(&descr, source, target,  rocsparse_sparse_to_sparse_alg_default);
-*
-*      // Analysis phase
-*      rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, rocsparse_sparse_to_sparse_stage_analysis, &buffer_size);
-*      hipMalloc(&buffer,buffer_size);
-*      rocsparse_sparse_to_sparse(handle, descr, source, target, rocsparse_sparse_to_sparse_stage_analysis, buffer_size, buffer);
-*      hipFree(buffer);
-*
-*      //
-*      // the user is responsible to allocate target arrays after the analysis phase.
-*      //
-*      { int64_t rows, cols, ell_width;
-*        void * ind, * val;
-*        rocsparse_indextype        idx_type;
-*        rocsparse_index_base       idx_base;
-*        rocsparse_datatype         data_type;
-*
-*         rocsparse_ell_get(target,
-*                           &rows,
-*                           &cols,
-*                           &ind,
-*                           &val,
-*                           &ell_width,
-*                           &idx_type,
-*                           &idx_base,
-*                           &data_type);
-*         hipMalloc(&ell_ind,ell_width * M * sizeof(int32_t));
-*         hipMalloc(&ell_val,ell_width * M * sizeof(float)));
-*         rocsparse_ell_set_pointers(target, ell_ind, ell_val); }
-*
-*      // Calculation phase
-*      rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, rocsparse_sparse_to_sparse_stage_compute, &buffer_size);
-*      hipMalloc(&buffer,buffer_size);
-*      rocsparse_sparse_to_sparse(handle, descr, source, target, rocsparse_sparse_to_sparse_stage_compute, buffer_size, buffer);
-*      hipFree(buffer);
-*  \endcode
+*  \snippet example_rocsparse_sparse_to_sparse.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse(rocsparse_handle                 handle,

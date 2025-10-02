@@ -295,7 +295,7 @@ void testing_aux_mat_init_structured_bad_arg(const Arguments& arg)
                                                                 HIP_R_64F,
                                                                 HIPSPARSE_ORDER_COL,
                                                                 HIPSPARSELT_SPARSITY_50_PERCENT),
-                            HIPSPARSE_STATUS_NOT_SUPPORTED);     
+                            HIPSPARSE_STATUS_NOT_SUPPORTED);
 }
 
 void testing_aux_mat_dense_init(const Arguments& arg)

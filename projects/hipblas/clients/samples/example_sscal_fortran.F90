@@ -163,7 +163,7 @@ program example_fortran_scal
     ! Call hipblasSscal
     call HIPBLAS_CHECK(hipblasSscal(handle, n, c_loc(alpha), dx, 1))
     call HIP_CHECK(hipDeviceSynchronize())
-    
+
     ! Stop time
     call date_and_time(values = tend)
 

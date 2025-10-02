@@ -21,8 +21,8 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -46,9 +46,53 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<lookback_scan_determinism Determinism,
+template<typename LookBackScanState>
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
+    init_device_scan_by_key_kernel(LookBackScanState  lookback_scan_state,
+                                   const unsigned int number_of_blocks,
+                                   unsigned int       save_index,
+                                   typename LookBackScanState::value_type* const save_dest)
+{
+    init_lookback_scan_state_kernel_impl(lookback_scan_state,
+                                         number_of_blocks,
+                                         save_index,
+                                         save_dest);
+}
+
+template<typename LookBackScanState, class KeysInputIterator, class ItemPerBlockType>
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_device_scan_by_key_kernel(
+    LookBackScanState                             lookback_scan_state,
+    const unsigned int                            number_of_blocks,
+    unsigned int                                  save_index,
+    typename LookBackScanState::value_type* const save_dest,
+    KeysInputIterator                             keys, // keys from the 0 without any offsets
+    typename std::iterator_traits<
+        KeysInputIterator>::value_type* __restrict__ last_keys_of_each_block,
+    size_t                 num_last_keys_of_each_block,
+    const ItemPerBlockType items_per_block)
+{
+    init_lookback_scan_state_kernel_impl(lookback_scan_state,
+                                         number_of_blocks,
+                                         save_index,
+                                         save_dest);
+
+    // Initialize the last_keys_of_each_block
+    const auto block_size = ::rocprim::detail::block_size<0>();
+    const auto global_tid
+        = (::rocprim::detail::block_id<0>() * block_size) + ::rocprim::detail::block_thread_id<0>();
+    const auto total_threads = ::rocprim::detail::grid_size<0>() * block_size;
+    using common_size_t      = typename std::common_type<decltype(num_last_keys_of_each_block),
+                                                    decltype(total_threads)>::type;
+    for(common_size_t i = global_tid; i < static_cast<common_size_t>(num_last_keys_of_each_block);
+        i += static_cast<common_size_t>(total_threads))
+    {
+        last_keys_of_each_block[i] = keys[(i * items_per_block) + (items_per_block - 1)];
+    }
+}
+
+template<typename Config,
+         lookback_scan_determinism Determinism,
          bool                      Exclusive,
-         typename Config,
          typename KeyInputIterator,
          typename InputIterator,
          typename OutputIterator,
@@ -57,33 +101,83 @@ template<lookback_scan_determinism Determinism,
          typename BinaryFunction,
          typename LookbackScanState,
          typename AccType>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    device_scan_by_key_kernel(const KeyInputIterator                       keys,
-                              const InputIterator                          values,
-                              const OutputIterator                         output,
-                              const InitialValueType                       initial_value,
-                              const CompareFunction                        compare,
-                              const BinaryFunction                         scan_op,
-                              const LookbackScanState                      scan_state,
-                              const size_t                                 size,
-                              const size_t                                 starting_block,
-                              const size_t                                 number_of_blocks,
-                              const ::rocprim::tuple<AccType, bool>* const previous_last_value)
+inline hipError_t launch_device_scan_by_key(
+    detail::target_arch                          arch,
+    const KeyInputIterator                       keys,
+    const InputIterator                          values,
+    const OutputIterator                         output,
+    const InitialValueType                       initial_value,
+    const CompareFunction                        compare,
+    const BinaryFunction                         scan_op,
+    const LookbackScanState                      scan_state,
+    const size_t                                 size,
+    const size_t                                 starting_block,
+    const size_t                                 number_of_blocks,
+    const ::rocprim::tuple<AccType, bool>* const previous_last_value,
+    bool                                         use_last_keys,
+    const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
+    dim3        grid,
+    dim3        block,
+    size_t      shmem,
+    hipStream_t stream)
 {
-    device_scan_by_key_kernel_impl<Determinism, Exclusive, Config>(
-        keys,
-        values,
-        output,
-        static_cast<AccType>(get_input_value(initial_value)),
-        compare,
-        scan_op,
-        scan_state,
-        size,
-        starting_block,
-        number_of_blocks,
-        previous_last_value);
+
+    auto kernel = [=](auto arch_config)
+    {
+        device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
+            keys,
+            values,
+            output,
+            static_cast<AccType>(get_input_value(initial_value)),
+            compare,
+            scan_op,
+            scan_state,
+            size,
+            starting_block,
+            number_of_blocks,
+            previous_last_value,
+            use_last_keys,
+            last_keys);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
+/// \return 0 if in-place is not detected
+template<bool Exclusive,
+         typename KeysInputIterator,
+         typename OutputIterator,
+         typename SizeType,
+         typename NumBlockType>
+ROCPRIM_FORCE_INLINE ROCPRIM_HOST size_t detect_reusing_keys(
+    KeysInputIterator keys,
+    OutputIterator output,
+    SizeType size,
+    NumBlockType number_of_blocks)
+{
+    using key_type    = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    if constexpr(std::is_same<KeysInputIterator, OutputIterator>::value)
+    {
+        if(static_cast<SizeType>(std::distance(keys, output)) < size)
+        {
+            // In this case, there is overlap on `keys` and `output`. So we allocate a temp buffer
+            return sizeof(key_type) * (number_of_blocks - 1);
+        }
+    }
+    else if constexpr(std::is_pointer<KeysInputIterator>::value
+                      && std::is_pointer<OutputIterator>::value
+                      && std::is_convertible<key_type, output_type>::value)
+    {
+        if(static_cast<SizeType>(std::distance(keys, reinterpret_cast<KeysInputIterator>(output)))
+           < size)
+        {
+            // In this case, there is overlap on `keys` and `output`. So we allocate a temp buffer
+            return sizeof(key_type) * (number_of_blocks - 1);
+        }
+    }
+    return 0;
+}
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
@@ -117,7 +211,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     {
         return result;
     }
-    const scan_by_key_config_params params = dispatch_target_arch<config>(target_arch);
+    const scan_by_key_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     using wrapped_type = ::rocprim::tuple<AccType, bool>;
 
@@ -150,14 +244,23 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         return layout_result;
     }
 
+    key_type*  last_keys_of_each_block;
+    const auto last_keys_of_each_block_size_byte
+        = items_per_thread ? detect_reusing_keys<Exclusive>(keys,
+                                                            output,
+                                                            size,
+                                                            ceiling_div(size, items_per_block))
+                           : 0;
+
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
             // This is valid even with offset_scan_state_with_sleep_type
             detail::temp_storage::make_partition(&scan_state_storage, layout),
-            detail::temp_storage::ptr_aligned_array(&previous_last_value,
-                                                    use_limited_size ? 1 : 0)));
+            detail::temp_storage::ptr_aligned_array(&previous_last_value, use_limited_size ? 1 : 0),
+            detail::temp_storage::ptr_aligned_array(&last_keys_of_each_block,
+                                                    last_keys_of_each_block_size_byte)));
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
         return partition_result;
@@ -242,17 +345,53 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         with_scan_state(
             [&](const auto scan_state)
             {
-                hipLaunchKernelGGL(init_lookback_scan_state_kernel,
-                                   dim3(init_grid_size),
-                                   dim3(block_size),
-                                   0,
-                                   stream,
-                                   scan_state,
-                                   scan_blocks,
-                                   number_of_blocks - 1,
-                                   i > 0 ? previous_last_value : nullptr);
+                if constexpr(Exclusive)
+                {
+                    hipLaunchKernelGGL(init_device_scan_by_key_kernel,
+                                       dim3(init_grid_size),
+                                       dim3(block_size),
+                                       0,
+                                       stream,
+                                       scan_state,
+                                       scan_blocks,
+                                       number_of_blocks - 1,
+                                       i > 0 ? previous_last_value : nullptr);
+                }
+                else
+                {
+                    // only when in-place scan is needed, we initialize the last_keys_of_each_block
+                    if(last_keys_of_each_block_size_byte != 0 && i == 0)
+                    {
+                        hipLaunchKernelGGL(init_device_scan_by_key_kernel,
+                                           dim3(init_grid_size),
+                                           dim3(block_size),
+                                           0,
+                                           stream,
+                                           scan_state,
+                                           scan_blocks,
+                                           number_of_blocks - 1,
+                                           i > 0 ? previous_last_value : nullptr,
+                                           keys,
+                                           last_keys_of_each_block,
+                                           last_keys_of_each_block_size_byte
+                                               / sizeof(decltype(*last_keys_of_each_block)),
+                                           items_per_block);
+                    }
+                    else
+                    {
+                        hipLaunchKernelGGL(init_device_scan_by_key_kernel,
+                                           dim3(init_grid_size),
+                                           dim3(block_size),
+                                           0,
+                                           stream,
+                                           scan_state,
+                                           scan_blocks,
+                                           number_of_blocks - 1,
+                                           i > 0 ? previous_last_value : nullptr);
+                    }
+                }
             });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_device_scan_by_key_kernel",
                                                     scan_blocks,
                                                     start);
 
@@ -260,15 +399,11 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         {
             start = std::chrono::steady_clock::now();
         }
-        with_scan_state(
+        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
             [&](auto& scan_state)
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(device_scan_by_key_kernel<Determinism, Exclusive, config>),
-                    dim3(scan_blocks),
-                    dim3(block_size),
-                    0,
-                    stream,
+                return launch_device_scan_by_key<config, Determinism, Exclusive>(
+                    target_arch,
                     keys + offset,
                     input + offset,
                     output + offset,
@@ -279,17 +414,23 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                     size,
                     i * number_of_blocks,
                     total_number_of_blocks,
-                    i > 0 ? as_const_ptr(previous_last_value) : nullptr);
-            });
+                    i > 0 ? as_const_ptr(previous_last_value) : nullptr,
+                    last_keys_of_each_block_size_byte != 0,
+                    last_keys_of_each_block,
+                    dim3(scan_blocks),
+                    dim3(block_size),
+                    0,
+                    stream);
+            }));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                     current_size,
                                                     start);
     }
+
     return hipSuccess;
 }
 
-
-}
+} // namespace detail
 
 /// \addtogroup devicemodule
 /// @{
@@ -312,6 +453,13 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
+///
+/// \note In-place inclusive_scan_by_key
+/// In these situations, in-place inclusive_scan_by_key is supported:
+/// - The buffers in `keys_input` and `values_output` are overlaped to each other, and `KeysInputIterator` and `ValuesOutputIterator` are the same.
+/// - The buffers in `keys_input` and `values_output` are overlaped to each other, `KeysInputIterator` and `ValuesOutputIterator` are the different,
+///   but they are both pointer types, and their "std::iterator_traits<KeysInputIterator>::value_type" is convertible to
+///   "std::iterator_traits<ValuesOutputIterator>::value_type"
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. It can be
@@ -504,6 +652,9 @@ inline hipError_t deterministic_inclusive_scan_by_key(void* const               
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
+///
+/// \note In-place exclusive_scan_by_key
+/// In-place exclusive_scan_by_key is supported.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. It can be

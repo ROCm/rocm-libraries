@@ -243,8 +243,6 @@ namespace rocRoller
         {
         };
 
-        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
-
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>
         {

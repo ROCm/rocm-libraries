@@ -67,6 +67,7 @@
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
 #include "device/device_spmv.hpp"
+#include "device/device_transform.hpp"
 
 // Grid
 #include "grid/grid_barrier.hpp"
@@ -82,7 +83,6 @@
 #include "iterator/counting_input_iterator.hpp"
 #include "iterator/discard_output_iterator.hpp"
 #include "iterator/tex_obj_input_iterator.hpp"
-#include "iterator/tex_ref_input_iterator.hpp"
 #include "iterator/transform_input_iterator.hpp"
 
 // Thread

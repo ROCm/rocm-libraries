@@ -13,10 +13,15 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
+  - any-glob-to-any-file: 'shared/origami/**/*'
 
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
+
+"project: hipdnn":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipdnn/**/*'
 
 "project: hipfft":
 - changed-files:
@@ -42,9 +47,14 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: none":
+- changed-files:
+  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
+
 "project: rocblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'
+  - any-glob-to-any-file: 'shared/tensile/**/*'
 
 "project: rocfft":
 - changed-files:
@@ -73,6 +83,10 @@
 "shared: mxdatagenerator":
 - changed-files:
   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
+
+"shared: origami":
+- changed-files:
+  - any-glob-to-any-file: 'shared/origami/**/*'
 
 "shared: rocroller":
 - changed-files:

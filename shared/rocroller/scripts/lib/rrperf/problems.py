@@ -24,10 +24,11 @@
 ################################################################################
 
 import pathlib
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, List, Optional
-import yaml
 
+import yaml
+from rrperf.utils import get_dataclass_id
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -160,7 +161,8 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
@@ -179,8 +181,8 @@ class GEMMSolution:
     wave_k: int = -1
     wave_b: int = -1
 
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
+    workgroup_size_x: int = -1
+    workgroup_size_y: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
@@ -196,6 +198,7 @@ class GEMMSolution:
     direct2LDS_B: bool = False
 
     scheduler: str = "Priority"
+    schedulerCost: str = "LinearWeighted"
 
     prefetch: bool = True
     prefetchInFlight: int = 2
@@ -210,6 +213,7 @@ class GEMMSolution:
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False
+    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
@@ -228,10 +232,16 @@ class GEMM(GEMMProblem, GEMMSolution):
     numOuter: int = 1
     numInner: int = 10
 
+    noCheck: bool = False
+
     visualize: bool = False
 
     def __post_init__(self):
         convert_class_params(GEMM, self)
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -285,7 +295,7 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -385,6 +395,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "SCH": self.scheduler[0],
             "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
+            "DPFirst": TF(self.streamKTwoTileDPFirst),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -405,6 +416,10 @@ class CodeGen:
 
     numWarmUp: int = 2
     numRuns: int = 10
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -454,7 +469,7 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -487,8 +502,8 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property
@@ -536,6 +551,29 @@ _base_to_run_class = {
 }
 
 
+def cast_missing_parameters(result):
+    """
+    Cast parameters in previous GEMMResult version into existing parameters
+
+    Args:
+        result: a dictionary with parameters (keys) and their values
+
+    """
+    if "workgroupMapping" in result:
+
+        assert (
+            len(result["workgroupMapping"]) == 2
+        ), "workgroupMapping should contain a dimension and a value"
+
+        wgmDim = result["workgroupMapping"][0]
+        wgmValue = result["workgroupMapping"][1]
+
+        del result["workgroupMapping"]
+
+        result["workgroupMappingDim"] = wgmDim
+        result["workgroupMappingValue"] = wgmValue
+
+
 def load_results(path: pathlib.Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
@@ -544,6 +582,7 @@ def load_results(path: pathlib.Path):
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["resultType"]]
         r.pop("path", None)
+        cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))
     return rv
 

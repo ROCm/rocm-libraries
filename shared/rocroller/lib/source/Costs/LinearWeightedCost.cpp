@@ -88,6 +88,39 @@ namespace rocRoller
 
     namespace Scheduling
     {
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {.nops               = 10000.,
+                                                       .vmcnt              = 0,
+                                                       .lgkmcnt            = 0,
+                                                       .vmQueueLen         = 0,
+                                                       .vectorQueueSat     = 0,
+                                                       .ldsQueueSat        = 0,
+                                                       .lgkmQueueLen       = 0,
+                                                       .stallCycles        = 1000.0,
+                                                       .notMFMA            = 0,
+                                                       .isMFMA             = 0,
+                                                       .isSMEM             = 0,
+                                                       .isSControl         = 0,
+                                                       .isSALU             = 10,
+                                                       .isVMEMRead         = 0,
+                                                       .isVMEMWrite        = 0,
+                                                       .isLDSRead          = 0,
+                                                       .isLDSWrite         = 0,
+                                                       .isVALU             = 10,
+                                                       .isACCVGPRWrite     = 0,
+                                                       .isACCVGPRRead      = 0,
+                                                       .newSGPRs           = 0,
+                                                       .newVGPRs           = 0,
+                                                       .highWaterMarkSGPRs = 0,
+                                                       .highWaterMarkVGPRs = 0,
+                                                       .fractionOfSGPRs    = 0,
+                                                       .fractionOfVGPRs    = 0,
+                                                       .outOfRegisters     = 1000000000.0,
+                                                       .zeroFreeBarriers   = true,
+                                                       .vmemCycles         = 63,
+                                                       .vmemQueueSize      = 1,
+                                                       .dsmemCycles        = 38,
+                                                       .dsmemQueueSize     = 1};
+
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
                                             .lgkmcnt            = 885.6074246484375,
@@ -205,16 +238,15 @@ namespace rocRoller
                                             .outOfRegisters     = 1000000000.0,
                                             .zeroFreeBarriers   = true};
 
-        RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
 
-        inline LinearWeightedCost::LinearWeightedCost(ContextPtr ctx)
+        LinearWeightedCost::LinearWeightedCost(ContextPtr ctx, CostFunction fn)
             : Cost{ctx}
-            , m_weights(loadWeights(ctx))
+            , m_weights(loadWeights(ctx, fn))
         {
         }
 
-        Weights LinearWeightedCost::loadWeights(ContextPtr ctx) const
+        Weights LinearWeightedCost::loadWeights(ContextPtr ctx, CostFunction fn) const
         {
             auto settingsFile = Settings::getInstance()->get(Settings::SchedulerWeights);
             if(!settingsFile.empty())
@@ -235,6 +267,15 @@ namespace rocRoller
             else
             {
                 auto const& arch = ctx->targetArchitecture().target();
+
+                if(fn == CostFunction::LinearWeightedSimple)
+                {
+                    if(!arch.isCDNA35GPU())
+                        Log::warn("Architecture {} not tested for simplifed weights.",
+                                  arch.toString());
+
+                    return GFX950_SIMPLIFIED_WEIGHTS;
+                }
 
                 if(arch.isCDNA1GPU())
                     return GFX908_WEIGHTS;
@@ -259,26 +300,30 @@ namespace rocRoller
             return m_weights;
         }
 
-        inline bool LinearWeightedCost::Match(Argument arg)
+        bool LinearWeightedCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostFunction::LinearWeighted;
+            auto [costFn, ctx] = arg;
+            return costFn == CostFunction::LinearWeighted
+                   || costFn == CostFunction::LinearWeightedSimple;
         }
 
-        inline std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
+        std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<LinearWeightedCost>(std::get<1>(arg));
+            auto [costFn, ctx] = arg;
+
+            return std::make_shared<LinearWeightedCost>(ctx, costFn);
         }
 
-        inline std::string LinearWeightedCost::name() const
+        std::string LinearWeightedCost::name() const
         {
             return Name;
         }
 
-        inline float LinearWeightedCost::cost(Instruction const&       inst,
-                                              InstructionStatus const& status) const
+        float LinearWeightedCost::cost(Instruction const&       inst,
+                                       InstructionStatus const& status) const
         {
 
             auto nops = static_cast<float>(status.nops);

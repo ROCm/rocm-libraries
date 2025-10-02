@@ -92,8 +92,8 @@ extern "C" {
 *              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, 
-*              \p blockDim, \p descr, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb,
+*              \p blockDim, \p descr, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA,
 *              \p bsrSortedColIndA, \p x, \p beta or \p y is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -101,104 +101,7 @@ extern "C" {
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // alpha * ( 1.0  0.0  2.0 ) * ( 1.0 ) + beta * ( 4.0 ) = (  31.1 )
-*      //         ( 3.0  0.0  4.0 ) * ( 2.0 )          ( 5.0 ) = (  62.0 )
-*      //         ( 5.0  6.0  0.0 ) * ( 3.0 )          ( 6.0 ) = (  70.7 )
-*      //         ( 7.0  0.0  8.0 ) *                  ( 7.0 ) = ( 123.8 )
-*
-*      // BSR block dimension
-*      int bsr_dim = 2;
-*
-*      // Number of block rows and columns
-*      int mb = 2;
-*      int nb = 2;
-*
-*      // Number of non-zero blocks
-*      int nnzb = 4;
-*
-*      // BSR row pointers
-*      int hbsrRowPtr[3] = {0, 2, 4};
-*
-*      // BSR column indices
-*      int hbsrColInd[4] = {0, 1, 0, 1};
-*
-*      // BSR values
-*      double hbsrVal[16]
-*        = {1.0, 3.0, 0.0, 0.0, 2.0, 4.0, 0.0, 0.0, 5.0, 7.0, 6.0, 0.0, 0.0, 8.0, 0.0, 0.0};
-*
-*      // Block storage in column major
-*      hipsparseDirection_t dir = HIPSPARSE_DIRECTION_COLUMN;
-*
-*      // Transposition of the matrix
-*      hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*      // Scalar alpha and beta
-*      double alpha = 3.7;
-*      double beta  = 1.3;
-*
-*      // x and y
-*      double hx[4] = {1.0, 2.0, 3.0, 0.0};
-*      double hy[4] = {4.0, 5.0, 6.0, 7.0};
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Offload data to device
-*      int* dbsrRowPtr;
-*      int* dbsrColInd;
-*      double*        dbsrVal;
-*      double*        dx;
-*      double*        dy;
-*
-*      hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
-*      hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
-*      hipMalloc((void**)&dbsrVal, sizeof(double) * nnzb * bsr_dim * bsr_dim);
-*      hipMalloc((void**)&dx, sizeof(double) * nb * bsr_dim);
-*      hipMalloc((void**)&dy, sizeof(double) * mb * bsr_dim);
-*
-*      hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice);
-*      hipMemcpy(dbsrVal, hbsrVal, sizeof(double) * nnzb * bsr_dim * bsr_dim, hipMemcpyHostToDevice);
-*      hipMemcpy(dx, hx, sizeof(double) * nb * bsr_dim, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(double) * mb * bsr_dim, hipMemcpyHostToDevice);
-*
-*      // Call dbsrmv to perform y = alpha * A x + beta * y
-*      hipsparseDbsrmv(handle,
-*                      dir,
-*                      trans,
-*                      mb,
-*                      nb,
-*                      nnzb,
-*                      &alpha,
-*                      descr,
-*                      dbsrVal,
-*                      dbsrRowPtr,
-*                      dbsrColInd,
-*                      bsr_dim,
-*                      dx,
-*                      &beta,
-*                      dy);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * mb * bsr_dim, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroyMatDescr(descr);
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dbsrRowPtr);
-*      hipFree(dbsrColInd);
-*      hipFree(dbsrVal);
-*      hipFree(dx);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_bsrmv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

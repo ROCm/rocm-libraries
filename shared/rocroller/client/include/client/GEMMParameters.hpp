@@ -104,7 +104,7 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
-                std::pair<int, int> workgroupMapping;
+                int workgroupMappingDim;
             };
 
             /**
@@ -129,9 +129,9 @@ namespace rocRoller
                 int workgroupSizeX = 64;
                 int workgroupSizeY = 1;
 
-                std::pair<int, int> workgroupMapping       = {-1, -1};
-                bool                workgroupRemapXCC      = false;
-                int                 workgroupRemapXCCValue = -1;
+                int  workgroupMappingDim    = -1;
+                bool workgroupRemapXCC      = false;
+                int  workgroupRemapXCCValue = -1;
 
                 // Datatype of inputs and outputs
                 TypeParameters types;
@@ -161,10 +161,13 @@ namespace rocRoller
                 unsigned int unrollY = 0;
 
                 std::string scheduler;
+                std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                bool streamK        = false;
-                bool streamKTwoTile = false;
+                // TODO Use StreamKConfig
+                bool streamK               = false;
+                bool streamKTwoTile        = false;
+                bool streamKTwoTileDPFirst = false;
 
                 std::string version;
 

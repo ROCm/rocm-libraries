@@ -30,11 +30,11 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSparseToDense_bufferSize computes the required user allocated buffer size needed when converting 
-*  a sparse matrix to a dense matrix. This routine currently accepts the sparse matrix descriptor \p matA in CSR, 
+*  \p hipsparseSparseToDense_bufferSize computes the required user allocated buffer size needed when converting
+*  a sparse matrix to a dense matrix. This routine currently accepts the sparse matrix descriptor \p matA in CSR,
 *  CSC, or COO format. This routine is used to determine the size of the buffer needed in \ref hipsparseSparseToDense.
 *
-*  \p hipsparseSparseToDense_bufferSize supports different data types for the sparse and dense matrices. See 
+*  \p hipsparseSparseToDense_bufferSize supports different data types for the sparse and dense matrices. See
 *  \ref hipsparseSparseToDense for a complete listing of all the data types available.
 *
 *  @param[in]
@@ -72,17 +72,17 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *  \brief Sparse matrix to dense matrix conversion
 *
 *  \details
-*  \p hipsparseSparseToDense converts a sparse matrix to a dense matrix. This routine currently accepts 
-*  the sparse matrix descriptor \p matA in CSR, CSC, or COO format. This routine takes a user allocated buffer 
+*  \p hipsparseSparseToDense converts a sparse matrix to a dense matrix. This routine currently accepts
+*  the sparse matrix descriptor \p matA in CSR, CSC, or COO format. This routine takes a user allocated buffer
 *  whose size must first be computed by calling \ref hipsparseSparseToDense_bufferSize
 *
-*  The conversion of a sparse matrix into a dense one involves two steps. First, the user creates the sparse and 
-*  dense matrix descriptors and calls \ref hipsparseSparseToDense_bufferSize to determine the size of the required 
-*  temporary storage buffer. The user then allocates this buffer and passes it to \ref hipsparseSparseToDense in 
-*  order to complete the conversion. Once the conversion is complete, the user is free to deallocate the storage 
+*  The conversion of a sparse matrix into a dense one involves two steps. First, the user creates the sparse and
+*  dense matrix descriptors and calls \ref hipsparseSparseToDense_bufferSize to determine the size of the required
+*  temporary storage buffer. The user then allocates this buffer and passes it to \ref hipsparseSparseToDense in
+*  order to complete the conversion. Once the conversion is complete, the user is free to deallocate the storage
 *  buffer. See full example below for details.
 *
-*  \p hipsparseSparseToDense supports the following uniform precision data types for the sparse and dense matrices \f$A\f$ 
+*  \p hipsparseSparseToDense supports the following uniform precision data types for the sparse and dense matrices \f$A\f$
 *  and \f$B\f$:
 *
 *  \par Uniform Precisions:
@@ -115,93 +115,7 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *               pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    //     1 0 0 0
-*    // A = 4 2 0 4
-*    //     0 3 7 0
-*    //     9 0 0 1
-*    int m   = 4;
-*    int n   = 4;
-*    int nnz = 8;
-*
-*    std::vector<int> hcsrRowPtrA = {0, 1, 4, 6, 8};
-*    std::vector<int> hcsrColIndA = {0, 0, 1, 3, 1, 2, 0, 3};
-*    std::vector<float> hcsrValA = {1.0f, 4.0f, 2.0f, 4.0f, 3.0f, 7.0f, 9.0f, 1.0f};
-*
-*    int* dcsrRowPtrA;
-*    int* dcsrColIndA;
-*    float* dcsrValA;
-*    hipMalloc((void**)&dcsrRowPtrA, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColIndA, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrValA, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtrA, hcsrRowPtrA.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColIndA, hcsrColIndA.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrValA, hcsrValA.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    float* ddenseB;
-*    hipMalloc((void**)&ddenseB, sizeof(float) * m * n);
-*
-*    hipsparseHandle_t     handle;
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseDnMatDescr_t matB;
-*
-*    hipsparseCreate(&handle);
-*
-*    hipsparseIndexType_t rowIdxTypeA = HIPSPARSE_INDEX_32I;
-*    hipsparseIndexType_t colIdxTypeA = HIPSPARSE_INDEX_32I;
-*    hipDataType  dataTypeA = HIP_R_32F;
-*    hipsparseIndexBase_t idxBaseA = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    // Create sparse matrix A
-*    hipsparseCreateCsr(&matA,
-*        m,
-*        n,
-*        nnz,
-*        dcsrRowPtrA,
-*        dcsrColIndA,
-*        dcsrValA,
-*        rowIdxTypeA,
-*        colIdxTypeA,
-*        idxBaseA,
-*        dataTypeA);
-*
-*    // Create dense matrix B
-*    hipsparseCreateDnMat(&matB,
-*                        m,
-*                        n,
-*                        m,
-*                        ddenseB,
-*                        HIP_R_32F,
-*                        HIPSPARSE_ORDER_COL);
-*
-*    hipsparseSparseToDenseAlg_t alg = HIPSPARSE_SPARSETODENSE_ALG_DEFAULT;
-*
-*    size_t bufferSize;
-*    hipsparseSparseToDense_bufferSize(handle, matA, matB, alg, &bufferSize);
-*
-*    void* tempBuffer;
-*    hipMalloc((void**)&tempBuffer, bufferSize);
-*
-*    // Complete the conversion
-*    hipsparseSparseToDense(handle, matA, matB, alg, tempBuffer);
-*
-*    // Copy result back to host
-*    std::vector<float> hdenseB(m * n);
-*    hipMemcpy(hdenseB.data(), ddenseB, sizeof(float) * m * n, hipMemcpyDeviceToHost);
-*
-*    // Clear hipSPARSE
-*    hipsparseDestroyMatDescr(matA);
-*    hipsparseDestroyMatDescr(matB);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dcsrRowPtrA);
-*    hipFree(dcsrColIndA);
-*    hipFree(dcsrValA);
-*    hipFree(ddenseB);
-*    hipFree(tempBuffer);
-*  \endcode
+*  \snippet example_hipsparse_sparse_to_dense.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

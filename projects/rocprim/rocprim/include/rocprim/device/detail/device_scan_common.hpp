@@ -82,14 +82,12 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void init_lookback_scan_state(LookBackScanState  l
 }
 
 template<typename LookBackScanState>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
-    init_lookback_scan_state_kernel(LookBackScanState              lookback_scan_state,
-                                    const unsigned int             number_of_blocks,
-                                    ordered_block_id<unsigned int> ordered_bid,
-                                    unsigned int                   save_index = 0,
-                                    typename LookBackScanState::value_type* const save_dest
-                                    = nullptr)
+ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE 
+void init_lookback_scan_state_kernel_impl(LookBackScanState              lookback_scan_state,
+                                          const unsigned int             number_of_blocks,
+                                          ordered_block_id<unsigned int> ordered_bid, // ordered block id is passed by value, so no need to call its constructor
+                                          unsigned int                   save_index,
+                                          typename LookBackScanState::value_type* const save_dest)
 {
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int block_size      = ::rocprim::detail::block_size<0>();
@@ -111,13 +109,11 @@ ROCPRIM_KERNEL
 }
 
 template<typename LookBackScanState>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
-    init_lookback_scan_state_kernel(LookBackScanState  lookback_scan_state,
+ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE 
+void init_lookback_scan_state_kernel_impl(LookBackScanState  lookback_scan_state,
                                     const unsigned int number_of_blocks,
-                                    unsigned int       save_index = 0,
-                                    typename LookBackScanState::value_type* const save_dest
-                                    = nullptr)
+                                    unsigned int       save_index,
+                                    typename LookBackScanState::value_type* const save_dest)
 {
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int block_size      = ::rocprim::detail::block_size<0>();
@@ -136,6 +132,38 @@ ROCPRIM_KERNEL
     }
 
     init_lookback_scan_state(lookback_scan_state, number_of_blocks, flat_thread_id);
+}
+
+template<typename LookBackScanState>
+ROCPRIM_KERNEL
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
+    init_lookback_scan_state_kernel(LookBackScanState              lookback_scan_state,
+                                    const unsigned int             number_of_blocks,
+                                    ordered_block_id<unsigned int> ordered_bid,
+                                    unsigned int                   save_index = 0,
+                                    typename LookBackScanState::value_type* const save_dest
+                                    = nullptr)
+{
+    init_lookback_scan_state_kernel_impl(lookback_scan_state,
+                                         number_of_blocks,
+                                         ordered_bid,
+                                         save_index,
+                                         save_dest);
+}
+
+template<typename LookBackScanState>
+ROCPRIM_KERNEL
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
+    init_lookback_scan_state_kernel(LookBackScanState  lookback_scan_state,
+                                    const unsigned int number_of_blocks,
+                                    unsigned int       save_index = 0,
+                                    typename LookBackScanState::value_type* const save_dest
+                                    = nullptr)
+{
+    init_lookback_scan_state_kernel_impl(lookback_scan_state,
+                                         number_of_blocks,
+                                         save_index,
+                                         save_dest);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS

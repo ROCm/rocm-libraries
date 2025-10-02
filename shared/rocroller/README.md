@@ -45,7 +45,7 @@ project dependencies are installed in a location discoverable
 by CMake by default. In the event that this is not the case, the
 `CMAKE_PREFIX_PATH` can be used to help CMake find required packages.
 Often, ROCm is installed in `/opt/rocm` so setting the prefix path
-accordingly will ensure ROCm dependencies are locatable. To aide in 
+accordingly will ensure ROCm dependencies are locatable. To aide in
 setting common configurations a `CMakePresets.json` file is provided
 in the project root directory. Two presets are provided with the following
 options:
@@ -96,7 +96,7 @@ To build rocRoller natively on Ubuntu 22 (jammy):
 ```
 # As root, once:
 apt update
-apt install -y libboost-container1.74-dev libopenblas-dev ninja-build
+apt install -y libopenblas-dev ninja-build
 
 # As regular user:
 git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
@@ -394,22 +394,7 @@ The use of `Throw<FatalError>("message")` can also be used to catch incorrect co
 
 ## Profiling
 
-On Linux, we can use the "perf" tool to sample the callgraph and
-generate a flame graph.
-
-Using FlameGraph: https://github.com/brendangregg/FlameGraph
-
-CMake configure with `-DROCROLLER_ENABLE_TIMERS=ON` and compile.
-
-Then run with the steps outlined in [scripts/flamegraph.py](scripts/flamegraph.py):
-```
-  perf record -F 99 -g ./bin/rocroller-tests --gtest_filter="KernelGraph*03"
-  perf script > out.perf
-  ~/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
-  ~/FlameGraph/flamegraph.pl out.folded > kernel.svg
-```
-
-Additionally, when using the trace Dockerfile, you can invoke rrperf to profile RocRoller or Tensile guideposts with Omniperf.
+When using the trace Dockerfile, you can invoke rrperf to profile RocRoller or Tensile guideposts with Omniperf.
 To see how this works, check rrperf's help documentation:
 ```
   ./scripts/rrperf profile --help

@@ -75,10 +75,13 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       GTest::GTest
       GTest::Main
   )
-  target_link_libraries(${TEST_TARGET}
-    PRIVATE
-      rocprim
-  )
+
+  if(USE_SYSTEM_LIB)
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocprim)
+  else()
+    target_link_libraries(${TEST_TARGET} PRIVATE rocprim)
+  endif()
+
   if(USE_HIPCXX)
     target_link_libraries(${TEST_TARGET}
       PRIVATE

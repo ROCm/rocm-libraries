@@ -342,7 +342,7 @@ namespace llvm
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {
                 float floatVal = value;
-                ScalarTraits<float>::output(value, ctx, out);
+                ScalarTraits<float>::output(floatVal, ctx, out);
             }
 
             static StringRef input(StringRef scalar, void* ctx, T& value)
@@ -359,6 +359,32 @@ namespace llvm
             static QuotingType mustQuote(StringRef ref)
             {
                 return ScalarTraits<float>::mustQuote(ref);
+            }
+        };
+
+        template <>
+        struct ScalarTraits<rocRoller::Raw32>
+        {
+            static void output(const rocRoller::Raw32& value, void* ctx, llvm::raw_ostream& out)
+            {
+                auto outputVal = static_cast<uint32_t>(value);
+                ScalarTraits<float>::output(outputVal, ctx, out);
+            }
+
+            static StringRef input(StringRef scalar, void* ctx, rocRoller::Raw32& value)
+            {
+                uint32_t inputVal = 0u;
+
+                auto rv = ScalarTraits<uint32_t>::input(scalar, ctx, inputVal);
+
+                value = rocRoller::Raw32(inputVal);
+
+                return rv;
+            }
+
+            static QuotingType mustQuote(StringRef ref)
+            {
+                return ScalarTraits<std::string>::mustQuote(ref);
             }
         };
 

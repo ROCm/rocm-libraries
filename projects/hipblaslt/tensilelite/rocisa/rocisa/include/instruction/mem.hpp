@@ -104,6 +104,12 @@ namespace rocisa
                 case InstType::INST_D16_HI_B16:
                     kStr = isa[0] < 11 ? "short_d16_hi" : "d16_hi_b16";
                     break;
+                case InstType::INST_TR8_B64:
+                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "";
+                    break;
+                case InstType::INST_TR16_B128:
+                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "";
+                    break;
                 default:
                     break;
                 }
@@ -188,6 +194,56 @@ namespace rocisa
             if(flat)
             {
                 kStr += flat->toString();
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    struct GLOBALLoadInstruction : public GlobalReadInstruction
+    {
+        std::shared_ptr<Container>     vaddr;
+        std::shared_ptr<Container>     saddr;
+        std::optional<GLOBALModifiers> modifier;
+
+        GLOBALLoadInstruction(InstType                          instType,
+                              const std::shared_ptr<Container>& dst,
+                              const std::shared_ptr<Container>& vaddr,
+                              const std::shared_ptr<Container>& saddr,
+                              std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                              const std::string&                comment  = "")
+            : GlobalReadInstruction(instType, dst, comment)
+            , vaddr(vaddr)
+            , saddr(saddr)
+            , modifier(modifier)
+        {
+            instStr = "global_load_";
+        }
+
+        GLOBALLoadInstruction(const GLOBALLoadInstruction& other)
+            : GlobalReadInstruction(other)
+            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
+            , saddr(other.saddr ? other.saddr->clone() : nullptr)
+            , modifier(other.modifier)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, vaddr, saddr};
+        }
+
+        virtual std::string getArgStr() const
+        {
+            return dst->toString() + ", " + vaddr->toString() + ", " + saddr->toString();
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(modifier)
+            {
+                kStr += modifier->toString();
             }
             return formatWithComment(kStr);
         }
@@ -1075,6 +1131,50 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<FlatLoadB128>(*this);
+        }
+    };
+
+    struct GlobalLoadTR8B64 : public GLOBALLoadInstruction
+    {
+        GlobalLoadTR8B64(const std::shared_ptr<RegisterContainer>& dst,
+                              const std::shared_ptr<RegisterContainer>& vaddr,
+                              const std::shared_ptr<RegisterContainer>& saddr,
+                              std::optional<GLOBALModifiers>            modifier  = std::nullopt,
+                              const std::string&                        comment = "")
+            : GLOBALLoadInstruction(InstType::INST_TR8_B64, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadTR8B64(const GlobalLoadTR8B64& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadTR8B64>(*this);
+        }
+    };
+
+    struct GlobalLoadTR16B128 : public GLOBALLoadInstruction
+    {
+        GlobalLoadTR16B128(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_TR16_B128, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadTR16B128(const GlobalLoadTR16B128& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadTR16B128>(*this);
         }
     };
 

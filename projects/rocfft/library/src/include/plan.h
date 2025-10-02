@@ -45,6 +45,16 @@ constexpr size_t PowMax()
     return u;
 }
 
+// types of grid layouts for global transpositions
+enum class grid_layout
+{
+    invalid = 0,
+    slab    = 1,
+    pencil  = 2,
+    brick   = 3
+};
+using transpose_type = std::pair<grid_layout, grid_layout>;
+
 // Generic function to check is pow of a given base number or not
 template <int base>
 static inline bool IsPow(size_t u)
@@ -105,6 +115,12 @@ struct rocfft_brick_t
     // compute offset of this brick, given the field's stride
     size_t offset_in_field(const std::vector<size_t>& fieldStride) const;
 
+    bool operator==(const rocfft_brick_t& other) const
+    {
+        return lower == other.lower && upper == other.upper && stride == other.stride
+               && location == other.location;
+    }
+
     std::string str() const;
 };
 
@@ -133,7 +149,9 @@ struct rocfft_plan_description_t
     // Multi-process communicator info:
     rocfft_comm_type comm_type = rocfft_comm_none;
 #ifdef ROCFFT_MPI_ENABLE
-    MPI_Comm_wrapper_t mpi_comm;
+    // this is the communicator that was directly provided by the user
+    // - we don't own it so it doesn't need to be wrapped or freed
+    MPI_Comm user_mpi_comm = MPI_COMM_NULL;
 #endif
 
     LoadOps  loadOps;
@@ -179,6 +197,9 @@ struct rocfft_plan_description_t
 
 struct rocfft_plan_t
 {
+#ifdef ROCFFT_MPI_ENABLE
+    MPI_Comm_wrapper_t mpi_comm;
+#endif
     size_t rank = 0;
     // input lengths
     std::vector<size_t> lengths;
@@ -330,7 +351,7 @@ private:
                          std::vector<size_t>&       outputItems,
                          size_t                     transposeNumber);
 
-    // global transpose implemented as an all-to-all communication.
+    // default global all-to-all transpose
     void GlobalTransposeA2A(size_t                     elem_size,
                             const rocfft_field_t&      inField,
                             const rocfft_field_t&      outField,

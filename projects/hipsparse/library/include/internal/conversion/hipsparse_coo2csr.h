@@ -34,7 +34,7 @@ extern "C" {
 *  \details
 *  \p hipsparseXcoo2csr converts the COO array containing the row indices into a
 *  CSR array of row offsets, that point to the start of every row.
-*  It is assumed that the COO row index array is sorted and that all arrays have been allocated 
+*  It is assumed that the COO row index array is sorted and that all arrays have been allocated
 *  prior to calling hipsparseXcoo2csr.
 *
 *  For example, given the COO row indices array:
@@ -79,44 +79,7 @@ extern "C" {
 *              pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in COO format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcooRowInd[8] = {0, 0, 0, 1, 1, 2, 2, 2};
-*    int hcooColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcooVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    int* dcooRowInd = nullptr;
-*    int* dcooColInd = nullptr;
-*    hipMalloc((void**)&dcooRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcooColInd, sizeof(int) * nnz);
-*
-*    hipMemcpy(dcooRowInd, hcooRowInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcooColInd, hcooColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcsrRowPtr = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*
-*    hipsparseXcoo2csr(handle, dcooRowInd, nnz, m, dcsrRowPtr, base);
-*
-*    hipFree(dcooRowInd);
-*    hipFree(dcooColInd);
-*    
-*    hipFree(dcsrRowPtr);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_coo2csr.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,

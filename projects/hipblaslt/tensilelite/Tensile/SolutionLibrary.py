@@ -92,6 +92,18 @@ class MatchingLibrary:
         if distance == "Equality" or distance == "GridBased":
             propertyKeys[0] = Properties.Property("BatchSize", index=0)
 
+        if distance == "Range":
+            propertyKeys = {
+                0: Properties.Property("FreeSizeA", index=0),
+                1: Properties.Property("FreeSizeA", index=0),
+                2: Properties.Property("FreeSizeB", index=0),
+                3: Properties.Property("FreeSizeB", index=0),
+                4: Properties.Property("BatchSize", index=0),
+                5: Properties.Property("BatchSize", index=0),
+                6: Properties.Property("BoundSize", index=0),
+                7: Properties.Property("BoundSize", index=0)
+            }
+
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
 
@@ -404,6 +416,8 @@ class MasterSolutionLibrary:
             if d["LibraryType"] == "Matching":
                 if d["Library"]["distance"] == "Equality":
                     predicate = Properties.Predicate(tag="EqualityMatching")
+                elif d["Library"]["distance"] == "Range":
+                    predicate = Properties.Predicate(tag="RangeMatching")
                 else:
                     predicate = Properties.Predicate(tag="TruePred")
 
@@ -417,7 +431,7 @@ class MasterSolutionLibrary:
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": freesizeLib})
             elif d["LibraryType"] == "Prediction":
-                predicate = Properties.Predicate(tag="FreeSizeMatching") # TODO Do we need a new predicate here?
+                predicate = Properties.Predicate(tag="PredictionMatching")
 
                 predictionLib = PredictionLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")

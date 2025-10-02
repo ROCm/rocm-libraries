@@ -173,7 +173,7 @@ bool display_timing_info_is_stdout_disabled()
 int main(int argc, char** argv)
 {
     // Print version
-    char version[256];
+    char version[512];
     query_version(version);
 
     // Get device id from command line

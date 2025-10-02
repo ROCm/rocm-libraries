@@ -92,7 +92,7 @@ extern "C" {
 void query_version(char* version)
 {
     int  hipsparse_ver;
-    char hipsparse_rev[64];
+    char hipsparse_rev[256];
 
     hipsparseStatus_t status;
 
@@ -126,12 +126,13 @@ void query_version(char* version)
         throw(status);
     }
 
-    sprintf(version,
-            "v%d.%d.%d-%s",
-            hipsparse_ver / 100000,
-            hipsparse_ver / 100 % 1000,
-            hipsparse_ver % 100,
-            hipsparse_rev);
+    snprintf(version,
+             512,
+             "v%d.%d.%d-%.256s",
+             hipsparse_ver / 100000,
+             hipsparse_ver / 100 % 1000,
+             hipsparse_ver % 100,
+             hipsparse_rev);
 }
 
 /* ============================================================================================ */

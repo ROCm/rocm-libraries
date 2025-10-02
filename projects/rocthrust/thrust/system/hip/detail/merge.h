@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,21 +29,21 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/system/hip/config.h>
-
-#  include <thrust/detail/minmax.h>
-#  include <thrust/detail/mpl/math.h>
-#  include <thrust/detail/range/head_flags.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
-#  include <thrust/extrema.h>
-#  include <thrust/functional.h>
-#  include <thrust/merge.h>
+#  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/pair.h>
-#  include <thrust/system/hip/detail/get_value.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/util.h>
 
 #  include <cstdint>
@@ -76,22 +76,22 @@ struct predicate_wrapper
 template <class Derived, class KeysIt1, class KeysIt2, class ResultIt, class CompareOp>
 ResultIt THRUST_HIP_RUNTIME_FUNCTION merge(
   execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ResultIt result,
+  KeysIt1 keys1_begin,
+  KeysIt1 keys1_end,
+  KeysIt2 keys2_begin,
+  KeysIt2 keys2_end,
+  ResultIt result_begin,
   CompareOp compare_op)
 
 {
   using size_type = size_t;
 
-  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_begin, keys1_end));
+  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_begin, keys2_end));
 
   if (input1_size == 0 && input2_size == 0)
   {
-    return result;
+    return result_begin;
   }
 
   size_t storage_size = 0;
@@ -101,7 +101,16 @@ ResultIt THRUST_HIP_RUNTIME_FUNCTION merge(
   // Determine temporary device storage requirements.
   hip_rocprim::throw_on_error(
     rocprim::merge(
-      nullptr, storage_size, keys1_first, keys2_first, result, input1_size, input2_size, compare_op, stream, debug_sync),
+      nullptr,
+      storage_size,
+      keys1_begin,
+      keys2_begin,
+      result_begin,
+      input1_size,
+      input2_size,
+      compare_op,
+      stream,
+      debug_sync),
     "merge failed on 1st step");
 
   // Allocate temporary storage.
@@ -110,11 +119,11 @@ ResultIt THRUST_HIP_RUNTIME_FUNCTION merge(
 
   hip_rocprim::throw_on_error(
     rocprim::merge(
-      ptr, storage_size, keys1_first, keys2_first, result, input1_size, input2_size, compare_op, stream, debug_sync),
+      ptr, storage_size, keys1_begin, keys2_begin, result_begin, input1_size, input2_size, compare_op, stream, debug_sync),
     "merge failed on 2nd step");
   hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "merge: failed to synchronize");
 
-  ResultIt result_end = result + input1_size + input2_size;
+  ResultIt result_end = result_begin + input1_size + input2_size;
   return result_end;
 }
 
@@ -128,14 +137,14 @@ template <typename Derived,
           typename CompareOp>
 THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
   execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ItemsIt1 items1_first,
-  ItemsIt2 items2_first,
-  KeysOutputIt keys_result,
-  ItemsOutputIt items_result,
+  KeysIt1 keys1_begin,
+  KeysIt1 keys1_end,
+  KeysIt2 keys2_begin,
+  KeysIt2 keys2_end,
+  ItemsIt1 items1_begin,
+  ItemsIt2 items2_begin,
+  KeysOutputIt keys_out_begin,
+  ItemsOutputIt items_out_begin,
   CompareOp compare_op)
 {
   using size_type = size_t;
@@ -145,12 +154,12 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 
   predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 
-  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_begin, keys1_end));
+  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_begin, keys2_end));
 
   if (input1_size == 0 && input2_size == 0)
   {
-    return thrust::make_pair(keys_result, items_result);
+    return thrust::make_pair(keys_out_begin, items_out_begin);
   };
 
   size_t storage_size = 0;
@@ -162,9 +171,9 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
     rocprim::merge(
       nullptr,
       storage_size,
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys1_begin, items1_begin)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys2_begin, items2_begin)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys_out_begin, items_out_begin)),
       input1_size,
       input2_size,
       wrapped_binary_pred,
@@ -180,9 +189,9 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
     rocprim::merge(
       ptr,
       storage_size,
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
-      rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys1_begin, items1_begin)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys2_begin, items2_begin)),
+      rocprim::make_zip_iterator(rocprim::make_tuple(keys_out_begin, items_out_begin)),
       input1_size,
       input2_size,
       wrapped_binary_pred,
@@ -192,7 +201,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
   hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "merge: failed to synchronize");
 
   size_t count = input1_size + input2_size;
-  return thrust::make_pair(keys_result + count, items_result + count);
+  return thrust::make_pair(keys_out_begin + count, items_out_begin + count);
 }
 
 } // namespace __merge
@@ -201,48 +210,47 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 // Thrust API entry points
 //-------------------------
 THRUST_EXEC_CHECK_DISABLE
-template <class Derived, class KeysIt1, class KeysIt2, class ResultIt, class CompareOp>
-ResultIt THRUST_HIP_FUNCTION merge(
-  execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ResultIt result,
-  CompareOp compare_op)
-
+template <class Derived, class KeysIt1, class KeysIt2, class ResultIt, class CompareOp = less<>>
+ResultIt THRUST_HOST_DEVICE
+merge(execution_policy<Derived>& policy,
+      KeysIt1 keys1_begin,
+      KeysIt1 keys1_end,
+      KeysIt2 keys2_begin,
+      KeysIt2 keys2_end,
+      ResultIt result_begin,
+      CompareOp compare_op = {})
 {
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static ResultIt
     par(execution_policy<Derived>& policy,
-        KeysIt1 keys1_first,
-        KeysIt1 keys1_last,
-        KeysIt2 keys2_first,
-        KeysIt2 keys2_last,
-        ResultIt result,
+        KeysIt1 keys1_begin,
+        KeysIt1 keys1_end,
+        KeysIt2 keys2_begin,
+        KeysIt2 keys2_end,
+        ResultIt result_begin,
         CompareOp compare_op)
     {
-      return __merge::merge(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+      return __merge::merge(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
     }
     THRUST_DEVICE static ResultIt
     seq(execution_policy<Derived>& policy,
-        KeysIt1 keys1_first,
-        KeysIt1 keys1_last,
-        KeysIt2 keys2_first,
-        KeysIt2 keys2_last,
-        ResultIt result,
+        KeysIt1 keys1_begin,
+        KeysIt1 keys1_end,
+        KeysIt2 keys2_begin,
+        KeysIt2 keys2_end,
+        ResultIt result_begin,
         CompareOp compare_op)
     {
       return thrust::merge(
-        cvt_to_seq(derived_cast(policy)), keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+        cvt_to_seq(derived_cast(policy)), keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
     }
   };
 #  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+  return workaround::par(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
 #  else
-  return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+  return workaround::seq(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
 #  endif
 }
 
@@ -254,68 +262,68 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt,
-          class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION merge_by_key(
+          class CompareOp = less<>>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
   execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ItemsIt1 items1_first,
-  ItemsIt2 items2_first,
-  KeysOutputIt keys_result,
-  ItemsOutputIt items_result,
-  CompareOp compare_op)
+  KeysIt1 keys1_begin,
+  KeysIt1 keys1_end,
+  KeysIt2 keys2_begin,
+  KeysIt2 keys2_end,
+  ItemsIt1 items1_begin,
+  ItemsIt2 items2_begin,
+  KeysOutputIt keys_out_begin,
+  ItemsOutputIt items_out_begin,
+  CompareOp compare_op = {})
 {
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static pair<KeysOutputIt, ItemsOutputIt> par(
       execution_policy<Derived>& policy,
-      KeysIt1 keys1_first,
-      KeysIt1 keys1_last,
-      KeysIt2 keys2_first,
-      KeysIt2 keys2_last,
-      ItemsIt1 items1_first,
-      ItemsIt2 items2_first,
-      KeysOutputIt keys_result,
-      ItemsOutputIt items_result,
+      KeysIt1 keys1_begin,
+      KeysIt1 keys1_end,
+      KeysIt2 keys2_begin,
+      KeysIt2 keys2_end,
+      ItemsIt1 items1_begin,
+      ItemsIt2 items2_begin,
+      KeysOutputIt keys_out_begin,
+      ItemsOutputIt items_out_begin,
       CompareOp compare_op)
     {
       return __merge::merge(
         policy,
-        keys1_first,
-        keys1_last,
-        keys2_first,
-        keys2_last,
-        items1_first,
-        items2_first,
-        keys_result,
-        items_result,
+        keys1_begin,
+        keys1_end,
+        keys2_begin,
+        keys2_end,
+        items1_begin,
+        items2_begin,
+        keys_out_begin,
+        items_out_begin,
         compare_op);
     }
     THRUST_DEVICE static pair<KeysOutputIt, ItemsOutputIt> seq(
       execution_policy<Derived>& policy,
-      KeysIt1 keys1_first,
-      KeysIt1 keys1_last,
-      KeysIt2 keys2_first,
-      KeysIt2 keys2_last,
-      ItemsIt1 items1_first,
-      ItemsIt2 items2_first,
-      KeysOutputIt keys_result,
-      ItemsOutputIt items_result,
+      KeysIt1 keys1_begin,
+      KeysIt1 keys1_end,
+      KeysIt2 keys2_begin,
+      KeysIt2 keys2_end,
+      ItemsIt1 items1_begin,
+      ItemsIt2 items2_begin,
+      KeysOutputIt keys_out_begin,
+      ItemsOutputIt items_out_begin,
       CompareOp compare_op)
     {
       return thrust::merge_by_key(
         cvt_to_seq(derived_cast(policy)),
-        keys1_first,
-        keys1_last,
-        keys2_first,
-        keys2_last,
-        items1_first,
-        items2_first,
-        keys_result,
-        items_result,
+        keys1_begin,
+        keys1_end,
+        keys2_begin,
+        keys2_end,
+        items1_begin,
+        items2_begin,
+        keys_out_begin,
+        items_out_begin,
         compare_op);
     }
   };
@@ -323,71 +331,30 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION merge_by_key(
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(
     policy,
-    keys1_first,
-    keys1_last,
-    keys2_first,
-    keys2_last,
-    items1_first,
-    items2_first,
-    keys_result,
-    items_result,
+    keys1_begin,
+    keys1_end,
+    keys2_begin,
+    keys2_end,
+    items1_begin,
+    items2_begin,
+    keys_out_begin,
+    items_out_begin,
     compare_op);
 #  else
   return workaround::seq(
     policy,
-    keys1_first,
-    keys1_last,
-    keys2_first,
-    keys2_last,
-    items1_first,
-    items2_first,
-    keys_result,
-    items_result,
+    keys1_begin,
+    keys1_end,
+    keys2_begin,
+    keys2_end,
+    items1_begin,
+    items2_begin,
+    keys_out_begin,
+    items_out_begin,
     compare_op);
 #  endif
 }
 
-THRUST_EXEC_CHECK_DISABLE
-template <class Derived, class KeysIt1, class KeysIt2, class ResultIt>
-ResultIt THRUST_HIP_FUNCTION merge(
-  execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ResultIt result)
-{
-  using keys_type = typename thrust::iterator_value<KeysIt1>::type;
-  return hip_rocprim::merge(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, less<keys_type>());
-}
-
-template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION merge_by_key(
-  execution_policy<Derived>& policy,
-  KeysIt1 keys1_first,
-  KeysIt1 keys1_last,
-  KeysIt2 keys2_first,
-  KeysIt2 keys2_last,
-  ItemsIt1 items1_first,
-  ItemsIt2 items2_first,
-  KeysOutputIt keys_result,
-  ItemsOutputIt items_result)
-{
-  using keys_type = typename thrust::iterator_value<KeysIt1>::type;
-  return hip_rocprim::merge_by_key(
-    policy,
-    keys1_first,
-    keys1_last,
-    keys2_first,
-    keys2_last,
-    items1_first,
-    items2_first,
-    keys_result,
-    items_result,
-    thrust::less<keys_type>());
-}
-
 } // namespace hip_rocprim
-
 THRUST_NAMESPACE_END
 #endif
