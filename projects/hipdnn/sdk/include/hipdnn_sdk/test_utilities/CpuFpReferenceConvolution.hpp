@@ -94,7 +94,7 @@ public:
             // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> outputSpatialIndices(indices.begin() + 3, indices.end());
 
-            auto accumulator = static_cast<AccumulatorType>(0);
+            auto accumulator = static_cast<AccumulatorType>(0.0f);
             int64_t baseInputChannel = gIdx * channelsPerGroup;
 
             for(int64_t c = 0; c < channelsPerGroup; ++c)
@@ -147,8 +147,9 @@ public:
                             InputDataType inputVal = input.getHostValue(inputFullIndices);
                             InputDataType weightVal = weight.getHostValue(weightFullIndices);
 
-                            accumulator += static_cast<AccumulatorType>(inputVal)
-                                           * static_cast<AccumulatorType>(weightVal);
+                            accumulator = accumulator
+                                          + (static_cast<AccumulatorType>(inputVal)
+                                             * static_cast<AccumulatorType>(weightVal));
                         }
                     });
             }
@@ -219,7 +220,7 @@ public:
             // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> inputSpatialIndices(indices.begin() + 3, indices.end());
 
-            AccumulatorType vAcc = 0;
+            auto vAcc = static_cast<AccumulatorType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing output gradients
             iterateAlongDimensions(
@@ -276,8 +277,9 @@ public:
                             InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
                             InputDataType vWei = weight.getHostValue(weightFullIndices);
 
-                            vAcc += static_cast<AccumulatorType>(vOut)
-                                    * static_cast<AccumulatorType>(vWei);
+                            vAcc = vAcc
+                                   + (static_cast<AccumulatorType>(vOut)
+                                      * static_cast<AccumulatorType>(vWei));
                         }
                     }
                 });
