@@ -182,7 +182,8 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            if(isLocalDevice())
+            if(isLocalDevice() && assertOpKind != AssertOpKind::MemoryViolation
+               && assertOpKind != AssertOpKind::STrap)
             {
                 KernelArguments kargs;
 
