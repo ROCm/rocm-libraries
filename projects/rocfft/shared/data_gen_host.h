@@ -732,11 +732,11 @@ static void generate_real_data(std::vector<hostbuf>& input,
 }
 
 template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&     vals,
-                                                  const std::vector<Tsize>& length,
-                                                  const std::vector<Tsize>& istride,
-                                                  const Tsize               idist,
-                                                  const Tsize               nbatch)
+static void impose_hermitian_symmetry_interleaved_host(std::vector<hostbuf>&     vals,
+                                                       const std::vector<Tsize>& length,
+                                                       const std::vector<Tsize>& istride,
+                                                       const Tsize               idist,
+                                                       const Tsize               nbatch)
 {
     switch(length.size())
     {
@@ -755,11 +755,11 @@ static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&     vals
 }
 
 template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_planar(std::vector<hostbuf>&     vals,
-                                             const std::vector<Tsize>& length,
-                                             const std::vector<Tsize>& istride,
-                                             const Tsize               idist,
-                                             const Tsize               nbatch)
+static void impose_hermitian_symmetry_planar_host(std::vector<hostbuf>&     vals,
+                                                  const std::vector<Tsize>& length,
+                                                  const std::vector<Tsize>& istride,
+                                                  const Tsize               idist,
+                                                  const Tsize               nbatch)
 {
     switch(length.size())
     {

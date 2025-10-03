@@ -65,6 +65,56 @@ __device__ static void set_imag_zero(const size_t pos, Tfloat* xreal, Tfloat* xi
     ximag[pos] = 0.0;
 }
 
+// get grid dimensions for hermitian symmetrizer kernel
+static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
+                                       const size_t               batch,
+                                       const size_t               blockSize)
+{
+    dim3 gridDim;
+
+    switch(length.size())
+    {
+    case 1:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
+        break;
+    case 2:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize));
+        break;
+    case 3:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize),
+                       DivRoundingUp<size_t>(length[1] - 1, blockSize));
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return gridDim;
+}
+
+static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
+{
+    dim3 blockDim;
+
+    switch(length.size())
+    {
+    case 1:
+        blockDim = dim3(blockSize);
+        break;
+    case 2:
+        blockDim = dim3(blockSize, blockSize);
+        break;
+    case 3:
+        blockDim = dim3(blockSize, blockSize, blockSize);
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return blockDim;
+}
+
 // For complex-to-real transforms, the input data must be Hermitiam-symmetric.
 // That is, u_k is the complex conjugate of u_{-k}, where k is the wavevector in Fourier
 // space.  For multi-dimensional data, this means that we only need to store a bit more
@@ -446,6 +496,196 @@ __global__ static void impose_hermitian_symmetry_planar_3D_kernel(Tfloat*      x
                           ximag);
         }
     }
+}
+
+template <typename Tcomplex>
+static void impose_hermitian_symmetry_interleaved_device(const std::vector<size_t>& length,
+                                                         const std::vector<size_t>& ilength,
+                                                         const std::vector<size_t>& stride,
+                                                         const size_t               dist,
+                                                         const size_t               batch,
+                                                         Tcomplex*                  input_data,
+                                                         const hipDeviceProp_t&     deviceProp)
+{
+    auto blockSize = DATA_GEN_THREADS;
+    auto blockDim  = generate_blockDim(length, blockSize);
+    auto gridDim   = generate_hermitian_gridDim(length, batch, blockSize);
+
+    switch(length.size())
+    {
+    case 1:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_interleaved_1D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_1D_kernel<Tcomplex>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data,
+                           length[0],
+                           stride[0],
+                           dist,
+                           batch,
+                           length[0] % 2 == 0);
+
+        break;
+    }
+    case 2:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_interleaved_2D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_2D_kernel<Tcomplex>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data,
+                           length[0],
+                           length[1],
+                           stride[0],
+                           stride[1],
+                           dist,
+                           batch,
+                           (ilength[0] + 1) / 2 - 1,
+                           length[0] % 2 == 0,
+                           length[1] % 2 == 0);
+
+        break;
+    }
+    case 3:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_interleaved_3D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_3D_kernel<Tcomplex>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data,
+                           length[0],
+                           length[1],
+                           length[2],
+                           stride[0],
+                           stride[1],
+                           stride[2],
+                           dist,
+                           batch,
+                           (ilength[0] + 1) / 2 - 1,
+                           ilength[1] - 1,
+                           (ilength[1] + 1) / 2 - 1,
+                           length[0] % 2 == 0,
+                           length[1] % 2 == 0,
+                           length[2] % 2 == 0);
+        break;
+    }
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("impose_hermitian_symmetry_interleaved_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tfloat>
+static void impose_hermitian_symmetry_planar_device(const std::vector<size_t>& length,
+                                                    const std::vector<size_t>& ilength,
+                                                    const std::vector<size_t>& stride,
+                                                    const size_t               dist,
+                                                    const size_t               batch,
+                                                    Tfloat*                    input_data_real,
+                                                    Tfloat*                    input_data_imag,
+                                                    const hipDeviceProp_t&     deviceProp)
+{
+    auto blockSize = DATA_GEN_THREADS;
+    auto blockDim  = generate_blockDim(length, blockSize);
+    auto gridDim   = generate_hermitian_gridDim(length, batch, blockSize);
+
+    switch(length.size())
+    {
+    case 1:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_planar_1D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_1D_kernel<Tfloat>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data_real,
+                           input_data_imag,
+                           length[0],
+                           stride[0],
+                           dist,
+                           batch,
+                           length[0] % 2 == 0);
+
+        break;
+    }
+    case 2:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_planar_2D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_2D_kernel<Tfloat>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data_real,
+                           input_data_imag,
+                           length[0],
+                           length[1],
+                           stride[0],
+                           stride[1],
+                           dist,
+                           batch,
+                           (ilength[0] + 1) / 2 - 1,
+                           length[0] % 2 == 0,
+                           length[1] % 2 == 0);
+
+        break;
+    }
+    case 3:
+    {
+        launch_limits_check(
+            "impose_hermitian_symmetry_planar_3D_kernel", gridDim, blockDim, deviceProp);
+
+        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_3D_kernel<Tfloat>,
+                           gridDim,
+                           blockDim,
+                           0,
+                           0,
+                           input_data_real,
+                           input_data_imag,
+                           length[0],
+                           length[1],
+                           length[2],
+                           stride[0],
+                           stride[1],
+                           stride[2],
+                           dist,
+                           batch,
+                           (ilength[0] + 1) / 2 - 1,
+                           ilength[1] - 1,
+                           (ilength[1] + 1) / 2 - 1,
+                           length[0] % 2 == 0,
+                           length[1] % 2 == 0,
+                           length[2] % 2 == 0);
+        break;
+    }
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("impose_hermitian_symmetry_planar_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
 }
 
 #ifdef USE_HIPRAND
@@ -859,56 +1099,6 @@ static dim3 generate_data_gridDim(const size_t isize)
     return {gridDim_x, gridDim_y};
 }
 
-// get grid dimensions for hermitian symmetrizer kernel
-static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
-                                       const size_t               batch,
-                                       const size_t               blockSize)
-{
-    dim3 gridDim;
-
-    switch(length.size())
-    {
-    case 1:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
-        break;
-    case 2:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize));
-        break;
-    case 3:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize),
-                       DivRoundingUp<size_t>(length[1] - 1, blockSize));
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return gridDim;
-}
-
-static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
-{
-    dim3 blockDim;
-
-    switch(length.size())
-    {
-    case 1:
-        blockDim = dim3(blockSize);
-        break;
-    case 2:
-        blockDim = dim3(blockSize, blockSize);
-        break;
-    case 3:
-        blockDim = dim3(blockSize, blockSize, blockSize);
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return blockDim;
-}
-
 template <typename Tint, typename Treal>
 static void generate_random_interleaved_data(const Tint&            whole_length,
                                              const size_t           idist,
@@ -1163,194 +1353,5 @@ static void generate_real_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
-template <typename Tcomplex>
-static void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,
-                                                  const std::vector<size_t>& ilength,
-                                                  const std::vector<size_t>& stride,
-                                                  const size_t               dist,
-                                                  const size_t               batch,
-                                                  Tcomplex*                  input_data,
-                                                  const hipDeviceProp_t&     deviceProp)
-{
-    auto blockSize = DATA_GEN_THREADS;
-    auto blockDim  = generate_blockDim(length, blockSize);
-    auto gridDim   = generate_hermitian_gridDim(length, batch, blockSize);
-
-    switch(length.size())
-    {
-    case 1:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_interleaved_1D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_1D_kernel<Tcomplex>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data,
-                           length[0],
-                           stride[0],
-                           dist,
-                           batch,
-                           length[0] % 2 == 0);
-
-        break;
-    }
-    case 2:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_interleaved_2D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_2D_kernel<Tcomplex>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data,
-                           length[0],
-                           length[1],
-                           stride[0],
-                           stride[1],
-                           dist,
-                           batch,
-                           (ilength[0] + 1) / 2 - 1,
-                           length[0] % 2 == 0,
-                           length[1] % 2 == 0);
-
-        break;
-    }
-    case 3:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_interleaved_3D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_interleaved_3D_kernel<Tcomplex>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data,
-                           length[0],
-                           length[1],
-                           length[2],
-                           stride[0],
-                           stride[1],
-                           stride[2],
-                           dist,
-                           batch,
-                           (ilength[0] + 1) / 2 - 1,
-                           ilength[1] - 1,
-                           (ilength[1] + 1) / 2 - 1,
-                           length[0] % 2 == 0,
-                           length[1] % 2 == 0,
-                           length[2] % 2 == 0);
-        break;
-    }
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("impose_hermitian_symmetry_interleaved_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
-
-template <typename Tfloat>
-static void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
-                                             const std::vector<size_t>& ilength,
-                                             const std::vector<size_t>& stride,
-                                             const size_t               dist,
-                                             const size_t               batch,
-                                             Tfloat*                    input_data_real,
-                                             Tfloat*                    input_data_imag,
-                                             const hipDeviceProp_t&     deviceProp)
-{
-    auto blockSize = DATA_GEN_THREADS;
-    auto blockDim  = generate_blockDim(length, blockSize);
-    auto gridDim   = generate_hermitian_gridDim(length, batch, blockSize);
-
-    switch(length.size())
-    {
-    case 1:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_planar_1D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_1D_kernel<Tfloat>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data_real,
-                           input_data_imag,
-                           length[0],
-                           stride[0],
-                           dist,
-                           batch,
-                           length[0] % 2 == 0);
-
-        break;
-    }
-    case 2:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_planar_2D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_2D_kernel<Tfloat>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data_real,
-                           input_data_imag,
-                           length[0],
-                           length[1],
-                           stride[0],
-                           stride[1],
-                           dist,
-                           batch,
-                           (ilength[0] + 1) / 2 - 1,
-                           length[0] % 2 == 0,
-                           length[1] % 2 == 0);
-
-        break;
-    }
-    case 3:
-    {
-        launch_limits_check(
-            "impose_hermitian_symmetry_planar_3D_kernel", gridDim, blockDim, deviceProp);
-
-        hipLaunchKernelGGL(impose_hermitian_symmetry_planar_3D_kernel<Tfloat>,
-                           gridDim,
-                           blockDim,
-                           0,
-                           0,
-                           input_data_real,
-                           input_data_imag,
-                           length[0],
-                           length[1],
-                           length[2],
-                           stride[0],
-                           stride[1],
-                           stride[2],
-                           dist,
-                           batch,
-                           (ilength[0] + 1) / 2 - 1,
-                           ilength[1] - 1,
-                           (ilength[1] + 1) / 2 - 1,
-                           length[0] % 2 == 0,
-                           length[1] % 2 == 0,
-                           length[2] % 2 == 0);
-        break;
-    }
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("impose_hermitian_symmetry_planar_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
 #endif // USE_HIPRAND
 #endif // DATA_GEN_DEVICE_H

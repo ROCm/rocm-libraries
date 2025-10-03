@@ -270,7 +270,7 @@ inline void set_input(std::vector<gpubuf>&       input,
         if(itype == fft_array_type_hermitian_interleaved)
         {
             auto ibuffer_2 = (rocfft_complex<Tfloat>*)input[0].data();
-            impose_hermitian_symmetry_interleaved(
+            impose_hermitian_symmetry_interleaved_device(
                 length, ilength, istride, idist, nbatch, ibuffer_2, deviceProp);
         }
 
@@ -305,7 +305,7 @@ inline void set_input(std::vector<gpubuf>&       input,
                                         field_contig_dist);
 
         if(itype == fft_array_type_hermitian_planar)
-            impose_hermitian_symmetry_planar(
+            impose_hermitian_symmetry_planar_device(
                 length, ilength, istride, idist, nbatch, ibuffer_real, ibuffer_imag, deviceProp);
 
         break;
@@ -387,7 +387,8 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                      field_contig_dist);
 
         if(itype == fft_array_type_hermitian_interleaved)
-            impose_hermitian_symmetry_interleaved<Tfloat>(input, length, istride, idist, nbatch);
+            impose_hermitian_symmetry_interleaved_host<Tfloat>(
+                input, length, istride, idist, nbatch);
 
         break;
     }
@@ -408,7 +409,7 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                 field_contig_dist);
 
         if(itype == fft_array_type_hermitian_planar)
-            impose_hermitian_symmetry_planar<Tfloat>(input, length, istride, idist, nbatch);
+            impose_hermitian_symmetry_planar_host<Tfloat>(input, length, istride, idist, nbatch);
 
         break;
     }
