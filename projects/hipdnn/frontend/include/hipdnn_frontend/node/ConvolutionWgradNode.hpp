@@ -293,7 +293,7 @@ public:
 
                 // Solve for kernel size:
                 // kernel_size = ((in_i + pre_padding + post_padding - stride * (out_i - 1) - 1) / dilation) + 1
-                auto numerator = xSize + prePad + postPad - strideVal * (dySize - 1) - 1;
+                auto numerator = xSize + prePad + postPad - (strideVal * (dySize - 1)) - 1;
 
                 HIPDNN_RETURN_IF_LT(
                     numerator,
