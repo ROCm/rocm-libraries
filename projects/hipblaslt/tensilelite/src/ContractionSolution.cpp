@@ -1424,7 +1424,7 @@ namespace TensileLite
                 singleCallArgs<T_Debug, false>(problem,
                                                inputs.grouped[idx],
                                                workspaceOffsetInByte,
-                                               nullptr,
+                                               &hardware,
                                                rv.numWorkGroups,
                                                rv.numWorkGroups,
                                                h_args,
