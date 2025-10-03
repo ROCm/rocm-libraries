@@ -252,7 +252,13 @@
 
 #undef CVT_INTEGRAL2ACCUM
 #ifdef __HIP_PLATFORM_AMD__
-#define CVT_INTEGRAL2ACCUM(x) MIOPEN_ERROR_NOT_IMLEMENTED
+#if MIOPEN_USE_BFP16 == 1
+// No direct conversion from integral types to BF16 is available.
+// WARNING: Precision loss when integral type is wider than 16 bits.
+#define CVT_INTEGRAL2ACCUM(x) (float_to_bfloat16(static_cast<float>(x)))
+#else
+#define CVT_INTEGRAL2ACCUM(x) (static_cast<FLOAT>(x))
+#endif
 #else
 #if MIOPEN_USE_BFP16 == 1
 // No direct conversion from integral types to BF16 is available.

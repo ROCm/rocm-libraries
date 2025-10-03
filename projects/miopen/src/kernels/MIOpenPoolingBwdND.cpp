@@ -229,20 +229,24 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                     int wend   = min((wstart + KERNEL_SZ_W), static_cast<int>(bot_w));
                     wstart     = max(wstart, 0);
 
-                    unsigned int pool_size = 0;
+                    auto inv_pool_size = FLOAT_ACCUM{0};
                     if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                        pool_size = KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
+                    {
+                        inv_pool_size = FLOAT_ACCUM{1} /
+                                        CVT_INTEGRAL2ACCUM(KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D);
+                    }
                     else
                     {
-                        pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-                        pool_size = (pool_size == 0) ? 1 : pool_size;
+                        int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+                        pool_size     = (pool_size == 0) ? 1 : pool_size;
+                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
                     }
 
                     unsigned int top_gbl_off =
                         b_id * top_str_b + c_id * top_str_c + h * top_str_d + j * top_str_h + i;
                     FLOAT_ACCUM add_val =
                         b_id < batch ? CVT_FLOAT2ACCUM(top_df[top_gbl_off]) : CVT_FP32_2ACCUM(0.0f);
-                    add_val /= CVT_INTEGRAL2ACCUM(pool_size);
+                    add_val *= inv_pool_size;
 
                     for(int m = dstart; m < dend; ++m)
                     {

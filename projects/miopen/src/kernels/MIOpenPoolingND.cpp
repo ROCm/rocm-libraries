@@ -170,14 +170,18 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                         wstart = max(wstart, 0);
                     }
 
-                    unsigned int pool_size = 0;
+                    auto inv_pool_size = FLOAT_ACCUM{0};
                     if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
                     {
-                        pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-                        pool_size = (pool_size == 0) ? 1 : pool_size;
+                        int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+                        pool_size     = (pool_size == 0) ? 1 : pool_size;
+                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
                     }
                     else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                        pool_size = KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
+                    {
+                        inv_pool_size = FLOAT_ACCUM{1} /
+                                        CVT_INTEGRAL2ACCUM(KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D);
+                    }
 
                     FLOAT_ACCUM top_val = MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
                                               ? /* MAX */ FLOAT_ACCUM{-MAX_VAL_ACCUM}
@@ -223,7 +227,7 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                     }
 
                     if constexpr(AVERAGE_OPS)
-                        top_val *= CVT_FP32_2ACCUM(1.f) / static_cast<FLOAT_ACCUM>(pool_size);
+                        top_val *= inv_pool_size;
 
                     if(top_d_id + m < top_d && top_h_id + k < top_h && top_w_id + l < top_w &&
                        b_id < batch)

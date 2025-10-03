@@ -175,21 +175,25 @@ extern "C" __global__ __launch_bounds__(block_size) //
                     int wend   = min(wstart + MLO_POOLING_KERNEL_SZ0, mlo_bot_width);
                     wstart     = max(wstart, 0);
 
-                    int pool_size = 0;
+                    auto inv_pool_size = FLOAT_ACCUM{0};
                     if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                        pool_size = MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
+                    {
+                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(MLO_POOLING_KERNEL_SZ0 *
+                                                                            MLO_POOLING_KERNEL_SZ1);
+                    }
                     else
                     {
-                        pool_size = (hend - hstart) * (wend - wstart);
-                        pool_size = (pool_size == 0) ? 1 : pool_size;
+                        int pool_size = (hend - hstart) * (wend - wstart);
+                        pool_size     = (pool_size == 0) ? 1 : pool_size;
+                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
                     }
 
                     int lcl_top_h = top_h - top_y;
                     int lcl_top_w = top_w - top_x;
                     FLOAT_ACCUM add_val =
                         CVT_FLOAT2ACCUM(
-                            lcl_top_diff[lcl_top_h * MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w]) /
-                        CVT_INTEGRAL2ACCUM(pool_size);
+                            lcl_top_diff[lcl_top_h * MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w]) *
+                        inv_pool_size;
 
                     res[k][l] += add_val;
                 }

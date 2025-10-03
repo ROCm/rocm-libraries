@@ -158,14 +158,18 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
                 wstart  = max(wstart1, 0);
             }
 
-            unsigned int pool_size = 0;
+            auto inv_pool_size = FLOAT_ACCUM{0};
             if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
             {
-                pool_size = (hend - hstart) * (wend - wstart);
-                pool_size = (pool_size == 0) ? 1 : pool_size;
+                int pool_size = (hend - hstart) * (wend - wstart);
+                pool_size     = (pool_size == 0) ? 1 : pool_size;
+                inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
             }
             else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                pool_size = MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
+            {
+                inv_pool_size = FLOAT_ACCUM{1} /
+                                CVT_INTEGRAL2ACCUM(MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1);
+            }
 
             if constexpr(USE_MASK)
                 mask_private[k][l] = 0;
@@ -202,7 +206,7 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
             }
 
             if constexpr(AVERAGE_OPS)
-                res[k][l] *= CVT_FP32_2ACCUM(1.f) / static_cast<FLOAT_ACCUM>(pool_size);
+                res[k][l] *= inv_pool_size;
         }
     }
 
