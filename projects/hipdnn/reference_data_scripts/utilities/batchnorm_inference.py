@@ -77,8 +77,8 @@ class BatchnormInference:
             inputs.bias.tensor.resize_(original_dims)
             inputs.inv_variance.tensor.resize_(original_dims)
 
-        if saved_exception != None:
-            raise e
+        if saved_exception is not None:
+            raise saved_exception
 
     @staticmethod
     def from_dict(d: dict, tensors: dict[int, TensorAttributes]):
