@@ -15,6 +15,22 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace ::testing;
 
+namespace hipdnn_frontend
+{
+
+// Utility class to access private members of Graph for testing purposes
+class GraphTestUtils : public Graph
+{
+public:
+    GraphTestUtils() = default;
+
+    std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
+    {
+        return _sub_nodes;
+    }
+};
+}
+
 class TestGraph : public ::testing::Test
 {
 protected:
@@ -1735,6 +1751,95 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
 
     auto execResult = graph.execute(_handle, variantPackForExec, workspace);
     EXPECT_TRUE(execResult.is_good());
+}
+
+// Test: Normal graph (no orphans, no cycles)
+TEST_F(TestGraph, TopologicalSortSucceedsOnNormalGraph)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    EXPECT_TRUE(graph.topologicallySortGraph().is_good());
+}
+
+// Test: Orphaned node present in the graph
+TEST_F(TestGraph, TopologicalSortSucceedsWithOrphanedNode)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    // Connected nodes
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    // Orphaned node (not connected to the main graph)
+    auto x2 = std::make_shared<TensorAttributes>();
+    x2->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x2->set_uid(2);
+    BatchnormInferenceAttributes attributes3;
+    attributes3.set_name("BatchnormNode3");
+    auto y3 = graph.batchnorm_inference(x2, mean, invVariance, scale, bias, attributes3);
+
+    EXPECT_FALSE(graph.topologicallySortGraph().is_good());
+}
+
+TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    // Introduce a cycle: set x of the first node to y2
+    auto& subNodes = graph.getPrivateGraphSubnodes();
+    auto* batchNode = dynamic_cast<BatchnormInferenceNode*>(subNodes[0].get());
+    ASSERT_NE(batchNode, nullptr);
+    batchNode->attributes.set_x(y2);
+
+    EXPECT_FALSE(graph.topologicallySortGraph().is_good());
 }
 
 // NOLINTEND

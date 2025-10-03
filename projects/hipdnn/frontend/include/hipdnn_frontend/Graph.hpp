@@ -18,6 +18,7 @@
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
 
 namespace hipdnn_frontend
 {
@@ -146,6 +147,60 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    GraphStructure buildAdjacencyList(
+        const std::unordered_map<std::shared_ptr<TensorAttributes>, size_t>& tensorProducer) const
+    {
+        size_t nodeCount = _sub_nodes.size();
+        GraphStructure structure;
+        structure.adjacencyList.resize(nodeCount);
+
+        for(size_t j = 0; j < nodeCount; ++j)
+        {
+            auto inputs = _sub_nodes[j]->getNodeInputTensorAttributes();
+            for(auto& input : inputs)
+            {
+                auto it = tensorProducer.find(input);
+                if(it != tensorProducer.end())
+                {
+                    size_t i = it->second;
+                    structure.adjacencyList[i].push_back(j);
+                }
+            }
+        }
+
+        return structure;
+    }
+
+    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorProducerMap() const
+    {
+        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorProducer;
+        size_t nodeCount = _sub_nodes.size();
+
+        for(size_t i = 0; i < nodeCount; ++i)
+        {
+            auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
+            for(auto& output : outputs)
+            {
+                tensorProducer[output] = i;
+            }
+        }
+
+        return tensorProducer;
+    }
+
+    void reorderNodesTopologically(const std::vector<size_t>& topologicalOrder)
+    {
+        std::vector<std::shared_ptr<INode>> reorderedNodes;
+        reorderedNodes.reserve(topologicalOrder.size());
+
+        for(auto idx : topologicalOrder)
+        {
+            reorderedNodes.push_back(_sub_nodes[idx]);
+        }
+
+        _sub_nodes = std::move(reorderedNodes);
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -157,7 +212,58 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
+        auto result = checkNoDuplicateTensorIds();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        result = topologicallySortGraph();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
         return validateSubtree();
+    }
+
+    Error checkNoDuplicateTensorIds()
+    {
+        std::unordered_set<int64_t> usedTensorUids;
+        gatherHipdnnTensorIdsSubtree(usedTensorUids);
+        //todo
+        return {ErrorCode::OK, ""};
+    }
+
+    Error topologicallySortGraph()
+    {
+        size_t nodeCount = _sub_nodes.size();
+
+        if(nodeCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        auto tensorProducer = buildTensorProducerMap();
+        auto graphStructure = buildAdjacencyList(tensorProducer);
+
+        auto sortResult = performTopologicalSortWithComponentDetection(graphStructure);
+
+        if(sortResult.hasCycle)
+        {
+            return {ErrorCode::INVALID_VALUE, "Graph contains a cycle, cannot be sorted."};
+        }
+
+        if(sortResult.componentCount > 1)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph contains multiple disconnected components, please split the graph into "
+                    "individual graphs"};
+        }
+
+        reorderNodesTopologically(sortResult.order);
+
+        return {ErrorCode::OK, ""};
     }
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
