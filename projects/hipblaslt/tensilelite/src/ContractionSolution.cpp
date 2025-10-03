@@ -1090,7 +1090,7 @@ namespace TensileLite
             {
                 internalArg1 = wgm;
             }
-            else if(internalArgsSupport.version == 2)
+            else if(internalArgsSupport.version == 2 && !internalArgsSupport.useSFC)
             {
                 // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
                 //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
@@ -1105,12 +1105,10 @@ namespace TensileLite
                     wgmxccg = pAMDGPU->computeUnitCount;
                 }
                 internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
-                if (getenv("GWGMX") || getenv("GWGMY") || getenv("GWGM")) {
-                  int gwgmx = getenv("GWGMX") ? atoi(getenv("GWGMX")) : 8;
-                  int gwgmy = getenv("GWGMY") ? atoi(getenv("GWGMY")) : 4;
-                  int gwgmxcc = getenv("GWGMXCC") ? atoi(getenv("GWGMXCC")) : 1;
-                  internalArg1 = 0xffc00000 | (gwgmxcc & 0x00000001) << 16 |(gwgmy & 0x000000ff) << 8 | (gwgmx & 0x000000ff);
-                }
+            }
+            else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
+            {
+              internalArg1 = wgm;
             }
         }
 

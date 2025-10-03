@@ -1597,15 +1597,6 @@ class KernelWriterAssembly(KernelWriter):
 
         # Convert 1D to 2D
         sgprWGM = "WGM"
-        label_1d_2d_skip = Label(self.labels.getNameInc("skip_1d_2d_cvt"), "")
-        wgmDispatchMask = self.states.WGMDispatchMask
-        # Allow skipping convert to 2d indices if streamK
-        if kernel["GlobalSplitU"] == 0 and kernel["SpaceFillingAlgo"] > 0:
-          sgprTmp = self.sgprPool.checkOut(1)
-          module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprWGM), src1=hex(wgmDispatchMask), comment="Get XCC Reorder flag value"))
-          module.add(SCmpEQU32(src0=sgpr(sgprTmp), src1=hex(wgmDispatchMask), comment=""))
-          module.add(SCBranchSCC1(labelName=label_1d_2d_skip.getLabelName(), comment=""))
-          self.sgprPool.checkIn(sgprTmp)
         module.addComment0("idxWG01 = idxWG012 - wg2 * numWG0 * numWG1")
         module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr("NumWorkGroups1"), src1=sgpr("NumWorkGroups0")))
         module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr(tmpSgpr.idx), src1=sgpr("WorkGroup2")))
@@ -1620,7 +1611,6 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment0("wg0 = idxWG01 - wg1 * numWG0")
         module.add(SMulI32(dst=sgpr(tmpSgpr.idx), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0")))
         module.add(SSubU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr.idx)))
-        module.add(label_1d_2d_skip)
 
       # early stop if wgIdx exceed wg needed
       if earlyStop:
@@ -2295,52 +2285,18 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("graWorkGroup")
     module.addComment0("graWorkGroup mapping")
 
-    #print("Pool size before:", self.sgprPool.size())
-
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.graWorkGroup(self, kernel, tPA, tPB))
 
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.graWorkGroup(self, kernel))
 
-    ########################################
-    # Blocked rows or columns
-    # Do branch
-
-    #self.sgprPool.checkIn(self.sgprs["SrdD"])
-    #self.sgprPool.checkIn(self.sgprs["SrdC"])
-    #if kernel["StreamKAtomic"] == 0:
-    #  self.sgprPool.checkIn(self.sgprs["SrdWS"])
-
-    #print("Pool size after:", self.sgprPool.size())
-
+    # Start of WGM algos
     sgprWGM = "WGM"
-    if kernel["SpaceFillingAlgo"]: # and self.sgprPool.available() >= 15:
-
-      tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
-
-      labelGWGM = Label(self.labels.getUniqueNamePrefix("GenericWGM"), comment="")
-      labelWGM = Label(self.labels.getUniqueNamePrefix("WGM"), comment="")
-      labelWGMAlgoEnd = Label(self.labels.getUniqueNamePrefix("WGMAlgoEnd"), comment="")
-      wgmDispatchMask = self.states.WGMDispatchMask
-
-      module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr(sgprWGM), src1=hex(wgmDispatchMask)))
-      module.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=hex(wgmDispatchMask), comment=""))
-      module.add(SCBranchSCC1(labelName=labelGWGM.getLabelName(), comment=""))
-      self.sgprPool.checkIn(tmpSgpr)
-
-      # Start of existing WGM
-      module.add(labelWGM)
-      module.add(DefaultWGM(self, kernel, sgprWGM))
-      module.add(SBranch(labelName=labelWGMAlgoEnd.getLabelName(), comment=""))
-      # Start of space-filling WGM
-      module.add(labelGWGM)
+    if len(kernel["SpaceFillingAlgo"]):
+      module.addComment0("Start of Generic WGM algo")
+      self.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
-
-
-
-      module.add(labelWGMAlgoEnd)
-
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
@@ -7687,7 +7643,6 @@ class KernelWriterAssembly(KernelWriter):
       rStart = periodParam[8] if doTailOpt == 2 else 0
       rEnd = periodParam[9] if doTailOpt == 2 else 0
 
-      # TODOBS: check if +5 can be removed
       requiredSgprs = min(self.sgprPool.size(), self.states.regCaps["MaxSgpr"])
       maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)

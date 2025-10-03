@@ -287,7 +287,7 @@ class StateValues:
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
 
-  WGMDispatchMask: int                   = 0xffc00000 # Last 10 bits
+  WGMTransformLevels: int                = -1
 
   # Epilogue states
   preloadScaleA = False
@@ -4844,7 +4844,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("StreamKIterEnd", 1)
       self.defineSgpr("StreamKLocalStart", 1)
       self.defineSgpr("StreamKLocalEnd", 1)
-      self.defineSgpr("StreamKTileID", 1)
+      if len(kernel["SpaceFillingAlgo"]):
+        self.defineSgpr("StreamKTileID", 1)
       if kernel["StreamKAtomic"] == 0:
         self.defineSgpr("SrdWS", 4, 4)
 

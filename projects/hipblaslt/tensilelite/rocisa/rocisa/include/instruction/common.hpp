@@ -471,6 +471,34 @@ namespace rocisa
         }
     };
 
+    struct SCSelectB64 : public CommonInstruction
+    {
+        SCSelectB64(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src0,
+                    const InstructionInput&           src1,
+                    const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_cselect_b64");
+        }
+
+        SCSelectB64(const SCSelectB64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SCSelectB64>(*this);
+        }
+    };
+
     struct SAndB32 : public CommonInstruction
     {
         SAndB32(const std::shared_ptr<Container>& dst,
@@ -1105,7 +1133,7 @@ namespace rocisa
             return std::make_shared<SFlbitI32B32>(*this);
         }
     };
-  
+
     struct SMovkI32 : public CommonInstruction
     {
         SMovkI32(const std::shared_ptr<Container>& dst,
@@ -3538,6 +3566,28 @@ namespace rocisa
         }
     };
 
+    struct VRcpF64 : public CommonInstruction
+    {
+        VRcpF64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src,
+                const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_rcp_f64");
+        }
+
+        VRcpF64(const VRcpF64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VRcpF64>(*this);
+        }
+    };
+
     struct VRsqF16 : public CommonInstruction
     {
         VRsqF16(const std::shared_ptr<Container>& dst,
@@ -4876,7 +4926,7 @@ namespace rocisa
             return std::make_shared<VWritelaneB32>(*this);
         }
     };
-  
+
     struct VRndneF32 : public CommonInstruction
     {
         VRndneF32(const std::shared_ptr<Container>& dst,

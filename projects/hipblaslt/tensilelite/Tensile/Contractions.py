@@ -622,7 +622,7 @@ class SizeMapping:
                    grvwB                    = d['GlobalReadVectorWidthB'],
                    gwvwC                    = d['StoreVectorWidth'],
                    gwvwD                    = d['StoreVectorWidth'],
-                   workGroupMapping         = d['WorkGroupMapping'],
+                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else d['SFCWGM'],
                    staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
                    staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
                    depthU                   = d['DepthU'],
@@ -666,7 +666,9 @@ class InternalArgsSupport:
                  'gsu',
                  'wgm',
                  'staggerU',
-                 'useUniversalArgs']
+                 'useUniversalArgs',
+                 'useSFC'
+                 ]
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -674,7 +676,8 @@ class InternalArgsSupport:
                    gsu = d['InternalSupportParams']['SupportUserGSU'],
                    wgm = d['InternalSupportParams']['SupportCustomWGM'],
                    staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
-                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'])
+                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
+                   useSFC = d['InternalSupportParams']['UseSFC'])
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

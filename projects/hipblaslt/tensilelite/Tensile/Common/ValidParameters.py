@@ -522,12 +522,38 @@ validParameters = { # we need to make sure this matches develop
         range(-1, 1024)
     ),  # change a workgroup's id so that contiguous workgroup can map on same XCC, remap workgroup in a group of WGMXCCG.
     # Use Space-filling-algorithm to determine workgroup mapping
-    # 0 : do not use space-filling algo
-    # 1 : map workgroup IDs to C tiles based on Hilbert curve
-    # 2 : map workgroup IDs to C tiles based on Morton Z-curve
-    # 3 : map workgroup IDs to C tiles based on Morton (reverseN)-curve
-    # 4 : map workgroup IDs to C tiles based on Morton U-curve
-    "SpaceFillingAlgo" : [0, 1, 2, 3, 4],
+    # Parameter is provided as a list of integers. The length of the list indicates the level depth.
+    # Each integer represents an ordering ID to denote which ordering to use at each level.
+    # An empty array means use default (old) WGM algo
+    #
+    # With multi-level orderings the WGM values contains grid dims for each level encoded as 8bit values
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Order IDS:
+    # 0 : map workgroup IDs to C based on col-major order
+    # 1 : map workgroup IDs to C based on row-major order
+    # 2 : map workgroup IDs to C tiles based on Hilbert curve
+    # 3 : map workgroup IDs to C tiles based on Morton Z-curve
+    # 4 : map workgroup IDs to C tiles based on Morton (reverseN)-curve
+    # 5 : map workgroup IDs to C tiles based on Morton U-curve
+    #
+    # Examples:
+    # [0]: Single level ordering of C tiles using column major ordering
+    # [0,1]: Double level ordering of C tiles using column major ordering, then row-major
+    # [1,1,1]: Triple level ordering of C tiles using row major ordering at each level
+    "SpaceFillingAlgo" : -1,
+    # Used to specify the grid dims for each level when using SpaceFillingAlgo. This value is directly passed into the
+    # WGM parameter. The format is
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Examples:
+    # 0x01020304
+    #  - Level1 grid dim 4x3
+    #  - Level2 grid dim 2x1 (if enabled, otherwise last 16 bit values are ignored)
+    # 0x10010820
+    #  - Level1 grid dim 32x8
+    #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
+    "SFCWGM" : -1,
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
@@ -855,6 +881,20 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+def checkSpaceFillAlgoIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 3:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        maxOrderID = 5
+        for orderId in value:
+            if orderId not in range(0,maxOrderID + 1):
+                msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
+                raise Exception(msgBase.format(name, value))
+
 
 def checkParametersAreValid(param, validParams):
     """Ensures paramaters in params exist and have valid values as specified by validParames"""
@@ -880,3 +920,5 @@ def checkParametersAreValid(param, validParams):
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
+        elif name == "SpaceFillingAlgo":
+            checkSpaceFillAlgoIsValid(name, value)

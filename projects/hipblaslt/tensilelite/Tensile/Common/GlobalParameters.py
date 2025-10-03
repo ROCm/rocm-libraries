@@ -317,6 +317,7 @@ defaultInternalSupportParams = {
     "SupportCustomStaggerU": True,
     # Use GG as G's backend
     "UseUniversalArgs": True,
+    "UseSFC": False,
 }
 
 # same parameter for all solution b/c depends only on compiler
@@ -421,7 +422,8 @@ defaultBenchmarkCommonParameters = [
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [0]},
     {"UseCustomMainLoopSchedule": [1]},
-    {"SpaceFillingAlgo": [0]}
+    {"SpaceFillingAlgo": [[]]},
+    {"SFCWGM": [0x01010101]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
