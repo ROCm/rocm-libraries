@@ -8529,12 +8529,11 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
  */
 typedef enum
 {
-    miopenTuningPolicyNone     = 1, /* do not enforce anything */
-    miopenTuningPolicyDbUpdate = 2, /* tune and update the db  */
-    miopenTuningPolicySearch =
-        3, /* search db first, if record not found tune but do not update the db */
-    miopenTuningPolicySearchDbUpdate = 4, /* combination of Search and DbUpdate */
-    miopenTuningPolicyDbClean        = 5, /* remove existing entry, do not tune */
+    miopenTuningPolicyNone           = 1, /*!< do not enforce anything */
+    miopenTuningPolicyDbUpdate       = 2, /*!< tune and update the db  */
+    miopenTuningPolicySearch         = 3, /*!< search db first, if record not found tune but do not update the db */
+    miopenTuningPolicySearchDbUpdate = 4, /*!< combination of Search and DbUpdate */
+    miopenTuningPolicyDbClean        = 5, /*!< remove existing entry, do not tune */
 } miopenTuningPolicy_t;
 
 /*! @ingroup handle
