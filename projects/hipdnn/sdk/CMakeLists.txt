@@ -16,57 +16,79 @@ hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 # and not install the headers.
 set(_hipdnn_sdk_local_export_targets)
 set(_hipdnn_sdk_local_export_includes)
-if(TARGET FlatBuffers)
-    # Add alias if it doesn't already exist
-    if(NOT TARGET flatbuffers::flatbuffers)
-        add_library(flatbuffers::flatbuffers ALIAS FlatBuffers)
-    endif()
 
+# Function to process SDK dependencies and set up aliases and export lists
+# Arguments:
+#   TARGET_NAME - The actual target name (e.g., FlatBuffers)
+#   ALIAS_NAME - The alias target name (e.g., flatbuffers::flatbuffers)
+#   INCLUDE_SUBDIR - Optional subdirectory to append to include path (e.g., flatbuffers)
+function(_hipdnn_sdk_process_dependency TARGET_NAME ALIAS_NAME)
+    # Parse optional arguments
+    set(options "")
+    set(oneValueArgs INCLUDE_SUBDIR INCLUDE_DIR)
+    set(multiValueArgs "")
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    
+    if(NOT TARGET ${TARGET_NAME})
+        return()
+    endif()
+    
+    # Add alias if it doesn't already exist
+    if(NOT TARGET ${ALIAS_NAME})
+        add_library(${ALIAS_NAME} ALIAS ${TARGET_NAME})
+    endif()
+    
+    # Check if target is imported (system-installed) or locally built
+    get_target_property(_is_imported ${TARGET_NAME} IMPORTED)
+    if(NOT _is_imported)
+        # Add to local export targets
+        list(APPEND _hipdnn_sdk_local_export_targets ${TARGET_NAME})
+        set(_hipdnn_sdk_local_export_targets ${_hipdnn_sdk_local_export_targets} PARENT_SCOPE)
+        
+        # Add include directory if specified
+        if(ARG_INCLUDE_DIR)
+            if(ARG_INCLUDE_SUBDIR)
+                list(APPEND _hipdnn_sdk_local_export_includes ${ARG_INCLUDE_DIR}/${ARG_INCLUDE_SUBDIR})
+            else()
+                list(APPEND _hipdnn_sdk_local_export_includes ${ARG_INCLUDE_DIR})
+            endif()
+            set(_hipdnn_sdk_local_export_includes ${_hipdnn_sdk_local_export_includes} PARENT_SCOPE)
+        endif()
+    endif()
+endfunction()
+
+# Process flatbuffers dependency
+if(TARGET FlatBuffers)
+    # Hack to workaround an issue with how flatbuffers sets up its INSTALL_INTERFACE.
+    # internally it uses the following: $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+    # This end ups resolving to /opt/rocm/include/include which isnt correct.  I cant find a way
+    # to set this value when adding the dependency so after we init the dependency, I then force the
+    # INTERFACE_INCLUDE_DIRECTORIES to be the correct value required for the hipdnn_sdk
     get_target_property(_is_imported FlatBuffers IMPORTED)
     if(NOT _is_imported)
-        # Hack to workaround an issue with how flatbuffers sets up its INSTALL_INTERFACE.
-        # internally it uses the following: $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
-        # This end ups resolving to /opt/rocm/include/include which isnt correct.  I cant find a way
-        # to set this value when adding the dependency so after we init the dependency, I then force the
-        # INTERFACE_INCLUDE_DIRECTORIES to be the correct value required for the hipdnn_sdk
         get_target_property(current_includes FlatBuffers INTERFACE_INCLUDE_DIRECTORIES)
         list(REMOVE_ITEM current_includes "$<INSTALL_INTERFACE:include/include>")
         list(APPEND current_includes "$<INSTALL_INTERFACE:${HIP_DNN_SDK_INSTALL_INCLUDE_DIR}>")
         set_target_properties(FlatBuffers PROPERTIES
             INTERFACE_INCLUDE_DIRECTORIES "${current_includes}"
         )
-        list(APPEND _hipdnn_sdk_local_export_targets FlatBuffers)
-        # Flatbuffer header structure is different, we need to add the 'flatbuffers' subdir
-        list(APPEND _hipdnn_sdk_local_export_includes ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}/flatbuffers)
     endif()
+    _hipdnn_sdk_process_dependency(FlatBuffers flatbuffers::flatbuffers
+        INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
+        INCLUDE_SUBDIR flatbuffers
+    )
 endif()
 
-if(TARGET spdlog_header_only)
-    # Add alias if it doesn't already exist
-    if(NOT TARGET spdlog::spdlog_header_only)
-        add_library(spdlog::spdlog_header_only ALIAS spdlog_header_only)
-    endif()
+# Process spdlog dependency
+_hipdnn_sdk_process_dependency(spdlog_header_only spdlog::spdlog_header_only
+    INCLUDE_DIR ${HIP_DNN_SPDLOG_INCLUDE_DIR}
+    INCLUDE_SUBDIR spdlog
+)
 
-    get_target_property(_is_imported spdlog_header_only IMPORTED)
-    if(NOT _is_imported)
-        list(APPEND _hipdnn_sdk_local_export_targets spdlog_header_only)
-        # spdlog header structure is different, we need to add the 'spdlog' subdir
-        list(APPEND _hipdnn_sdk_local_export_includes ${HIP_DNN_SPDLOG_INCLUDE_DIR}/spdlog)
-    endif()
-endif()
-
-if(TARGET nlohmann_json)
-    # Add alias if it doesn't already exist
-    if(TARGET nlohmann_json AND NOT TARGET nlohmann_json::nlohmann_json)
-        add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
-    endif()
-
-    get_target_property(_is_imported nlohmann_json IMPORTED)
-    if(NOT _is_imported)
-        list(APPEND _hipdnn_sdk_local_export_targets nlohmann_json)
-        list(APPEND _hipdnn_sdk_local_export_includes ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR})
-    endif()
-endif()
+# Process nlohmann_json dependency
+_hipdnn_sdk_process_dependency(nlohmann_json nlohmann_json::nlohmann_json
+    INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
+)
 
 add_library(hipdnn_sdk INTERFACE)
 target_link_libraries(hipdnn_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only nlohmann_json::nlohmann_json)
