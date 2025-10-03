@@ -39,8 +39,17 @@ struct default_delete<T, typename std::enable_if<!std::is_array<T>::value>::type
       return;
     }
 
-    // We use for_each_n to launch a kernel that executes the destructor on the device,
-    // avoiding known issues with thrust::device_delete for user-defined types.
+    // The ideal implementation would be a simple call to `thrust::device_delete`:
+    //
+    //   thrust::device_delete(ptr);
+    //
+    // However, for non-trivially destructible types, `thrust::device_delete`
+    // calls `thrust::destroy_range`, which requires an allocator with a
+    // `value_type` typedef. The internal `thrust::detail::device_delete_allocator`
+    // is an empty struct that lacks this typedef, causing a compilation error.
+    //
+    // As a workaround, we manually invoke the destructor on the device using
+    // `thrust::for_each_n` and then separately free the memory.
     if constexpr (!std::is_trivially_destructible<T>::value)
     {
       thrust::for_each_n(ptr, 1, [] __device__(T & x) {
@@ -73,8 +82,18 @@ struct default_delete<T[], typename std::enable_if<!std::is_trivially_destructib
       return;
     }
 
-    // We use for_each_n to launch a kernel that executes the destructor on the device,
-    // avoiding known issues with thrust::device_delete for user-defined types.
+    // The ideal implementation would be a call to `thrust::device_delete`
+    // with the number of elements:
+    //
+    //   thrust::device_delete(ptr, m_size);
+    //
+    // However, for non-trivially destructible types, `thrust::device_delete`
+    // calls `thrust::destroy_range`, which requires an allocator with a
+    // `value_type` typedef. The internal `thrust::detail::device_delete_allocator`
+    // is an empty struct that lacks this typedef, causing a compilation error.
+    //
+    // As a workaround, we manually invoke the destructor on each element
+    // using `thrust::for_each_n` and then separately free the memory.
     if (m_size)
     {
       thrust::for_each_n(ptr, m_size, [] __device__(T & x) {
