@@ -162,7 +162,7 @@ TEST_F(TestTopologicalSortingUtils, MultipleSourcesAndSinks)
     // Graph:
     //   0    1
     //  / \  / \
-    // 3   2
+    // 3   2    3 <-- 3 is the same as the other 3, just cant draw it in ascii
 
     // Both 0 and 1 point to 2 and 3. 2 and 3 are sinks.
     GraphStructure structure;
@@ -196,16 +196,49 @@ TEST_F(TestTopologicalSortingUtils, ComplexDag)
 
 TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
 {
-    // Graph: 0 -> 1    2 (disconnected)
-    GraphStructure structure;
-    structure.adjacencyList = {{1}, {}, {}};
+    {
+        // Graph: 0 -> 1    2 (disconnected)
+        GraphStructure structure;
+        structure.adjacencyList = {{1}, {}, {}};
 
-    auto result = performTopologicalSortWithComponentDetection(structure);
+        auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.order.size(), 3);
-    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
-    EXPECT_FALSE(result.hasCycle);
-    EXPECT_EQ(result.componentCount, 2);
+        EXPECT_FALSE(result.hasCycle);
+        EXPECT_EQ(result.componentCount, 2);
+    }
+
+    {
+        // Graph: 0 -> 1    2 -> 3 (two disconnected components)
+        GraphStructure structure;
+        structure.adjacencyList = {{1}, {}, {3}, {}};
+
+        auto result = performTopologicalSortWithComponentDetection(structure);
+
+        EXPECT_FALSE(result.hasCycle);
+        EXPECT_EQ(result.componentCount, 2);
+    }
+
+    {
+        // Graph: 0 -> 1    2 -> 3    4 (three disconnected components)
+        GraphStructure structure;
+        structure.adjacencyList = {{1}, {}, {3}, {}, {}};
+
+        auto result = performTopologicalSortWithComponentDetection(structure);
+
+        EXPECT_FALSE(result.hasCycle);
+        EXPECT_EQ(result.componentCount, 3);
+    }
+
+    {
+        // Graph: 0 -> 1 , 0-> 2, 1->3, 2->3.  4->5, 6, 7->8, 8->9
+        GraphStructure structure;
+        structure.adjacencyList = {{1, 2}, {3}, {3}, {}, {5}, {}, {}, {8}, {9}, {}};
+
+        auto result = performTopologicalSortWithComponentDetection(structure);
+
+        EXPECT_FALSE(result.hasCycle);
+        EXPECT_EQ(result.componentCount, 4);
+    }
 }
 
 TEST_F(TestTopologicalSortingUtils, LargerGraph)

@@ -38,16 +38,12 @@ inline std::vector<int> computeInDegrees(const GraphStructure& structure)
     return inDegrees;
 }
 
-inline TopologicalSortResult
-    performTopologicalSortWithComponentDetection(const GraphStructure& structure)
+inline std::vector<size_t> performTopologicalSort(const GraphStructure& structure)
 {
     size_t nodeCount = structure.adjacencyList.size();
     std::queue<size_t> zeroInDegree;
     std::vector<size_t> topologicalOrder;
     std::vector<int> inDegrees = computeInDegrees(structure);
-
-    std::vector<int> componentId(nodeCount, -1);
-    int currentComponent = 0;
 
     // Find all source nodes (in-degree 0)
     for(size_t i = 0; i < nodeCount; ++i)
@@ -55,29 +51,18 @@ inline TopologicalSortResult
         if(inDegrees[i] == 0)
         {
             zeroInDegree.push(i);
-            componentId[i] = currentComponent++;
         }
     }
 
-    int componentCount = currentComponent;
-
-    // Process nodes
+    // Process nodes in topological order
     while(!zeroInDegree.empty())
     {
         size_t current = zeroInDegree.front();
         zeroInDegree.pop();
         topologicalOrder.push_back(current);
 
-        int currentComponentId = componentId[current];
-
         for(auto neighbor : structure.adjacencyList[current])
         {
-            // Propagate component ID to neighbors
-            if(componentId[neighbor] == -1)
-            {
-                componentId[neighbor] = currentComponentId;
-            }
-
             inDegrees[neighbor]--;
             if(inDegrees[neighbor] == 0)
             {
@@ -86,9 +71,67 @@ inline TopologicalSortResult
         }
     }
 
-    bool hasCycle = (topologicalOrder.size() != nodeCount);
+    return topologicalOrder;
+}
 
-    return {topologicalOrder, componentCount, hasCycle};
+inline int countConnectedComponents(const GraphStructure& structure)
+{
+    size_t nodeCount = structure.adjacencyList.size();
+
+    if(nodeCount == 0)
+    {
+        return 0;
+    }
+
+    // Build undirected version of the graph for connectivity checking
+    std::vector<std::vector<size_t>> undirectedGraph(nodeCount);
+    for(size_t i = 0; i < nodeCount; ++i)
+    {
+        for(auto j : structure.adjacencyList[i])
+        {
+            undirectedGraph[i].push_back(j);
+            undirectedGraph[j].push_back(i);
+        }
+    }
+
+    // DFS to find connected components
+    std::unordered_set<size_t> visited;
+    int componentCount = 0;
+
+    for(size_t start = 0; start < nodeCount; ++start)
+    {
+        if(visited.find(start) != visited.end())
+        {
+            continue;
+        }
+
+        componentCount++;
+        std::stack<size_t> stack;
+        stack.push(start);
+
+        while(!stack.empty())
+        {
+            size_t current = stack.top();
+            stack.pop();
+
+            if(visited.find(current) != visited.end())
+            {
+                continue;
+            }
+
+            visited.insert(current);
+
+            for(auto neighbor : undirectedGraph[current])
+            {
+                if(visited.find(neighbor) == visited.end())
+                {
+                    stack.push(neighbor);
+                }
+            }
+        }
+    }
+
+    return componentCount;
 }
 
 inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
@@ -142,6 +185,16 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
     }
 
     return false; // No cycle
+}
+
+inline TopologicalSortResult
+    performTopologicalSortWithComponentDetection(const GraphStructure& structure)
+{
+    auto topologicalOrder = performTopologicalSort(structure);
+    int componentCount = countConnectedComponents(structure);
+    bool hasCycle = detectCycle(topologicalOrder, structure);
+
+    return {topologicalOrder, componentCount, hasCycle};
 }
 
 }
