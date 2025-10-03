@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,7 +29,16 @@
 
 #include "common_test_header.hpp"
 
+#include "hipcub/util_allocator.hpp"
+#include <cstdlib>
 #include <hipcub/util_allocator.hpp>
+
+#if __has_include(<valgrind/valgrind.h>)
+    #include <valgrind/valgrind.h>
+    #define HAS_VALGRIND_H 1
+#else
+    #define HAS_VALGRIND_H 0
+#endif
 
 __global__
 void EmptyKernel()
@@ -39,6 +48,16 @@ void EmptyKernel()
 
 TEST(HipcubCachingDeviceAllocatorTests, Test1)
 {
+
+#if HAS_VALGRIND_H
+    // This test is very timing sensitive. Valgrind significantly slows down
+    // kernel execution and therefore messes up the timing of the test. 
+    // If valgrind is being used we should disable this test otherwise it will fail
+    if (RUNNING_ON_VALGRIND) {
+        GTEST_SKIP() << "Skipping test under Valgrind";
+    }
+#endif //HAS_VALGRIND_H
+
     // Get number of GPUs and current GPU
     int num_gpus;
     int initial_gpu;

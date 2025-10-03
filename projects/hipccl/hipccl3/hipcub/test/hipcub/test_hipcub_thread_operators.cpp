@@ -692,6 +692,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
         HIP_CHECK(hipFree(d_keys_expected));
         HIP_CHECK(hipFree(d_expected));
         HIP_CHECK(hipFree(d_unique_keys_expected));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 }
 
