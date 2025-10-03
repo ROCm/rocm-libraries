@@ -3,30 +3,34 @@
 
 rocRoller is a software library for generating AMDGPU kernels.
 
-[![Master Branch Code Coverage Report for gfx90a](https://img.shields.io/badge/Code%20Coverage-gfx90a-informational)](http://math-ci.amd.com/job/enterprise/job/code-coverage/job/rocRoller/job/master/Code_20coverage_20gfx90a_20report)
-[![Master Branch Code Coverage Report for python](https://img.shields.io/badge/Code%20Coverage-Python-informational)](http://math-ci.amd.com/job/enterprise/job/code-coverage/job/rocRoller/job/master/Python_20Code_20coverage_20gfx90a_20report)
-[![Master Branch Performance Report for gfx90a](https://img.shields.io/badge/Performance-gfx90a-critical)](http://math-ci.amd.com/job/enterprise/job/performance/job/rocRoller/job/master/Performance_20Report_20for_20gfx90a)
-[![Master Branch Performance Report for gfx942](https://img.shields.io/badge/Performance-gfx942-critical)](http://math-ci.amd.com/job/enterprise/job/performance/job/rocRoller/job/master/Performance_20Report_20for_20gfx942)
-[![Master Branch Generated Documentation](https://img.shields.io/badge/Documentation-Generated-informational)](http://math-ci.amd.com/job/enterprise/job/documentation/job/rocRoller/job/master/Generated_20Docs)
+[![Develop Branch Code Coverage Report for gfx942](https://img.shields.io/badge/Code%20Coverage-gfx942-informational)](http://math-ci.amd.com/job/rocm-libraries/job/codecov/job/rocroller/job/develop/Code_20coverage_20gfx942_20report)
+[![Develop Branch Code Coverage Report for python](https://img.shields.io/badge/Code%20Coverage-Python-informational)](http://math-ci.amd.com/job/rocm-libraries/job/codecov/job/rocroller/job/develop/Python_20Code_20coverage_20gfx942_20report)
+[![Develop Branch Performance Report for gfx942](https://img.shields.io/badge/Performance-gfx942-critical)](http://math-ci.amd.com/job/rocm-libraries/job/performance/job/rocroller/job/develop/Performance_20Report_20for_20gfx90a)
+[![Develop Branch Generated Documentation](https://img.shields.io/badge/Documentation-Generated-informational)](http://math-ci.amd.com/job/rocm-libraries/job/documentation/job/rocroller/job/develop/Generated_20Docs)
 
 ## Jump to
 
 - [AMD's rocRoller Assembly Kernel Generator](#amds-rocroller-assembly-kernel-generator)
-  - [Building the library](#building-the-library)
-    - [Quick start instructions](#quick-start-instructions)
-    - [Detailed commandline instructions](#detailed-commandline-instructions)
-    - [Cmake and make commands](#cmake-and-make-commands)
-      - [CMake Options](#cmake-options)
-    - [Running the tests](#running-the-tests)
-    - [Updating pregenerated GPUArchitecture yaml files](#updating-pregenerated-gpuarchitecture-yaml-files)
-  - [GEMM client](#gemm-client)
+  - [Building the Library](#building-the-library)
+    - [Quick Start](#quick-start)
+    - [Building](#building)
+    - [With Docker](#with-docker)
+    - [Natively (e.g. Ubuntu 22.04)](#natively-eg-ubuntu-2204)
+    - [CMake and Make Commands](#cmake-and-make-commands)
+    - [Common CMake Options](#common-cmake-options)
+  - [Running the Tests](#running-the-tests-from-a-build-directory)
+    - [With CTest](#with-ctest)
+    - [With GTest](#with-gtest)
+    - [With Catch2](#with-catch2)
+  - [Updating Pregenerated GPUArchitecture YAML Files](#updating-pregenerated-gpuarchitecture-yaml-files)
+  - [GEMM Client](#gemm-client)
   - [File Structure](#file-structure)
   - [Coding Practices](#coding-practices)
     - [Style](#style)
     - [ISO C++ Standard](#iso-c-standard)
     - [Documentation](#documentation)
       - [Building Documentation](#building-documentation)
-  - [PR submissions](#pr-submissions)
+  - [PR Submissions](#pr-submissions)
   - [Testing](#testing)
   - [Logging](#logging)
   - [Debugging](#debugging)
@@ -45,7 +49,7 @@ rocRoller is a software library for generating AMDGPU kernels.
 git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set shared/rocroller
+git sparse-checkout set shared/rocroller shared/mxdatagenerator
 git checkout develop   # or your desired branch
 ```
 
@@ -55,7 +59,7 @@ rocRoller uses CMake for configuration and building. If all dependencies are ins
 
 **Common Presets:**
 
-- **opt-rocm**: Emulates the current dev workflow.
+- **default:release**: Emulates the current dev workflow.
   - `CMAKE_CXX_COMPILER`: `/opt/rocm/bin/amdclang++`
   - `ROCROLLER_ENABLE_FETCH`: `ON`
   - `CMAKE_PREFIX_PATH`: `/opt/rocm;/opt/rocm/llvm`
@@ -71,8 +75,7 @@ rocRoller uses CMake for configuration and building. If all dependencies are ins
 
 **Usage Example:**
 ```bash
-cmake --preset opt-rocm -B build -S . [additional cmake options]
-cmake --preset precheckin -B build -S . [additional cmake options]
+cmake --preset default:release -B build -S . [additional cmake options]
 ```
 
 If dependencies are missing, enable FetchContent with `ROCROLLER_ENABLE_FETCH=ON` to automatically download and build them.
@@ -82,11 +85,9 @@ If dependencies are missing, enable FetchContent with `ROCROLLER_ENABLE_FETCH=ON
 ```bash
 ./docker/user-image/start_user_container
 docker exec -ti -u ${USER} ${USER}_dev_clang bash
-cd /data
-mkdir -p build
-cd build
-cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
-make -j
+cd /data/shared/rocroller
+cmake --preset default:release -B build -S .
+cmake --build build -j
 ```
 
 #### natively (e.g. Ubuntu 22.04)
@@ -97,10 +98,9 @@ apt update
 apt install -y libopenblas-dev ninja-build
 
 # As regular user:
-mkdir -p build
-cd build
-cmake --preset default:release -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
-make -j
+cd <path-to>/rocm-libraries/shared/rocroller
+cmake --preset default:release -B build -S .
+cmake --build build -j
 ```
 
 ### CMake and Make Commands
@@ -134,14 +134,14 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
 | MXDATAGENERATOR_GIT_TAG                   | see root CMakeLists.txt | mxDataGenerator tag/commit hash           |
 | MXDATAGENERATOR_GIT_URL                   | https://github.com/ROCm/mxDataGenerator.git | mxDataGenerator repo URL |
 
-## Running the Tests
+## Running the Tests (from a build directory)
 
 ### With CTest
 **Run All Tests:**
   ```bash
   ctest
   # or
-  make test
+  make test # or ninja, if using
   ```
   Runs all tests, one process per test.
 
@@ -203,14 +203,23 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
   ./test/rocroller-tests-catch --list-tests
   ```
 
+**List All Test Tags:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tags
+  ```
+
 **Run a Specific Test:**
   ```bash
   ./test/rocroller-tests-catch "<test-name-or-regex>"
   ```
 
-**List a Specific Test:**
+**List Specific Tests:**
   ```bash
   ./test/rocroller-tests-catch --list-tests "<test-name-or-regex>"
+  ```
+**List Specific Tests via Tags:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tags "<tag-name-or-regex>"
   ```
 
 **Get Help:**
@@ -251,7 +260,7 @@ To launch the GEMM client from your build directory, run:
  - `Foo_fwd.hpp`: Contains forward declarations for all types defined in `Foo.hpp`, type aliases such as `FooPtr` for `std::shared_ptr<Foo>` and `std::variant`.  Should have zero or very few includes.
  - `Foo.cpp`: Contains definitions for longer functions.
 
-Generally, we priortiize inlining.
+Generally, we prioritize inlining.
 
 ## Coding Practices
 
@@ -304,8 +313,7 @@ This will generate an HTML website from the markdown readme files and Doxygen co
 - If a new feature cannot be implemented in fewer than `500` lines of code then consider either refactoring, or splitting the feature into two or more PRs.
 - When opening a PR, details of what the feature does are essential.
 - PR authors should provide a description on how to review the PR, such as, outlining key changes. This is especially important if the PR is complex, novel, or on the higher side of lines of code change.
-- As mentioned in the coding style section, PR code needs to be formatted with `clang-format` version 13. This can be done manually.
-- rocRoller's docker images already have this version of `clang-format` and formatting can be automated using githooks. The command for installing the hook to the local repo: `.githooks/install`
+- PR code needs to be formatted with `clang-format` version 13 (rocRoller's docker images already have this version of `clang-format`). This can be done manually, with `scripts/fix-format`, or via githooks (with `.githooks/install`).
 - If a PR alters the compilation process in a way that causes the performance job to fail when building the master branch, adding the label `ci:no-build-master` will instead compare the PR against the latest build of the master branch.
 
 
