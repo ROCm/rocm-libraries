@@ -54,7 +54,7 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         {
             std::vector<char> log(logSize, '\0');
             if(hiprtcGetProgramLog(prog, log.data()) == HIPRTC_SUCCESS)
-                throw std::runtime_error(log.data());
+                throw std::runtime_error(std::string(log.begin(), log.end()));
         }
         throw std::runtime_error("compile failed without log");
     }
