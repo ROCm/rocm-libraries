@@ -313,43 +313,39 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, CandidateSelectionModel_Test)
     ASSERT_FALSE(meta.output_params().empty());
 }
 
-// These two tests cause the build to fail due to missing symbols/linker errors
-// TODO: fix these and reintroduce them
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
+{
+    auto problem =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
 
-// TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
-// {
-//     auto problem =
-//         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    int index = 0, split_k = 1;
+    std::string kernel_id;
+    std::vector<std::string> valid_kernels;
 
-//     int index = 0, split_k = 1;
-//     std::string kernel_id;
-//     std::vector<std::string> valid_kernels;
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
+        ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
 
-//     auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
-//         ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
+    ASSERT_TRUE(ai_success);
+    ASSERT_FALSE(kernel_id.empty());
+}
 
-//     ASSERT_TRUE(ai_success);
-//     ASSERT_FALSE(kernel_id.empty());
-// }
+TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
+{
+    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
+        [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
 
-// TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
-// {
-//     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-//     empty_kernels =
-//         [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
+    auto problem =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    int index = 0, split_k = 1;
+    std::string kernel_id;
+    std::vector<std::string> valid_kernels;
 
-//     auto problem =
-//         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
-//     int index = 0, split_k = 1;
-//     std::string kernel_id;
-//     std::vector<std::string> valid_kernels;
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
+        ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
 
-//     auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
-//         ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
-
-//     ASSERT_FALSE(ai_success);
-//     ASSERT_TRUE(kernel_id.empty());
-// }
+    ASSERT_FALSE(ai_success);
+    ASSERT_TRUE(kernel_id.empty());
+}
 
 // ------------------- Full Solver Tests -------------------
 

@@ -386,8 +386,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
 {
     index     = 0;
-    split_k   = 1;
-    kernel_id = "";
+    kernel_id = "None";
+    split_k   = 1; // This solver uses split_k, so initialize to 1
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     // 1. AI heuristics (if enabled)

@@ -51,6 +51,7 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
                                                   std::vector<std::vector<std::string>>& kernels);
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
+// Main template implementation
 template <typename DataType>
 MIOPEN_INTERNALS_EXPORT
     std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
@@ -63,53 +64,64 @@ MIOPEN_INTERNALS_EXPORT
         std::string& kernel_id,
         std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
             fill_valid_kernels,
-        std::string solver_name);
+        std::string solver_name)
+{
+    valid_kernels = fill_valid_kernels(problem);
 
-extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<float>(
-    const miopen::ExecutionContext&,
-    const miopen::conv::ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
-    std::string);
+    // Filter kernels by type
+    std::vector<int> heuristic_indexes;
+    std::vector<std::vector<std::string>> heuristic_kernels;
+    FillHeuristicKernels(valid_kernels, heuristic_indexes, heuristic_kernels);
+    // Prepare features and split_k values
+    const std::string& arch = ctx.GetStream().GetDeviceName();
 
-extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<int8_t>(
-    const miopen::ExecutionContext&,
-    const miopen::conv::ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
-    std::string);
+    // Use AI model to select best candidate
+    try
+    {
+        std::map<std::string, float> features =
+            GetFeatures3D(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
 
-#if MIOPEN_USE_COMPOSABLEKERNEL
-extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::half_t>(
-    const miopen::ExecutionContext&,
-    const miopen::conv::ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
-    std::string);
+        bool use_split_k = split_k != 0;
+        if(split_k > 1)
+        {
+            MIOPEN_THROW("Invalid initial split_k value for performing AI Heuristics: " +
+                         std::to_string(split_k) + ". Expected 0 (no split) or 1 (default split).");
+        }
 
-extern template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel<ck::bhalf_t>(
-    const miopen::ExecutionContext&,
-    const miopen::conv::ProblemDescription&,
-    std::vector<std::string>&,
-    int&,
-    int&,
-    std::string&,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
-    std::string);
-#endif
+        auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
+            arch, solver_name, features, heuristic_kernels, use_split_k);
+
+        // Check if we have any candidates
+        if(!result.IsEmpty())
+        {
+            // Get the best candidate (first in the sorted list)
+            int best_index   = result.GetBestKernelIndex();
+            int best_split_k = result.GetBestSplitK();
+
+            if(best_index >= 0 && best_index < static_cast<int>(valid_kernels.size()))
+            {
+                index   = best_index;
+                split_k = best_split_k;
+                if(use_split_k)
+                {
+                    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+                }
+                else
+                {
+                    kernel_id = valid_kernels[index];
+                }
+                return {true, result};
+            }
+        }
+        MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
+        return {false, result};
+    }
+    catch(const miopen::Exception& ex)
+    {
+        MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
+        return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
+    }
+}
 } // namespace conv
 } // namespace solver
 } // namespace miopen
