@@ -78,7 +78,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrSwap)
 }
 
 // Thrust-specific test for assignment operator.
-TEST(UniquePtrGeneralTests, TestUniquePtrMoveAsgn)
+TEST(UniquePtrGeneralTests, TestUniquePtrAsgnMove)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -105,7 +105,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrMoveAsgn)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.asgn/move.pass.cpp
-TEST(UniquePtrGeneralTests, TestUnqiuePtrSelfMoveAsgn)
+TEST(UniquePtrGeneralTests, TestUniquePtrAsgnSelfMove)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -119,7 +119,7 @@ TEST(UniquePtrGeneralTests, TestUnqiuePtrSelfMoveAsgn)
 }
 
 // Thrust-specific test for assigning nullptr to unique_ptr.
-TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgn)
+TEST(UniquePtrGeneralTests, TestUniquePtrAsgnNull)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -140,7 +140,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgn)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/default.pass.cpp
-TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtor)
+TEST(UniquePtrGeneralTests, TestUniquePtrCtorDefault)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -152,7 +152,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtor)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/move.pass.cpp
-TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtor)
+TEST(UniquePtrGeneralTests, TestUniquePtrCtorMove)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -167,7 +167,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtor)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/nullptr.pass.cpp
-TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtor)
+TEST(UniquePtrGeneralTests, TestUniquePtrCtorNullptr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -179,7 +179,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtor)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/pointer.pass.cpp
-TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtor)
+TEST(UniquePtrGeneralTests, TestUniquePtrCtorPointer)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
