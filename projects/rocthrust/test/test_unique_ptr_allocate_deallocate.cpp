@@ -137,34 +137,46 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpArray)
 
     // Pointers of same array type
     {
-        thrust::unique_ptr<int[]> p1 = thrust::make_unique<int[]>(10);
-        thrust::unique_ptr<int[]> p2 = thrust::make_unique<int[]>(10);
+        thrust::unique_ptr<A[]> p1 = thrust::make_unique<A[]>(10);
+        thrust::unique_ptr<A[]> p2 = thrust::make_unique<A[]>(10);
 
-        int* ptr1 = p1.get_raw();
-        int* ptr2 = p2.get_raw();
+        for (int i = 0; i < 10; ++i)
+        {
+            p1[i] = A();
+            p2[i] = A();
+        }
 
-        ASSERT_EQ((p1 == p2), (static_cast<void*>(ptr1) == static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 != p2), (static_cast<void*>(ptr1) != static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 < p2), (static_cast<void*>(ptr1) < static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 <= p2), (static_cast<void*>(ptr1) <= static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 > p2), (static_cast<void*>(ptr1) > static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 >= p2), (static_cast<void*>(ptr1) >= static_cast<void*>(ptr2)));
+        A* ptr1 = p1.get_raw();
+        A* ptr2 = p2.get_raw();
+
+        ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
+        ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
+        ASSERT_EQ((p1 < p2), (ptr1 < ptr2));
+        ASSERT_EQ((p1 <= p2), (ptr1 <= ptr2));
+        ASSERT_EQ((p1 > p2), (ptr1 > ptr2));
+        ASSERT_EQ((p1 >= p2), (ptr1 >= ptr2));
     }
 
     // Pointers of different array type
     {
-        thrust::unique_ptr<int[]>   p1 = thrust::make_unique<int[]>(10);
-        thrust::unique_ptr<float[]> p2 = thrust::make_unique<float[]>(10);
+        thrust::unique_ptr<A[]> p1 = thrust::make_unique<A[]>(10);
+        thrust::unique_ptr<B[]> p2 = thrust::make_unique<B[]>(10);
 
-        int*   ptr1 = p1.get_raw();
-        float* ptr2 = p2.get_raw();
+        for (int i = 0; i < 10; ++i)
+        {
+            p1[i] = A();
+            p2[i] = B();
+        }
 
-        ASSERT_EQ((p1 == p2), (static_cast<void*>(ptr1) == static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 != p2), (static_cast<void*>(ptr1) != static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 < p2), (static_cast<void*>(ptr1) < static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 <= p2), (static_cast<void*>(ptr1) <= static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 > p2), (static_cast<void*>(ptr1) > static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 >= p2), (static_cast<void*>(ptr1) >= static_cast<void*>(ptr2)));
+        A* ptr1 = p1.get_raw();
+        B* ptr2 = p2.get_raw();
+
+        ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
+        ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
+        ASSERT_EQ((p1 < p2), (ptr1 < ptr2));
+        ASSERT_EQ((p1 <= p2), (ptr1 <= ptr2));
+        ASSERT_EQ((p1 > p2), (ptr1 > ptr2));
+        ASSERT_EQ((p1 >= p2), (ptr1 >= ptr2));
     }
 }
 
