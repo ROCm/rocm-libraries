@@ -10,11 +10,6 @@ using namespace hipdnn_frontend;
 class TestTopologicalSortingUtils : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        // Setup code if needed
-    }
-
     static bool isValidTopologicalOrder(const std::vector<size_t>& order,
                                         const GraphStructure& structure)
     {

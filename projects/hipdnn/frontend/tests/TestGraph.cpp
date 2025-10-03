@@ -1753,7 +1753,6 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     EXPECT_TRUE(execResult.is_good());
 }
 
-// Test: Normal graph (no orphans, no cycles)
 TEST_F(TestGraph, TopologicalSortSucceedsOnNormalGraph)
 {
     GraphTestUtils graph;
@@ -1778,8 +1777,7 @@ TEST_F(TestGraph, TopologicalSortSucceedsOnNormalGraph)
     EXPECT_TRUE(graph.topologicallySortGraph().is_good());
 }
 
-// Test: Orphaned node present in the graph
-TEST_F(TestGraph, TopologicalSortSucceedsWithOrphanedNode)
+TEST_F(TestGraph, TopologicalSortFailsWithOrphanedNode)
 {
     GraphTestUtils graph;
 

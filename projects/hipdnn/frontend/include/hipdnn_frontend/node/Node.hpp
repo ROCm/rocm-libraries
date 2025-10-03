@@ -107,8 +107,6 @@ protected:
         }
         return {};
     }
-
-    friend class TestGraph;
 };
 
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
