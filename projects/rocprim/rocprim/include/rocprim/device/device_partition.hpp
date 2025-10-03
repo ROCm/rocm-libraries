@@ -214,13 +214,13 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
-        = ::rocprim::detail::constexpr_value_variant<bool, true, false>::create(
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
             use_atomic_block_id);
 
     bool use_sleepy_scan;
     ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));
     const auto use_sleepy_scan_variant
-        = ::rocprim::detail::constexpr_value_variant<bool, true, false>::create(use_sleepy_scan);
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(use_sleepy_scan);
 
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)

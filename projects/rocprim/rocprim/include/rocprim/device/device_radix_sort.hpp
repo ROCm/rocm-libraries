@@ -507,7 +507,7 @@ hipError_t radix_sort_onesweep_impl(
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
-        = ::rocprim::detail::constexpr_value_variant<bool, true, false>::create(
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
             use_atomic_block_id);
 
     ROCPRIM_RETURN_ON_ERROR(std::visit(

@@ -608,7 +608,6 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     const unsigned int  block_offset = block_id * items_per_block;
     const KeyIterator   block_keys   = keys_input + block_offset;
     const ValueIterator block_values = values_input + block_offset;
-    ::rocprim::syncthreads();
 
     tile_processor{}.process_tile(block_keys,
                                   block_values,
