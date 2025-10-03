@@ -99,9 +99,7 @@ Arguments setup_gebsr2gebsc_arguments(gebsr2gebsc_bin_tuple tup)
     std::string bin_file = std::get<4>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    std::string filename = get_filename(bin_file);
-    strncpy(arg.filename, filename.c_str(), filename.length());
-    arg.filename[filename.length()] = '\0';
+    arg.set_filename(get_filename(bin_file));
 
     return arg;
 }

@@ -93,16 +93,8 @@ Arguments setup_bsrmv_arguments(bsrmv_bin_tuple tup)
     // Determine absolute path of test matrix
     std::string bin_file = std::get<5>(tup);
 
-    std::cout << "bin_file: " << bin_file << std::endl;
-
     // Matrices are stored at the same path in matrices directory
-    std::string filename = get_filename(bin_file);
-    std::cout << "filename: " << filename << " filename.length(): " << filename.length()
-              << std::endl;
-    strncpy(arg.filename, filename.c_str(), filename.length());
-    std::cout << "1111" << std::endl;
-    arg.filename[filename.length()] = '\0';
-    std::cout << "2222" << std::endl;
+    arg.set_filename(get_filename(bin_file));
 
     return arg;
 }

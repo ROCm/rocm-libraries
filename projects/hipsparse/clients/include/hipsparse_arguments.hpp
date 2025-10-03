@@ -219,4 +219,10 @@ struct Arguments
     {
         return percentage;
     }
+
+    void set_filename(const std::string& bin_file)
+    {
+        strncpy(this->filename, bin_file.c_str(), bin_file.length());
+        this->filename[bin_file.length()] = '\0';
+    }
 };

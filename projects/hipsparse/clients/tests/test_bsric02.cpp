@@ -90,9 +90,7 @@ Arguments setup_bsric02_arguments(bsric02_bin_tuple tup)
     // Get current executables absolute path
 
     // Matrices are stored at the same path in matrices directory
-    std::string filename = get_filename(bin_file);
-    strncpy(arg.filename, filename.c_str(), filename.length());
-    arg.filename[filename.length()] = '\0';
+    arg.set_filename(get_filename(bin_file));
 
     return arg;
 }
