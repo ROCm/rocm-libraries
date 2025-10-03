@@ -130,6 +130,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
     }
 }
 
+// Based on llvm-project/libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.special/cmp.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -195,6 +196,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpNullptr)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.array.pass.cpp
 TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArray)
 {
     using T = typename TestFixture::input_type;
@@ -212,6 +214,7 @@ TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArray)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.array.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArrayUserType)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -234,6 +237,7 @@ TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArrayUserType)
     }
 }
 
+// Thrust-specific test for array deleter behavior.
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltrArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -256,6 +260,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltrArray)
 }
 
 #if THRUST_CPP_DIALECT >= 2020
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique_for_overwrite.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestMakeUniqueForOverwriteSingleInt)
 {
     thrust::unique_ptr<int> p = thrust::make_unique_for_overwrite<int>();
