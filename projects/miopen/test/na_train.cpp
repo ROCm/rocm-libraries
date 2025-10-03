@@ -761,7 +761,7 @@ struct na_fusion_driver : test_driver
     {
         this->batch_factor = 4;
 
-        add(batchnormMode, "batch-norm-mode", generate_data({/*0, */ 1}));
+        add(batchnormMode, "batch-norm-mode", generate_data({0, 1}));
         add(input,
             "input",
             (batchnormMode == 1) ? get_bn_spatial_input_tensor(tensor_elem_gen_integer{max_value})
@@ -772,7 +772,7 @@ struct na_fusion_driver : test_driver
         add(amode,
             "amode",
             generate_data(
-                {"MIOPENACTIVATIONRELU" /*, "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"*/}));
+                {"MIOPENACTIVATIONRELU", "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"}));
     }
 
     void run()

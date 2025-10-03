@@ -138,7 +138,7 @@ MIOpenBatchNormActivBwdPerActivation(const __global _FLOAT* __restrict x_in,
                 xhat     = (FLOAT2FLOATPREC(*(x_in + index)) - mean) * invVar;
                 tmp1     = mad(xhat, dxhathat, dxhat);
                 bn_out   = mad(xhat, pvt_scale, pvt_bias);
-                act_dyin = FLOAT2FLOAPREC(*(dy_in + index));
+                act_dyin = FLOAT2FLOATPREC(*(dy_in + index));
                 act_out  = FLOAT2FLOATPREC(*(y_in + index));
                 ActivationFunction_Diff(1,
                                         &bn_dyin,
