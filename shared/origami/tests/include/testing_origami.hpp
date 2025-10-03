@@ -304,6 +304,8 @@ void ComputeTotalLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            0,
+                                                                            0,
                                                                             splittingFactor);
 
     double latency_cycles_large = origami::compute_total_latency(hardware,
@@ -325,6 +327,8 @@ void ComputeTotalLatency(const origami::hardware_t& hardware,
                                                                             origami::data_type_t::BFloat16,
                                                                             mx_block_size,
                                                                             WGM,
+                                                                            0,
+                                                                            0,
                                                                             splittingFactor);
     EXPECT_LT(latency_cycles_small, latency_cycles_large);
 }
@@ -532,10 +536,10 @@ void BestWGM(const origami::hardware_t& hardware,
         M, N, K, batch, hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false);
 
     auto best_wgm_small_tile = select_best_wgm(
-        M, N, K, batch, hardware, MT_M/2, MT_N/2, MT_K * 2, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false);
+        M/4, N/4, K, batch, hardware, MT_M, MT_N, MT_K * 2, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false);
 
     auto best_wgm_nonsquare = select_best_wgm(
-        2048, 5120, K, batch, hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false);
+        1024, 5120, K, batch, hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false);
 
     EXPECT_GT(best_wgm_small_tile.second, best_wgm_large_tile.second);
     EXPECT_NE(best_wgm_large_tile.second, best_wgm_nonsquare.second);
