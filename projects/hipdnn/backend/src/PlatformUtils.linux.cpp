@@ -35,10 +35,10 @@ PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 // that is not resolved at runtime, leading to dlopen failure with RTLD_NOW.
 // When this is fixed in rocblas, we should ideally switch back to RTLD_NOW.
 #if __has_feature(address_sanitizer)
-    // Address Sanitizer does not support RTLD_DEEPBIND, so we use RTLD_LAZY only
-    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_LAZY);
+    // Address Sanitizer does not support RTLD_DEEPBIND, so we use RTLD_NOW only
+    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW);
 #else
-    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_LAZY | RTLD_DEEPBIND);
+    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_DEEPBIND);
 #endif
 
     if(handle == nullptr)
