@@ -182,7 +182,8 @@ namespace origami
                                                  size_t          MI_N,
                                                  size_t          MI_K,
                                                  size_t          element_size_A,
-                                                 size_t          element_size_B)
+                                                 size_t          element_size_B,
+                                                 data_type_t     mi_datatype)
     {
         // In X1 TF32 GEMMs, we do:
         // v_cvt_pk_bf16_f32  (convert/pack fp32 to bf16)
@@ -191,6 +192,14 @@ namespace origami
         // That is, the extra instructions that we need to account for are the two cvt_pk ops
         // per wave tile
 
+        // However, these extra ops should not be added up to the overal tile latency becuase
+        // they can be run in parallel to Matix and Memory operations (given they are not dependent).
+        // So, We should ideally take L_tile = max{Mem, Comp, Vec (cvt latencies)}.
+        // Since, Vec latency is not modeled yet, we somehow model that into the current logic
+        // by scaling according to MFMA latencies and putting some heuristics to model the fact
+        // that these vector operations can be hidden (read interleaved) with the other memory
+        // or MFMA instructions.
+
         // TODO: Use kernel's actual wavetiles.
         const double wave_tile_m = MT_M / 2.0;
         const double wave_tile_n = MT_N / 2.0;
@@ -198,11 +207,40 @@ namespace origami
 
         // MFMA count
         const double N_MI = (wave_tile_m / MI_M) * (wave_tile_n / MI_N) * wave_tile_k;
+        const double num_mfma = 1.0 * static_cast<double>(N_MI);
+        // Cycle scale per MI
+        const double L_MI = hardware.get_mi_latency(MI_M, MI_N, MI_K, mi_datatype);
+        const double mfma_cycles = num_mfma * L_MI;
 
-        // overhead: every cvt_pk op has a latency of 4
-        const double cvt = 4 * 2 * N_MI;
+        // 2) Bytes (per K-slice), using ceil-div to whole bytes
+        const double bytesA
+            = static_cast<double>(wave_tile_m) * MT_K * safe_ceil_div(element_size_A, 8);
+        const double bytesB
+            = static_cast<double>(wave_tile_n) * MT_K * safe_ceil_div(element_size_B, 8);
 
-        return cvt;
+        // 3) Modeled transfer quanta (128B lines)
+        //      dsA = bytesA / (128 * MI_M)
+        //      dsB = bytesB / (128 * MI_N)
+        //      GR  = dsA  (global->LDS modeled equal to A-side DS)
+        const double dsA = (bytesA / 128.0) / static_cast<double>(MI_M); // LDS->VGPR for A
+        const double dsB = (bytesB / 128.0) / static_cast<double>(MI_N); // LDS->VGPR for B
+        const double GR  = dsA; // Global->LDS reads
+        const double LR  = dsA + dsB; // total DS->VGPR
+
+        // 5) Exposed vs hidden CVT
+        // spare MFMA
+        const double spare_mfma = std::max(0.0, num_mfma - LR - GR);
+        // 2 cvt per each ds_write (this for SS_BSS -- should be revised for other datatypes)
+        // Each cvt has a latency of four. It is scaled by the MI Latency
+        // Note: change 16.0 based on mi_data_type if we want to generalize this for all
+        // casting GEMMs.
+        const double cvt        = (2.0 * 4.0 / 16.0 * L_MI) * LR; 
+        // cvt ops are interleaved in main loop and don't stall matrix or memory units.
+        // Heuristically, we set
+        const double H          = (8.0 / 16.0 * L_MI) * spare_mfma + (4.0 / 16.0) * L_MI * (LR + GR);
+        const double overhead   = std::max(cvt - H, 0.0);
+
+        return overhead;
     }
 
     // Compute cvt overhead in tf32 emulation
@@ -845,20 +883,12 @@ namespace origami
                                             MI_N,
                                             MI_K,
                                             element_size_A,
-                                            element_size_B);
+                                            element_size_B,
+                                            mi_datatype);
         }
-
 
         // 5) Single-tile latency (always additive)
         double L_tile_single = std::max(L_compute, L_mem) + L_cvt;
-
-        // 5') We add the cvt overhead directly to memory path
-        if((element_size_A == 32) && (element_size_B == 32)
-                 && (mi_datatype == data_type_t::BFloat16)
-                 && (hardware.arch == hardware_t::architecture_t::gfx950)) // SS_BSS on GFX950
-        {
-            L_tile_single = std::max(L_compute, L_mem + L_cvt);
-        }
 
         // 6) Number of K-iterations (excluding epilogue), at least 1
         // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
@@ -1099,7 +1129,11 @@ namespace origami
             }
         }
 
-        if(heuristics && !tf32_emu)
+        bool is_SS_BSS = ((element_size_A == 32) && (element_size_B == 32)
+        && (mi_datatype == data_type_t::BFloat16)
+        && (hardware.arch == hardware_t::architecture_t::gfx950));
+
+        if(heuristics && !tf32_emu && !is_SS_BSS)
         {
             // Penalize tiles that lead to edge waste
             const size_t numMT_M = safe_ceil_div(M, MT_M);
