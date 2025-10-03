@@ -591,8 +591,9 @@ namespace
         {
             return "xf32_r";
         }
-        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
-                && typeB == rocisa::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16
+                && (typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Float && typeB == rocisa::DataType::Float))
         {
             return "f32_bf16_r";
         }
@@ -632,8 +633,9 @@ namespace
         {
             return "c_xf32_r";
         }
-        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
-                && typeB == rocisa::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16
+                && (typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Float && typeB == rocisa::DataType::Float))
         {
             return "c_f32_fast_bf16_r";
         }
