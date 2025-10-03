@@ -32,7 +32,7 @@ std::filesystem::path getCurrentModuleDirectory()
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
 // If dlopen throws due to undefined symbols, a temporary workaround is to use RTLD_LAZY
-// loading to bypass this. However, it's less safe since RTLD_NOW catches undefined 
+// loading to bypass this. However, it's less safe since RTLD_NOW catches undefined
 // symbols at load-time.
 #if __has_feature(address_sanitizer)
     // Address Sanitizer does not support RTLD_DEEPBIND, so we use RTLD_NOW only
