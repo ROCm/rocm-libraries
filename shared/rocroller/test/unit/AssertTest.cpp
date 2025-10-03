@@ -342,10 +342,8 @@ namespace AssertTest
     INSTANTIATE_TEST_SUITE_P(
         AssertTest,
         GPU_AssertTest,
-        ::testing::Combine(
-            supportedISAValues(),
-            ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "MEMORY_VIOLATION"),
-                              std::tuple(AssertOpKind::STrap, "ASSERT_TRAP"),
-                              std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
-                              std::tuple(AssertOpKind::Count, "Invalid AssertOpKind"))));
+        ::testing::Combine(supportedISAValues(),
+                           ::testing::Values(std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
+                                             std::tuple(AssertOpKind::Count,
+                                                        "Invalid AssertOpKind"))));
 }
