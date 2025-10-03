@@ -1,3 +1,7 @@
+import sys
+import os
+# Find files in utilities folder without requiring a package to be created
+sys.path.insert(1, os.path.dirname(os.path.realpath(__file__))+"/utilities/")
 import torch
 from tensor import TensorAttributes
 from batchnorm_inference import BatchnormInference
