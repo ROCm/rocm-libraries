@@ -13,6 +13,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Added a new trust verify find mode.
 * Ported Op4dTensorLite kernel from OpenCL to HIP.
 * Implemented a generic HIP kernel for backwards layer normalization.
+* [BatchNorm] Enabled tuning through miopenSetTuningPolicy
 
 ### Changed
 
