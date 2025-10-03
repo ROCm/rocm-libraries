@@ -128,11 +128,7 @@ class StreamK(Component):
         module.addComment0("StreamK calculate tile idx and map to WG")
 
         # sTmp = tile index
-        tmpVgpr = writer.vgprPool.checkOut(2, "div")
-        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-        module.add(scalarUInt32DivideAndRemainder(qReg=sTmp, dReg="StreamKIter", divReg="ItersPerTile", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="StreamKIter // ItersPerTile"))
-        tmpVgprRes = None
-        writer.vgprPool.checkIn(tmpVgpr)
+        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(sTmp+2)))
         # sTmp+1 = tile start
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Tile start iteration"))
         # sTmp+2 = tile end
@@ -376,7 +372,7 @@ class StreamK(Component):
             # Get Iter of the start of the tile
             tmpSgpr = writer.sgprPool.checkOut(3, "tmpSgpr", preventOverflow=False)
             module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKIter"), src1=1, comment="StreamKIter-1 to get Iter in current tile"))
-            module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr+0, dReg=tmpSgpr+1, divReg="ItersPerTile", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="tileIdx = tileIter // itersPerTile"))
+            module.add(sMagicDiv2(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr(tmpSgpr+1), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
             module.add(SMulI32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+0), src1=sgpr("ItersPerTile"), comment="tileStart=tileIdx * ItersPerTile"))
             module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr("SKItersPerWG"), src1=1, comment="ItersPerWG w/ extraIter"))
             module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr+2, dReg=tmpSgpr+1, divReg=tmpSgpr+0, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgCount = tileStart / (itersPerWG+1)"))
