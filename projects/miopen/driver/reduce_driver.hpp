@@ -182,7 +182,7 @@ int ReduceDriver<Tgpu, Tref>::AddCmdLineArgs()
         "DimsToReduce", 'R', "0,2", "The indices of the dimensions to be reduced", "string");
     inflags.AddInputFlag("ReduceOp",
                          'O',
-                         "0,2",
+                         "0",
                          "Reduction Operation Type (check the enum miopenReduceTensorOp_t in "
                          "miopen.h) (Default=0 to represent Add of two values)",
                          "int");
@@ -200,7 +200,7 @@ int ReduceDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "int");
     inflags.AddInputFlag("IndicesUsed",
                          'I',
-                         "0,1",
+                         "0",
                          "whether indices of the reduced values are outputed when Min/Max "
                          "operation is used (Default=0 to indicate no indices outputed)",
                          "int");
