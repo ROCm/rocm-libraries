@@ -285,7 +285,6 @@ void testing_bsrmv_bad_arg(void)
 template <typename T>
 hipsparseStatus_t testing_bsrmv(Arguments argus)
 {
-    std::cout << "AAAA" << std::endl;
     int                  m         = argus.M;
     int                  n         = argus.N;
     int                  block_dim = argus.block_dim;
@@ -316,8 +315,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
 #endif
     }
 
-    std::cout << "BBBB" << std::endl;
-
     srand(12345ULL);
 
     // Host structures
@@ -335,9 +332,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
 
     mb = (m + block_dim - 1) / block_dim;
     nb = (n + block_dim - 1) / block_dim;
-
-    std::cout << "m: " << m << " n: " << n << " nnz: " << nnz << " block_dim: " << block_dim
-              << " mb: " << mb << " nb: " << nb << std::endl;
 
     std::vector<T> hx(nb * block_dim);
     std::vector<T> hy_1(mb * block_dim);
@@ -387,8 +381,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
-    std::cout << "CCCC" << std::endl;
-
     // Convert to BSR
     int nnzb;
     CHECK_HIPSPARSE_ERROR(hipsparseXcsr2bsrNnz(handle,
@@ -403,7 +395,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                                                dbsr_row_ptr,
                                                &nnzb));
 
-    std::cout << "nnzb: " << nnzb << std::endl;
     auto dbsr_col_ind_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnzb), device_free};
     auto dbsr_val_managed = hipsparse_unique_ptr{
@@ -426,7 +417,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                                             dbsr_row_ptr,
                                             dbsr_col_ind));
 
-    std::cout << "DDDD" << std::endl;
     if(argus.unit_check)
     {
         CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
@@ -449,7 +439,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                                               &h_beta,
                                               dy_1));
 
-        std::cout << "EEEE" << std::endl;
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(hipsparseXbsrmv(handle,
@@ -468,7 +457,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                                               d_beta,
                                               dy_2));
 
-        std::cout << "FFFF" << std::endl;
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
@@ -487,7 +475,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                                   sizeof(T) * nnzb * block_dim * block_dim,
                                   hipMemcpyDeviceToHost));
 
-        std::cout << "GGGG" << std::endl;
         host_bsrmv(dir,
                    transA,
                    mb,
@@ -502,11 +489,9 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                    h_beta,
                    hy_gold.data(),
                    idx_base);
-        std::cout << "HHHH" << std::endl;
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
-        std::cout << "IIII" << std::endl;
     }
 
     if(argus.timing)
