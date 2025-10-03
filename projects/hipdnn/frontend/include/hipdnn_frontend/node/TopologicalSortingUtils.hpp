@@ -17,9 +17,16 @@ struct GraphStructure
     std::vector<std::vector<size_t>> adjacencyList;
 };
 
-std::vector<int> computeInDegrees(const GraphStructure& structure)
+struct TopologicalSortResult
 {
-    size_t nodeCount = structure.adjacencyList.size(); //_sub_nodes.size();
+    std::vector<size_t> order;
+    int componentCount;
+    bool hasCycle;
+};
+
+inline std::vector<int> computeInDegrees(const GraphStructure& structure)
+{
+    size_t nodeCount = structure.adjacencyList.size();
     std::vector<int> inDegrees(nodeCount, 0);
     for(size_t i = 0; i < nodeCount; ++i)
     {
@@ -31,86 +38,46 @@ std::vector<int> computeInDegrees(const GraphStructure& structure)
     return inDegrees;
 }
 
-int checkForDisconnectedComponents(const GraphStructure& structure)
+inline TopologicalSortResult
+    performTopologicalSortWithComponentDetection(const GraphStructure& structure)
 {
-    size_t nodeCount = structure.adjacencyList.size(); //_sub_nodes.size();
-    std::unordered_set<size_t> visited;
-    int componentCount = 0;
-
-    // Build undirected graph for connectivity check
-    std::vector<std::vector<size_t>> undirectedGraph(nodeCount);
-    for(size_t i = 0; i < nodeCount; ++i)
-    {
-        for(auto j : structure.adjacencyList[i])
-        {
-            undirectedGraph[i].push_back(j);
-            undirectedGraph[j].push_back(i);
-        }
-    }
-
-    // DFS to find connected components
-    for(size_t start = 0; start < nodeCount; ++start)
-    {
-        if(visited.find(start) != visited.end())
-        {
-            continue;
-        }
-
-        componentCount++;
-        std::stack<size_t> stack;
-        stack.push(start);
-
-        while(!stack.empty())
-        {
-            size_t current = stack.top();
-            stack.pop();
-
-            if(visited.find(current) != visited.end())
-            {
-                continue;
-            }
-
-            visited.insert(current);
-
-            for(auto neighbor : undirectedGraph[current])
-            {
-                if(visited.find(neighbor) == visited.end())
-                {
-                    stack.push(neighbor);
-                }
-            }
-        }
-    }
-
-    return componentCount;
-}
-
-std::vector<size_t> performTopologicalSort(const GraphStructure& structure)
-{
-    size_t nodeCount = structure.adjacencyList.size(); //_sub_nodes.size();
+    size_t nodeCount = structure.adjacencyList.size();
     std::queue<size_t> zeroInDegree;
     std::vector<size_t> topologicalOrder;
     std::vector<int> inDegrees = computeInDegrees(structure);
 
-    // Initialize queue with all nodes that have no incoming edges
+    std::vector<int> componentId(nodeCount, -1);
+    int currentComponent = 0;
+
+    // Find all source nodes (in-degree 0)
     for(size_t i = 0; i < nodeCount; ++i)
     {
         if(inDegrees[i] == 0)
         {
             zeroInDegree.push(i);
+            componentId[i] = currentComponent++;
         }
     }
 
-    // Process nodes in topological order
+    int componentCount = currentComponent;
+
+    // Process nodes
     while(!zeroInDegree.empty())
     {
         size_t current = zeroInDegree.front();
         zeroInDegree.pop();
         topologicalOrder.push_back(current);
 
-        // For each neighbor, decrement in-degree
+        int currentComponentId = componentId[current];
+
         for(auto neighbor : structure.adjacencyList[current])
         {
+            // Propagate component ID to neighbors
+            if(componentId[neighbor] == -1)
+            {
+                componentId[neighbor] = currentComponentId;
+            }
+
             inDegrees[neighbor]--;
             if(inDegrees[neighbor] == 0)
             {
@@ -119,10 +86,13 @@ std::vector<size_t> performTopologicalSort(const GraphStructure& structure)
         }
     }
 
-    return topologicalOrder;
+    bool hasCycle = (topologicalOrder.size() != nodeCount);
+
+    return {topologicalOrder, componentCount, hasCycle};
 }
 
-bool detectCycle(const std::vector<size_t>& topologicalOrder, const GraphStructure& structure)
+inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
+                        const GraphStructure& structure)
 {
     size_t nodeCount = structure.adjacencyList.size();
 

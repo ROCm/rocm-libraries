@@ -99,10 +99,11 @@ TEST_F(TestTopologicalSortingUtils, EmptyGraph)
     GraphStructure structure;
     structure.adjacencyList = {};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    EXPECT_TRUE(result.empty());
-    EXPECT_FALSE(detectCycle(result, structure));
+    EXPECT_TRUE(result.order.empty());
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 0);
 }
 
 TEST_F(TestTopologicalSortingUtils, SingleNode)
@@ -110,11 +111,12 @@ TEST_F(TestTopologicalSortingUtils, SingleNode)
     GraphStructure structure;
     structure.adjacencyList = {{}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 1);
-    EXPECT_EQ(result[0], 0);
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 1);
+    EXPECT_EQ(result.order[0], 0);
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, LinearChain)
@@ -123,15 +125,16 @@ TEST_F(TestTopologicalSortingUtils, LinearChain)
     GraphStructure structure;
     structure.adjacencyList = {{1}, {2}, {3}, {}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 4);
-    EXPECT_EQ(result[0], 0);
-    EXPECT_EQ(result[1], 1);
-    EXPECT_EQ(result[2], 2);
-    EXPECT_EQ(result[3], 3);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 4);
+    EXPECT_EQ(result.order[0], 0);
+    EXPECT_EQ(result.order[1], 1);
+    EXPECT_EQ(result.order[2], 2);
+    EXPECT_EQ(result.order[3], 3);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, DiamondGraph)
@@ -144,27 +147,33 @@ TEST_F(TestTopologicalSortingUtils, DiamondGraph)
     GraphStructure structure;
     structure.adjacencyList = {{1, 2}, {3}, {3}, {}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 4);
-    EXPECT_EQ(result[0], 0);
-    EXPECT_EQ(result[3], 3);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 4);
+    EXPECT_EQ(result.order[0], 0);
+    EXPECT_EQ(result.order[3], 3);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, MultipleSourcesAndSinks)
 {
-    // Graph: 0 -> 2    1 -> 2
-    //        0 -> 3    1 -> 3
+    // Graph:
+    //   0    1
+    //  / \  / \
+    // 3   2
+
+    // Both 0 and 1 point to 2 and 3. 2 and 3 are sinks.
     GraphStructure structure;
     structure.adjacencyList = {{2, 3}, {2, 3}, {}, {}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 4);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 4);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, ComplexDag)
@@ -175,13 +184,14 @@ TEST_F(TestTopologicalSortingUtils, ComplexDag)
     GraphStructure structure;
     structure.adjacencyList = {{1, 2}, {3}, {3, 4}, {4}, {}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 5);
-    EXPECT_EQ(result[0], 0);
-    EXPECT_EQ(result[4], 4);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 5);
+    EXPECT_EQ(result.order[0], 0);
+    EXPECT_EQ(result.order[4], 4);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
@@ -190,11 +200,12 @@ TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
     GraphStructure structure;
     structure.adjacencyList = {{1}, {}, {}};
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 3);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 3);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 2);
 }
 
 TEST_F(TestTopologicalSortingUtils, LargerGraph)
@@ -225,13 +236,14 @@ TEST_F(TestTopologicalSortingUtils, LargerGraph)
     //   \   |   /
     //      9
 
-    auto result = performTopologicalSort(structure);
+    auto result = performTopologicalSortWithComponentDetection(structure);
 
-    ASSERT_EQ(result.size(), 10);
-    EXPECT_EQ(result[0], 0);
-    EXPECT_EQ(result[9], 9);
-    EXPECT_TRUE(isValidTopologicalOrder(result, structure));
-    EXPECT_FALSE(detectCycle(result, structure));
+    ASSERT_EQ(result.order.size(), 10);
+    EXPECT_EQ(result.order[0], 0);
+    EXPECT_EQ(result.order[9], 9);
+    EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
+    EXPECT_FALSE(result.hasCycle);
+    EXPECT_EQ(result.componentCount, 1);
 }
 
 TEST_F(TestTopologicalSortingUtils, CyclicGraph)
@@ -239,9 +251,7 @@ TEST_F(TestTopologicalSortingUtils, CyclicGraph)
     // Graph: 0 -> 1 -> 2 -> 1 (cycle)
     GraphStructure structure;
     structure.adjacencyList = {{1}, {2}, {1}};
-    auto sortResult = performTopologicalSort(structure);
+    auto sortResult = performTopologicalSortWithComponentDetection(structure);
 
-    auto cycleDetected = detectCycle(sortResult, structure);
-
-    EXPECT_TRUE(cycleDetected);
+    EXPECT_TRUE(sortResult.hasCycle);
 }
