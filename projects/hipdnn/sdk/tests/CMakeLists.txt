@@ -66,7 +66,6 @@ target_link_libraries(hipdnn_sdk_tests
     hipdnn_sdk
     hipdnn_frontend
     hip::host
-    spdlog_header_only
     ${CMAKE_DL_LIBS}
 )
 
