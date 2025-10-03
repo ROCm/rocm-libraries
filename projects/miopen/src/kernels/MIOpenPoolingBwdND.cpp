@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+
 #include <hip/hip_runtime.h>
 #include "miopen_cstdint.hpp"
 #include "miopen_limits.hpp"
@@ -65,7 +66,7 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
     bot_blk_h = max(bot_blk_h, 1);
     bot_blk_d = max(bot_blk_d, 1);
 
-    for(unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x; gid < total_work;
+    for(unsigned int gid = blockIdx.x * MLO_POOLING_GROUP_SZ0 + threadIdx.x; gid < total_work;
         gid += MAX_ACTIV_WORKITEM)
     {
         int b_id = gid / chal / bot_blk_w / bot_blk_h / bot_blk_d;
@@ -183,7 +184,7 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
     bot_blk_h = max(bot_blk_h, 1);
     bot_blk_d = max(bot_blk_d, 1);
 
-    for(unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x; gid < total_work;
+    for(unsigned int gid = blockIdx.x * MLO_POOLING_GROUP_SZ0 + threadIdx.x; gid < total_work;
         gid += MAX_ACTIV_WORKITEM)
     {
         int b_id = gid / chal / bot_blk_w / bot_blk_h / bot_blk_d;
@@ -228,13 +229,14 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                     int wend   = min((wstart + KERNEL_SZ_W), static_cast<int>(bot_w));
                     wstart     = max(wstart, 0);
 
-                    unsigned int pool_size =
-#if MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE
-                        KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
-#else
-                        (dend - dstart) * (hend - hstart) * (wend - wstart);
-#endif
-                    pool_size = (pool_size == 0) ? 1 : pool_size;
+                    unsigned int pool_size = 0;
+                    if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+                        pool_size = KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
+                    else
+                    {
+                        pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+                        pool_size = (pool_size == 0) ? 1 : pool_size;
+                    }
 
                     unsigned int top_gbl_off =
                         b_id * top_str_b + c_id * top_str_c + h * top_str_d + j * top_str_h + i;

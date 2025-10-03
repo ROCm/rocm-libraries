@@ -110,18 +110,15 @@ extern "C" __global__ void mloPoolingForwardNaive(const FLOAT* bot_ptr,
             const unsigned int hstart = static_cast<unsigned int>(max(int_hstart, 0));
             const unsigned int wstart = static_cast<unsigned int>(max(int_wstart, 0));
 
-            const unsigned int pool_size = [&] {
-                if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
-                {
-                    const unsigned int pool_size =
-                        (dend - dstart) * (hend - hstart) * (wend - wstart);
-                    return (pool_size == 0) ? 1 : pool_size;
-                }
-                else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                    return filter_w * filter_h * filter_d;
-                else // MAX
-                    return 0;
-            }();
+            unsigned int pool_size = 0;
+
+            if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
+            {
+                pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+                pool_size = (pool_size == 0) ? 1 : pool_size;
+            }
+            else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+                pool_size = filter_w * filter_h * filter_d;
 
             FLOAT_ACCUM res = AVERAGE_OPS ? FLOAT_ACCUM{0} : /* MAX */ FLOAT_ACCUM{-MAX_VAL_ACCUM};
             bool found      = false; // May remain false if bot contains only NaNs/-INFs.

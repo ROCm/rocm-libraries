@@ -44,8 +44,6 @@
 #define AVERAGE_OPS 0
 #endif
 
-constexpr auto MLO_POOLBWD_GROUP_SZ2 = 1;
-
 constexpr auto MLO_POOLBWD_LCL_DATA_WIDTH = (MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX +
                                              MLO_POOLING_KERNEL_SZ0 + MLO_POOLING_STRIDE0 - 2) /
                                             MLO_POOLING_STRIDE0;
@@ -53,7 +51,7 @@ constexpr auto MLO_POOLBWD_LCL_DATA_HEIGHT = (MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBW
                                               MLO_POOLING_KERNEL_SZ1 + MLO_POOLING_STRIDE1 - 2) /
                                              MLO_POOLING_STRIDE1;
 
-constexpr int block_size = MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_GROUP_SZ2;
+constexpr int block_size = MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_GROUP_SZ1;
 
 #if AVERAGE_OPS
 
@@ -81,7 +79,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
     //        int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
-    int ob = blockIdx.z * blockDim.z + threadIdx.z; // outputs * batch_sz
+    int ob = blockIdx.z; // outputs * batch_sz
     int b  = ob / mlo_n_outputs;
     int o  = ob - b * mlo_n_outputs;
 
@@ -102,35 +100,42 @@ extern "C" __global__ __launch_bounds__(block_size) //
         }
     }
 
-    // load tile
-    for(int tj = lcl_id1; tj < MLO_POOLBWD_LCL_DATA_HEIGHT; tj += MLO_POOLBWD_GROUP_SZ1)
+// load tile
+#pragma unroll
+    for(int tj1 = 0; tj1 < MLO_POOLBWD_LCL_DATA_HEIGHT; tj1 += MLO_POOLBWD_GROUP_SZ1)
     {
-        int top_y_act = top_y + tj;
-        int top_y_off = top_y_act * mlo_topdf_str;
-
-        int lcl_off_v = tj * MLO_POOLBWD_LCL_DATA_WIDTH;
-
-        bool invisibleY = (top_y_act >= mlo_top_height);
-
-        for(int ti = lcl_id0; ti < MLO_POOLBWD_LCL_DATA_WIDTH; ti += MLO_POOLBWD_GROUP_SZ0)
+        const auto tj = tj1 + lcl_id1;
+        if(MLO_POOLBWD_LCL_DATA_HEIGHT % MLO_POOLBWD_GROUP_SZ1 == 0 ||
+           tj < MLO_POOLBWD_LCL_DATA_HEIGHT)
         {
-            int top_x_act = top_x + ti;
+            int top_y_act = top_y + tj;
+            int top_y_off = top_y_act * mlo_topdf_str;
 
-            bool invisibleX = (top_x_act >= mlo_top_width);
+            int lcl_off_v = tj * MLO_POOLBWD_LCL_DATA_WIDTH;
 
-            int top_diff_off = (invisibleX || invisibleY) ? 0 : top_off + top_y_off + top_x_act;
+            bool invisibleY = (top_y_act >= mlo_top_height);
 
-            FLOAT top_val = top_diff[top_diff_off];
-
-            top_val = (invisibleX || invisibleY) ? 0 : top_val;
-
-            lcl_top_diff[lcl_off_v + ti] = top_val;
-#if 0
-            if (lcl_id1 == 0 && o == 0 && b == 0)
+#pragma unroll
+            for(int ti1 = 0; ti1 < MLO_POOLBWD_LCL_DATA_WIDTH; ti1 += MLO_POOLBWD_GROUP_SZ0)
             {
-                printf("K:in: %d %d %d   %f\n", top_off + top_y_off + top_x_act, top_y_act, top_x_act, top_val);
+                const auto ti = ti1 + lcl_id0;
+                if(MLO_POOLBWD_LCL_DATA_WIDTH % MLO_POOLBWD_GROUP_SZ0 == 0 ||
+                   ti < MLO_POOLBWD_LCL_DATA_WIDTH)
+                {
+                    int top_x_act = top_x + ti;
+
+                    bool invisibleX = (top_x_act >= mlo_top_width);
+
+                    int top_diff_off =
+                        (invisibleX || invisibleY) ? 0 : top_off + top_y_off + top_x_act;
+
+                    FLOAT top_val = top_diff[top_diff_off];
+
+                    top_val = (invisibleX || invisibleY) ? 0 : top_val;
+
+                    lcl_top_diff[lcl_off_v + ti] = top_val;
+                }
             }
-#endif
         }
     }
 
@@ -170,10 +175,14 @@ extern "C" __global__ __launch_bounds__(block_size) //
                     int wend   = min(wstart + MLO_POOLING_KERNEL_SZ0, mlo_bot_width);
                     wstart     = max(wstart, 0);
 
-                    int pool_size = MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE //
-                                        ? MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1
-                                        : (hend - hstart) * (wend - wstart);
-                    pool_size     = (pool_size == 0) ? 1 : pool_size;
+                    int pool_size = 0;
+                    if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+                        pool_size = MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
+                    else
+                    {
+                        pool_size = (hend - hstart) * (wend - wstart);
+                        pool_size = (pool_size == 0) ? 1 : pool_size;
+                    }
 
                     int lcl_top_h = top_h - top_y;
                     int lcl_top_w = top_w - top_x;
@@ -183,12 +192,6 @@ extern "C" __global__ __launch_bounds__(block_size) //
                         CVT_INTEGRAL2ACCUM(pool_size);
 
                     res[k][l] += add_val;
-#if 0
-                    if (bot_x+l==6&&bot_y+k==0&&o==3&&b==0)
-                    {
-                        printf("K:com: %d %d %d %d %d %d   %10.8f %10.8f %10.8f %d\n", k,l,top_h, top_w, lcl_top_h, lcl_top_w, res[k][l], add_val, lcl_top_diff[lcl_top_h *  MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w], pool_size);
-                    }
-#endif
                 }
             }
         }
@@ -203,12 +206,6 @@ extern "C" __global__ __launch_bounds__(block_size) //
             if(bot_y + k < mlo_bot_height && bot_x + l < mlo_bot_width)
             {
                 bot_diff[bot_off + k * mlo_botdf_str + l] = CVT_ACCUM2FLOAT(res[k][l]);
-#if 0
-                if (lcl_id0==0&&lcl_id1==0&&o==0&&b==0)
-                {
-                    printf("K:out: %d %d %d  %f\n", bot_off + k * mlo_botdf_str +l, k, l, bot_diff[bot_off + k * mlo_botdf_str +l]);
-                }
-#endif
             }
         }
     }
@@ -245,7 +242,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
     int y       = gid1 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
-    int ob      = blockIdx.z * blockDim.z + threadIdx.z; // outputs * batch_sz
+    int ob      = blockIdx.z; // outputs * batch_sz
     int b       = ob / mlo_n_outputs;
     int o       = ob - b * mlo_n_outputs;
 
@@ -284,7 +281,6 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
                 top_df_val = top_df[idx];
                 mask_val   = mask[idx];
-                // top_df_val *= visible;
 
                 lcl_top_df[lcl_idx] = top_df_val;
             }
@@ -293,7 +289,6 @@ extern "C" __global__ __launch_bounds__(block_size) //
     }
 
     __syncthreads();
-    FLOAT add_val;
     int bt_y = (y + lcl_id1 * MLO_POOLBWD_N_VERT_OUT_PIX);
     int bt_x = (x + lcl_id0 * MLO_POOLBWD_N_HORIZ_OUT_PIX);
 
@@ -348,11 +343,9 @@ extern "C" __global__ __launch_bounds__(block_size) //
                                 (filter_y >= 0);
                     }
 
-                    // FLOAT add_val = lcl_top_df[lcl_idx] * match;
-                    // FLOAT add_val = match ? lcl_top_df[lcl_idx] : (FLOAT)0;
                     if(match)
                     {
-                        add_val = lcl_top_df[lcl_idx];
+                        FLOAT add_val = lcl_top_df[lcl_idx];
                         res[k][l] += add_val;
                     }
                 }

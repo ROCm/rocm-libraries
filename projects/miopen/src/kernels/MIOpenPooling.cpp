@@ -46,10 +46,8 @@ constexpr bool USE_MASK = false;
 #define AVERAGE_OPS 0
 #endif
 
-constexpr auto MLO_POOLING_GROUP_SZ2 = 1;
-
 #if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-#define MLO_POOLING_OP(A, B) (fmax((A), (B)))
+#define MLO_POOLING_OP(A, B) (__builtin_fmax((A), (B)))
 #elif AVERAGE_OPS
 #define MLO_POOLING_OP(A, B) ((A) + (B))
 #endif
@@ -69,7 +67,7 @@ constexpr auto MLO_BOT_DATA_SZ1 =
 
 #include "float_types.h"
 
-constexpr int block_size = MLO_POOLING_GROUP_SZ0 * MLO_POOLING_GROUP_SZ1 * MLO_POOLING_GROUP_SZ2;
+constexpr int block_size = MLO_POOLING_GROUP_SZ0 * MLO_POOLING_GROUP_SZ1;
 
 extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT* bot,
                                                                      FLOAT* top,
@@ -93,7 +91,7 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
     const unsigned int lcl_id0 = threadIdx.x;
     const unsigned int lcl_id1 = threadIdx.y;
 
-    const unsigned int ob      = blockIdx.z * blockDim.z + threadIdx.z;
+    const unsigned int ob      = blockIdx.z;
     const unsigned int b       = ob / mlo_n_outputs;
     const unsigned int o       = ob - b * mlo_n_outputs;
     const unsigned int bot_x   = (x + lcl_id0 * MLO_POOLING_N_HORIZ_OUT_PIX) * MLO_POOLING_STRIDE0;
@@ -139,28 +137,35 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
     for(unsigned int k = 0; k < MLO_POOLING_N_VERT_OUT_PIX; k++)
     {
         const unsigned int y_dst = y + lcl_id1 * MLO_POOLING_N_VERT_OUT_PIX + k;
-        const int hstart1        = static_cast<int>(y_dst) * MLO_POOLING_STRIDE1 - mlo_pad1;
-        const int hend = min((hstart1 + MLO_POOLING_KERNEL_SZ1), static_cast<int>(mlo_bot_height));
-        const int hstart = max(hstart1, 0);
+
+        int hstart1 = 0, hstart = 0, hend = 0;
+        if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE || (USE_MASK && USE_IMG_INDEX))
+        {
+            hstart1 = static_cast<int>(y_dst) * MLO_POOLING_STRIDE1 - mlo_pad1;
+            hend    = min((hstart1 + MLO_POOLING_KERNEL_SZ1), static_cast<int>(mlo_bot_height));
+            hstart  = max(hstart1, 0);
+        }
 
         for(unsigned int l = 0; l < MLO_POOLING_N_HORIZ_OUT_PIX; l++)
         {
             const unsigned int x_dst = x + lcl_id0 * MLO_POOLING_N_HORIZ_OUT_PIX + l;
-            const int wstart1        = static_cast<int>(x_dst) * MLO_POOLING_STRIDE0 - mlo_pad0;
-            const int wend =
-                min((wstart1 + MLO_POOLING_KERNEL_SZ0), static_cast<int>(mlo_bot_width));
-            const int wstart = max(wstart1, 0);
 
-            unsigned int pool_size = [&] {
-                if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
-                    return (hend - hstart) * (wend - wstart);
-                else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
-                    return MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
-                else // MAX
-                    return 0;
-            }();
+            int wstart1 = 0, wstart = 0, wend = 0;
+            if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE || (USE_MASK && USE_IMG_INDEX))
+            {
+                wstart1 = static_cast<int>(x_dst) * MLO_POOLING_STRIDE0 - mlo_pad0;
+                wend    = min((wstart1 + MLO_POOLING_KERNEL_SZ0), static_cast<int>(mlo_bot_width));
+                wstart  = max(wstart1, 0);
+            }
 
-            pool_size = (pool_size == 0) ? 1 : pool_size;
+            unsigned int pool_size = 0;
+            if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
+            {
+                pool_size = (hend - hstart) * (wend - wstart);
+                pool_size = (pool_size == 0) ? 1 : pool_size;
+            }
+            else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+                pool_size = MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
 
             if constexpr(USE_MASK)
                 mask_private[k][l] = 0;

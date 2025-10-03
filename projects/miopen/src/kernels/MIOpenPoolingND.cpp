@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <hip/hip_runtime.h>
 #include "miopen_cstdint.hpp"
 #include "pooling_functions.h"
 
@@ -145,7 +146,7 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
             if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
             {
                 dstart = (top_d_id + m) * STRIDE_D - pad_d;
-                dend   = min((dstart + KERNEL_SZ_D), (int)bot_d);
+                dend   = min((dstart + KERNEL_SZ_D), static_cast<int>(bot_d));
                 dstart = max(dstart, 0);
             }
 
@@ -154,9 +155,9 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                 int hstart = 0, hend = 0;
                 if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
                 {
-                    int hstart = (top_h_id + k) * STRIDE_H - pad_h;
-                    hend       = min((hstart + KERNEL_SZ_H), (int)bot_h);
-                    hstart     = max(hstart, 0);
+                    hstart = (top_h_id + k) * STRIDE_H - pad_h;
+                    hend   = min((hstart + KERNEL_SZ_H), static_cast<int>(bot_h));
+                    hstart = max(hstart, 0);
                 }
 
                 for(unsigned int l = 0; l < TOP_W_PER_WORK; l++)
@@ -164,9 +165,9 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                     int wstart = 0, wend = 0;
                     if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
                     {
-                        int wstart = (top_w_id + l) * STRIDE_W - pad_w;
-                        wend       = min((wstart + KERNEL_SZ_W), (int)bot_w);
-                        wstart     = max(wstart, 0);
+                        wstart = (top_w_id + l) * STRIDE_W - pad_w;
+                        wend   = min((wstart + KERNEL_SZ_W), static_cast<int>(bot_w));
+                        wstart = max(wstart, 0);
                     }
 
                     unsigned int pool_size = 0;
@@ -199,14 +200,18 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                                     {
                                         top_val = bot_val;
 
-#if USE_GLOBAL_INDEX
-                                        mask_idx =
-                                            ((top_w_id + l) * STRIDE_W + i - pad_w) +
-                                            bot_w * ((top_h_id + k) * STRIDE_H + j - pad_h) +
-                                            bot_w * bot_h * ((top_d_id + m) * STRIDE_D + h - pad_d);
-#else
-                                        mask_idx = i + KERNEL_SZ_W * (j + KERNEL_SZ_H * h);
-#endif
+                                        if constexpr(USE_GLOBAL_INDEX)
+                                        {
+                                            mask_idx =
+                                                ((top_w_id + l) * STRIDE_W + i - pad_w) +
+                                                bot_w * ((top_h_id + k) * STRIDE_H + j - pad_h) +
+                                                bot_w * bot_h *
+                                                    ((top_d_id + m) * STRIDE_D + h - pad_d);
+                                        }
+                                        else
+                                        {
+                                            mask_idx = i + KERNEL_SZ_W * (j + KERNEL_SZ_H * h);
+                                        }
                                     }
                                 }
                                 else
