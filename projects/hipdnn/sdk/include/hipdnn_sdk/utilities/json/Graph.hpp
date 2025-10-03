@@ -52,12 +52,12 @@ void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
 // NOLINTNEXTLINE(readability-identifier-naming)
 void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
 {
-    graphJson["nodes"] = *graph.nodes();
+    graphJson["nodes"] = graph.nodes();
     graphJson["compute_type"] = graph.compute_type();
     graphJson["io_type"] = graph.io_type();
     graphJson["intermediate_type"] = graph.intermediate_type();
     graphJson["name"] = graph.name()->c_str();
-    graphJson["tensors"] = *graph.tensors();
+    graphJson["tensors"] = graph.tensors();
 }
 
 }

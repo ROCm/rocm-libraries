@@ -37,18 +37,24 @@ inline __HOST_DEVICE__ hip_bfloat16 habs(const hip_bfloat16 a)
 inline __HOST_DEVICE__ bool hisnan(const hip_bfloat16 a)
 {
     hip_bfloat16 hr = a;
-    return !(~hr.data & 0x7f80) && +(hr.data & 0x7f);
+    return !static_cast<bool>(~hr.data & 0x7f80) && static_cast<bool>(+(hr.data & 0x7f));
 }
 
 inline __HOST_DEVICE__ hip_bfloat16 hmax(const hip_bfloat16 a, const hip_bfloat16 b)
 {
-    auto a_nan = hisnan(a), b_nan = hisnan(b);
-    if(a_nan || b_nan)
+    auto aNan = hisnan(a);
+    auto bNan = hisnan(b);
+
+    if(aNan || bNan)
     {
-        if(a_nan && b_nan)
+        if(aNan && bNan)
+        {
             return HIPDNN_NAN_BF16; // return canonical NaN
-        return a_nan ? b : a;
+        }
+
+        return aNan ? b : a;
     }
+
     return a.data > b.data ? a : b;
 }
 

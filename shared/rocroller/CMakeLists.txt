@@ -123,28 +123,7 @@ if(msgpack-cxx_FOUND)
 else()
     find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
     message(STATUS "Found msgpack (<=5.x)")
-    set(msgpack_libs msgpackc)
-endif()
-
-find_package(Boost 1.74.0 QUIET)
-if(NOT Boost_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            boost
-            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-        )
-        set(boost_temp_testing ${BUILD_TESTING})
-        set(BUILD_TESTING OFF)
-        set(BUILD_SHARED_LIBS OFF)
-        set(boost_temp_shared ${BUILD_SHARED_LIBS})
-        set(Boost_USE_STATIC_LIBS ON)
-        set(BOOST_INCLUDE_LIBRARIES multi_index)
-        FetchContent_MakeAvailable(boost)
-        set(BUILD_TESTING ${boost_temp_testing})
-        set(BUILD_SHARED_LIBS ${boost_temp_shared})
-    else()
-        message(FATAL_ERROR "Failed to find boost")
-    endif()
+    set(msgpack_libs msgpackc-cxx)
 endif()
 
 find_package(hip REQUIRED)
@@ -199,7 +178,6 @@ target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
@@ -238,7 +216,6 @@ target_link_libraries(rocroller
     PUBLIC
        hip::host
     PRIVATE
-        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )
@@ -315,7 +292,6 @@ rocm_export_targets(
     NAMESPACE roc::
     EXPORT rocroller-targets
     DEPENDS PACKAGE yaml-cpp
-    DEPENDS PACKAGE Boost
     DEPENDS PACKAGE fmt
     DEPENDS PACKAGE hip
 )

@@ -60,6 +60,7 @@ option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
+option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -183,27 +184,22 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_FETCH)
-        block(SCOPE_FOR VARIABLES)
-            #set(ROCROLLER_ENABLE_FETCH ON)
-            #set(ROCROLLER_BUILD_TESTING OFF)
-            #set(ROCROLLER_ENABLE_CLIENT OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            set(BUILD_TESTING OFF)
-            set(BUILD_CLIENTS OFF)
-            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            include(FetchContent)
-            FetchContent_Declare(
-                rocRoller
-                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
-            )
-            FetchContent_MakeAvailable(rocRoller)
-        endblock()
-    else()
-        find_package(rocroller REQUIRED)
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        if(HIPBLASLT_ENABLE_THEROCK)
+            find_package(rocroller REQUIRED)
+        else()
+            block(SCOPE_FOR VARIABLES)
+                set(ROCROLLER_ENABLE_FETCH ON)
+                set(ROCROLLER_BUILD_TESTING OFF)
+                set(ROCROLLER_ENABLE_CLIENT OFF)
+                option(YAML_CPP_INSTALL "" ON)
+                set(BUILD_TESTING OFF)
+                set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+                set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+                add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
+            endblock()
+        endif()
     endif()
 endif()
 
@@ -305,7 +301,16 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     # work around code object stripping failure if using /usr/bin/strip
-    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip") # need to generalize this
+    find_program(LLVM_STRIP 
+        NAMES llvm-strip
+        PATH_SUFFIXES lib/llvm/bin llvm/bin bin
+    )
+    if(LLVM_STRIP)
+        set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
+    else()
+        message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    endif()
+
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(
