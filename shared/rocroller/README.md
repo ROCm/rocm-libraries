@@ -14,31 +14,32 @@ rocRoller is a software library for generating AMDGPU kernels.
   - [Building the Library](#building-the-library)
     - [Quick Start](#quick-start)
     - [Building](#building)
-    - [With Docker](#with-docker)
-    - [Natively (e.g. Ubuntu 22.04)](#natively-eg-ubuntu-2204)
+    - [with docker](#with-docker)
+    - [natively (e.g. Ubuntu 22.04)](#natively-eg-ubuntu-2204)
     - [CMake and Make Commands](#cmake-and-make-commands)
     - [Common CMake Options](#common-cmake-options)
-  - [Running the Tests](#running-the-tests-from-a-build-directory)
+  - [Running the Tests (from a build directory)](#running-the-tests-from-a-build-directory)
     - [With CTest](#with-ctest)
     - [With GTest](#with-gtest)
     - [With Catch2](#with-catch2)
   - [Updating Pregenerated GPUArchitecture YAML Files](#updating-pregenerated-gpuarchitecture-yaml-files)
   - [GEMM Client](#gemm-client)
-  - [File Structure](#file-structure)
-  - [Coding Practices](#coding-practices)
-    - [Style](#style)
-    - [ISO C++ Standard](#iso-c-standard)
-    - [Documentation](#documentation)
-      - [Building Documentation](#building-documentation)
-  - [PR Submissions](#pr-submissions)
-  - [Testing](#testing)
-  - [Logging](#logging)
-  - [Debugging](#debugging)
-  - [Profiling](#profiling)
-  - [Performance](#performance)
-  - [Kernel Analysis](#kernel-analysis)
-  - [Graph Visualization](#graph-visualization)
-  - [Memory Access Visualization](#memory-access-visualization)
+  - [Development](#development)
+    - [File Structure](#file-structure)
+    - [Coding Practices](#coding-practices)
+      - [Style](#style)
+      - [ISO C++ Standard](#iso-c-standard)
+      - [Documentation](#documentation)
+      - [PR submissions](#pr-submissions)
+      - [Testing](#testing)
+  - [Logging and Debugging](#logging-and-debugging)
+    - [Logging](#logging)
+    - [Debugging](#debugging)
+  - [Analysis](#analysis)
+    - [Performance Analysis](#performance-analysis)
+    - [Kernel Analysis](#kernel-analysis)
+    - [KernelGraph Visualization](#kernelgraph-visualization)
+    - [Memory Access Visualization](#memory-access-visualization)
 
 ## Building the Library
 
@@ -251,7 +252,8 @@ To launch the GEMM client from your build directory, run:
 ./bin/client/rocroller-gemm --help
 ```
 
-## File Structure
+## Development
+### File Structure
 
  - `Foo.hpp`: Contains definitions for classes, concepts, etc.  Functions should be declaration-only.
  This is meant to allow for easy reading of the interface.
@@ -262,9 +264,7 @@ To launch the GEMM client from your build directory, run:
 
 Generally, we prioritize inlining.
 
-## Coding Practices
-
-### Style
+### Coding Style
 
  - Static and free functions should start with an uppercase character
  - Instance functions should start with lowercase
@@ -295,19 +295,18 @@ Documentation of code is as important for maintainability as writing clear and c
 
 Note: If using VSCode consider installing the [Doxygen Documentation Generator](https://marketplace.visualstudio.com/items?itemName=cschlosser.doxdocgen) extension. This extension helps with quickly implementing documentation sections in a Doxygen format.
 
-#### Building Documentation
-
 [Graphviz](https://graphviz.org/) and [Doxygen](https://www.doxygen.nl/index.html) both need to be installed to build the html documentation.
 
 The Doxygen documentation can be built via the make command from the main build directory:
-```
-make -j$(nproc) docs
+```bash
+cd build
+make -j docs # or ninja, if using
 ```
 
 This will generate an HTML website from the markdown readme files and Doxygen comments and source/object relationships. The `index.html` file can be found in `doc/html` from the root of your local repository.
 
 
-## PR submissions
+### PR submissions
 
 - PRs submitting should have fewer than `500` lines of code change, unless of course those changes are merely lines moved or deleted.
 - If a new feature cannot be implemented in fewer than `500` lines of code then consider either refactoring, or splitting the feature into two or more PRs.
@@ -317,7 +316,7 @@ This will generate an HTML website from the markdown readme files and Doxygen co
 - If a PR alters the compilation process in a way that causes the performance job to fail when building the master branch, adding the label `ci:no-build-master` will instead compare the PR against the latest build of the master branch.
 
 
-## Testing
+### Testing
 
 Each new feature is required to have a test.
 - Test sources are placed in the `test` folder.
@@ -337,7 +336,9 @@ Note a few conditions:
 [Catch2](https://github.com/catchorg/Catch2) is the preferred unit testing framework for new unit tests.  GTest information for working with older unit tests can be found in the [GoogleTest User's Guide](https://google.github.io/googletest/).
 
 
-## Logging
+## Logging and Debugging
+For a full list of `ROCROLLER_*` environment variables see: [Settings.hpp](lib/include/rocRoller/Utilities/Settings.hpp)
+### Logging
 
 - By default, logging messages of level `info` and above are sent to the console.
 - Set `ROCROLLER_LOG_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages.
@@ -345,9 +346,8 @@ Note a few conditions:
 - Set `ROCROLLER_LOG_CONSOLE_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages to the console.
 - Set `ROCROLLER_LOG_FILE` to a file name to log output to.
 - Set `ROCROLLER_LOG_FILE_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages to a file.
-- For a full list of options, see: [Settings.hpp](lib/include/rocRoller/Utilities/Settings.hpp)
 
-## Debugging
+### Debugging
 
 - Set `ROCROLLER_SAVE_ASSEMBLY=1` to write generated assembly code to a `.s` text file in the current directory. The file name is based on the kernel name. To specify a custom file name, set `ROCROLLER_ASSEMBLY_FILE` to your desired name.
 - Set `ROCROLLER_RANDOM_SEED` to an integer to control the seed for the `RandomGenerator` used in unit tests.
@@ -391,15 +391,9 @@ The first argument is the condition to check. Additional arguments (such as `Sho
 
 You can also use `Throw<FatalError>("message")` to catch and report incorrect code.
 
-## Profiling
+## Analysis
 
-**Omniperf Profiling with Docker:**
-If using the trace Dockerfile, you can profile rocRoller with Omniperf via `rrperf`. For usage details, run:
-```bash
-./scripts/rrperf profile --help
-```
-
-## Performance
+### Performance Analysis
 
 To run performance tests, use the `rrperf` tool. The `autoperf` command benchmarks multiple commits as well as your current workspace. For usage details, refer to the help documentation:
 
@@ -407,7 +401,7 @@ To run performance tests, use the `rrperf` tool. The `autoperf` command benchmar
 ./scripts/rrperf autoperf --help
 ```
 
-## Kernel Analysis
+### Kernel Analysis
 
 Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoller.
 
@@ -432,7 +426,7 @@ To view a summary plot of the generated file, run:
 
 and visit http://127.0.0.1:8050/.
 
-## Graph Visualization
+### KernelGraph Visualization
 
 The kgraph script can be run on an assembly file or on log output to generate a .dot file or rendered .pdf of the internal graph.  Run it with the `--help` option to see invocation.
 
@@ -454,9 +448,9 @@ Run the following to compare multiple dot files:
 ./dot_diff.py dots_0000.dot dots_0001.dot dots_0002.dot -o dots
 ```
 
-## Memory Access Visualization
+### Memory Access Visualization
 
-The [GEMM client](client/gemm.cpp) can produce memory trace files, using `--visualize=True`, which can be rendered using the [show_matrix script](scripts/show_matrix).
+The [GEMM client](client/src/gemm.cpp) can produce memory trace files, using `--visualize=True`, which can be rendered using the [show_matrix script](scripts/show_matrix).
 
 The following commands can be used to visualize memory access patterns to png files:
 
