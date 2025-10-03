@@ -32,7 +32,7 @@ public:
 TESTS_DEFINE(UniquePtrAllocDeallocTests, NumericalTestsParams);
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.single.pass.cpp
-TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUnique)
+TYPED_TEST(UniquePtrAllocDeallocTests, TestUniquePtrMakeUnique)
 {
     using T = typename TestFixture::input_type;
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -51,7 +51,7 @@ TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUnique)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.single.pass.cpp
-TEST(UniquePtrAllocDeallocTests, TestMakeUniqueUserType)
+TEST(UniquePtrAllocDeallocTests, TestUniquePtrMakeUniqueUserType)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -131,7 +131,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.special/cmp_nullptr.pass.cpp
-TEST(UniquePtrAllocDeallocTests, TestUniquePtrNullptr)
+TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpNullptr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
