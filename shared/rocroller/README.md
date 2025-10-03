@@ -299,7 +299,6 @@ Note: If using VSCode consider installing the [Doxygen Documentation Generator](
 
 The Doxygen documentation can be built via the make command from the main build directory:
 ```bash
-cd build
 make -j docs # or ninja, if using
 ```
 
