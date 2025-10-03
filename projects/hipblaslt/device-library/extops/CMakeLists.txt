@@ -11,12 +11,16 @@ string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 message(STATUS "Architectures to process: ${archs}")
 
-# Track previous target for dependency chain
+# Serializing extop-library targets: Generating hipblasltExtOpLibrary.dat
+# per architecture is fast compared to other build tasks and not on the
+# critical path. Concurrent access to intermediate files is not well
+# supported on certain file systems or operating systems. Therefore, we
+# serialize by adding dependencies between each target and the previous one.
 set(previous_target "")
 
 foreach(arch IN LISTS archs)
     #  Start of arch configuration
-    message(STATUS "Configuring target for architecture: ${arch}")
+    message(STATUS "hipblaslt device library extops: Configuring target for architecture ${arch} for hipblasltExtOpLibrary")
     set(WAVEFRONT "-mwavefrontsize64")
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
         set(WAVEFRONT "-mno-wavefrontsize64")
