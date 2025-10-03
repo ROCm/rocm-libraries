@@ -98,6 +98,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrSwap)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.special/swap.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrSwapArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -143,6 +144,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnMove)
     }  
 }
 
+// Thrust-specific test for array assignment operator.
 TEST(UniquePtrGeneralTests, TestUniquePtrMoveAsgnArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -191,6 +193,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnSelfMove)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.asgn/move.pass.cpp
 TEST(UniquePtrGeneralTests, TestUnqiuePtrSelfMoveAsgnArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -225,6 +228,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnNull)
     }
 }
 
+// Thrust-specific test for assigning nullptr to unique_ptr array.
 TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgnArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -302,6 +306,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrCtorPointer)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/default.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtorArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -313,6 +318,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtorArray)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/move.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtorArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -327,6 +333,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtorArray)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/nullptr.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtorArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -338,6 +345,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtorArray)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.ctor/pointer.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtorArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -351,6 +359,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtorArray)
     }
 }
 
+// Thrust-specific test for raw pointer constructor.
 TEST(UniquePtrGeneralTests, TestUniquePtrRawPointerCtor)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -421,6 +430,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
     }
 }
 
+// Thrust-specific test for checking if the array destruction is correct.
 TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptrArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -458,6 +468,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierRelease)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.modifiers/release.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrModifierReleaseArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -524,6 +535,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierReset)
     thrust::device_delete(finished);
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.modifiers/reset.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrModifierResetArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -637,6 +649,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBool)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/explicit_bool.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBoolArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -720,6 +733,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversGet)
     // }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/get.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrObserversGetArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -787,6 +801,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleter)
     thrust::device_delete(finished);
 }
 
+// Thrust-specific test for testing if thrust::unique_ptr array is correct with custom, user provided deleters.
 TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleterArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -817,6 +832,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleterArray)
     thrust::device_delete(finished);
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/get_deleter.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleterArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -883,6 +899,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrGetDeleter)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/get_deleter.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrGetDeleterArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
