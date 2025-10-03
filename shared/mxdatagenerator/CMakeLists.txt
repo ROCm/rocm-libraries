@@ -24,7 +24,7 @@
 #
 ################################################################################
 
-cmake_minimum_required(VERSION 3.25.2)
+cmake_minimum_required(VERSION 3.24.4)
 project(mxDataGenerator VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 20)
 

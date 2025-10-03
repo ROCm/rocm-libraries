@@ -17,16 +17,7 @@ endif()
 if(NOT ROCM_LIBS_SUPERBUILD)
     find_package(mxDataGenerator QUIET)
     if(NOT mxDataGenerator_FOUND)
-        if(ROCROLLER_ENABLE_FETCH)
-            FetchContent_Declare(
-                mxDataGenerator
-                GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
-                GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
-            )
-            FetchContent_MakeAvailable(mxDataGenerator)
-        else()
-            message(FATAL_ERROR "Failed to find mxDataGenerator")
-        endif()
+        add_subdirectory("${PROJECT_SOURCE_DIR}/../mxdatagenerator" "${PROJECT_BINARY_DIR}/mxdatagenerator")
     endif()
 endif()
 
