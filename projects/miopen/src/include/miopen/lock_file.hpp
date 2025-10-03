@@ -26,6 +26,7 @@
 #ifndef GUARD_MIOPEN_LOCK_FILE_HPP_
 #define GUARD_MIOPEN_LOCK_FILE_HPP_
 
+#include <miopen/errors.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 
@@ -57,7 +58,7 @@ public:
         std::vector<char> hostname(256);
         gethostname(hostname.data(), hostname.size());
         pid_t pid = getpid();
-        hardlink_path = path.string() + "." + hostname.data() + "." + std::to_string(pid);
+        hardlink_path = lockfile_path.string() + "." + hostname.data() + "." + std::to_string(pid);
     }
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)
@@ -67,9 +68,7 @@ public:
         while(!acquired && now < abs_time)
         {
             now = boost::posix_time::second_clock::universal_time();
-            acquired = fs::create_directory(lockfile_path);
-            if(acquired)
-                acquired = try_lock_hardlink();
+            acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
@@ -86,9 +85,7 @@ public:
         bool acquired = false;
         while(!acquired)
         {
-            acquired = fs::create_directory(lockfile_path);
-            if(acquired)
-                acquired = try_lock_hardlink();
+            acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -101,9 +98,7 @@ public:
     bool try_lock()
     {
         bool acquired = false;
-        acquired = fs::create_directory(lockfile_path);
-        if(acquired)
-            acquired = try_lock_hardlink();
+        acquired = try_lock_hardlink();
         if(acquired)
             MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         return acquired;
@@ -112,36 +107,41 @@ public:
     bool try_lock_hardlink()
     {
         std::error_code ec;
-        create_hard_link(path, hardlink_path, ec);
+
+        if(!fs::exists(hardlink_path))
+        {
+            if(!std::ofstream{hardlink_path})
+                MIOPEN_THROW("Error creating file <" + hardlink_path + "> for locking.");
+            fs::permissions(hardlink_path, FS_ENUM_PERMS_ALL);
+        }
+
+        create_hard_link(hardlink_path, lockfile_path, ec);
         if(ec.value() == 0)
         {
             if(fs::hard_link_count(hardlink_path) == 2)
                 return true;
         }
-        fs::remove(hardlink_path);
-        if(fs::hard_link_count(path) == 1)
-            fs::remove(lockfile_path);
 
         return false;
     }
 
     void unlock_hardlink()
     {
+        MIOPEN_LOG_I2("Unlock hardlink < " << hardlink_path.string());
         fs::remove(hardlink_path);
     }
 
     void unlock()
     {
         MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
-        unlock_hardlink();
         fs::remove(lockfile_path);
+        fs::remove(hardlink_path);
     }
 
 private:
     fs::path path;
     fs::path lockfile_path;
     fs::path hardlink_path;
-    boost::interprocess::file_lock flock;
 };
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
