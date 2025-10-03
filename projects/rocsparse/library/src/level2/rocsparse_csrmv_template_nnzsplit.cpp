@@ -431,6 +431,73 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
                                                              Y*       y,
                                                              bool     force_conj)
 {
+    if(handle->pointer_mode == rocsparse_pointer_mode_host)
+    {
+        const T gamma[1] = {static_cast<T>(0)};
+        return rocsparse::csrmv_nnzsplit_template_dispatch(handle,
+                                                           trans,
+                                                           m,
+                                                           n,
+                                                           nnz,
+                                                           alpha_device_host,
+                                                           descr,
+                                                           csr_val,
+                                                           csr_row_ptr,
+                                                           csr_col_ind,
+                                                           csrmv_info,
+                                                           x,
+                                                           beta_device_host,
+                                                           y,
+                                                           gamma,
+                                                           (const Y*)nullptr,
+                                                           force_conj);
+    }
+    else
+    {
+        T* gamma;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&gamma, sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(hipMemsetAsync(gamma, 0, sizeof(T), handle->stream));
+        rocsparse_status status = rocsparse::csrmv_nnzsplit_template_dispatch(handle,
+                                                                              trans,
+                                                                              m,
+                                                                              n,
+                                                                              nnz,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              csrmv_info,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              gamma,
+                                                                              (const Y*)nullptr,
+                                                                              force_conj);
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(gamma, handle->stream));
+        return status;
+    }
+}
+
+template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle    handle,
+                                                             rocsparse_operation trans,
+                                                             J                   m,
+                                                             J                   n,
+                                                             I                   nnz,
+                                                             const T*            alpha_device_host,
+                                                             const rocsparse_mat_descr descr,
+                                                             const A*                  csr_val,
+                                                             const I*                  csr_row_ptr,
+                                                             const J*                  csr_col_ind,
+                                                             rocsparse_csrmv_info      csrmv_info,
+                                                             const X*                  x,
+                                                             const T* beta_device_host,
+                                                             Y*       y,
+                                                             const T* gamma_device_host,
+                                                             const Z* z,
+                                                             bool     force_conj)
+{
     ROCSPARSE_ROUTINE_TRACE;
 
     const J ysize = (trans == rocsparse_operation_none) ? m : n;
@@ -440,7 +507,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
 
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::axpby_array(handle, ysize, gamma_device_host, z, beta_device_host, y));
         LAUNCH_HELPER(LAUNCH_CSRMV)
     }
 
@@ -448,7 +516,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     {
         if(descr->type != rocsparse_matrix_type_symmetric)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::axpby_array(handle, ysize, gamma_device_host, z, beta_device_host, y));
         }
 
         LAUNCH_HELPER(LAUNCH_CSRMVT)

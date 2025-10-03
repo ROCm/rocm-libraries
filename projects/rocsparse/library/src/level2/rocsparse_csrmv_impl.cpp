@@ -130,6 +130,83 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                            bool                      force_conj,
                                            bool                      fallback_algorithm)
 {
+    if(handle->pointer_mode == rocsparse_pointer_mode_host)
+    {
+        const T gamma[1] = {static_cast<T>(0)};
+        return rocsparse::csrmv_template<T, I, J, A, X, Y, Y>(handle,
+                                                              trans,
+                                                              alg,
+                                                              m_,
+                                                              n_,
+                                                              nnz_,
+                                                              alpha_device_host_,
+                                                              descr,
+                                                              csr_val_,
+                                                              csr_row_ptr_begin_,
+                                                              csr_row_ptr_end_,
+                                                              csr_col_ind_,
+                                                              csrmv_info,
+                                                              x_,
+                                                              beta_device_host_,
+                                                              y_,
+                                                              gamma,
+                                                              (const void*)nullptr,
+                                                              force_conj,
+                                                              fallback_algorithm);
+    }
+    else
+    {
+        T* gamma;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&gamma, sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(hipMemsetAsync(gamma, 0, sizeof(T), handle->stream));
+        rocsparse_status status
+            = rocsparse::csrmv_template<T, I, J, A, X, Y, Y>(handle,
+                                                             trans,
+                                                             alg,
+                                                             m_,
+                                                             n_,
+                                                             nnz_,
+                                                             alpha_device_host_,
+                                                             descr,
+                                                             csr_val_,
+                                                             csr_row_ptr_begin_,
+                                                             csr_row_ptr_end_,
+                                                             csr_col_ind_,
+                                                             csrmv_info,
+                                                             x_,
+                                                             beta_device_host_,
+                                                             y_,
+                                                             gamma,
+                                                             (const void*)nullptr,
+                                                             force_conj,
+                                                             fallback_algorithm);
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(gamma, handle->stream));
+        return status;
+    }
+}
+
+template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
+                                           rocsparse_operation       trans,
+                                           rocsparse::csrmv_alg      alg,
+                                           int64_t                   m_,
+                                           int64_t                   n_,
+                                           int64_t                   nnz_,
+                                           const void*               alpha_device_host_,
+                                           const rocsparse_mat_descr descr,
+                                           const void*               csr_val_,
+                                           const void*               csr_row_ptr_begin_,
+                                           const void*               csr_row_ptr_end_,
+                                           const void*               csr_col_ind_,
+                                           rocsparse_csrmv_info      csrmv_info,
+                                           const void*               x_,
+                                           const void*               beta_device_host_,
+                                           void*                     y_,
+                                           const void*               gamma_device_host_,
+                                           const void*               z_,
+                                           bool                      force_conj,
+                                           bool                      fallback_algorithm)
+{
     ROCSPARSE_ROUTINE_TRACE;
 
     const J  m                 = static_cast<J>(m_);
@@ -137,12 +214,14 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
     const I  nnz               = static_cast<I>(nnz_);
     const T* alpha_device_host = reinterpret_cast<const T*>(alpha_device_host_);
     const T* beta_device_host  = reinterpret_cast<const T*>(beta_device_host_);
+    const T* gamma_device_host = reinterpret_cast<const T*>(gamma_device_host_);
     const A* csr_val           = reinterpret_cast<const A*>(csr_val_);
     const I* csr_row_ptr_begin = reinterpret_cast<const I*>(csr_row_ptr_begin_);
     const I* csr_row_ptr_end   = reinterpret_cast<const I*>(csr_row_ptr_end_);
     const J* csr_col_ind       = reinterpret_cast<const J*>(csr_col_ind_);
     const X* x                 = reinterpret_cast<const X*>(x_);
     Y*       y                 = reinterpret_cast<Y*>(y_);
+    const Z* z                 = reinterpret_cast<const Z*>(z_);
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -203,6 +282,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              gamma_device_host,
+                                                                              z,
                                                                               force_conj));
         return rocsparse_status_success;
     }
@@ -233,6 +314,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              gamma_device_host,
+                                                                              z,
                                                                               force_conj));
 
         return rocsparse_status_success;
@@ -264,6 +347,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                          x,
                                                                          beta_device_host,
                                                                          y,
+                                                                         gamma_device_host,
+                                                                         z,
                                                                          force_conj));
         return rocsparse_status_success;
     }
@@ -294,6 +379,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               x,
                                                                               beta_device_host,
                                                                               y,
+                                                                              gamma_device_host,
+                                                                              z,
                                                                               force_conj));
 
         return rocsparse_status_success;

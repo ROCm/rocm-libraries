@@ -35,6 +35,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_general_device(bool                 conj,
                                                     J                    m,
@@ -46,6 +47,8 @@ namespace rocsparse
                                                     const X*             x,
                                                     T                    beta,
                                                     Y*                   y,
+                                                    T                    gamma,
+                                                    const Z*             z,
                                                     rocsparse_index_base idx_base)
     {
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
@@ -76,14 +79,15 @@ namespace rocsparse
             // First thread of each wavefront writes result into global memory
             if(lid == WF_SIZE - 1)
             {
-                if(beta == static_cast<T>(0))
+                if(beta != static_cast<T>(0))
                 {
-                    y[row] = sum;
+                    sum = rocsparse::fma<T>(beta, y[row], sum);
                 }
-                else
+                if(gamma != static_cast<T>(0))
                 {
-                    y[row] = rocsparse::fma<T>(beta, y[row], sum);
+                    sum = rocsparse::fma<T>(gamma, z[row], sum);
                 }
+                y[row] = sum;
             }
         }
     }
@@ -209,6 +213,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_adaptive_device(bool                 conj,
                                                      I                    nnz,
@@ -222,6 +227,8 @@ namespace rocsparse
                                                      const X*             x,
                                                      T                    beta,
                                                      Y*                   y,
+                                                     T                    gamma,
+                                                     Z*                   z,
                                                      rocsparse_index_base idx_base)
     {
         __shared__ T partialSums[BLOCKSIZE];
@@ -374,6 +381,10 @@ namespace rocsparse
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[local_row], temp_sum);
                     }
+                    if(gamma != static_cast<T>(0))
+                    {
+                        temp_sum = rocsparse::fma<T>(gamma, z[local_row], temp_sum);
+                    }
                     y[local_row] = temp_sum;
                 }
             }
@@ -402,6 +413,10 @@ namespace rocsparse
                     if(beta != static_cast<T>(0))
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[local_row], temp_sum);
+                    }
+                    if(gamma != static_cast<T>(0))
+                    {
+                        temp_sum = rocsparse::fma<T>(gamma, z[local_row], temp_sum);
                     }
 
                     y[local_row] = temp_sum;
@@ -456,6 +471,10 @@ namespace rocsparse
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[r], temp_sum);
                     }
+                    if(gamma != static_cast<T>(0))
+                    {
+                        temp_sum = rocsparse::fma<T>(gamma, z[r], temp_sum);
+                    }
 
                     y[r] = temp_sum;
                 }
@@ -486,6 +505,10 @@ namespace rocsparse
                 // The first workgroup handles the output initialization.
                 const Y out_val = y[row];
                 temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                if(gamma != static_cast<T>(0))
+                {
+                    temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
+                }
 
                 // All inter thread communication is done using atomics, therefore cache flushes or
                 // invalidates should not be needed (thus __threadfence() has been removed to regain
@@ -824,6 +847,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void
         csrmvn_lrb_medium_rows_warp_reduce_device(bool                 conj,
@@ -839,6 +863,8 @@ namespace rocsparse
                                                   const X*             x,
                                                   T                    beta,
                                                   Y*                   y,
+                                                  T                    gamma,
+                                                  Z*                   z,
                                                   rocsparse_index_base idx_base)
     {
         const int tid = hipThreadIdx_x;
@@ -878,6 +904,11 @@ namespace rocsparse
                 temp_sum = rocsparse::fma<T>(beta, y[row], temp_sum);
             }
 
+            if(gamma != static_cast<T>(0))
+            {
+                temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
+            }
+
             y[row] = temp_sum;
         }
     }
@@ -889,6 +920,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_lrb_medium_rows_device(bool                 conj,
                                                             I                    nnz,
@@ -902,6 +934,8 @@ namespace rocsparse
                                                             const X*             x,
                                                             T                    beta,
                                                             Y*                   y,
+                                                            T                    gamma,
+                                                            const Z*             z,
                                                             rocsparse_index_base idx_base)
     {
         const int lid = hipThreadIdx_x;
@@ -955,6 +989,11 @@ namespace rocsparse
             if(beta != static_cast<T>(0))
             {
                 temp_sum = rocsparse::fma<T>(beta, y[row], temp_sum);
+            }
+
+            if(gamma != static_cast<T>(0))
+            {
+                temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
             }
 
             y[row] = temp_sum;

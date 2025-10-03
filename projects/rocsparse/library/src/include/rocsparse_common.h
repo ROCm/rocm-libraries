@@ -56,6 +56,14 @@ namespace rocsparse
     rocsparse_status
         scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array);
 
+    template <typename I, typename X, typename Y, typename T>
+    rocsparse_status axpby_array(rocsparse_handle handle,
+                                 I                length,
+                                 const T*         alpha_device_host,
+                                 const X*         x_array,
+                                 const T*         beta_device_host,
+                                 Y*               y_array);
+
     template <typename I, typename A, typename T>
     rocsparse_status scale_2d_array(rocsparse_handle handle,
                                     I                m,

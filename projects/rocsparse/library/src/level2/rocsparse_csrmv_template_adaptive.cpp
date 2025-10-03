@@ -479,7 +479,7 @@ namespace rocsparse
         }
     }
 
-    template <typename I, typename J, typename A, typename X, typename Y, typename T>
+    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_adaptive_kernel(bool conj,
                                 I    nnz,
@@ -493,11 +493,14 @@ namespace rocsparse
                                 const X* __restrict__ x,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 Y* __restrict__ y,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, gamma),
+                                Z* __restrict__ z,
                                 rocsparse_index_base idx_base,
                                 bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(gamma);
         if(alpha != 0 || beta != 1)
         {
             rocsparse::
@@ -514,6 +517,8 @@ namespace rocsparse
                     x,
                     beta,
                     y,
+                    gamma,
+                    z,
                     idx_base);
         }
     }
@@ -595,6 +600,73 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                                                              Y*       y,
                                                              bool     force_conj)
 {
+    if(handle->pointer_mode == rocsparse_pointer_mode_host)
+    {
+        const T gamma[1] = {static_cast<T>(0)};
+        return rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                           trans,
+                                                           m,
+                                                           n,
+                                                           nnz,
+                                                           alpha_device_host,
+                                                           descr,
+                                                           csr_val,
+                                                           csr_row_ptr,
+                                                           csr_col_ind,
+                                                           info,
+                                                           x,
+                                                           beta_device_host,
+                                                           y,
+                                                           gamma,
+                                                           (const Y*)nullptr,
+                                                           force_conj);
+    }
+    else
+    {
+        T* gamma;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&gamma, sizeof(T), handle->stream));
+        RETURN_IF_HIP_ERROR(hipMemsetAsync(gamma, 0, sizeof(T), handle->stream));
+        rocsparse_status status = rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                                              trans,
+                                                                              m,
+                                                                              n,
+                                                                              nnz,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              info,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              gamma,
+                                                                              (const Y*)nullptr,
+                                                                              force_conj);
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(gamma, handle->stream));
+        return status;
+    }
+}
+
+template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle    handle,
+                                                             rocsparse_operation trans,
+                                                             J                   m,
+                                                             J                   n,
+                                                             I                   nnz,
+                                                             const T*            alpha_device_host,
+                                                             const rocsparse_mat_descr descr,
+                                                             const A*                  csr_val,
+                                                             const I*                  csr_row_ptr,
+                                                             const J*                  csr_col_ind,
+                                                             rocsparse_csrmv_info      info,
+                                                             const X*                  x,
+                                                             const T* beta_device_host,
+                                                             Y*       y,
+                                                             const T* gamma_device_host,
+                                                             const Z* z,
+                                                             bool     force_conj)
+{
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -648,6 +720,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             x,
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
             y,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, gamma_device_host),
+            z,
             descr->base,
             handle->pointer_mode == rocsparse_pointer_mode_host);
 

@@ -176,6 +176,29 @@ namespace rocsparse
         }
     }
 
+    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
+    ROCSPARSE_DEVICE_ILF void axpby_device(
+        I length, T alpha, const X* __restrict__ x_array, T beta, Y* __restrict__ y_array)
+    {
+        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+        if(gid >= length)
+        {
+            return;
+        }
+
+        Y tmp = static_cast<Y>(0);
+        if(beta != static_cast<T>(0))
+        {
+            tmp += static_cast<Y>(beta) * y_array[gid];
+        }
+        if(alpha != static_cast<T>(0))
+        {
+            tmp += static_cast<Y>(alpha) * static_cast<Y>(x_array[gid]);
+        }
+        y_array[gid] = tmp;
+    }
+
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
     ROCSPARSE_DEVICE_ILF void scale_2d_device(
         I m, I n, int64_t ld, int64_t stride, T value, A* __restrict__ array, rocsparse_order order)
@@ -302,6 +325,21 @@ namespace rocsparse
         {
             rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
         }
+    }
+
+    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void axpby_kernel(I length,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                      const X* __restrict__ x_array,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                      Y* __restrict__ y_array,
+                      bool is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+
+        rocsparse::axpby_device<BLOCKSIZE>(length, alpha, x_array, beta, y_array);
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
@@ -463,6 +501,40 @@ rocsparse_status
                 length,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
                 array,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
+        }
+    }
+    return rocsparse_status_success;
+}
+
+template <typename I, typename X, typename Y, typename T>
+rocsparse_status rocsparse::axpby_array(rocsparse_handle handle,
+                                        I                length,
+                                        const T*         alpha_device_host,
+                                        const X*         x_array,
+                                        const T*         beta_device_host,
+                                        Y*               y_array)
+{
+    if(length > 0)
+    {
+        const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
+        if(on_host && *alpha_device_host == 0 && *beta_device_host == 0)
+        {
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(y_array, 0, sizeof(Y) * length, handle->stream));
+        }
+        else
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::axpby_kernel<256>),
+                dim3((length - 1) / 256 + 1),
+                dim3(256),
+                0,
+                handle->stream,
+                length,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                x_array,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                y_array,
                 handle->pointer_mode == rocsparse_pointer_mode_host);
         }
     }
@@ -658,9 +730,15 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, ATYPE, TTYPE)              \
-    template rocsparse_status rocsparse::scale_array( \
-        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);
+#define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                       \
+    template rocsparse_status rocsparse::scale_array(                                          \
+        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array); \
+    template rocsparse_status rocsparse::axpby_array(rocsparse_handle handle,                  \
+                                                     ITYPE            length,                  \
+                                                     const TTYPE*     alpha_device_host,       \
+                                                     const ATYPE*     x_array,                 \
+                                                     const TTYPE*     beta_device_host,        \
+                                                     ATYPE*           y_array);
 
 INSTANTIATE(int32_t, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, float);

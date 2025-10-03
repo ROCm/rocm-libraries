@@ -102,6 +102,25 @@ namespace rocsparse
                                                       Y*                        y,
                                                       bool                      force_conj);
 
+    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+    rocsparse_status csrmv_rowsplit_template_dispatch(rocsparse_handle          handle,
+                                                      rocsparse_operation       trans,
+                                                      J                         m,
+                                                      J                         n,
+                                                      I                         nnz,
+                                                      const T*                  alpha_device_host,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr_begin,
+                                                      const I*                  csr_row_ptr_end,
+                                                      const J*                  csr_col_ind,
+                                                      const X*                  x,
+                                                      const T*                  beta_device_host,
+                                                      Y*                        y,
+                                                      const T*                  gamma_device_host,
+                                                      const Z*                  z,
+                                                      bool                      force_conj);
+
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_adaptive_template_dispatch(rocsparse_handle          handle,
                                                       rocsparse_operation       trans,
@@ -119,7 +138,26 @@ namespace rocsparse
                                                       Y*                        y,
                                                       bool                      force_conj);
 
-    template <typename T, typename I, typename J, typename A, typename X, typename Y>
+    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+    rocsparse_status csrmv_adaptive_template_dispatch(rocsparse_handle          handle,
+                                                      rocsparse_operation       trans,
+                                                      J                         m,
+                                                      J                         n,
+                                                      I                         nnz,
+                                                      const T*                  alpha_device_host,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr,
+                                                      const J*                  csr_col_ind,
+                                                      rocsparse_csrmv_info      csrmv_info,
+                                                      const X*                  x,
+                                                      const T*                  beta_device_host,
+                                                      Y*                        y,
+                                                      const T*                  gamma_device_host,
+                                                      const Z*                  z,
+                                                      bool                      force_conj);
+
+    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
     rocsparse_status csrmv_lrb_template_dispatch(rocsparse_handle          handle,
                                                  rocsparse_operation       trans,
                                                  J                         m,
@@ -134,7 +172,28 @@ namespace rocsparse
                                                  const X*                  x,
                                                  const T*                  beta_device_host,
                                                  Y*                        y,
+                                                 const T*                  gamma_device_host,
+                                                 const Z*                  z,
                                                  bool                      force_conj);
+
+    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+    rocsparse_status csrmv_nnzsplit_template_dispatch(rocsparse_handle          handle,
+                                                      rocsparse_operation       trans,
+                                                      J                         m,
+                                                      J                         n,
+                                                      I                         nnz,
+                                                      const T*                  alpha_device_host,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr,
+                                                      const J*                  csr_col_ind,
+                                                      rocsparse_csrmv_info      csrmv_info,
+                                                      const X*                  x,
+                                                      const T*                  beta_device_host,
+                                                      Y*                        y,
+                                                      const T*                  gamma_device_host,
+                                                      const Z*                  z,
+                                                      bool                      force_conj);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_nnzsplit_template_dispatch(rocsparse_handle          handle,
@@ -170,6 +229,28 @@ namespace rocsparse
                                     const void*               x,
                                     const void*               beta,
                                     void*                     y,
+                                    bool                      force_conj,
+                                    bool                      fallback_algorithm);
+
+    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename Z>
+    rocsparse_status csrmv_template(rocsparse_handle          handle,
+                                    rocsparse_operation       trans,
+                                    rocsparse::csrmv_alg      alg,
+                                    int64_t                   m,
+                                    int64_t                   n,
+                                    int64_t                   nnz,
+                                    const void*               alpha,
+                                    const rocsparse_mat_descr descr,
+                                    const void*               csr_val,
+                                    const void*               csr_row_ptr_begin,
+                                    const void*               csr_row_ptr_end,
+                                    const void*               csr_col_ind,
+                                    rocsparse_csrmv_info      csrmv_info,
+                                    const void*               x,
+                                    const void*               beta,
+                                    void*                     y,
+                                    const void*               gamma,
+                                    const void*               z,
                                     bool                      force_conj,
                                     bool                      fallback_algorithm);
 
