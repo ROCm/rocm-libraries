@@ -8,11 +8,12 @@ include "batchnorm_backward_attributes.fbs";
 include "batchnorm_inference_attributes.fbs";
 include "convolution_fwd_attributes.fbs";
 include "convolution_bwd_attributes.fbs";
+include "convolution_wrw_attributes.fbs";
 include "pointwise_attributes.fbs";
 
 namespace hipdnn_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes}
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes}
 
 table Node {
 	name: string;
