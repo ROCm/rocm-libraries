@@ -22,6 +22,13 @@ public:
     int val_a;
 }; 
 
+class B : public A
+{
+public:
+    __host__ __device__ B() : A() {}
+    __host__ __device__ B(int num) : A(num) {}
+};
+
 TESTS_DEFINE(UniquePtrAllocDeallocTests, NumericalTestsParams);
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.single.pass.cpp
@@ -76,11 +83,11 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
 
     // Pointers of same type
     {
-        thrust::unique_ptr<int> p1 = thrust::make_unique<int>(1);
-        thrust::unique_ptr<int> p2 = thrust::make_unique<int>(2);
+        thrust::unique_ptr<A> p1 = thrust::make_unique<A>(1);
+        thrust::unique_ptr<A> p2 = thrust::make_unique<A>(2);
 
-        int* ptr1 = p1.get_raw();
-        int* ptr2 = p2.get_raw();
+        A* ptr1 = p1.get_raw();
+        A* ptr2 = p2.get_raw();
 
         ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
         ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
@@ -92,32 +99,32 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
 
     // Pointers of different type
     {
-        thrust::unique_ptr<int>   p1 = thrust::make_unique<int>(1);
-        thrust::unique_ptr<float> p2 = thrust::make_unique<float>(2.2);
+        thrust::unique_ptr<A> p1(thrust::device_new<A>(1));
+        thrust::unique_ptr<B> p2(thrust::device_new<B>(2));
 
-        int*   ptr1 = p1.get_raw();
-        float* ptr2 = p2.get_raw();
+        A* ptr1 = p1.get_raw();
+        B* ptr2 = p2.get_raw();
 
-        ASSERT_EQ((p1 == p2), (static_cast<void*>(ptr1) == static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 != p2), (static_cast<void*>(ptr1) != static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 < p2), (static_cast<void*>(ptr1) < static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 <= p2), (static_cast<void*>(ptr1) <= static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 > p2), (static_cast<void*>(ptr1) > static_cast<void*>(ptr2)));
-        ASSERT_EQ((p1 >= p2), (static_cast<void*>(ptr1) >= static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 == p2), ((ptr1) == (ptr2)));
+        ASSERT_EQ((p1 != p2), ((ptr1) != (ptr2)));
+        ASSERT_EQ((p1 < p2), ((ptr1) < (ptr2)));
+        ASSERT_EQ((p1 <= p2), ((ptr1) <= (ptr2)));
+        ASSERT_EQ((p1 > p2), ((ptr1) > (ptr2)));
+        ASSERT_EQ((p1 >= p2), ((ptr1) >= (ptr2)));
     }
 
     // Default-constructed pointers of same type
     {
-        const thrust::unique_ptr<int> p1;
-        const thrust::unique_ptr<int> p2;
+        const thrust::unique_ptr<A> p1;
+        const thrust::unique_ptr<A> p2;
 
         ASSERT_EQ(p1, p2);
     }
 
     // Default-constructed pointers of different type
     {
-        const thrust::unique_ptr<int>   p1;
-        const thrust::unique_ptr<float> p2;
+        const thrust::unique_ptr<A> p1;
+        const thrust::unique_ptr<B> p2;
 
         ASSERT_EQ(p1, p2);
     }
