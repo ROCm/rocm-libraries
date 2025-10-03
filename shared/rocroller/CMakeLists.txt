@@ -123,7 +123,7 @@ if(msgpack-cxx_FOUND)
 else()
     find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
     message(STATUS "Found msgpack (<=5.x)")
-    set(msgpack_libs msgpackc)
+    set(msgpack_libs msgpackc-cxx)
 endif()
 
 find_package(hip REQUIRED)
