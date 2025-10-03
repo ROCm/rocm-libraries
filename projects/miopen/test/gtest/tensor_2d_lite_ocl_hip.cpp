@@ -319,9 +319,9 @@ protected:
 #endif
 };
 
-using GPU_Op2dTensorLiteTest = Op2dTensorLiteTest<float>;
+using GPU_Op2dTensorLiteTest_FP32 = Op2dTensorLiteTest<float>;
 
-TEST_P(GPU_Op2dTensorLiteTest, PortTest)
+TEST_P(GPU_Op2dTensorLiteTest_FP32, PortTest)
 {
     // run OCL kernel
     runOCL();
@@ -332,7 +332,7 @@ TEST_P(GPU_Op2dTensorLiteTest, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_Op2dTensorLiteTest,
+                         GPU_Op2dTensorLiteTest_FP32,
                          testing::Combine(testing::ValuesIn(TensorsConfigs<float>()),
                                           testing::Values(1.0f),
                                           testing::Values(1.0f),
