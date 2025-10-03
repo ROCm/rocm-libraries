@@ -30,7 +30,6 @@
 #endif // no system header
 
 #include <thrust/detail/config/compiler.h> // IWYU pragma: export
-#include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 
 // Deprecation warnings may be silenced by defining the following macros. These
 // may be combined.
@@ -86,6 +85,38 @@
 #  undef THRUST_CPLUSPLUS // cleanup
 
 #endif // !THRUST_CPP_DIALECT
+
+// Macros to suppress deprecation compiler warnings, from "deprecated.h"
+// TODO: These macros start with `LIBCUDACXX`. So, when libhipcxx is
+// available in this scope, we should remove these macros and use the ones
+// from libhipcxx.
+// Check for deprecation opt-outs
+#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT) || defined(CCCL_IGNORE_DEPRECATED_CPP_DIALECT) \
+  || defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
+#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+#    define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
+#  endif
+#endif // suppress all dialect deprecation warnings
+#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(CCCL_IGNORE_DEPRECATED_CPP_14) \
+  || defined(CUB_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#    define THRUST_IGNORE_DEPRECATED_CPP_14
+#  endif
+#endif // suppress all c++14 dialect deprecation warnings
+#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(CCCL_IGNORE_DEPRECATED_CPP_11)  \
+  || defined(CUB_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
+  || defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
+#    define THRUST_IGNORE_DEPRECATED_CPP_11
+#  endif
+#endif // suppress all c++11 dialect deprecation warnings
+#if defined(LIBCUDACXX_IGNORE_DEPRECATED_COMPILER) || defined(CCCL_IGNORE_DEPRECATED_COMPILER) \
+  || defined(CUB_IGNORE_DEPRECATED_COMPILER) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)  \
+  || defined(THRUST_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_11)
+#  if !defined(THRUST_IGNORE_DEPRECATED_COMPILER)
+#    define THRUST_IGNORE_DEPRECATED_COMPILER
+#  endif
+#endif // suppress all compiler deprecation warnings
 
 // Constexpr feature macros:
 #if THRUST_CPP_DIALECT >= 2023
@@ -149,7 +180,7 @@ THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 11);
 #elif THRUST_CPP_DIALECT == 2014 && !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
 // =C++14. Soft upgrade message:
 THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 14);
-#endif // THRUST_CPP_DIALECT >= 2017
+#endif // THRUST_CPP_DIALECT < 2011
 
 #undef THRUST_COMPILER_DEPRECATION_SOFT
 #undef THRUST_COMPILER_DEPRECATION
