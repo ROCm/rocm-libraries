@@ -60,6 +60,7 @@ option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
+option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -183,32 +184,22 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_FETCH)
-        block(SCOPE_FOR VARIABLES)
-            #set(ROCROLLER_ENABLE_FETCH ON)
-            #set(ROCROLLER_BUILD_TESTING OFF)
-            #set(ROCROLLER_ENABLE_CLIENT OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            set(BUILD_TESTING OFF)
-            set(BUILD_CLIENTS OFF)
-            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            # Ensure rocroller uses the same compiler as the parent project
-            # NOTE: This is only required for the pinned commit and isn't present
-            # in the latest rocroller, therefor this should be removed once we bump
-            # the rocroller commit
-            set(ROCROLLER_ASSEMBLER_PATH ${CMAKE_CXX_COMPILER})
-            include(FetchContent)
-            FetchContent_Declare(
-                rocRoller
-                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
-            )
-            FetchContent_MakeAvailable(rocRoller)
-        endblock()
-    else()
-        find_package(rocroller REQUIRED)
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        if(HIPBLASLT_ENABLE_THEROCK)
+            find_package(rocroller REQUIRED)
+        else()
+            block(SCOPE_FOR VARIABLES)
+                set(ROCROLLER_ENABLE_FETCH ON)
+                set(ROCROLLER_BUILD_TESTING OFF)
+                set(ROCROLLER_ENABLE_CLIENT OFF)
+                option(YAML_CPP_INSTALL "" ON)
+                set(BUILD_TESTING OFF)
+                set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+                set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+                add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
+            endblock()
+        endif()
     endif()
 endif()
 
