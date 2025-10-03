@@ -24,6 +24,7 @@ public:
 
 TESTS_DEFINE(UniquePtrAllocDeallocTests, NumericalTestsParams);
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.single.pass.cpp
 TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUnique)
 {
     using T = typename TestFixture::input_type;
@@ -42,6 +43,7 @@ TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUnique)
     ASSERT_EQ(*p1, T {});
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.create/make_unique.single.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestMakeUniqueUserType)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -52,6 +54,7 @@ TEST(UniquePtrAllocDeallocTests, TestMakeUniqueUserType)
     ASSERT_EQ(host_p.val_a, 7);
 }
 
+// Thrust-specific test for deleter behavior.
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -66,6 +69,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltr)
     thrust::device_delete(finished);
 }
 
+// Based on llvm-project/libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.special/cmp.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -119,6 +123,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
     }
 }
 
+// Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.special/cmp_nullptr.pass.cpp
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrNullptr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -126,7 +131,7 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrNullptr)
     // Test with a non-null unqiue_ptr
     {
         const thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
-
+ 
         ASSERT_NE(p, nullptr);
         ASSERT_LT(nullptr, p);
         ASSERT_LE(nullptr, p);
