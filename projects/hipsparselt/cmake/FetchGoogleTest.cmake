@@ -3,7 +3,7 @@
 
 find_package(GTest QUIET CONFIG)
 
-if(NOT GTest_FOUND)
+if(NOT GTest_FOUND AND HIPSPARSELT_ENABLE_FETCH)
     include(FetchContent)
     FetchContent_Declare(
         googletest
@@ -15,6 +15,11 @@ if(NOT GTest_FOUND)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     message(STATUS "Fetched GTest and installed to: ${gtest_SOURCE_DIR}")
-else()
+elseif(GTest_FOUND)
     message(STATUS "Found GTest: ${gtest_SOURCE_DIR}")
+else()
+  message(FATAL_ERROR 
+    "GTest not found. Install with your package manager (recommended) or "
+    "opt-in to fetch with `-DHIPSPARSELT_ENABLE_FETCH=ON`."
+  )
 endif()
