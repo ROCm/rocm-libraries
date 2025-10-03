@@ -748,6 +748,12 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversGetArray)
         ASSERT_EQ(const_p.get(), dev_p);
     }
 
+    // TODO: Uncomment this part of the test when the underlying issue with thrust::device_free is resolved.
+    // This test is currently commented out because it fails to compile. The
+    // thrust::unique_ptr<const int> destructor calls thrust::device_free, which
+    // expects a thrust::device_ptr<void>. The implicit conversion from
+    // thrust::device_ptr<const int> to thrust::device_ptr<void> is not allowed,
+    // causing a compilation error.
     // // get() for const array
     // {
     //     thrust::device_ptr<const int> dev_p = thrust::device_new<const int>(10);
