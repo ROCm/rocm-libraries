@@ -757,8 +757,127 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
             {
-                co_yield m_loadStoreTileGenerator.genLoadLDSTile(
-                    tag, load, m_graph->buildTransformer(tag));
+                {
+                    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+                    auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
+                    auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
+
+                    auto maybeParentLDS = only(
+                        m_graph->coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<Duplicate>));
+                    if(maybeParentLDS)
+                        ldsTag = *maybeParentLDS;
+
+                    if(tile.memoryType == MemoryType::WAVE)
+                    {
+
+                        auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
+                        auto [vgprTag, vgpr]         = m_graph->getDimension<VGPR>(tag);
+
+                        auto dataTypeInfo = DataTypeInfo::Get(load.varType);
+                        auto numBits
+                            = static_cast<uint>(dataTypeInfo.elementBits / dataTypeInfo.packing);
+                        auto numElements = getUnsignedInt(evaluate(vgpr.size));
+                        auto numBytes    = (numBits * numElements) / 8u;
+
+                        auto coords = m_graph->buildTransformer(tag);
+                        coords.setCoordinate(vgprTag, Expression::literal(0));
+                        auto index = coords.reverse({ldsTag})[0];
+
+                        Log::info("LDS WAVE LOAD: tag {}, numBits {}, numElements {}, numBytes {}, "
+                                  "index {}",
+                                  tag,
+                                  numBits,
+                                  numElements,
+                                  numBytes,
+                                  toString(index));
+
+                        KernelArguments              m_arguments;
+                        std::array<uint, 3>          m_workgroupOffset, m_workitemOffset;
+                        std::array<ExpressionPtr, 3> m_kernelWorkgroupIndexes,
+                            m_kernelWorkitemIndexes;
+
+                        for(int i = 0; i < 3; ++i)
+                        {
+                            m_workgroupOffset[i] = m_arguments.size();
+                            auto wg_name         = concatenate("WG", i);
+                            auto wg_carg         = CommandArgument(nullptr,
+                                                           DataType::UInt32,
+                                                           m_workgroupOffset[i],
+                                                           DataDirection::ReadOnly,
+                                                           wg_name);
+                            auto wg              = std::make_shared<CommandArgument>(wg_carg);
+                            m_arguments.appendUnbound<uint>(wg_name);
+
+                            m_workitemOffset[i] = m_arguments.size();
+                            auto wi_name        = concatenate("WI", i);
+                            auto wi_carg        = CommandArgument(nullptr,
+                                                           DataType::UInt32,
+                                                           m_workitemOffset[i],
+                                                           DataDirection::ReadOnly,
+                                                           wi_name);
+                            auto wi             = std::make_shared<CommandArgument>(wi_carg);
+                            m_arguments.appendUnbound<uint>(wi_name);
+
+                            m_kernelWorkgroupIndexes[i]
+                                = std::make_shared<Expression::Expression>(wg);
+                            m_kernelWorkitemIndexes[i]
+                                = std::make_shared<Expression::Expression>(wi);
+                        }
+
+                        auto rawArguments = m_arguments.dataVector();
+                        auto runtimeArguments
+                            = RuntimeArguments(rawArguments.data(), rawArguments.size());
+
+                        auto setWorkgroup = [&](uint i, uint v) {
+                            *((uint*)(rawArguments.data() + m_workgroupOffset[i])) = v;
+                        };
+                        auto setWorkitem = [&](uint i, uint v) {
+                            *((uint*)(rawArguments.data() + m_workitemOffset[i])) = v;
+                        };
+
+                        // TODO: need to call fillexecutioncoordinates here?
+
+                        for(uint wg = 0; wg < 1; ++wg)
+                        {
+                            setWorkgroup(0, wg);
+                            for(uint wi = 0; wi < 64;
+                                ++wi) // TODO: should be product of invocation's workgroup size
+                            {
+                                setWorkitem(0, wi);
+
+                                auto offsetValue = Expression::evaluate(index, runtimeArguments);
+                                auto offset
+                                    = std::visit([](auto x) { return (size_t)x; }, offsetValue);
+
+                                Log::error("offset {}", offset);
+                            }
+                        }
+                    }
+                }
+                for(const auto instr : m_loadStoreTileGenerator.genLoadLDSTile(
+                        tag, load, m_graph->buildTransformer(tag)))
+                {
+                    // if(GPUInstructionInfo::isLDS(instr.getOpCode()))
+                    // {
+                    //     // From Register to LoadLDSTile
+                    //     Log::error("lowering LoadLDSTile: {}", instr.toString(LogLevel::Verbose));
+                    //     const auto addrReg = instr.getSrcs()[0];
+                    //     AssertFatal(addrReg != nullptr);
+                    //     auto context = addrReg->context();
+                    //     AssertFatal(context != nullptr);
+                    //     auto offsetTag
+                    //         = context->registerTagManager()->findRegister(addrReg).value();
+                    //     Log::error("offsetTag {}", offsetTag);
+                    //     for(const auto& connection :
+                    //         context->kernel()->kernel_graph()->mapper.getCoordinateConnections(
+                    //             offsetTag))
+                    //     {
+                    //         Log::error("connection {}", toString(connection));
+                    //     }
+                    // }
+                    co_yield std::move(instr);
+                }
             }
 
             Generator<Instruction> operator()(int tag, LoadSGPR const& load)

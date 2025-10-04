@@ -97,7 +97,7 @@ namespace rocRoller
                 if(expr->regType() == Register::Type::Literal)
                     return expr->getLiteralValue();
 
-                Throw<FatalError>("Register present in runtime expression", ShowValue(expr));
+                Throw<FatalError>("Register present in runtime expression", toString(expr));
             }
 
             CommandArgumentValue operator()(ToScalar const& expr)
