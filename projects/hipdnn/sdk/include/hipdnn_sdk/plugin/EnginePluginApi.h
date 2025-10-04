@@ -45,7 +45,7 @@ extern "C" {
  *       The function can be called with `max_engines = 0` (in this case, `engine_ids` may be `NULL`)
  *       to retrieve the total count of available engines without returning their IDs.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIds(
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIds(
     int64_t* engine_ids, uint32_t max_engines, uint32_t* num_engines);
 
 /**
@@ -58,7 +58,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t hipdnnEnginePl
  *
  * @note The caller is responsible for ensuring that the handle is destroyed properly to avoid resource leaks.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle);
 
 /**
@@ -70,7 +70,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @note The handle becomes invalid after this function is called.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle);
 
 /**
@@ -84,7 +84,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  * @note The caller must ensure that the provided stream remains valid for the duration of operations performed
  *       using the engine plugin handle.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream);
 
 /**
@@ -107,7 +107,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *       The function can be called with `max_engines = 0` (in this case `engine_ids` may be `NULL`)
  *       to retrieve the total count of applicable engines without returning their IDs.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetApplicableEngineIds(hipdnnEnginePluginHandle_t handle,
                                              const hipdnnPluginConstData_t* op_graph,
                                              int64_t* engine_ids,
@@ -129,7 +129,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *       allocating the buffer for the serialized `EngineDetails`. After use, this memory must be freed using
  *       hipdnnEnginePluginDestroyEngineDetails().
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
                                        int64_t engine_id,
                                        const hipdnnPluginConstData_t* op_graph,
@@ -146,7 +146,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @note This function takes a structure as input, deallocates the buffer, and sets all fields to 0.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHandle_t handle,
                                            hipdnnPluginConstData_t* engine_details);
 
@@ -161,7 +161,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                        const hipdnnPluginConstData_t* engine_config,
                                        const hipdnnPluginConstData_t* op_graph,
@@ -183,7 +183,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *       for the execution context, and the user is responsible for releasing these resources by calling
  *       `hipdnnEnginePluginDestroyExecutionContext()` when the execution context is no longer needed.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreateExecutionContext(
         hipdnnEnginePluginHandle_t handle,
         const hipdnnPluginConstData_t* engine_config,
@@ -200,7 +200,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @note The execution context becomes invalid after this function is called.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyExecutionContext(
         hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t execution_context);
 
@@ -217,7 +217,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
                                      hipdnnEnginePluginExecutionContext_t execution_context,
                                      void* workspace,
