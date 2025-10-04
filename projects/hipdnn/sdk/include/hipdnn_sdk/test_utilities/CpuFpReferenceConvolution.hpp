@@ -302,6 +302,124 @@ public:
         gradInput.memory().markHostModified();
     }
 
+    static void convBwdWeight(const TensorBase<InputDataType>& input,
+                              TensorBase<InputDataType>& gradWeight,
+                              const TensorBase<InputDataType>& gradOutput,
+                              const std::vector<int64_t>& strides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding)
+    {
+        convBwdWeight(input, gradWeight, gradOutput, strides, dilations, padding, padding);
+    }
+
+    static void convBwdWeight(const TensorBase<InputDataType>& input,
+                              TensorBase<InputDataType>& gradWeight,
+                              const TensorBase<InputDataType>& gradOutput,
+                              const std::vector<int64_t>& strides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& prePadding,
+                              const std::vector<int64_t>& postPadding)
+    {
+        validateInput(input, gradWeight, gradOutput, strides, dilations, prePadding, postPadding);
+
+        // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
+        const auto& inputDims = input.dims();
+        const auto& weightDims = gradWeight.dims();
+        const auto& outputDims = gradOutput.dims();
+
+        int64_t nBatch = outputDims[0];
+
+        int64_t nSpatialDims = static_cast<int64_t>(inputDims.size()) - 2;
+        std::vector<int64_t> inputSpatialDims(inputDims.begin() + 2, inputDims.end());
+        std::vector<int64_t> kernelSpatialDims(weightDims.begin() + 2, weightDims.end());
+        std::vector<int64_t> outputSpatialDims(outputDims.begin() + 2, outputDims.end());
+
+        int64_t totalOutputChannels = weightDims[0]; // G * K (flattened)
+        int64_t channelsPerGroup = weightDims[1]; // C
+
+        // Calculate groups from input/weight channel relationship
+        int64_t nInputChannels = inputDims[1];
+        int64_t nGroups = nInputChannels / channelsPerGroup; // G
+        int64_t outputChannelsPerGroup = totalOutputChannels / nGroups; // K
+
+        auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
+            auto gIdx = indices[0];
+            auto kIdx = indices[1];
+            auto cIdx = indices[2];
+
+            // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
+            std::vector<int64_t> kernelSpatialIndices(indices.begin() + 3, indices.end());
+
+            auto vAcc = static_cast<AccumulatorType>(0.0f);
+
+            // Iterate over each spatial position of the kernel for contributing output gradients
+            iterateAlongDimensions(
+                outputSpatialDims, [&](const std::vector<int64_t>& outputSpatialIndices) {
+                    std::vector<int64_t> inputSpatialIndices(static_cast<size_t>(nSpatialDims));
+
+                    bool validPosition = true;
+
+                    // For each spatial dimension, calculate the corresponding output gradient index
+                    for(int64_t dim = 0; dim < nSpatialDims; ++dim)
+                    {
+                        auto dimIdx = static_cast<size_t>(dim);
+
+                        int64_t tmp = (outputSpatialIndices[dimIdx] * strides[dimIdx])
+                                      + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                      - prePadding[dimIdx];
+
+                        inputSpatialIndices[dimIdx] = tmp;
+
+                        if(inputSpatialIndices[dimIdx] < 0
+                           || inputSpatialIndices[dimIdx] >= inputSpatialDims[dimIdx])
+                        {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+
+                    if(validPosition)
+                    {
+                        for(int64_t n = 0; n < nBatch; ++n)
+                        {
+                            auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + kIdx;
+
+                            auto gradOutputFullIndices
+                                = buildTensorIndices(n, outputChannelIdx, outputSpatialIndices);
+
+                            auto inputChannelIdx = (gIdx * channelsPerGroup) + cIdx;
+
+                            auto inputFullIndices
+                                = buildTensorIndices(n, inputChannelIdx, inputSpatialIndices);
+
+                            InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
+
+                            InputDataType vIn = input.getHostValue(inputFullIndices);
+
+                            vAcc = vAcc
+                                   + (static_cast<AccumulatorType>(vOut)
+                                      * static_cast<AccumulatorType>(vIn));
+                        }
+                    }
+                });
+
+            auto weightN = (gIdx * outputChannelsPerGroup) + kIdx;
+            auto weightFullIndices = buildTensorIndices(weightN, cIdx, kernelSpatialIndices);
+
+            gradWeight.setHostValue(static_cast<InputDataType>(vAcc), weightFullIndices);
+        };
+
+        // Build dimensions for parallel iteration
+        std::vector<int64_t> parallelDims = {nGroups, outputChannelsPerGroup, channelsPerGroup};
+        parallelDims.insert(parallelDims.end(), kernelSpatialDims.begin(), kernelSpatialDims.end());
+
+        auto parallelFunc
+            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        parallelFunc(std::thread::hardware_concurrency());
+
+        gradWeight.memory().markHostModified();
+    }
+
 private:
     static void validateInput(const TensorBase<InputDataType>& input,
                               const TensorBase<InputDataType>& weight,
