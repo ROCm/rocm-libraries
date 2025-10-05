@@ -13902,6 +13902,9 @@ class KernelWriterAssembly(KernelWriter):
 
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
+    # Wait for all LR in pre-loop to complete before we start main loop
+    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
+
     if numCodePath == 1:
       module.add(TextBlock("MAINLOOP 0\n"))
       module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
@@ -13917,9 +13920,10 @@ class KernelWriterAssembly(KernelWriter):
     loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
 
     tmpSgpr = self.sgprPool.checkOut(1)
-    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, 1)"))
+    numbits = 1 if numCodePath == 2 else 2
+    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, %u)"%numbits))
 
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all PGR to complete"))
+
     tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2)
     sgprPC = ContinuousRegister(tmpSgpr1, 3)
     for l in range(numCodePath):
