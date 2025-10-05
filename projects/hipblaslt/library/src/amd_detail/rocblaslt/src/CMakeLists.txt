@@ -22,5 +22,5 @@ target_sources(hipblaslt
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    add_subdirectory(rocroller EXCLUDE_FROM_ALL ON)
+    add_subdirectory(rocroller)
 endif()
