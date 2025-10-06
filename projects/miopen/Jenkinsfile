@@ -67,7 +67,7 @@ def runBuildAndSingleGtestJob(def utils, def flags, def build_timeout_minutes=42
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
             utils.buildHipClangJobAndReboot(
-                lfs_pull:true, 
+                dvc_pull:true,
                 setup_flags: single_gtest_flags + flags, 
                 build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check", 
                 needs_reboot:false, 
