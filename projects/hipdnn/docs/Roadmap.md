@@ -102,7 +102,7 @@ Plugins extend hipDNN's capabilities by providing computational implementations.
 #### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Convolution Integration**: Adding integration to support Convolution operations
+- **Convolution Integration**: Adding integration to support remaining Convolution operations
 - **Batch Normalization**: Adding integration to support remaining batchnorm operations
 - **Fusion Support**: Adding integration to support existing fusions
 

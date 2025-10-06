@@ -8,11 +8,10 @@
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 
@@ -54,7 +53,7 @@ protected:
 
     void runFwdBatchnormGraph(Batchnorm2dTestCase testCase,
                               hipdnn_sdk::data_objects::DataType inputDataType,
-                              InputType epsilon)
+                              InputType tolerance)
     {
         auto dims = std::vector<int64_t>{testCase.n, testCase.c, testCase.h, testCase.w};
 
@@ -157,7 +156,7 @@ protected:
             yTensorCpu,
             1e-3);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidation(epsilon, epsilon);
+        CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu.memory(), yTensor.memory()));
     }
 
@@ -247,51 +246,67 @@ public:
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, 1e-6f);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::FLOAT,
+                         batchnorm::getToleranceInference<float>());
 }
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::BFLOAT16, 1e-2_bf);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                         batchnorm::getToleranceInference<hip_bfloat16>());
 }
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp16, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::HALF, 1e-2_h);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::HALF,
+                         batchnorm::getToleranceInference<half>());
 }
 
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp64, DISABLED_Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::DOUBLE, 1e-6);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::DOUBLE,
+                         batchnorm::getToleranceInference<double>());
 }
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, 1e-6f);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::FLOAT,
+                         batchnorm::getToleranceInference<float>());
 }
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::BFLOAT16, 1e-2_bf);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                         batchnorm::getToleranceInference<hip_bfloat16>());
 }
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp16, Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::HALF, 1e-2_h);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::HALF,
+                         batchnorm::getToleranceInference<half>());
 }
 
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp64, DISABLED_Correctness)
 {
     auto testCase = GetParam();
-    runFwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::DOUBLE, 1e-6);
+    runFwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::DOUBLE,
+                         batchnorm::getToleranceInference<double>());
 }
 
 INSTANTIATE_TEST_SUITE_P(,
