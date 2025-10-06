@@ -241,7 +241,8 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_lower,
                       const size_t               field_lower_batch,
                       const Tint1&               field_contig_stride,
-                      const size_t               field_contig_dist)
+                      const size_t               field_contig_dist,
+                      const bool                 use_gpu_symmetrizer)
 {
     auto isize = count_iters(whole_length) * nbatch;
 
@@ -269,9 +270,29 @@ inline void set_input(std::vector<gpubuf>&       input,
 
         if(itype == fft_array_type_hermitian_interleaved)
         {
-            auto ibuffer_2 = (rocfft_complex<Tfloat>*)input[0].data();
-            impose_hermitian_symmetry_interleaved_device(
-                length, ilength, istride, idist, nbatch, ibuffer_2, deviceProp);
+            if(use_gpu_symmetrizer)
+                impose_hermitian_symmetry_interleaved_device(
+                    length, ilength, istride, idist, nbatch, ibuffer, deviceProp);
+            else
+            {
+                std::vector<hostbuf> input_host(input.size());
+                input_host[0].alloc(input[0].size());
+
+                auto ibuffer_host = (rocfft_complex<Tfloat>*)input_host[0].data();
+
+                if(hipMemcpy(ibuffer_host, ibuffer, input_host[0].size(), hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian symmetrizer");
+
+                impose_hermitian_symmetry_interleaved_host<Tfloat>(
+                    input_host, length, istride, idist, nbatch);
+
+                if(hipMemcpy(ibuffer, ibuffer_host, input_host[0].size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+            }
         }
 
         break;
@@ -305,8 +326,51 @@ inline void set_input(std::vector<gpubuf>&       input,
                                         field_contig_dist);
 
         if(itype == fft_array_type_hermitian_planar)
-            impose_hermitian_symmetry_planar_device(
-                length, ilength, istride, idist, nbatch, ibuffer_real, ibuffer_imag, deviceProp);
+        {
+            if(use_gpu_symmetrizer)
+                impose_hermitian_symmetry_planar_device(length,
+                                                        ilength,
+                                                        istride,
+                                                        idist,
+                                                        nbatch,
+                                                        ibuffer_real,
+                                                        ibuffer_imag,
+                                                        deviceProp);
+            else
+            {
+                std::vector<hostbuf> input_host(input.size());
+                input_host[0].alloc(input[0].size());
+                input_host[1].alloc(input[1].size());
+
+                auto ibuffer_real_host = (Tfloat*)input_host[0].data();
+                auto ibuffer_imag_host = (Tfloat*)input_host[1].data();
+
+                if(hipMemcpy(
+                       ibuffer_real_host, ibuffer_real, input_host[0].size(), hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian symmetrizer");
+                if(hipMemcpy(
+                       ibuffer_imag_host, ibuffer_imag, input_host[1].size(), hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian symmetrizer");
+
+                impose_hermitian_symmetry_planar_host<Tfloat>(
+                    input_host, length, istride, idist, nbatch);
+
+                if(hipMemcpy(
+                       ibuffer_real, ibuffer_real_host, input_host[0].size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+                if(hipMemcpy(
+                       ibuffer_imag, ibuffer_imag_host, input_host[1].size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+            }
+        }
 
         break;
     }
@@ -366,7 +430,8 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_lower,
                       const size_t               field_lower_batch,
                       const Tint1                field_contig_stride,
-                      const size_t               field_contig_dist)
+                      const size_t               field_contig_dist,
+                      const bool                 use_gpu_symmetrizer)
 {
     switch(itype)
     {
@@ -387,8 +452,36 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                      field_contig_dist);
 
         if(itype == fft_array_type_hermitian_interleaved)
-            impose_hermitian_symmetry_interleaved_host<Tfloat>(
-                input, length, istride, idist, nbatch);
+        {
+            if(use_gpu_symmetrizer)
+            {
+                std::vector<gpubuf> input_device(input.size());
+                if(input_device[0].alloc(input[0].size()) != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to allocate device memory for Hermitian symmetrizer");
+
+                auto ibuffer        = (rocfft_complex<Tfloat>*)input[0].data();
+                auto ibuffer_device = (rocfft_complex<Tfloat>*)input_device[0].data();
+
+                if(hipMemcpy(ibuffer_device, ibuffer, input_device[0].size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+
+                auto deviceProp = get_curr_device_prop();
+                impose_hermitian_symmetry_interleaved_device(
+                    length, ilength, istride, idist, nbatch, ibuffer_device, deviceProp);
+
+                if(hipMemcpy(ibuffer, ibuffer_device, input_device[0].size(), hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian "
+                        "symmetrizer");
+            }
+            else
+                impose_hermitian_symmetry_interleaved_host<Tfloat>(
+                    input, length, istride, idist, nbatch);
+        }
 
         break;
     }
@@ -409,7 +502,68 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                 field_contig_dist);
 
         if(itype == fft_array_type_hermitian_planar)
-            impose_hermitian_symmetry_planar_host<Tfloat>(input, length, istride, idist, nbatch);
+        {
+            if(use_gpu_symmetrizer)
+            {
+                std::vector<gpubuf> input_device(input.size());
+                if(input_device[0].alloc(input[0].size()) != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to allocate device memory for Hermitian symmetrizer");
+                if(input_device[1].alloc(input[1].size()) != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to allocate device memory for Hermitian symmetrizer");
+
+                auto ibuffer_real        = (Tfloat*)input[0].data();
+                auto ibuffer_imag        = (Tfloat*)input[1].data();
+                auto ibuffer_real_device = (Tfloat*)input_device[0].data();
+                auto ibuffer_imag_device = (Tfloat*)input_device[1].data();
+
+                if(hipMemcpy(ibuffer_real_device,
+                             ibuffer_real,
+                             input_device[0].size(),
+                             hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+                if(hipMemcpy(ibuffer_imag_device,
+                             ibuffer_imag,
+                             input_device[1].size(),
+                             hipMemcpyHostToDevice)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from host to device for Hermitian symmetrizer");
+
+                auto deviceProp = get_curr_device_prop();
+                impose_hermitian_symmetry_planar_device(length,
+                                                        ilength,
+                                                        istride,
+                                                        idist,
+                                                        nbatch,
+                                                        ibuffer_real_device,
+                                                        ibuffer_imag_device,
+                                                        deviceProp);
+
+                if(hipMemcpy(ibuffer_real,
+                             ibuffer_real_device,
+                             input_device[0].size(),
+                             hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian "
+                        "symmetrizer");
+                if(hipMemcpy(ibuffer_imag,
+                             ibuffer_imag_device,
+                             input_device[1].size(),
+                             hipMemcpyDeviceToHost)
+                   != hipSuccess)
+                    throw std::runtime_error(
+                        "Failed to copy input data from device to host for Hermitian "
+                        "symmetrizer");
+            }
+            else
+                impose_hermitian_symmetry_planar_host<Tfloat>(
+                    input, length, istride, idist, nbatch);
+        }
 
         break;
     }
@@ -449,7 +603,8 @@ inline void set_input(std::vector<Tbuff>&        input,
                       const std::vector<size_t>& field_lower,
                       const size_t               field_lower_batch,
                       const std::vector<size_t>& field_contig_stride,
-                      const size_t               field_contig_dist)
+                      const size_t               field_contig_dist,
+                      const bool                 use_gpu_symmetrizer)
 {
     switch(length.size())
     {
@@ -468,7 +623,8 @@ inline void set_input(std::vector<Tbuff>&        input,
                                   field_lower[0],
                                   field_lower_batch,
                                   field_contig_stride[0],
-                                  field_contig_dist);
+                                  field_contig_dist,
+                                  use_gpu_symmetrizer);
         break;
     case 2:
         set_input<Tfloat, std::tuple<size_t, size_t>>(
@@ -486,7 +642,8 @@ inline void set_input(std::vector<Tbuff>&        input,
             std::make_tuple(field_lower[0], field_lower[1]),
             field_lower_batch,
             std::make_tuple(field_contig_stride[0], field_contig_stride[1]),
-            field_contig_dist);
+            field_contig_dist,
+            use_gpu_symmetrizer);
         break;
     case 3:
         set_input<Tfloat, std::tuple<size_t, size_t, size_t>>(
@@ -504,7 +661,8 @@ inline void set_input(std::vector<Tbuff>&        input,
             std::make_tuple(field_lower[0], field_lower[1], field_lower[2]),
             field_lower_batch,
             std::make_tuple(field_contig_stride[0], field_contig_stride[1], field_contig_stride[2]),
-            field_contig_dist);
+            field_contig_dist,
+            use_gpu_symmetrizer);
         break;
     default:
         abort();
@@ -1997,7 +2155,7 @@ public:
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
     template <typename Tbuff>
-    inline void compute_input(std::vector<Tbuff>& input)
+    inline void compute_input(std::vector<Tbuff>& input, const bool use_gpu_symmetrizer = true)
     {
         auto deviceProp = get_curr_device_prop();
 
@@ -2020,7 +2178,8 @@ public:
                                           field_lower,
                                           0,
                                           contiguous_stride,
-                                          contiguous_dist);
+                                          contiguous_dist,
+                                          use_gpu_symmetrizer);
             break;
         case fft_precision_double:
             set_input<Tbuff, double>(input,
@@ -2035,7 +2194,8 @@ public:
                                      field_lower,
                                      0,
                                      contiguous_stride,
-                                     contiguous_dist);
+                                     contiguous_dist,
+                                     use_gpu_symmetrizer);
             break;
         case fft_precision_single:
             set_input<Tbuff, float>(input,
@@ -2050,7 +2210,8 @@ public:
                                     field_lower,
                                     0,
                                     contiguous_stride,
-                                    contiguous_dist);
+                                    contiguous_dist,
+                                    use_gpu_symmetrizer);
             break;
         }
     }
@@ -4014,7 +4175,8 @@ void init_local_input(int                                       comm_rank,
                                           brick_lower_nobatch,
                                           brick_lower_batch,
                                           contiguous_stride,
-                                          contiguous_dist);
+                                          contiguous_dist,
+                                          true);
             break;
         case fft_precision_single:
             set_input<Tbuff, float>(bufvec,
@@ -4029,7 +4191,8 @@ void init_local_input(int                                       comm_rank,
                                     brick_lower_nobatch,
                                     brick_lower_batch,
                                     contiguous_stride,
-                                    contiguous_dist);
+                                    contiguous_dist,
+                                    true);
             break;
         case fft_precision_double:
             set_input<Tbuff, double>(bufvec,
@@ -4044,7 +4207,8 @@ void init_local_input(int                                       comm_rank,
                                      brick_lower_nobatch,
                                      brick_lower_batch,
                                      contiguous_stride,
-                                     contiguous_dist);
+                                     contiguous_dist,
+                                     true);
             break;
         }
     }
