@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,8 +58,8 @@ std::string hipsparse_datapath();
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #define CHECK_HIP_ERROR(error)                \
     if(error != hipSuccess)                   \
@@ -73,7 +73,7 @@ std::string hipsparse_datapath();
         exit(EXIT_FAILURE);                   \
     }
 
-#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 
 #define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
     case token_:                             \

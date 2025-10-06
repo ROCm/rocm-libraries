@@ -739,7 +739,7 @@ struct csr2csc_alg_support
 #else
 #if(CUDART_VERSION >= 12000)
         return HIPSPARSE_CSR2CSC_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return HIPSPARSE_CSR2CSC_ALG1;
 #else
         return -1;
@@ -756,7 +756,7 @@ struct csr2csc_alg_support
 #if(CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running csr2csc. Possible choices are "
                "default: 0, Alg1: 1 (default:0)";
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running csr2csc. Possible choices are "
                "default: 1, Alg1: 1, Alg2: 2 (default:1)";
 #else
@@ -773,7 +773,7 @@ struct csr2csc_alg_support
 #else
 #if(CUDART_VERSION >= 12000)
         return std::vector<int>({HIPSPARSE_CSR2CSC_ALG_DEFAULT, HIPSPARSE_CSR2CSC_ALG1});
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return std::vector<int>({HIPSPARSE_CSR2CSC_ALG1, HIPSPARSE_CSR2CSC_ALG2});
 #endif
 #endif
@@ -856,9 +856,9 @@ struct spgemm_alg_support
 #else
 #if(CUDART_VERSION >= 12000)
         return HIPSPARSE_SPGEMM_DEFAULT;
-#elif (CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPGEMM_DEFAULT;
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
         return HIPSPARSE_SPGEMM_DEFAULT;
 #else
         return -1;
@@ -875,10 +875,10 @@ struct spgemm_alg_support
 #if(CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0, Deterministic: 1, Non-Deterministic: 2, Alg1: 3, Alg2: 4, Alg3: 5 (default:0)";
-#elif (CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0, Deterministic: 1, Non-Deterministic: 2 (default:0)";
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0 (default:0)";
 #else
@@ -897,11 +897,11 @@ struct spmm_alg_support
 #else
 #if(CUDART_VERSION >= 12000)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
         return HIPSPARSE_MM_ALG_DEFAULT;
 #else
         return -1;
@@ -920,15 +920,15 @@ struct spmm_alg_support
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5 CSR Alg2: 6, "
                "CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)";
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, "
                "CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)";
-#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, "
                "Blocked ELL Alg1: 13 (default:0)";
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4  (default:0)";
 #else
@@ -947,9 +947,9 @@ struct spmv_alg_support
 #else
 #if(CUDART_VERSION >= 12000)
         return HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
         return HIPSPARSE_MV_ALG_DEFAULT;
 #else
         return -1;
@@ -966,10 +966,10 @@ struct spmv_alg_support
 #if(CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)";
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)";
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg: 1, CSR Alg1: 2, CSR Alg2: 3 (default:0)";
 #else
