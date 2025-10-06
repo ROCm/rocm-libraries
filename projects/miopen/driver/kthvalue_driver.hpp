@@ -36,6 +36,7 @@
 #include <miopen/tensor_view_utils.hpp>
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
+#include <miopen/par_walk.hpp>
 
 #include <vector>
 
@@ -90,6 +91,60 @@ void mloKthvalueFwdRunHost(TIO* input,
 }
 
 template <typename TIO>
+void mloKthvalueFwdRunHostMT(TIO* input,
+                             miopenTensorDescriptor_t pInputDesc,
+                             TIO* outputHost,
+                             miopenTensorDescriptor_t outputDesc,
+                             size_t* indices,
+                             miopenTensorDescriptor_t indicesDesc,
+                             size_t k,
+                             int dim)
+{
+    auto inputDesc         = miopen::deref(pInputDesc);
+    size_t inputSize       = inputDesc.GetElementSize();
+    size_t dimSize         = inputDesc.GetLengths()[dim];
+    size_t dimStride       = inputDesc.GetStrides()[dim];
+    auto inputTv           = miopen::get_inner_expanded_tv<5>(miopen::deref(pInputDesc));
+    auto inputTvWithoutDim = miopen::get_tv_without_dim<5>(inputTv, dim);
+    auto outputTv          = miopen::get_inner_expanded_tv<5>(miopen::deref(outputDesc));
+    auto indicesTv         = miopen::get_inner_expanded_tv<5>(miopen::deref(indicesDesc));
+
+    size_t numSlice = inputSize / dimSize;
+
+    miopen::par_walk(size_t{0}, numSlice, [&](size_t chunk_begin, size_t chunk_end)
+    {
+        std::vector<size_t> ids(dimSize);
+        for(int i = 0; i < dimSize; ++i)
+        {
+            ids[i] = i;
+        }
+
+        std::vector<float> elements{};
+
+        for(int slideChunkId = chunk_begin; slideChunkId < chunk_end; ++slideChunkId)
+        {
+            elements.clear();
+            tensor_layout_t<4> layout(inputTvWithoutDim, slideChunkId);
+            auto idx = inputTvWithoutDim.get_tensor_view_idx(layout);
+
+            for(int j = 0; j < dimSize; ++j)
+            {
+                elements.push_back(static_cast<float>(input[idx + j * dimStride]));
+            }
+
+            std::sort(ids.begin(), ids.end(), [&](size_t x, size_t y) -> bool {
+                return elements[x] < elements[y];
+            });
+            auto output_layout  = tensor_layout_t<5>(outputTv, slideChunkId);
+            auto indices_layout = tensor_layout_t<5>(indicesTv, slideChunkId);
+            outputHost[outputTv.get_tensor_view_idx(output_layout)] =
+                static_cast<TIO>(elements[ids[k - 1]]);
+            indices[indicesTv.get_tensor_view_idx(indices_layout)] = ids[k - 1];
+        }
+    });
+}
+
+template <typename TIO>
 class KthvalueDriver : public Driver
 {
 public:
@@ -113,6 +168,7 @@ public:
 
     int RunForwardGPU() override;
     int RunForwardCPU();
+    int RunForwardCPUMT();
 
     int RunBackwardGPU() override;
     int RunBackwardCPU();
@@ -140,8 +196,10 @@ private:
     std::vector<TIO> input;
     std::vector<size_t> indices;
     std::vector<size_t> indicesHost;
+    std::vector<size_t> indicesHostMT;
     std::vector<TIO> output;
     std::vector<TIO> outputHost;
+    std::vector<TIO> outputHostMT;
 
     bool isContiguous;
     int dim;
@@ -254,8 +312,10 @@ int KthvalueDriver<TIO>::AllocateBuffersAndCopy()
     input       = std::vector<TIO>(in_sz, static_cast<TIO>(0));
     indices     = std::vector<size_t>(idx_sz, 0);
     indicesHost = std::vector<size_t>(idx_sz, 0);
+    indicesHostMT = std::vector<size_t>(idx_sz, 0);
     output      = std::vector<TIO>(out_sz, static_cast<TIO>(0));
     outputHost  = std::vector<TIO>(out_sz, static_cast<TIO>(0));
+    outputHostMT = std::vector<TIO>(out_sz, static_cast<TIO>(0));
 
     for(int i = 0; i < in_sz; i++)
     {
@@ -346,6 +406,21 @@ int KthvalueDriver<TIO>::RunForwardCPU()
 }
 
 template <typename TIO>
+int KthvalueDriver<TIO>::RunForwardCPUMT()
+{
+    mloKthvalueFwdRunHostMT<TIO>(input.data(),
+                               inputDesc,
+                               outputHostMT.data(),
+                               outputDesc,
+                               indicesHostMT.data(),
+                               indicesDesc,
+                               k,
+                               dim);
+
+    return miopenStatusSuccess;
+}
+
+template <typename TIO>
 int KthvalueDriver<TIO>::RunBackwardGPU()
 {
     return miopenStatusSuccess;
@@ -374,6 +449,20 @@ int KthvalueDriver<TIO>::VerifyForward()
     else
     {
         std::cout << "Forward Kthvalue Verifies OK on CPU reference (" << errorOutput << "< "
+                  << tolerance << ')' << std::endl;
+    }
+
+    RunForwardCPUMT();
+    auto errorOutputHostMT = miopen::rms_range(outputHost, outputHostMT);
+    if(!std::isfinite(errorOutputHostMT) || errorOutputHostMT > tolerance)
+    {
+        std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT << " > " << tolerance
+                  << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "CPU MT version of forward Kthvalue Verifies OK on CPU reference (" << errorOutputHostMT << "< "
                   << tolerance << ')' << std::endl;
     }
 

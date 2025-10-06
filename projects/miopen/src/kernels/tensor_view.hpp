@@ -37,7 +37,7 @@ template <int N>
 struct tensor_view_t
 {
     // Get index in tensor view at tensor layout
-    constexpr uint64_t get_tensor_view_idx(const tensor_layout_t<N>& tensor_layout)
+    constexpr uint64_t get_tensor_view_idx(const tensor_layout_t<N>& tensor_layout) const
     {
         static_assert(N > 0);
         uint64_t idx = 0;

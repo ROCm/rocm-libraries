@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 #include "../driver/tensor_driver.hpp"
-#include "cpu_kthvalue.hpp"
+#include "../driver/kthvalue_driver.hpp"
 #include "get_handle.hpp"
 
 #include "random.hpp"
@@ -160,7 +160,17 @@ protected:
                                          config.k,
                                          config.dim,
                                          config.keepDim);
-        cpu_kthvalue<TIO>(input, outputHost, indicesHost, indicesDesc, config.k, config.dim);
+        miopenTensorDescriptor_t inputDesc = &input.desc;
+        miopenTensorDescriptor_t outputDesc = &outputHost.desc;
+        miopenTensorDescriptor_t indicesDescNonObject = &indicesDesc;
+        mloKthvalueFwdRunHost<TIO>(input.data.data(),
+                                   inputDesc,
+                                   outputHost.data.data(),
+                                   outputDesc,
+                                   indicesHost.data(),
+                                   indicesDescNonObject,
+                                   config.k,
+                                   config.dim);
 
         EXPECT_EQ(status, miopenStatusSuccess);
         output.data = handle.Read<TIO>(output_dev, output.data.size());
