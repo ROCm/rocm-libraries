@@ -1,0 +1,54 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default:release",
+      "displayName": "Configure preset for release build with installation to /opt/rocm",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+        "CMAKE_PREFIX_PATH": "/opt/rocm",
+        "GPU_TARGETS": "all"
+      },
+      "environment": {
+        "ROCM_PATH": "/opt/rocm"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Configure preset for debug build with installation to /opt/rocm",
+      "inherits": "default:release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HIPSPARSELT_BUILD_TESTING": "ON",
+        "HIPSPARSELT_ENABLE_BENCHMARKS": "ON",
+        "HIPSPARSELT_ENABLE_SAMPLES": "ON"
+      }
+    },
+    {
+      "name": "clients-only",
+      "displayName": "Configure preset for clients development",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_ENABLE_CLIENT": "ON",
+        "GPU_TARGETS": "all"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Configure preset for coverage build",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_BUILD_COVERAGE": "ON",
+        "GPU_TARGETS": "all"
+      }
+    }
+  ]
+}

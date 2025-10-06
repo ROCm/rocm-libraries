@@ -52,7 +52,10 @@ add_executable(hipdnn_sdk_tests
     test_utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     test_utilities/cpu_graph_executor/TestBatchnormTrainPlan.cpp
-
+    test_utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
+    test_utilities/cpu_graph_executor/TestConvolutionBwdSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp
 )
 
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -63,7 +66,6 @@ target_link_libraries(hipdnn_sdk_tests
     hipdnn_sdk
     hipdnn_frontend
     hip::host
-    spdlog_header_only
     ${CMAKE_DL_LIBS}
 )
 

@@ -10,7 +10,9 @@ subtree_to_project_map = {
     "projects/rocblas": "blas",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
-    "projects/rocthrust": "prim"
+    "projects/rocthrust": "prim",
+    "shared/rocroller": "blas",
+    "shared/tensile": "blas"
 }
 
 project_map = {

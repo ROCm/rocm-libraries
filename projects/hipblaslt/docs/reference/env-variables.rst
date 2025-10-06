@@ -119,3 +119,22 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
       - | Integer value specifying maximum compute units
         | Example: 32 (limits GEMM kernels to 32 compute units)
         | Default: All available compute units
+
+Type overrides
+======================
+
+Overrides for specific types.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32``
+        | Overrides the compute type used for GEMMs which specify a compute type of ``XF32``.
+      - | -1: Off (Default)
+        | 0: F32
+        | 1: XF32(eg TF32)
+        | 2: F32_BF16

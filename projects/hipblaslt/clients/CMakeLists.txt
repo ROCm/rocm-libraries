@@ -30,15 +30,10 @@ target_link_libraries(hipblaslt-clients-common
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPBLASLT_ENABLE_FETCH)
-            FetchContent_Declare(
-                mxDataGenerator
-                GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
-                GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
-            )
-            FetchContent_MakeAvailable(mxDataGenerator)
-        else()
+        if(HIPBLASLT_ENABLE_THEROCK)
             find_package(mxDataGenerator REQUIRED)
+        else()
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
         endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
@@ -111,6 +106,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             hipblaslt::hipblaslt-clients-common
             GTest::gtest
             OpenMP::OpenMP_CXX
+            ${CMAKE_DL_LIBS}
     )
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)

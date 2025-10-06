@@ -50,12 +50,17 @@ function(add_test_plugin target_name)
     # Default to custom test plugin directory unless overridden
     if(NOT DEFINED ${target_name}_OUTPUT_DIR)
         set(${target_name}_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/custom")
+        set(${target_name}_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/custom")
     endif()
     
     set_target_properties(${target_name} PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
     )
 
+    install(TARGETS ${target_name}
+        LIBRARY DESTINATION "${${target_name}_INSTALL_DIR}"
+        RUNTIME DESTINATION "${${target_name}_INSTALL_DIR}"
+    )
 
     clang_tidy_check(${target_name})
 
@@ -84,6 +89,7 @@ add_test_plugin(${TEST_INCOMPLETE_API_PLUGIN_NAME} TestIncompleteApiPlugin.cpp)
 
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
+set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
 add_test_plugin(${TEST_GOOD_DEFAULT_PLUGIN_NAME} TestGoodDefaultPlugin.cpp)
 
 

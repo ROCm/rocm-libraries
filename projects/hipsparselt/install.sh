@@ -268,7 +268,7 @@ install_msgpack_from_source( )
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
-      git clone -b cpp-3.0.1 https://github.com/msgpack/msgpack-c.git
+      git clone -b cpp-3.1.0 https://github.com/msgpack/msgpack-c.git
       cd msgpack-c
       CXX=${cxx} CC=${cc} ${cmake_executable} -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF .
       make
@@ -547,14 +547,8 @@ if [[ "${install_dependencies}" == true ]]; then
       ;;
   esac
 
-  # The following builds googletest from source, installs into cmake default /usr/local
-  pushd .
-    printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
-    mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ../../deps
-    make -j$(nproc)
-    elevate_if_not_root make install
-  popd
+  # Note: googletest is now automatically fetched and built via FetchContent in CMake
+  # No manual installation needed
 fi
 
 if [[ "${build_relocatable}" == true ]]; then
@@ -580,7 +574,11 @@ pushd .
   # #################################################
   # configure & build
   # #################################################
-  cmake_common_options="-DAMDGPU_TARGETS=${gpu_architecture}"
+  cmake_common_options="-DGPU_TARGETS=${gpu_architecture}"
+  if [[ "${install_dependencies}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_FETCH=ON"
+  fi
+
   cmake_client_options=""
 
   # build type
@@ -597,24 +595,21 @@ pushd .
 
   # cuda
   if [[ "${build_cuda}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_CUDA=ON"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_CUDA=ON"
   else
-    cmake_common_options="${cmake_common_options} -DBUILD_CUDA=OFF"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_CUDA=OFF"
   fi
 
 
   # address sanitizer
   if [[ "${build_address_sanitizer}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_ADDRESS_SANITIZER=ON"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_ASAN=ON"
   fi
 
   # code coverage
   if [[ "${build_codecoverage}" == true ]]; then
-      if [[ "${build_release}" == true ]]; then
-          echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
-          exit 1
-      fi
-      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON"
+      # Note: build system rejects code coverage if not in debug mode
+      cmake_common_options="${cmake_common_options} -DHIPSPARSELT_BUILD_COVERAGE=ON"
   fi
 
   # library type
@@ -623,7 +618,7 @@ pushd .
       printf "Static library not supported for CUDA backend.\n"
       exit 1
     fi
-    cmake_common_options="{cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
+    cmake_common_options="{cmake_common_options} -DHIPSPARSELT_BUILD_SHARED_LIBS=OFF"
     compiler="${rocm_path}/bin/amdclang++" #force amdclang++ for static libs, g++ doesn't work
     compiler_c="${rocm_path}/bin/amdclang"
     printf "Forcing compiler to amdclang++ for static library.\n"
@@ -635,9 +630,9 @@ pushd .
       mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
       install_blis
       popd
-      cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON -DLINK_BLIS=${LINK_BLIS}"
+      cmake_client_options="${cmake_client_options} -DHIPSPARSELT_ENABLE_SAMPLES=ON -DHIPSPARSELT_BUILD_TESTING=ON -DHIPSPARSELT_ENABLE_BENCHMARKS=ON -DHIPSPARSELT_ENABLE_BLIS=${LINK_BLIS}"
       if [[ -n "${blis_dir}" ]]; then
-        cmake_common_options="${cmake_common_options} -DBUILD_DIR=${blis_dir}"
+        cmake_common_options="${cmake_common_options} -DHIPSPARSELT_BLIS_DIR=${blis_dir}"
       fi
   fi
 
@@ -659,11 +654,13 @@ pushd .
 
   tensile_opt=""
   if [[ "${build_tensile}" == false ]]; then
-    tensile_opt="${tensile_opt} -DBUILD_WITH_TENSILE=OFF"
+      printf "Building hipsparselt with tensile is no longer supported.\n"
+      exit 1
    else
-    tensile_opt="${tensile_opt} -DTensile_LOGIC=${tensile_logic} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
+    tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_HIP=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LIBLOGIC_PATH=${tensile_logic}"
     if [[ ${build_jobs} != $(nproc) ]]; then
-      tensile_opt="${tensile_opt} -DTensile_CPU_THREADS=${build_jobs}"
+      tensile_opt="${tensile_opt} -DTENSILELITE_BUILD_PARALLEL_LEVEL=${build_jobs}"
     fi
   fi
 
@@ -672,9 +669,9 @@ pushd .
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_LIBRARY_FORMAT=msgpack"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=msgpack"
   else
-    tensile_opt="${tensile_opt} -DTensile_LIBRARY_FORMAT=yaml"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=yaml"
   fi
   if [[ "${tensile_no_lazy_library_loading}" == true ]]; then
     tensile_opt="${tensile_opt} -DTensile_NO_LAZY_LIBRARY_LOADING=ON"
@@ -682,14 +679,6 @@ pushd .
 
   if [[ "${disable_hipsparselt_marker}" == true ]]; then
     tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_MARKER=OFF"
-  fi
-
-  if [[ "${enable_tensile_marker}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_ENABLE_MARKER=ON"
-  fi
-
-  if [[ "${keep_build_tmp}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_KEEP_BUILD_TMP=ON"
   fi
 
   echo $cmake_common_options
@@ -705,6 +694,8 @@ pushd .
   fi
 
   # Build library with AMD toolchain because of existense of device kernels
+  printf "CMAKE CONFIGURE COMMAND: \n"
+  set -x
   if [[ "${build_relocatable}" == true ]]; then
     FC=gfortran CXX=${compiler} CC=${compiler_c} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
       -DCMAKE_INSTALL_PREFIX=${install_prefix} \
@@ -715,8 +706,10 @@ pushd .
       -DROCM_DISABLE_LDCONFIG=ON \
       -DROCM_PATH="${rocm_path}" ../..
   else
-    FC=gfortran CXX=${compiler} CC=${compiler_c} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ../..
+    FC=gfortran CXX=${compiler} CC=${compiler_c} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix}  -DCMAKE_PREFIX_PATH="${rocm_path}" -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ../..
   fi
+  set +x
+
   check_exit_code "$?"
 
   make -j$(nproc) install VERBOSE=1

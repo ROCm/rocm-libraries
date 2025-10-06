@@ -70,31 +70,30 @@ using HipcubDeviceSpmvTestsParams = ::testing::Types<DeviceSpmvParams<float, 4, 
                                                      DeviceSpmvParams<float, 4, 0, 0, 0, true>>;
 
 template<typename T, typename OffsetType>
-static void
-generate_matrix(CooMatrix<T, OffsetType> &coo_matrix,
-                int32_t grid2d,
-                int32_t grid3d,
-                int32_t wheel,
-                int32_t dense)
+static void generate_matrix(CooMatrix<T, OffsetType>& coo_matrix,
+                            int32_t                   grid2d,
+                            int32_t                   grid3d,
+                            int32_t                   wheel,
+                            int32_t                   dense)
 {
-    if (grid2d > 0)
+    if(grid2d > 0)
     {
         // Generate 2D lattice
         coo_matrix.InitGrid2d(grid2d, false);
     }
-    else if (grid3d > 0)
+    else if(grid3d > 0)
     {
         // Generate 3D lattice
         coo_matrix.InitGrid3d(grid3d, false);
     }
-    else if (wheel > 0)
+    else if(wheel > 0)
     {
         // Generate wheel graph
         coo_matrix.InitWheel(wheel);
     }
-    else if (dense > 0)
+    else if(dense > 0)
     {
-        #if 0
+#if 0
         // Generate dense graph
         OffsetType size = 1 << 24; // 16M nnz
         args.GetCmdLineArgument("size", size);
@@ -102,27 +101,22 @@ generate_matrix(CooMatrix<T, OffsetType> &coo_matrix,
         OffsetType rows = size / dense;
         printf("dense_%d_x_%d, ", rows, dense); fflush(stdout);
         coo_matrix.InitDense(rows, dense);
-        #endif
+#endif
     }
 }
 
-template <
-    typename T,
-    typename OffsetType>
-void SpmvGold(
-    CsrMatrix<T, OffsetType>&  a,
-    const T*                         vector_x,
-    const T*                         vector_y_in,
-    T*                         vector_y_out,
-    T                          alpha,
-    T                          beta)
+template<typename T, typename OffsetType>
+void SpmvGold(CsrMatrix<T, OffsetType>& a,
+              const T*                  vector_x,
+              const T*                  vector_y_in,
+              T*                        vector_y_out,
+              T                         alpha,
+              T                         beta)
 {
-    for (OffsetType row = 0; row < a.num_rows; ++row)
+    for(OffsetType row = 0; row < a.num_rows; ++row)
     {
         T partial = beta * vector_y_in[row];
-        for (OffsetType offset = a.row_offsets[row];
-             offset < a.row_offsets[row + 1];
-             ++offset)
+        for(OffsetType offset = a.row_offsets[row]; offset < a.row_offsets[row + 1]; ++offset)
         {
             partial += alpha * a.values[offset] * vector_x[a.column_indices[offset]];
         }
@@ -138,8 +132,8 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::value_type;
-    using OffsetType = int32_t;
+    using T                   = typename TestFixture::value_type;
+    using OffsetType          = int32_t;
     constexpr int32_t grid_2d = TestFixture::grid_2d;
     constexpr int32_t grid_3d = TestFixture::grid_3d;
     constexpr int32_t wheel   = TestFixture::wheel;
@@ -160,14 +154,14 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     csr_matrix.FromCoo(coo_matrix);
 
     // Allocate input and output vectors
-    T* vector_x        = new T[csr_matrix.num_cols];
-    T* vector_y_in     = new T[csr_matrix.num_rows];
-    T* vector_y_out    = new T[csr_matrix.num_rows];
+    T* vector_x     = new T[csr_matrix.num_cols];
+    T* vector_y_in  = new T[csr_matrix.num_rows];
+    T* vector_y_out = new T[csr_matrix.num_rows];
 
-    for (int col = 0; col < csr_matrix.num_cols; ++col)
+    for(int col = 0; col < csr_matrix.num_cols; ++col)
         vector_x[col] = 1.0;
 
-    for (int row = 0; row < csr_matrix.num_rows; ++row)
+    for(int row = 0; row < csr_matrix.num_rows; ++row)
         vector_y_in[row] = 1.0;
 
     // Compute reference answer
@@ -178,11 +172,16 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     hipcub::DeviceSpmv::SpmvParams<T, OffsetType> params{};
     HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
-    HIP_CHECK(g_allocator.DeviceAllocate((void **) &params.d_values,          sizeof(T) * csr_matrix.num_nonzeros));
-    HIP_CHECK(g_allocator.DeviceAllocate((void **) &params.d_row_end_offsets, sizeof(OffsetType) * (csr_matrix.num_rows + 1)));
-    HIP_CHECK(g_allocator.DeviceAllocate((void **) &params.d_column_indices,  sizeof(OffsetType) * csr_matrix.num_nonzeros));
-    HIP_CHECK(g_allocator.DeviceAllocate((void **) &params.d_vector_x,        sizeof(T) * csr_matrix.num_cols));
-    HIP_CHECK(g_allocator.DeviceAllocate((void **) &params.d_vector_y,        sizeof(T) * csr_matrix.num_rows));
+    HIP_CHECK(
+        g_allocator.DeviceAllocate((void**)&params.d_values, sizeof(T) * csr_matrix.num_nonzeros));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&params.d_row_end_offsets,
+                                         sizeof(OffsetType) * (csr_matrix.num_rows + 1)));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&params.d_column_indices,
+                                         sizeof(OffsetType) * csr_matrix.num_nonzeros));
+    HIP_CHECK(
+        g_allocator.DeviceAllocate((void**)&params.d_vector_x, sizeof(T) * csr_matrix.num_cols));
+    HIP_CHECK(
+        g_allocator.DeviceAllocate((void**)&params.d_vector_y, sizeof(T) * csr_matrix.num_rows));
 
     params.num_rows     = csr_matrix.num_rows;
     params.num_cols     = csr_matrix.num_cols;
@@ -190,11 +189,26 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     params.alpha        = alpha_const;
     params.beta         = beta_const;
 
-    HIP_CHECK(hipMemcpy(params.d_values,            csr_matrix.values,         sizeof(T) * csr_matrix.num_nonzeros, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(params.d_row_end_offsets,   csr_matrix.row_offsets,    sizeof(OffsetType) * (csr_matrix.num_rows + 1), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(params.d_column_indices,    csr_matrix.column_indices, sizeof(OffsetType) * csr_matrix.num_nonzeros, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(params.d_vector_x,          vector_x,                  sizeof(T) * csr_matrix.num_cols, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(params.d_vector_y,          vector_y_in,               sizeof(T) * csr_matrix.num_rows, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(params.d_values,
+                        csr_matrix.values,
+                        sizeof(T) * csr_matrix.num_nonzeros,
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(params.d_row_end_offsets,
+                        csr_matrix.row_offsets,
+                        sizeof(OffsetType) * (csr_matrix.num_rows + 1),
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(params.d_column_indices,
+                        csr_matrix.column_indices,
+                        sizeof(OffsetType) * csr_matrix.num_nonzeros,
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(params.d_vector_x,
+                        vector_x,
+                        sizeof(T) * csr_matrix.num_cols,
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(params.d_vector_y,
+                        vector_y_in,
+                        sizeof(T) * csr_matrix.num_rows,
+                        hipMemcpyHostToDevice));
 
     // Allocate temporary storage
     size_t temp_storage_bytes = 0;
@@ -221,7 +235,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     HIP_CHECK(hipDeviceSynchronize());
 
     test_utils::GraphHelper gHelper;
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
         gHelper.startStreamCapture(stream);
 
     HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
@@ -238,10 +252,13 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
                                         stream));
     HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
         gHelper.createAndLaunchGraph(stream);
 
-    HIP_CHECK(hipMemcpy(vector_y_in, params.d_vector_y, sizeof(T) * params.num_rows, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(vector_y_in,
+                        params.d_vector_y,
+                        sizeof(T) * params.num_rows,
+                        hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -260,4 +277,16 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
     }
+
+    // De-allocate input and output vectors
+    delete[] vector_x;
+    delete[] vector_y_in;
+    delete[] vector_y_out;
+
+    HIP_CHECK(g_allocator.DeviceFree(params.d_values));
+    HIP_CHECK(g_allocator.DeviceFree(params.d_row_end_offsets));
+    HIP_CHECK(g_allocator.DeviceFree(params.d_column_indices));
+    HIP_CHECK(g_allocator.DeviceFree(params.d_vector_x));
+    HIP_CHECK(g_allocator.DeviceFree(params.d_vector_y));
+    HIP_CHECK(g_allocator.DeviceFree(d_temp_storage));
 }

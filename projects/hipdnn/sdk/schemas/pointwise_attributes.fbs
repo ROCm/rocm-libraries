@@ -60,10 +60,13 @@ table PointwiseAttributes {
     operation: PointwiseMode;
     relu_lower_clip: float = null;
     relu_upper_clip: float = null;
-    relu_lower_slope: float = null;
+    relu_lower_clip_slope: float = null;
     axis_tensor_uid: long = null;
     in_0_tensor_uid: long;
     in_1_tensor_uid: long = null;
     in_2_tensor_uid: long = null;
     out_0_tensor_uid: long;
+    swish_beta: float = null;
+    elu_alpha: float = null;
+    softplus_beta: float = null;
 }

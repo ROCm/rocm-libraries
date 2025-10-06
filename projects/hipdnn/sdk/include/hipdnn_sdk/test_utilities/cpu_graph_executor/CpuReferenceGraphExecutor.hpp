@@ -4,6 +4,8 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -48,7 +50,8 @@ private:
         buildPlanForNode(const hipdnn_plugin::IGraph& graph,
                          const hipdnn_sdk::data_objects::Node& node)
     {
-        auto key = buildSignatureKey(node, graph.getTensorMap());
+        // TODO: Switch this to the node's compute_type
+        auto key = buildSignatureKey(node, graph.getTensorMap(), graph.getGraph().compute_type());
 
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
@@ -62,7 +65,8 @@ private:
     static PlanRegistrySignatureKey buildSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
+            tensorMap,
+        const hipdnn_sdk::data_objects::DataType computeType)
     {
         switch(node.attributes_type())
         {
@@ -74,6 +78,9 @@ private:
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
             return BatchnormTrainSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+            return ConvolutionFwdSignatureKey(node, tensorMap, computeType);
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+            return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }

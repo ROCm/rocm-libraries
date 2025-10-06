@@ -50,13 +50,10 @@ target_include_directories(miopen_legacy_plugin_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_tests)
     
     add_target_to_check_targets(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
-    
-    MakeExecutableRelocatable(miopen_legacy_plugin_tests "$ORIGIN/../lib/hipdnn_plugins/engines")
 else()
     # For standalone build, set RPATH to find the plugin
     set_target_properties(miopen_legacy_plugin_tests PROPERTIES

@@ -198,12 +198,15 @@ struct PointwiseAttributesT : public ::flatbuffers::NativeTable {
   hipdnn_sdk::data_objects::PointwiseMode operation = hipdnn_sdk::data_objects::PointwiseMode::UNSET;
   ::flatbuffers::Optional<float> relu_lower_clip = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<float> relu_upper_clip = ::flatbuffers::nullopt;
-  ::flatbuffers::Optional<float> relu_lower_slope = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<float> relu_lower_clip_slope = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> axis_tensor_uid = ::flatbuffers::nullopt;
   int64_t in_0_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> in_1_tensor_uid = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> in_2_tensor_uid = ::flatbuffers::nullopt;
   int64_t out_0_tensor_uid = 0;
+  ::flatbuffers::Optional<float> swish_beta = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<float> elu_alpha = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<float> softplus_beta = ::flatbuffers::nullopt;
 };
 
 struct PointwiseAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -213,12 +216,15 @@ struct PointwiseAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
     VT_OPERATION = 4,
     VT_RELU_LOWER_CLIP = 6,
     VT_RELU_UPPER_CLIP = 8,
-    VT_RELU_LOWER_SLOPE = 10,
+    VT_RELU_LOWER_CLIP_SLOPE = 10,
     VT_AXIS_TENSOR_UID = 12,
     VT_IN_0_TENSOR_UID = 14,
     VT_IN_1_TENSOR_UID = 16,
     VT_IN_2_TENSOR_UID = 18,
-    VT_OUT_0_TENSOR_UID = 20
+    VT_OUT_0_TENSOR_UID = 20,
+    VT_SWISH_BETA = 22,
+    VT_ELU_ALPHA = 24,
+    VT_SOFTPLUS_BETA = 26
   };
   hipdnn_sdk::data_objects::PointwiseMode operation() const {
     return static_cast<hipdnn_sdk::data_objects::PointwiseMode>(GetField<int8_t>(VT_OPERATION, 0));
@@ -238,11 +244,11 @@ struct PointwiseAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   bool mutate_relu_upper_clip(float _relu_upper_clip) {
     return SetField<float>(VT_RELU_UPPER_CLIP, _relu_upper_clip);
   }
-  ::flatbuffers::Optional<float> relu_lower_slope() const {
-    return GetOptional<float, float>(VT_RELU_LOWER_SLOPE);
+  ::flatbuffers::Optional<float> relu_lower_clip_slope() const {
+    return GetOptional<float, float>(VT_RELU_LOWER_CLIP_SLOPE);
   }
-  bool mutate_relu_lower_slope(float _relu_lower_slope) {
-    return SetField<float>(VT_RELU_LOWER_SLOPE, _relu_lower_slope);
+  bool mutate_relu_lower_clip_slope(float _relu_lower_clip_slope) {
+    return SetField<float>(VT_RELU_LOWER_CLIP_SLOPE, _relu_lower_clip_slope);
   }
   ::flatbuffers::Optional<int64_t> axis_tensor_uid() const {
     return GetOptional<int64_t, int64_t>(VT_AXIS_TENSOR_UID);
@@ -274,17 +280,38 @@ struct PointwiseAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   bool mutate_out_0_tensor_uid(int64_t _out_0_tensor_uid = 0) {
     return SetField<int64_t>(VT_OUT_0_TENSOR_UID, _out_0_tensor_uid, 0);
   }
+  ::flatbuffers::Optional<float> swish_beta() const {
+    return GetOptional<float, float>(VT_SWISH_BETA);
+  }
+  bool mutate_swish_beta(float _swish_beta) {
+    return SetField<float>(VT_SWISH_BETA, _swish_beta);
+  }
+  ::flatbuffers::Optional<float> elu_alpha() const {
+    return GetOptional<float, float>(VT_ELU_ALPHA);
+  }
+  bool mutate_elu_alpha(float _elu_alpha) {
+    return SetField<float>(VT_ELU_ALPHA, _elu_alpha);
+  }
+  ::flatbuffers::Optional<float> softplus_beta() const {
+    return GetOptional<float, float>(VT_SOFTPLUS_BETA);
+  }
+  bool mutate_softplus_beta(float _softplus_beta) {
+    return SetField<float>(VT_SOFTPLUS_BETA, _softplus_beta);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int8_t>(verifier, VT_OPERATION, 1) &&
            VerifyField<float>(verifier, VT_RELU_LOWER_CLIP, 4) &&
            VerifyField<float>(verifier, VT_RELU_UPPER_CLIP, 4) &&
-           VerifyField<float>(verifier, VT_RELU_LOWER_SLOPE, 4) &&
+           VerifyField<float>(verifier, VT_RELU_LOWER_CLIP_SLOPE, 4) &&
            VerifyField<int64_t>(verifier, VT_AXIS_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_IN_0_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_IN_1_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_IN_2_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_OUT_0_TENSOR_UID, 8) &&
+           VerifyField<float>(verifier, VT_SWISH_BETA, 4) &&
+           VerifyField<float>(verifier, VT_ELU_ALPHA, 4) &&
+           VerifyField<float>(verifier, VT_SOFTPLUS_BETA, 4) &&
            verifier.EndTable();
   }
   PointwiseAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -305,8 +332,8 @@ struct PointwiseAttributesBuilder {
   void add_relu_upper_clip(float relu_upper_clip) {
     fbb_.AddElement<float>(PointwiseAttributes::VT_RELU_UPPER_CLIP, relu_upper_clip);
   }
-  void add_relu_lower_slope(float relu_lower_slope) {
-    fbb_.AddElement<float>(PointwiseAttributes::VT_RELU_LOWER_SLOPE, relu_lower_slope);
+  void add_relu_lower_clip_slope(float relu_lower_clip_slope) {
+    fbb_.AddElement<float>(PointwiseAttributes::VT_RELU_LOWER_CLIP_SLOPE, relu_lower_clip_slope);
   }
   void add_axis_tensor_uid(int64_t axis_tensor_uid) {
     fbb_.AddElement<int64_t>(PointwiseAttributes::VT_AXIS_TENSOR_UID, axis_tensor_uid);
@@ -322,6 +349,15 @@ struct PointwiseAttributesBuilder {
   }
   void add_out_0_tensor_uid(int64_t out_0_tensor_uid) {
     fbb_.AddElement<int64_t>(PointwiseAttributes::VT_OUT_0_TENSOR_UID, out_0_tensor_uid, 0);
+  }
+  void add_swish_beta(float swish_beta) {
+    fbb_.AddElement<float>(PointwiseAttributes::VT_SWISH_BETA, swish_beta);
+  }
+  void add_elu_alpha(float elu_alpha) {
+    fbb_.AddElement<float>(PointwiseAttributes::VT_ELU_ALPHA, elu_alpha);
+  }
+  void add_softplus_beta(float softplus_beta) {
+    fbb_.AddElement<float>(PointwiseAttributes::VT_SOFTPLUS_BETA, softplus_beta);
   }
   explicit PointwiseAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -339,19 +375,25 @@ inline ::flatbuffers::Offset<PointwiseAttributes> CreatePointwiseAttributes(
     hipdnn_sdk::data_objects::PointwiseMode operation = hipdnn_sdk::data_objects::PointwiseMode::UNSET,
     ::flatbuffers::Optional<float> relu_lower_clip = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<float> relu_upper_clip = ::flatbuffers::nullopt,
-    ::flatbuffers::Optional<float> relu_lower_slope = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<float> relu_lower_clip_slope = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> axis_tensor_uid = ::flatbuffers::nullopt,
     int64_t in_0_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> in_1_tensor_uid = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> in_2_tensor_uid = ::flatbuffers::nullopt,
-    int64_t out_0_tensor_uid = 0) {
+    int64_t out_0_tensor_uid = 0,
+    ::flatbuffers::Optional<float> swish_beta = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<float> elu_alpha = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<float> softplus_beta = ::flatbuffers::nullopt) {
   PointwiseAttributesBuilder builder_(_fbb);
   builder_.add_out_0_tensor_uid(out_0_tensor_uid);
   if(in_2_tensor_uid) { builder_.add_in_2_tensor_uid(*in_2_tensor_uid); }
   if(in_1_tensor_uid) { builder_.add_in_1_tensor_uid(*in_1_tensor_uid); }
   builder_.add_in_0_tensor_uid(in_0_tensor_uid);
   if(axis_tensor_uid) { builder_.add_axis_tensor_uid(*axis_tensor_uid); }
-  if(relu_lower_slope) { builder_.add_relu_lower_slope(*relu_lower_slope); }
+  if(softplus_beta) { builder_.add_softplus_beta(*softplus_beta); }
+  if(elu_alpha) { builder_.add_elu_alpha(*elu_alpha); }
+  if(swish_beta) { builder_.add_swish_beta(*swish_beta); }
+  if(relu_lower_clip_slope) { builder_.add_relu_lower_clip_slope(*relu_lower_clip_slope); }
   if(relu_upper_clip) { builder_.add_relu_upper_clip(*relu_upper_clip); }
   if(relu_lower_clip) { builder_.add_relu_lower_clip(*relu_lower_clip); }
   builder_.add_operation(operation);
@@ -366,12 +408,15 @@ inline bool operator==(const PointwiseAttributesT &lhs, const PointwiseAttribute
       (lhs.operation == rhs.operation) &&
       (lhs.relu_lower_clip == rhs.relu_lower_clip) &&
       (lhs.relu_upper_clip == rhs.relu_upper_clip) &&
-      (lhs.relu_lower_slope == rhs.relu_lower_slope) &&
+      (lhs.relu_lower_clip_slope == rhs.relu_lower_clip_slope) &&
       (lhs.axis_tensor_uid == rhs.axis_tensor_uid) &&
       (lhs.in_0_tensor_uid == rhs.in_0_tensor_uid) &&
       (lhs.in_1_tensor_uid == rhs.in_1_tensor_uid) &&
       (lhs.in_2_tensor_uid == rhs.in_2_tensor_uid) &&
-      (lhs.out_0_tensor_uid == rhs.out_0_tensor_uid);
+      (lhs.out_0_tensor_uid == rhs.out_0_tensor_uid) &&
+      (lhs.swish_beta == rhs.swish_beta) &&
+      (lhs.elu_alpha == rhs.elu_alpha) &&
+      (lhs.softplus_beta == rhs.softplus_beta);
 }
 
 inline bool operator!=(const PointwiseAttributesT &lhs, const PointwiseAttributesT &rhs) {
@@ -391,12 +436,15 @@ inline void PointwiseAttributes::UnPackTo(PointwiseAttributesT *_o, const ::flat
   { auto _e = operation(); _o->operation = _e; }
   { auto _e = relu_lower_clip(); _o->relu_lower_clip = _e; }
   { auto _e = relu_upper_clip(); _o->relu_upper_clip = _e; }
-  { auto _e = relu_lower_slope(); _o->relu_lower_slope = _e; }
+  { auto _e = relu_lower_clip_slope(); _o->relu_lower_clip_slope = _e; }
   { auto _e = axis_tensor_uid(); _o->axis_tensor_uid = _e; }
   { auto _e = in_0_tensor_uid(); _o->in_0_tensor_uid = _e; }
   { auto _e = in_1_tensor_uid(); _o->in_1_tensor_uid = _e; }
   { auto _e = in_2_tensor_uid(); _o->in_2_tensor_uid = _e; }
   { auto _e = out_0_tensor_uid(); _o->out_0_tensor_uid = _e; }
+  { auto _e = swish_beta(); _o->swish_beta = _e; }
+  { auto _e = elu_alpha(); _o->elu_alpha = _e; }
+  { auto _e = softplus_beta(); _o->softplus_beta = _e; }
 }
 
 inline ::flatbuffers::Offset<PointwiseAttributes> PointwiseAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PointwiseAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -410,23 +458,29 @@ inline ::flatbuffers::Offset<PointwiseAttributes> CreatePointwiseAttributes(::fl
   auto _operation = _o->operation;
   auto _relu_lower_clip = _o->relu_lower_clip;
   auto _relu_upper_clip = _o->relu_upper_clip;
-  auto _relu_lower_slope = _o->relu_lower_slope;
+  auto _relu_lower_clip_slope = _o->relu_lower_clip_slope;
   auto _axis_tensor_uid = _o->axis_tensor_uid;
   auto _in_0_tensor_uid = _o->in_0_tensor_uid;
   auto _in_1_tensor_uid = _o->in_1_tensor_uid;
   auto _in_2_tensor_uid = _o->in_2_tensor_uid;
   auto _out_0_tensor_uid = _o->out_0_tensor_uid;
+  auto _swish_beta = _o->swish_beta;
+  auto _elu_alpha = _o->elu_alpha;
+  auto _softplus_beta = _o->softplus_beta;
   return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
       _fbb,
       _operation,
       _relu_lower_clip,
       _relu_upper_clip,
-      _relu_lower_slope,
+      _relu_lower_clip_slope,
       _axis_tensor_uid,
       _in_0_tensor_uid,
       _in_1_tensor_uid,
       _in_2_tensor_uid,
-      _out_0_tensor_uid);
+      _out_0_tensor_uid,
+      _swish_beta,
+      _elu_alpha,
+      _softplus_beta);
 }
 
 }  // namespace data_objects

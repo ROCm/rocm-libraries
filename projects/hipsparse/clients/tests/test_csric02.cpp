@@ -83,7 +83,7 @@ Arguments setup_csric02_arguments(csric02_bin_tuple tup)
     // Get current executables absolute path
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    arg.set_filename(get_filename(bin_file));
 
     return arg;
 }
