@@ -10,6 +10,7 @@ The following table lists all operations currently supported in hipDNN, along wi
 |--------------|-----------|---------|----------------|-------------------|
 | Batchnorm Inference | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
 | Batchnorm Backwards | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
+| Convolution Forward | Fp16, BFp16, Float32 | NHWC, NCHW, NDHWC, NCDHW | No | MIOpen Legacy Plugin |
 
 ## Notes
 

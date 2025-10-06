@@ -1724,66 +1724,83 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // allocate memory on device
         dA.emplace_back(TiA, size_dA[i] * block_count, HMM);
+        CHECK_DEVICE_ALLOCATION(hipGetLastError());
         dB.emplace_back(TiB, size_dB[i] * block_count, HMM);
+        CHECK_DEVICE_ALLOCATION(hipGetLastError());
         dC.emplace_back(To, size_C[i] * block_count, HMM);
+        CHECK_DEVICE_ALLOCATION(hipGetLastError());
 
         if(!arg.c_equal_d)
         {
             dD.emplace_back(To, size_D[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
             dDp = &dD;
         }
         else
             dDp = &dC;
 
         if(size_bias[i] * block_count != 0)
+        {
             dBias.emplace_back(Tbias, size_bias[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
+        }
 
         if(arg.scaleAlpha_vector)
         {
             dScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
 
         if(arg.use_e)
         {
             dE.emplace_back(Taux, size_E[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
 
         if(arg.scaleA == hipblaslt_scaling_format::Scalar
            || arg.scaleA == hipblaslt_scaling_format::Vector)
         {
             dScaleA.emplace_back(Talpha, size_scaleAVec[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         else if(arg.scaleA == hipblaslt_scaling_format::Block)
         {
             // For MX format, use uin8_t for the scale (E8M0)
             dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         if(arg.scaleB == hipblaslt_scaling_format::Scalar
            || arg.scaleB == hipblaslt_scaling_format::Vector)
         {
             dScaleB.emplace_back(Talpha, size_scaleBVec[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         else if(arg.scaleB == hipblaslt_scaling_format::Block)
         {
             // For MX format, use uin8_t for the scale (E8M0)
             dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         if(arg.scaleC)
         {
             dScaleC.emplace_back(Talpha, 1, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         if(arg.scaleD)
         {
             dScaleD.emplace_back(Talpha, 1, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         if(arg.amaxD)
         {
             epilogue_on[i] = true;
             dAmaxD.emplace_back(Talpha, 1, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
         if(arg.scaleE)
         {
             dScaleE.emplace_back(Talpha, 1, HMM);
+            CHECK_DEVICE_ALLOCATION(hipGetLastError());
         }
 
         // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
