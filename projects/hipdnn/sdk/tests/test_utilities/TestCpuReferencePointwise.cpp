@@ -568,10 +568,11 @@ protected:
 
     void testReluBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});
-        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
 
-        // Fill with mix of positive and negative values
+        // Fill input with mix of positive and negative values
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
         input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
@@ -581,24 +582,29 @@ protected:
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_5), 0, 1, 1, 0); // -5.0
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input);
+        // Fill upstream gradient with test values
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        // Create expected tensor: ReLU_backward(x) = x > 0 ? 1 : 0
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, input, upstreamGrad);
+
+        // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 0, 0, 0); // 1 > 0 ? 1 : 0 = 1
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 0, 1); // -2 > 0 ? 1 : 0 = 0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 1, 0); // 0 > 0 ? 1 : 0 = 0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 0, 1, 1); // 3 > 0 ? 1 : 0 = 1
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 0, 0); // -1 > 0 ? 1 : 0 = 0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 1, 0, 1); // 2.5 > 0 ? 1 : 0 = 1
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 1, 1, 0); // -5 > 0 ? 1 : 0 = 0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 1, 1, 1); // 1.5 > 0 ? 1 : 0 = 1
-
-        // Add debug output for the zero case
-        std::cout << "DEBUG: For input x=0.0, output="
-                  << static_cast<float>(output.getHostValue(0, 0, 1, 0))
-                  << ", expected=" << static_cast<float>(expected.getHostValue(0, 0, 1, 0)) << "\n";
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 * 1.0f), 0, 0, 0, 0); // dy=2.0, x=1.0>0: dx=2.0*1=2.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f), 0, 0, 0, 1); // dy=1.5, x=-2.0<0: dx=1.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 0.0f), 0, 0, 1, 0); // dy=3.0, x=0.0<=0: dx=3.0*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1 * 1.0f), 0, 0, 1, 1); // dy=1.0, x=3.0>0: dx=1.0*1=1.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5 * 0.0f), 0, 1, 0, 0); // dy=2.5, x=-1.0<0: dx=2.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4 * 1.0f), 0, 1, 0, 1); // dy=4.0, x=2.5>0: dx=4.0*1=4.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f), 0, 1, 1, 0); // dy=1.5, x=-5.0<0: dx=1.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 1.0f), 0, 1, 1, 1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
         auto tolerance = getTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
@@ -662,10 +668,11 @@ protected:
 
     void testParameterizedReluBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});
-        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
 
-        // Fill with values that will test all three regions: below lower_clip, between clips, above upper_clip
+        // Fill forward input with values that will test all three regions: below lower_clip, between clips, above upper_clip
         input.setHostValue(
             static_cast<Input1Type>(-TEST_VALUE_5), 0, 0, 0, 0); // -5.0 (below lower_clip)
         input.setHostValue(
@@ -682,33 +689,60 @@ protected:
         input.setHostValue(
             static_cast<Input1Type>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (between clips)
 
+        // Fill upstream gradient with test values
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
+
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
         float lowerClip = -TEST_VALUE_2; // -2.0
         float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input, lowerClip, upperClip, lowerSlope);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, input, upstreamGrad, lowerClip, upperClip, lowerSlope);
 
-        // Create expected tensor: Generalized ReLU backward with parameters
+        // Create expected tensor: dx = dy * local_gradient
         Tensor<OutputType> expected({1, 2, 2, 2});
-        // For x < lower_clip: derivative = lower_slope
-        // For lower_clip <= x <= upper_clip: derivative = 1.0
-        // For x > upper_clip: derivative = 0.0
-        expected.setHostValue(static_cast<OutputType>(lowerSlope),
-                              0,
-                              0,
-                              0,
-                              0); // below lower_clip -> lower_slope = 0.1
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 0, 0, 1); // in range -> 1.0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 0, 1, 0); // in range -> 1.0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 1, 1); // above upper_clip -> 0.0
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f), 0, 1, 0, 0); // at lower_clip boundary -> 1.0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 1, 0, 1); // in range -> 1.0
-        expected.setHostValue(
-            static_cast<OutputType>(1.0f), 0, 1, 1, 0); // at upper_clip boundary -> 1.0
-        expected.setHostValue(static_cast<OutputType>(1.0f), 0, 1, 1, 1); // in range -> 1.0
+        for(int n = 0; n < 1; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        auto inputVal = static_cast<float>(input.getHostValue(n, c, h, w));
+                        auto upstreamGradVal = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
+                        
+                        // For x < lower_clip: local_gradient = lower_slope
+                        // For lower_clip <= x <= upper_clip: local_gradient = 1.0
+                        // For x > upper_clip: local_gradient = 0.0
+                        float localGradient;
+                        if(inputVal < lowerClip)
+                        {
+                            localGradient = lowerSlope;
+                        }
+                        else if(inputVal > upperClip)
+                        {
+                            localGradient = 0.0f;
+                        }
+                        else
+                        {
+                            localGradient = 1.0f;
+                        }
+                        
+                        auto downstreamGrad = upstreamGradVal * localGradient;
+                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
+                    }
+                }
+            }
+        }
 
         auto tolerance = getTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
@@ -783,10 +817,11 @@ protected:
 
     void testSigmoidBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});
-        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
 
-        // Fill with values that will test sigmoid backward function
+        // Fill forward input with values that will test sigmoid backward function
         input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
@@ -796,10 +831,20 @@ protected:
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
-            PointwiseMode::SIGMOID_BWD, output, input);
+        // Fill upstream gradient with test values
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        // Create expected tensor: sigmoid_backward(x) = sigmoid(x) * (1 - sigmoid(x))
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::SIGMOID_BWD, output, input, upstreamGrad);
+
+        // Create expected tensor: dx = dy * sigmoid(x) * (1 - sigmoid(x))
         Tensor<OutputType> expected({1, 2, 2, 2});
         for(int n = 0; n < 1; ++n)
         {
@@ -810,9 +855,11 @@ protected:
                     for(int w = 0; w < 2; ++w)
                     {
                         auto inputVal = input.getHostValue(n, c, h, w);
+                        auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
                         auto sigmoid = 1.0f / (1.0f + std::exp(-static_cast<float>(inputVal)));
-                        auto derivative = sigmoid * (1.0f - sigmoid);
-                        expected.setHostValue(static_cast<OutputType>(derivative), n, c, h, w);
+                        auto localGradient = sigmoid * (1.0f - sigmoid);
+                        auto downstreamGrad = static_cast<float>(upstreamGradVal) * localGradient;
+                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
@@ -866,10 +913,11 @@ protected:
 
     void testTanhBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});
-        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
 
-        // Fill with values that will test tanh backward function
+        // Fill forward input with values that will test tanh backward function
         input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1); // 1.0
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1), 0, 0, 1, 0); // -1.0
@@ -879,10 +927,20 @@ protected:
         input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_3), 0, 1, 1, 0); // -3.0
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1_5), 0, 1, 1, 1); // 1.5
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
-            PointwiseMode::TANH_BWD, output, input);
+        // Fill upstream gradient with test values
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 0); // 2.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 0, 0, 1); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 0, 1, 0); // 3.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // 1.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_2_5), 0, 1, 0, 0); // 2.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_4), 0, 1, 0, 1); // 4.0
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
+        upstreamGrad.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        // Create expected tensor: tanh_backward(x) = 1 - tanh²(x)
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::TANH_BWD, output, input, upstreamGrad);
+
+        // Create expected tensor: dx = dy * (1 - tanh²(x))
         Tensor<OutputType> expected({1, 2, 2, 2});
         for(int n = 0; n < 1; ++n)
         {
@@ -893,9 +951,11 @@ protected:
                     for(int w = 0; w < 2; ++w)
                     {
                         auto inputVal = input.getHostValue(n, c, h, w);
+                        auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
                         auto tanhVal = std::tanh(static_cast<float>(inputVal));
-                        auto derivative = 1.0f - (tanhVal * tanhVal);
-                        expected.setHostValue(static_cast<OutputType>(derivative), n, c, h, w);
+                        auto localGradient = 1.0f - (tanhVal * tanhVal);
+                        auto downstreamGrad = static_cast<float>(upstreamGradVal) * localGradient;
+                        expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }

@@ -77,6 +77,22 @@ public:
         executeBinaryOperation(operation, output, input1, input2);
     }
 
+    // Parameterized binary operations
+    template <typename Input1Type, typename Input2Type, typename ParamType>
+    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                 TensorBase<OutputType>& output,
+                                 const TensorBase<Input1Type>& input1,
+                                 const TensorBase<Input2Type>& input2,
+                                 const ParamType lowerClip,
+                                 const ParamType upperClip,
+                                 const ParamType lowerSlope)
+    {
+        static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
+                      "ParamType must be a valid tensor type for scalar parameters");
+        executeParameterizedBinaryOperation(
+            operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
+    }
+
 private:
     template <typename InputType>
     static void executeUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
@@ -90,20 +106,11 @@ private:
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(input, output, pointwise::ReluForward{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeUnary(input, output, pointwise::ReluBackward{});
-            break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
             policy.executeUnary(input, output, pointwise::SigmoidForward{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
-            policy.executeUnary(input, output, pointwise::SigmoidBackward{});
-            break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
             policy.executeUnary(input, output, pointwise::TanhForward{});
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
-            policy.executeUnary(input, output, pointwise::TanhBackward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::ABS:
             policy.executeUnary(input, output, pointwise::AbsoluteValue{});
@@ -136,12 +143,6 @@ private:
             policy.executeUnary(
                 input, output, pointwise::ReluForward{lowerClip, upperClip, lowerSlope});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeUnary(
-                input,
-                output,
-                pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
-            break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -166,12 +167,74 @@ private:
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
             break;
+        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::ReluBackward{});
+            break;
+        case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::SigmoidBackward{});
+            break;
+        case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::TanhBackward{});
+            break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 
         policy.markOutputModified(output);
+    }
+
+    template <typename Input1Type, typename Input2Type, typename ParamType>
+    static void
+        executeParameterizedBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                            TensorBase<OutputType>& output,
+                                            const TensorBase<Input1Type>& input1,
+                                            const TensorBase<Input2Type>& input2,
+                                            const ParamType lowerClip,
+                                            const ParamType upperClip,
+                                            const ParamType lowerSlope)
+    {
+        DeviceExecutor policy;
+
+        switch(operation)
+        {
+        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
+            break;
+        default:
+            throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        policy.markOutputModified(output);
+    }
+
+    static bool canExecuteUnaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    {
+        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
+               !attrs->in_1_tensor_uid() &&               // Must NOT be set
+               !attrs->in_2_tensor_uid() &&               // Must NOT be set
+               attrs->out_0_tensor_uid() != 0;            // Required: output
+    }
+
+    static bool canExecuteBinaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    {
+        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
+               attrs->in_1_tensor_uid() &&                // Must be set
+               *attrs->in_1_tensor_uid() != 0 &&          // Must be non-zero
+               !attrs->in_2_tensor_uid() &&               // Must NOT be set
+               attrs->out_0_tensor_uid() != 0;            // Required: output
+    }
+
+    static bool canExecuteTernaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    {
+        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
+               attrs->in_1_tensor_uid() &&                // Must be set
+               *attrs->in_1_tensor_uid() != 0 &&          // Must be non-zero
+               attrs->in_2_tensor_uid() &&                // Must be set
+               *attrs->in_2_tensor_uid() != 0 &&          // Must be non-zero
+               attrs->out_0_tensor_uid() != 0;            // Required: output
     }
 
     static bool canExecuteOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
@@ -183,28 +246,29 @@ private:
             return false;
         }
 
-        if(attrs->in_0_tensor_uid() == 0 || attrs->out_0_tensor_uid() == 0)
-        {
-            return false;
-        }
-
         PointwiseMode operation = attrs->operation();
         switch(operation)
         {
-        case PointwiseMode::ADD:
-        case PointwiseMode::SUB:
-            // Binary operations require second input
-            // Check if nullable field is set and has a non-zero value
-            return (attrs->in_1_tensor_uid() && *attrs->in_1_tensor_uid() != 0);
+        // Unary operations (only those with implemented functors)
         case PointwiseMode::RELU_FWD:
-        case PointwiseMode::RELU_BWD:
         case PointwiseMode::SIGMOID_FWD:
-        case PointwiseMode::SIGMOID_BWD:
         case PointwiseMode::TANH_FWD:
-        case PointwiseMode::TANH_BWD:
         case PointwiseMode::ABS:
         case PointwiseMode::NEG:
-            return true;
+            return canExecuteUnaryOperation(attrs);
+
+        // Binary operations (only those with implemented functors)
+        case PointwiseMode::ADD:
+        case PointwiseMode::SUB:
+        case PointwiseMode::RELU_BWD:
+        case PointwiseMode::SIGMOID_BWD:
+        case PointwiseMode::TANH_BWD:
+            return canExecuteBinaryOperation(attrs);
+
+        // Ternary operations (none implemented yet)
+        // case PointwiseMode::BINARY_SELECT:
+        //     return canExecuteTernaryOperation(attrs);
+
         default:
             return false;
         }
