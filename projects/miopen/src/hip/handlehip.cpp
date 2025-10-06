@@ -142,22 +142,6 @@ void default_deallocator(void*, void* mem)
         MIOPEN_LOG_I2("hipFree " << size << " at " << mem << " Ok");
 }
 
-int get_device_id() // Get random device
-{
-    int device;
-    auto status = hipGetDevice(&device);
-    if(status != hipSuccess)
-        MIOPEN_THROW("No device");
-    return device;
-}
-
-void set_device(int id)
-{
-    auto status = hipSetDevice(id);
-    if(status != hipSuccess)
-        MIOPEN_THROW("Error setting device");
-}
-
 #if MIOPEN_BUILD_DEV
 int set_default_device()
 {
@@ -174,6 +158,25 @@ int set_default_device()
 #endif
 
 } // namespace
+
+// The following two methods (get_device_id and set_device) were in the unnamed
+// namespace above, but in order to unit test them, they need to be accessible
+// from other translation units, hence moving them here.
+int get_device_id() // Get random device
+{
+    int device;
+    auto status = hipGetDevice(&device);
+    if(status != hipSuccess)
+        MIOPEN_THROW("No device");
+    return device;
+}
+
+void set_device(int id)
+{
+    auto status = hipSetDevice(id);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "Error setting device " + std::to_string(id));
+}
 
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local unsigned int meopenHandle_current_stream_id = 0;
