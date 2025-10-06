@@ -93,6 +93,11 @@ namespace rocRoller
         ExpressionPtr combineShifts(ExpressionPtr expr);
 
         /**
+         * TODO: add description
+         */
+        ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
+
+        /**
          * @brief Simplify expressions
          *
          * @param expr Input expression
