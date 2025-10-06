@@ -1421,6 +1421,10 @@ namespace TensileLite
             {
                 auto problem = problems[idx];
                 StreamKSettings sk;
+                // Grouped gemm currently not supported in SK
+                // But this code path is run to calculate to determine if solution is supported
+                // Set SK grid to 1 for now to avoid 0 division
+                sk.grid = 1;
                 singleCallArgs<T_Debug, false>(problem,
                                                inputs.grouped[idx],
                                                workspaceOffsetInByte,
