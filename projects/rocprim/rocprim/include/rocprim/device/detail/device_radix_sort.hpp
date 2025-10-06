@@ -1070,8 +1070,15 @@ struct onesweep_iteration_helper
         = RadixRankAlgorithm == block_radix_rank_algorithm::match;
 
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
-    static constexpr unsigned int N = 1;
+
+    static constexpr unsigned int OffsetSize = sizeof(Offset) * radix_size;
+    static constexpr unsigned int OrderedSize = rocprim::max(sizeof(Key), sizeof(Value)) * BlockSize;
+    static constexpr unsigned int RankSize = sizeof(typename radix_rank_type::storage_type);
+    static constexpr unsigned int Diff = (RankSize - OffsetSize) / OrderedSize;
+
+    static constexpr unsigned int N = rocprim::min(rocprim::max(Diff, 1u), ItemsPerThread);
     static constexpr unsigned int WindowOffset = BlockSize * N;
+    static constexpr bool Divisible = ItemsPerThread % N == 0;
 
     union data_storage
     {
@@ -1243,7 +1250,7 @@ struct onesweep_iteration_helper
         }
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int j = 0, x = 0; j < ItemsPerThread/N; ++j, x+=WindowOffset)
+        for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, N); ++j, x+=WindowOffset)
         {
             if constexpr(N != ItemsPerThread)
             {
@@ -1264,7 +1271,7 @@ struct onesweep_iteration_helper
             for (unsigned int n = 0; n < N; ++n)
             {
                 const unsigned int rank = x + n * BlockSize + flat_id;
-                if(IsFull || rank < valid_items)
+                if((Divisible && IsFull) || rank < valid_items)
                 {
                     Key                key = storage.ordered_block_keys[rank - x];
                     const unsigned int digit
@@ -1315,7 +1322,7 @@ struct onesweep_iteration_helper
             // ordered_block_values.
             unsigned int digits[ItemsPerThread];
             ROCPRIM_NO_UNROLL
-            for(unsigned int j = 0, x = 0; j < ItemsPerThread/N; ++j, x+=WindowOffset)
+            for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, N); ++j, x+=WindowOffset)
             {
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
@@ -1333,7 +1340,7 @@ struct onesweep_iteration_helper
                 for (unsigned int n = 0; n < N; ++n)
                 {
                     const unsigned int rank = x + n * BlockSize + flat_id;
-                    if(IsFull || rank < valid_items)
+                    if((Divisible && IsFull) || rank < valid_items)
                     {
                         const Key key = storage.ordered_block_keys[rank - x];
                         digits[n + j * N] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
@@ -1345,7 +1352,7 @@ struct onesweep_iteration_helper
            
             // And scatter the values to global memory.
             ROCPRIM_NO_UNROLL
-            for(unsigned int j = 0, x = 0; j < ItemsPerThread/N; ++j, x+=WindowOffset)
+            for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, N); ++j, x+=WindowOffset)
             {
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
@@ -1363,7 +1370,7 @@ struct onesweep_iteration_helper
                 for (unsigned int n = 0; n < N; ++n)
                 {
                     const unsigned int rank = x + n * BlockSize + flat_id;
-                    if(IsFull || rank < valid_items)
+                    if((Divisible && IsFull) || rank < valid_items)
                     {
                         const Value  value                  = storage.ordered_block_values[rank - x];
                         const Offset global_offset          = storage.global_digit_offsets[digits[n + j * N]];
