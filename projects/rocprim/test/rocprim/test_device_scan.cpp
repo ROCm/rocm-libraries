@@ -427,9 +427,10 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                          stream));
 
             // Create ordered block id.
-            common::device_ptr<unsigned int> ordered_bid_storage(1);
-            auto ordered_bid = rocprim::detail::ordered_block_id<unsigned int>::create(
-                ordered_bid_storage.get());
+            using block_id_type = rocprim::detail::block_id_wrapper<unsigned int>;
+            common::device_ptr<void> ordered_bid_storage(sizeof(block_id_type::id_type));
+            auto ordered_bid = block_id_type::create(ordered_bid_storage.get());
+            HIP_CHECK(ordered_bid.reset_from_host(stream));
 
             // Call the provided function with either scan_state or scan_state_with_sleep based on
             // the value of use_sleep

@@ -336,14 +336,35 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
                     start = std::chrono::steady_clock::now();
                 }
-                init_lookback_scan_state_kernel<<<dim3(init_grid_size),
-                                                  dim3(block_size),
-                                                  0,
-                                                  stream>>>(scan_state,
-                                                            scan_blocks,
-                                                            ordered_bid,
-                                                            number_of_blocks - 1,
-                                                            i > 0 ? previous_last_value : nullptr);
+                if (!Exclusive && last_keys_of_each_block_size_byte != 0 && i == 0)
+                {
+                    init_device_scan_by_key_kernel<<<dim3(init_grid_size),
+                                                     dim3(block_size),
+                                                     0,
+                                                     stream>>>(
+                        scan_state,
+                        scan_blocks,
+                        number_of_blocks - 1,
+                        i > 0 ? previous_last_value : nullptr,
+                        keys,
+                        last_keys_of_each_block,
+                        last_keys_of_each_block_size_byte
+                            / sizeof(decltype(*last_keys_of_each_block)),
+                        items_per_block,
+                        ordered_bid);
+                }
+                else
+                {
+                    init_device_scan_by_key_kernel<<<dim3(init_grid_size),
+                                                     dim3(block_size),
+                                                     0,
+                                                     stream>>>(scan_state,
+                                                               scan_blocks,
+                                                               number_of_blocks - 1,
+                                                               i > 0 ? previous_last_value
+                                                                     : nullptr,
+                                                               ordered_bid);
+                }
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
                                                             scan_blocks,
                                                             start);

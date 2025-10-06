@@ -289,9 +289,9 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                 }
 
                 // Define block and grid sizes for init kernel.
-                const auto init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
-                const auto init_grid_size
-                    = detail::ceiling_div(number_of_blocks_launch, block_size);
+                const size_t init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
+                const size_t init_grid_size
+                    = detail::ceiling_div(number_of_blocks_launch, init_block_size);
                 reduce_by_key_init_kernel<<<init_grid_size, init_block_size, 0, stream>>>(
                     scan_state,
                     number_of_blocks_launch,
