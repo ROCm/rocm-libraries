@@ -30,6 +30,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/filesystem.hpp>
 
+#include <boost/asio/ip/host_name.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/none.hpp>
 #include <boost/optional.hpp>
@@ -263,9 +264,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             return false;
         }
 
-        std::vector<char> hostname(256);
-        gethostname(hostname.data(), hostname.size());
-        const auto temp_name = filename + "." + hostname.data() + "." + std::to_string(getpid()) + ".temp";
+        const auto temp_name = filename + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid()) + ".temp";
         std::ofstream to(temp_name, std::ios::binary);
 
         if(!to)

@@ -30,6 +30,7 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 
+#include <boost/asio/ip/host_name.hpp>
 #include <boost/date_time/posix_time/posix_time_duration.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/date_time/posix_time/ptime.hpp>
@@ -55,10 +56,7 @@ public:
     FSLockFile(const fs::path& path_) : path(path_)
     {
         lockfile_path = path.string() + ".fslock";
-        std::vector<char> hostname(256);
-        gethostname(hostname.data(), hostname.size());
-        pid_t pid = getpid();
-        hardlink_path = lockfile_path.string() + "." + hostname.data() + "." + std::to_string(pid);
+        hardlink_path = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid());
     }
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)
