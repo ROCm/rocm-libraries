@@ -757,7 +757,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
             {
-                {
+                // TODO: should this be done on a copy of the graph?
+                const auto addresses = [&]() -> Generator<size_t> {
                     namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
                     auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
@@ -770,7 +771,6 @@ namespace rocRoller
 
                     if(tile.memoryType == MemoryType::WAVE)
                     {
-
                         auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
                         auto [vgprTag, vgpr]         = m_graph->getDimension<VGPR>(tag);
 
@@ -854,32 +854,32 @@ namespace rocRoller
                                 const auto offset
                                     = std::visit([](auto x) { return (size_t)x; }, offsetValue);
 
-                                Log::error("offset: {}", offset);
+                                co_yield offset;
                             }
                         }
                     }
-                }
-                for(const auto instr : m_loadStoreTileGenerator.genLoadLDSTile(
+                    else
+                    {
+                        // Non-Wave LDS Load
+                    }
+                }()
+                                                    .to<std::vector>();
+
+                for(auto instr : m_loadStoreTileGenerator.genLoadLDSTile(
                         tag, load, m_graph->buildTransformer(tag)))
                 {
-                    // if(GPUInstructionInfo::isLDS(instr.getOpCode()))
-                    // {
-                    //     // From Register to LoadLDSTile
-                    //     Log::error("lowering LoadLDSTile: {}", instr.toString(LogLevel::Verbose));
-                    //     const auto addrReg = instr.getSrcs()[0];
-                    //     AssertFatal(addrReg != nullptr);
-                    //     auto context = addrReg->context();
-                    //     AssertFatal(context != nullptr);
-                    //     auto offsetTag
-                    //         = context->registerTagManager()->findRegister(addrReg).value();
-                    //     Log::error("offsetTag {}", offsetTag);
-                    //     for(const auto& connection :
-                    //         context->kernel()->kernel_graph()->mapper.getCoordinateConnections(
-                    //             offsetTag))
-                    //     {
-                    //         Log::error("connection {}", toString(connection));
-                    //     }
-                    // }
+                    if(GPUInstructionInfo::isLDS(instr.getOpCode()) && addresses.size() > 0)
+                    {
+                        AssertFatal(not instr.addresses.has_value(),
+                                    "Should be unset",
+                                    ShowValue((*instr.addresses).size()));
+                        instr.addresses = addresses;
+
+                        for(const auto addr : addresses)
+                        {
+                            Log::error("  LDS address: {}", addr);
+                        }
+                    }
                     co_yield std::move(instr);
                 }
             }

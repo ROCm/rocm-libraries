@@ -83,29 +83,35 @@ namespace rocRoller
             if(!ctx)
                 return 4;
 
+            // Skip, ds_write, ds_read_u, transposed, ...;
+            // Non-gfx9
+            if(not inst.getOpCode().starts_with("ds_read_b")
+               || inst.getOpCode().find("_tr") != std::string::npos
+               || (not ctx->targetArchitecture().target().isCDNAGPU()))
+                return MEMObserver::getWeights(ctx).dsmemCycles;
+
             auto opCode              = inst.getOpCode();
             auto [dwords, direction] = LDSObserver::getLdsInfoFromOpcode(opCode);
 
             KernelGraph::MemoryTracer::MemoryOpLDS memOp{direction};
 
-            // Maybe on average 2-way bank conflict?
-            const uint          waveSize     = 64;
-            const uint          conflictWays = 2;
-            std::vector<size_t> addresses;
-            addresses.reserve(waveSize);
+            Log::error("{}", inst.toString(LogLevel::Debug));
 
-            for(uint thread = 0; thread < waveSize; ++thread)
-            {
-                addresses.push_back(thread * dwords * 4 * conflictWays);
-            }
+            // Currently only annotates MemoryType::WAVE
+            if(not inst.addresses.has_value())
+                return MEMObserver::getWeights(ctx).dsmemCycles;
 
-            KernelGraph::MemoryTracer::RuntimeLDSInstruction runtimeInst{memOp, dwords, addresses};
+            AssertFatal(inst.addresses->size() > 0,
+                        "LDS instruction missing addresses for cycle prediction");
+
+            KernelGraph::MemoryTracer::RuntimeLDSInstruction runtimeInst{
+                memOp, dwords, *inst.addresses};
 
             auto gfx = ctx->targetArchitecture().target().gfx;
 
             auto cycles
                 = KernelGraph::MemoryTracer::LDSBankModel::getInstructionCycles(runtimeInst, gfx);
-            // Log::error("cycles: {}", cycles);
+            Log::error("cycles: {}, dwords: {}", cycles, dwords);
             return cycles;
         }
 

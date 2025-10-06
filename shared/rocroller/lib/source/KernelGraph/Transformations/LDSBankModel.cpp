@@ -262,9 +262,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
-            AssertFatal(baseAddresses[i] % 4 == 0,
-                        "Base address {} is not dword aligned",
-                        baseAddresses[i]);
+            AssertFatal(
+                baseAddresses[i] % 4 == 0, "Base address is not dword aligned ", baseAddresses[i]);
             uint baseAddr = baseAddresses[i] / 4; // in dwords
 
             // Note: address arithmetic is operating on dword (instead of byte) units
