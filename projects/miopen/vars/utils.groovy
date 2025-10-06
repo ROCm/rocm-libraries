@@ -396,19 +396,6 @@ def buildHipClangJob(Map conf=[:]){
         return retimage
 }
 
-def buildHipClangJob(Map conf=[:]){
-    try{
-        buildHipClangJob(conf)
-        cleanWs()
-    }
-    catch(e){
-        echo "throwing error exception for the stage"
-        echo 'Exception occurred: ' + e.toString()
-        throw e
-    }
-}
-
-
 def RunPerfTest(Map conf=[:]){
     def dockerOpts="--device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"
     try {

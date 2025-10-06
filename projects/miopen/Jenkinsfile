@@ -190,6 +190,11 @@ pipeline {
                     }
                 }
             }
+            post {
+                always {
+                    cleanWs()
+                }
+            }
         }
         stage("Package and Static checks") {
             when {
@@ -204,6 +209,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob( package_build:true, needs_gpu:false)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -227,6 +237,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Check GTest Format') {
                     agent { label rocmnode("nogpu") }
@@ -238,6 +253,11 @@ pipeline {
                             withWorkingDir {
                                 sh 'cd ./test/utils && python3 gtest_formating_checks.py'
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -258,6 +278,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Tuna Fin Build Test')
                 {
@@ -270,6 +295,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: fin_flags, make_targets: "all", build_fin: "ON", needs_gpu:false, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -293,6 +323,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Dbsync gfx908') {
                     when {
@@ -305,6 +340,11 @@ pipeline {
                     agent{ label rocmnode("gfx908") }
                     steps{
                         runDbSyncJob(utils)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
                     }
                 }
                 stage('Dbsync gfx90a') {
@@ -319,6 +359,11 @@ pipeline {
                     steps{
                         runDbSyncJob(utils)
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Dbsync gfx942') {
                     when {
@@ -331,6 +376,11 @@ pipeline {
                     agent{ label rocmnode("gfx942") }
                     steps{
                         runDbSyncJob(utils)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
                     }
                 }
                 stage('Bf16 Hip Install All gfx908') {
@@ -347,6 +397,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Bf16_flags + Full_test, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -366,6 +421,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Bf16 Hip Install All gfx942') {
                     when {
@@ -381,6 +441,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Bf16_flags + Full_test, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -400,6 +465,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp16 Hip All Install gfx90a') {
                     when {
@@ -415,6 +485,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Full_test + Fp16_flags, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -434,6 +509,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp16 Hip All gfx1101') {
                     when {
@@ -449,6 +529,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Full_test + Fp16_flags)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -468,6 +553,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip All gfx90a') {
                     when {
@@ -483,6 +573,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Full_test)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -502,6 +597,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip All Install gfx1101') {
                     when {
@@ -517,6 +617,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(setup_flags: Full_test, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -535,6 +640,11 @@ pipeline {
                                 // Adds a comment under the jenkins build number so you can tell it is a nightly build.
                                 currentBuild.description = "Nightly Build"
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -558,6 +668,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip Debug NOCK gfx90a Build-Only') {
                     when {
@@ -575,6 +690,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip Static gfx90a') {
                     when {
@@ -590,6 +710,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off", mlir_build: 'OFF', build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -613,6 +738,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip Fast-Find gfx90a') {
                     when {
@@ -634,6 +764,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip SqlitePerfdb gfx90a') {
                     when {
@@ -649,6 +784,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On", build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -670,6 +810,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip Debug gfx908') {
                     when {
@@ -685,6 +830,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -704,6 +854,11 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
                 stage('Fp32 Hip Debug gfx942') {
                     when {
@@ -719,6 +874,11 @@ pipeline {
                             withWorkingDir {
                                 utils.buildHipClangJob(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
