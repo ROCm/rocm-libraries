@@ -185,7 +185,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
                     {
                         int pool_size = (hend - hstart) * (wend - wstart);
                         pool_size     = (pool_size == 0) ? 1 : pool_size;
-                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
+                        inv_pool_size = approxRcp(CVT_INTEGRAL2ACCUM(pool_size));
                     }
 
                     int lcl_top_h = top_h - top_y;

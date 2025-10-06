@@ -239,7 +239,7 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                     {
                         int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
                         pool_size     = (pool_size == 0) ? 1 : pool_size;
-                        inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
+                        inv_pool_size = approxRcp(CVT_INTEGRAL2ACCUM(pool_size));
                     }
 
                     unsigned int top_gbl_off =

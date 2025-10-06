@@ -47,7 +47,7 @@ constexpr bool USE_MASK = false;
 #endif
 
 #if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-#define MLO_POOLING_OP(A, B) (__builtin_fmax((A), (B)))
+#define MLO_POOLING_OP(A, B) (poolingMax((A), (B)))
 #elif AVERAGE_OPS
 #define MLO_POOLING_OP(A, B) ((A) + (B))
 #endif
@@ -163,7 +163,7 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
             {
                 int pool_size = (hend - hstart) * (wend - wstart);
                 pool_size     = (pool_size == 0) ? 1 : pool_size;
-                inv_pool_size = FLOAT_ACCUM{1} / CVT_INTEGRAL2ACCUM(pool_size);
+                inv_pool_size = approxRcp(CVT_INTEGRAL2ACCUM(pool_size));
             }
             else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
             {
