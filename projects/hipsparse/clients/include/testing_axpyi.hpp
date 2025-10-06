@@ -45,7 +45,7 @@ void testing_axpyi_bad_arg(const Arguments& argus)
 #if(!defined(CUDART_VERSION))
     int nnz       = 100;
     int safe_size = 100;
-    T alpha = make_DataType<T>(0.6);
+    T   alpha     = make_DataType<T>(0.6);
 
     hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
 

@@ -37,8 +37,7 @@ public:
         case hipsparse_test_numeric_types_enum::all:
         {
             return std::is_same<T, float>{} || std::is_same<T, double>{}
-                   || std::is_same<T, hipComplex>{}
-                   || std::is_same<T, hipDoubleComplex>{};
+                   || std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
         }
         case hipsparse_test_numeric_types_enum::real_only:
         {

@@ -25,43 +25,44 @@
 
 #include "hipsparse_data.hpp"
 #include "hipsparse_test.hpp"
-#include "hipsparse_test_template_traits.hpp"
 #include "hipsparse_test_enum.hpp"
+#include "hipsparse_test_template_traits.hpp"
 
 // INTERNAL MACRO TO SPECIALIZE TEST CALL NEEDED TO INSTANTIATE
-#define SPECIALIZE_HIPSPARSE_TEST_CALL(ROUTINE)                            \
-    template <>                                                            \
-    struct temp::hipsparse_test_call<hipsparse_test_enum::ROUTINE>               \
-    {                                                                      \
-        template <typename... P>                                           \
-        static void testing_bad_arg(const Arguments& arg)                  \
-        {                                                                  \
-            testing_##ROUTINE##_bad_arg<P...>(arg);                        \
-        }                                                                  \
-        template <typename... P>                                           \
-        static void testing(const Arguments& arg)                          \
-        {                                                                  \
-            testing_##ROUTINE<P...>(arg);                                  \
-        }                                                                  \
+#define SPECIALIZE_HIPSPARSE_TEST_CALL(ROUTINE)                    \
+    template <>                                                    \
+    struct temp::hipsparse_test_call<hipsparse_test_enum::ROUTINE> \
+    {                                                              \
+        template <typename... P>                                   \
+        static void testing_bad_arg(const Arguments& arg)          \
+        {                                                          \
+            testing_##ROUTINE##_bad_arg<P...>(arg);                \
+        }                                                          \
+        template <typename... P>                                   \
+        static void testing(const Arguments& arg)                  \
+        {                                                          \
+            testing_##ROUTINE<P...>(arg);                          \
+        }                                                          \
     };
 
 // INTERNAL MACRO TO SPECIALIZE TEST FUNCTOR NEEDED TO INSTANTIATE
-#define SPECIALIZE_HIPSPARSE_TEST_FUNCTORS(ROUTINE, ...)                \
-    template <>                                                         \
-    struct hipsparse_test_functors<hipsparse_test_enum::ROUTINE>        \
-    {                                                                   \
-        static std::string name_suffix(const Arguments& arg)            \
-        {                                                               \
-            std::ostringstream s;                                       \
-            hipsparse_test_name_suffix_generator(s, __VA_ARGS__);       \
-            return s.str();                                             \
-        }                                                               \
+#define SPECIALIZE_HIPSPARSE_TEST_FUNCTORS(ROUTINE, ...)          \
+    template <>                                                   \
+    struct hipsparse_test_functors<hipsparse_test_enum::ROUTINE>  \
+    {                                                             \
+        static std::string name_suffix(const Arguments& arg)      \
+        {                                                         \
+            std::ostringstream s;                                 \
+            hipsparse_test_name_suffix_generator(s, __VA_ARGS__); \
+            return s.str();                                       \
+        }                                                         \
     }
 
 // INTERNAL MACRO TO SPECIALIZE TEST TRAITS NEEDED TO INSTANTIATE
-#define SPECIALIZE_HIPSPARSE_TEST_TRAITS(ROUTINE, CONFIG)                           \
-    template <> struct hipsparse_test_traits<hipsparse_test_enum::ROUTINE> : CONFIG \
-    {                                                                               \
+#define SPECIALIZE_HIPSPARSE_TEST_TRAITS(ROUTINE, CONFIG)               \
+    template <>                                                         \
+    struct hipsparse_test_traits<hipsparse_test_enum::ROUTINE> : CONFIG \
+    {                                                                   \
     }
 
 // INSTANTIATE TESTS
@@ -72,28 +73,28 @@ using test_template_traits_t
 template <hipsparse_test_enum::value_type ROUTINE>
 using test_dispatch_t = hipsparse_test_dispatch<hipsparse_test_traits<ROUTINE>::s_dispatch>;
 
-#define INSTANTIATE_HIPSPARSE_TEST(ROUTINE, CATEGORY)                                     \
-    using ROUTINE = test_template_traits_t<hipsparse_test_enum::ROUTINE>::filter;         \
-    template <typename... P>                                                              \
-    using ROUTINE##_call                                                                  \
-        = test_template_traits_t<hipsparse_test_enum::ROUTINE>::caller<P...>;             \
-    TEST_P(ROUTINE, CATEGORY)                                                             \
-    {                                                                                     \
-        test_dispatch_t<hipsparse_test_enum::ROUTINE>::template dispatch<ROUTINE##_call>( \
-            GetParam());                                                                  \
-    }                                                                                     \
+#define INSTANTIATE_HIPSPARSE_TEST(ROUTINE, CATEGORY)                                          \
+    using ROUTINE = test_template_traits_t<hipsparse_test_enum::ROUTINE>::filter;              \
+    template <typename... P>                                                                   \
+    using ROUTINE##_call = test_template_traits_t<hipsparse_test_enum::ROUTINE>::caller<P...>; \
+    TEST_P(ROUTINE, CATEGORY)                                                                  \
+    {                                                                                          \
+        test_dispatch_t<hipsparse_test_enum::ROUTINE>::template dispatch<ROUTINE##_call>(      \
+            GetParam());                                                                       \
+    }                                                                                          \
     INSTANTIATE_TEST_CATEGORIES(ROUTINE)
 
 // DEFINE ALL REQUIRED INFORMATION FOR A TEST ROUTINE BUT WITH A PREDEFINED CONFIGURATION
 // (i.e. [T (default) | <I,T> | <I,J,T>] + a selection of numeric types (all (default), real_only, complex_only, some other specific situations (?) ) )
-#define TEST_ROUTINE_WITH_CONFIG(ROUTINE, CATEGORY, CONFIG, ...)   \
-    SPECIALIZE_HIPSPARSE_TEST_TRAITS(ROUTINE, CONFIG);        \
-    SPECIALIZE_HIPSPARSE_TEST_FUNCTORS(ROUTINE, __VA_ARGS__); \
-    SPECIALIZE_HIPSPARSE_TEST_CALL(ROUTINE);                  \
-    namespace                                                 \
-    {                                                         \
-        INSTANTIATE_HIPSPARSE_TEST(ROUTINE, CATEGORY);        \
+#define TEST_ROUTINE_WITH_CONFIG(ROUTINE, CATEGORY, CONFIG, ...) \
+    SPECIALIZE_HIPSPARSE_TEST_TRAITS(ROUTINE, CONFIG);           \
+    SPECIALIZE_HIPSPARSE_TEST_FUNCTORS(ROUTINE, __VA_ARGS__);    \
+    SPECIALIZE_HIPSPARSE_TEST_CALL(ROUTINE);                     \
+    namespace                                                    \
+    {                                                            \
+        INSTANTIATE_HIPSPARSE_TEST(ROUTINE, CATEGORY);           \
     }
 
 // DEFINE ALL REQUIRED INFORMATION FOR A TEST ROUTINE WITH A DEFAULT CONFIGURATION (i.e  T + all numeric types)
-#define TEST_ROUTINE(ROUTINE, CATEGORY, ...) TEST_ROUTINE_WITH_CONFIG(ROUTINE, CATEGORY, hipsparse_test_config, __VA_ARGS__)
+#define TEST_ROUTINE(ROUTINE, CATEGORY, ...) \
+    TEST_ROUTINE_WITH_CONFIG(ROUTINE, CATEGORY, hipsparse_test_config, __VA_ARGS__)

@@ -300,7 +300,7 @@ constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
 }
 #else
 #if(CUDART_VERSION >= 12000)
-constexpr auto hipsparse_spgemmalg2string(hipsparseSpMMAlg_t alg)
+constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
     {
@@ -320,7 +320,7 @@ constexpr auto hipsparse_spgemmalg2string(hipsparseSpMMAlg_t alg)
     return "invalid";
 }
 #elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
-constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
     {
@@ -334,7 +334,7 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
     return "invalid";
 }
 #elif(CUDART_VERSION >= 11000)
-constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
 {
     switch(alg)
     {

@@ -47,11 +47,11 @@
         categ0ry,                                                              \
         testclass,                                                             \
         testing::ValuesIn(HipSPARSE_TestData::begin([](const Arguments& arg) { \
-                            return !strcmp(arg.category, #categ0ry)            \
-                                    && testclass::type_filter(arg)             \
-                                    && testclass::function_filter(arg);        \
-                        }),                                                    \
-                        HipSPARSE_TestData::end()),                            \
+                              return !strcmp(arg.category, #categ0ry)          \
+                                     && testclass::type_filter(arg)            \
+                                     && testclass::function_filter(arg);       \
+                          }),                                                  \
+                          HipSPARSE_TestData::end()),                          \
         testclass::PrintToStringParamName());
 
 #if defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
@@ -101,14 +101,14 @@ public:
         // Warn about unset letter parameters
         if(name.find('*') != name.npos)
             fputs("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-                "Warning: Character * found in name."
-                " This means a required letter parameter\n"
-                "(e.g., transA, diag, etc.) has not been set in the YAML file."
-                " Check the YAML file.\n"
-                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
-                stderr);
+                  "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+                  "Warning: Character * found in name."
+                  " This means a required letter parameter\n"
+                  "(e.g., transA, diag, etc.) has not been set in the YAML file."
+                  " Check the YAML file.\n"
+                  "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                  "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
+                  stderr);
 
         // Replace non-alphanumeric characters with letters
         std::replace(name.begin(), name.end(), '-', 'n'); // minus
@@ -144,8 +144,8 @@ public:
         return std::move(name);
     }
 
-    HipSPARSE_TestName()                          = default;
-    HipSPARSE_TestName(const HipSPARSE_TestName&) = delete;
+    HipSPARSE_TestName()                                     = default;
+    HipSPARSE_TestName(const HipSPARSE_TestName&)            = delete;
     HipSPARSE_TestName& operator=(const HipSPARSE_TestName&) = delete;
 };
 
