@@ -1426,201 +1426,6 @@ TEST(TestConvolutionWgradNode, InferPropertiesLargeKernel7x7)
     EXPECT_EQ(inferredDims.size(), 4);
     EXPECT_EQ(inferredDims[0], 64); // Output channels
     EXPECT_EQ(inferredDims[1], 3); // Input channels
-    // Kernel height: ((224 + 3 + 3 - 2 * (112 - 1) - 1) / 1) + 1 = (224 + 6 - 222 - 1) / 1 + 1 = 7 / 1 + 1 = 8
-    // Wait, let me recalculate: numerator = 224 + 3 + 3 - 2 * 111 - 1 = 230 - 222 - 1 = 7 - 1 = 6? No wait:
-    // numerator = in_i + pre + post - stride * (out_i - 1) - 1
-    // numerator = 224 + 3 + 3 - 2 * (112 - 1) - 1 = 224 + 6 - 222 - 1 = 7
-    // kernel = (7 / 1) + 1 = 8? Hmm, that doesn't seem right for a 7x7 kernel with stride 2.
-    // Let me think about this formula more carefully.
-
-    // From forward formula: out = (in + pre + post - dilation * (kernel - 1) - 1) / stride + 1
-    // For kernel inference: in + pre + post - stride * (out - 1) - 1 = dilation * (kernel - 1)
-    // kernel = ((in + pre + post - stride * (out - 1) - 1) / dilation) + 1
-    // kernel = ((224 + 3 + 3 - 2 * 111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7 / 1 + 1 = 8
-    // Hmm, this gives 8 but we probably want 7. Let me check the math again.
-    // Actually for a 7x7 kernel with padding 3, stride 2: out = (224 + 3 + 3 - 7) / 2 + 1 = 223 / 2 + 1 = 111.5 + 1 = 112.5
-    // So with integer math: out = (224 + 6 - 7) / 2 + 1 = 223 / 2 + 1 = 111 + 1 = 112. Correct!
-    // Now for reverse: kernel = ((in + pre + post - stride * (out - 1) - 1) / dilation) + 1
-    // kernel = ((224 + 3 + 3 - 2 * 111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7 / 1 + 1 = 8
-    // That's off by 1! Let me check the formula in the dgrad code...
-
-    // From the dgrad code:
-    // dx_size = stride * (dy_size - 1) + dilated_kernel_size - pre_pad - post_pad
-    // where dilated_kernel_size = dilation * (kernel_size - 1) + 1
-
-    // For weight grad, we need to solve for kernel_size given x_size and dy_size:
-    // y_size = (x_size + pre + post - dilation * (kernel - 1) - 1) / stride + 1
-    // stride * (y_size - 1) = x_size + pre + post - dilation * (kernel - 1) - 1
-    // dilation * (kernel - 1) = x_size + pre + post - stride * (y_size - 1) - 1
-    // kernel - 1 = (x_size + pre + post - stride * (y_size - 1) - 1) / dilation
-    // kernel = ((x_size + pre + post - stride * (y_size - 1) - 1) / dilation) + 1
-
-    // kernel = ((224 + 3 + 3 - 2 * (112 - 1) - 1) / 1) + 1
-    // kernel = ((224 + 6 - 2 * 111 - 1) / 1) + 1
-    // kernel = ((230 - 222 - 1) / 1) + 1
-    // kernel = (7 / 1) + 1 = 8
-
-    // Hmm, but we want a 7x7 kernel. Let me verify with the forward formula:
-    // y = (x + pre + post - dilation * (kernel - 1) - 1) / stride + 1
-    // y = (224 + 3 + 3 - 1 * (7 - 1) - 1) / 2 + 1
-    // y = (230 - 6 - 1) / 2 + 1 = 223 / 2 + 1 = 111 + 1 = 112. Correct!
-
-    // Now reverse:
-    // kernel = ((x + pre + post - stride * (y - 1) - 1) / dilation) + 1
-    // kernel = ((224 + 3 + 3 - 2 * 111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7 / 1 + 1 = 8
-
-    // There's a bug in my understanding. Let me reconsider...
-    // Actually, I think the issue is in the forward formula. Let's use:
-    // y = floor((x + pre + post - kernel) / stride) + 1
-    // This is equivalent to: y = floor((x + pre + post - dilation * (kernel - 1) - 1) / stride) + 1
-
-    // For 7x7 kernel with stride 2, padding 3:
-    // y = floor((224 + 3 + 3 - 7) / 2) + 1 = floor(223 / 2) + 1 = 111 + 1 = 112. Correct!
-
-    // Now for reverse to find kernel:
-    // floor((x + pre + post - kernel) / stride) + 1 = y
-    // floor((x + pre + post - kernel) / stride) = y - 1
-    // (x + pre + post - kernel) / stride >= y - 1
-    // (x + pre + post - kernel) / stride < y
-    // x + pre + post - kernel >= stride * (y - 1)
-    // x + pre + post - kernel < stride * y
-    // kernel <= x + pre + post - stride * (y - 1)
-    // kernel > x + pre + post - stride * y
-
-    // kernel = x + pre + post - stride * (y - 1)
-    // kernel = 224 + 3 + 3 - 2 * 111 = 230 - 222 = 8
-
-    // Hmm, this gives 8, not 7. But wait, the actual formula with dilation is:
-    // y = floor((x + pre + post - dilation * (kernel - 1) - 1) / stride) + 1
-
-    // Let me verify again with kernel=7:
-    // y = floor((224 + 3 + 3 - 1 * (7 - 1) - 1) / 2) + 1
-    // y = floor((230 - 6 - 1) / 2) + 1 = floor(223 / 2) + 1 = 111 + 1 = 112. Correct!
-
-    // Now for reverse:
-    // floor((x + pre + post - dilation * (kernel - 1) - 1) / stride) = y - 1
-    // The floor means: x + pre + post - dilation * (kernel - 1) - 1 >= stride * (y - 1)
-    // and: x + pre + post - dilation * (kernel - 1) - 1 < stride * y
-
-    // From the lower bound: dilation * (kernel - 1) <= x + pre + post - stride * (y - 1) - 1
-    // kernel - 1 <= (x + pre + post - stride * (y - 1) - 1) / dilation
-    // kernel <= ((x + pre + post - stride * (y - 1) - 1) / dilation) + 1
-
-    // From the upper bound: dilation * (kernel - 1) > x + pre + post - stride * y - 1
-    // kernel - 1 > (x + pre + post - stride * y - 1) / dilation
-    // kernel > ((x + pre + post - stride * y - 1) / dilation) + 1
-
-    // The exact kernel size (when it's perfectly divisible) is:
-    // kernel = ((x + pre + post - stride * (y - 1) - 1) / dilation) + 1
-
-    // kernel = ((224 + 3 + 3 - 2 * 111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7 / 1 + 1 = 8
-
-    // So the formula gives 8, but the actual kernel should be 7. This suggests there might be an off-by-one error somewhere.
-    // Let me reconsider the forward formula more carefully.
-
-    // Actually, I think I was using the wrong formula. The standard conv formula is:
-    // out = floor((in + 2*pad - dilation*(kernel-1) - 1) / stride) + 1
-
-    // With symmetric padding (pre=post=pad):
-    // out = floor((in + pre + post - dilation*(kernel-1) - 1) / stride) + 1
-
-    // For kernel=7, pad=3, stride=2, in=224:
-    // out = floor((224 + 3 + 3 - 1*(7-1) - 1) / 2) + 1
-    // out = floor((230 - 6 - 1) / 2) + 1 = floor(223/2) + 1 = 111 + 1 = 112 ✓
-
-    // Solving for kernel:
-    // floor((in + pre + post - dilation*(kernel-1) - 1) / stride) = out - 1
-    // in + pre + post - dilation*(kernel-1) - 1 = stride * (out - 1) + remainder
-    // where 0 <= remainder < stride
-
-    // For exact inference (assuming remainder=0):
-    // dilation*(kernel-1) = in + pre + post - stride*(out-1) - 1
-    // kernel = ((in + pre + post - stride*(out-1) - 1) / dilation) + 1
-
-    // kernel = ((224 + 3 + 3 - 2*111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7/1 + 1 = 8
-
-    // Hmm, this still gives 8. But wait, I should check if the formula itself is correct.
-    // Let's verify with kernel=8:
-    // out = floor((224 + 3 + 3 - 1*(8-1) - 1) / 2) + 1
-    // out = floor((230 - 7 - 1) / 2) + 1 = floor(222/2) + 1 = 111 + 1 = 112 ✓
-
-    // Both kernel=7 and kernel=8 give the same output! This is because of the floor operation.
-    // The actual kernel range that produces out=112 is:
-    // 7 <= kernel <= 8 (with stride=2, there's a range of valid kernels)
-
-    // For inference, we typically want the minimum valid kernel size, which would be 7.
-    // But our formula gives the maximum, which is 8.
-
-    // Actually, I think the issue is that I need to use the ceiling division or adjust the formula.
-    // Let me think about this differently...
-
-    // Actually, looking at my implementation in ConvolutionWgradNode, I use:
-    // numerator = xSize + prePad + postPad - strideVal * (dySize - 1) - 1
-    // dwDims[i] = (numerator / dilationVal) + 1
-
-    // This is integer division, so:
-    // dwDims[i] = floor(numerator / dilationVal) + 1
-
-    // For the 7x7 case:
-    // numerator = 224 + 3 + 3 - 2 * 111 - 1 = 230 - 222 - 1 = 7
-    // dwDims[i] = floor(7 / 1) + 1 = 7 + 1 = 8
-
-    // So the test should expect 8, not 7. But this seems wrong...
-
-    // Let me reconsider. For a standard 7x7 conv with stride 2 and pad 3:
-    // out = floor((224 + 6 - 7) / 2) + 1 = floor(223 / 2) + 1 = 111 + 1 = 112
-
-    // Using the dilation formula:
-    // out = floor((224 + 6 - 1*(7-1) - 1) / 2) + 1 = floor((230 - 6 - 1) / 2) + 1 = floor(223 / 2) + 1 = 112 ✓
-
-    // For reverse (finding kernel from in and out):
-    // We know: floor((in + pre + post - dilation*(kernel-1) - 1) / stride) = out - 1
-    // This means: stride*(out-1) <= in + pre + post - dilation*(kernel-1) - 1 < stride*out
-    // So: dilation*(kernel-1) > in + pre + post - stride*out - 1
-    // and: dilation*(kernel-1) <= in + pre + post - stride*(out-1) - 1
-
-    // The minimum kernel that satisfies this:
-    // dilation*(kernel-1) = in + pre + post - stride*(out-1) - 1
-    // kernel = ((in + pre + post - stride*(out-1) - 1) / dilation) + 1
-
-    // kernel = ((224 + 6 - 2*111 - 1) / 1) + 1 = (230 - 222 - 1) / 1 + 1 = 7/1 + 1 = 8
-
-    // OK so the formula does give 8. Let me verify that kernel=8 also produces out=112:
-    // out = floor((224 + 6 - 1*(8-1) - 1) / 2) + 1 = floor((230 - 7 - 1) / 2) + 1 = floor(222/2) + 1 = 111 + 1 = 112 ✓
-
-    // So both kernel=7 and kernel=8 produce the same output. The inference gives kernel=8.
-    // This makes sense because when we go backward, we don't know the exact kernel size, only a range.
-    // The formula gives us one valid kernel size from that range.
-
-    // Actually, I realize now that I should double-check this. For a 7x7 kernel:
-    // out = floor((224 + 3 + 3 - 7) / 2) + 1 = floor(223/2) + 1 = 111 + 1 = 112
-
-    // Wait, I think I was using the dilation formula wrong. Let me use the simpler version:
-    // out = floor((in + pre + post - kernel) / stride) + 1
-
-    // For kernel=7: out = floor((224 + 6 - 7) / 2) + 1 = floor(223/2) + 1 = 111 + 1 = 112
-    // For kernel=8: out = floor((224 + 6 - 8) / 2) + 1 = floor(222/2) + 1 = 111 + 1 = 112
-
-    // Both give 112! So the range is [7, 8].
-
-    // Solving for kernel:
-    // floor((in + pre + post - kernel) / stride) = out - 1
-    // (in + pre + post - kernel) / stride >= out - 1
-    // (in + pre + post - kernel) / stride < out
-    // in + pre + post - kernel >= stride * (out - 1)
-    // in + pre + post - kernel < stride * out
-    // kernel <= in + pre + post - stride * (out - 1)
-    // kernel > in + pre + post - stride * out
-
-    // So: in + pre + post - stride * out < kernel <= in + pre + post - stride * (out - 1)
-    // 224 + 6 - 2*112 < kernel <= 224 + 6 - 2*111
-    // 230 - 224 < kernel <= 230 - 222
-    // 6 < kernel <= 8
-    // So kernel in {7, 8}
-
-    // Our formula gives the upper bound: kernel = 224 + 6 - 2*111 = 8
-
-    // So for this test, I should expect 8, not 7.
     EXPECT_EQ(inferredDims[2], 8);
     EXPECT_EQ(inferredDims[3], 8);
 }
@@ -1876,4 +1681,127 @@ TEST(TestConvolutionWgradNode, InferPropertiesNodeNegativePostPaddingValues)
 
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNegativePostPadding)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, -1}); // Negative post-padding
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateSpatialDimensionMismatch)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 28, 28}); // Incorrect spatial dimensions
+    dyTensor->set_stride({50176, 784, 28, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3}); // 3x3 kernel
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    // Expected dy size: ((32 + 1 + 1 - 3) / 1) + 1 = 32, but we have 28
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesMissingXStrides)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    // No stride set on x tensor
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    // No stride set on dw tensor - will try to infer from x
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesStrideDimensionMismatch)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32}); // Only 3 strides for 4D tensor
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    // No stride set on dw tensor - will try to infer from x
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }

@@ -77,7 +77,7 @@ public:
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
 
-        // dy implicitly checked here too
+        // dy implicitly checked here too since they must be equal
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
@@ -229,6 +229,7 @@ public:
         auto dy = attributes.get_dy();
         auto dw = attributes.get_dw();
 
+        // Repeated checks from pre_validate_node for cases where this is called standalone
         HIPDNN_RETURN_IF_FALSE(x,
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ConvolutionWgradNode missing x for setting properties");

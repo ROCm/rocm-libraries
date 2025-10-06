@@ -246,16 +246,12 @@ protected:
     {
         const auto& testCase = GetParam();
 
-        // Setup environment with specified plugin
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         std::vector<int64_t> inputDims = {2, 3, 14, 14}; // X dimensions
         std::vector<int64_t> filterDims = {3, 3, 3, 3}; // DW dimensions (K, C, R, S)
         std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
 
-        // Input (X): N=2, C=3, H=14, W=14
-        // Filter gradient (DW): K=3, C=3, R=3, S=3
-        // Output gradient (DY): N=2, K=3, P=12, Q=12
         std::vector<int64_t> prePadding = {0, 0};
         std::vector<int64_t> postPadding = {0, 0};
         std::vector<int64_t> stride = {1, 1};
@@ -306,7 +302,6 @@ INSTANTIATE_TEST_SUITE_P(
                             "NoEnginesPluginConvBackwardWeightTest",
                             FailurePoint::CREATE_EXECUTION_PLAN,
                             true}),
-    // Provide a custom name for each test instance (C++17 compatible)
     [](const ::testing::TestParamInfo<IntegrationTestCase>& info) {
         std::string name = info.param.description;
         std::transform(name.cbegin(), name.cend(), name.begin(), [](char c) {
