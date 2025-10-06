@@ -780,6 +780,7 @@ namespace rocRoller
                         auto numElements = getUnsignedInt(evaluate(vgpr.size));
                         auto numBytes    = (numBits * numElements) / 8u;
 
+                        // TODO: most of this can be cached
                         KernelArguments              m_arguments;
                         std::array<uint, 3>          m_workgroupOffset, m_workitemOffset;
                         std::array<ExpressionPtr, 3> m_kernelWorkgroupIndexes,
@@ -838,6 +839,8 @@ namespace rocRoller
                                   numBytes,
                                   toString(index));
 
+                        const auto byteIndex = index * Expression::literal(numBytes);
+
                         for(uint wg = 0; wg < 1; ++wg)
                         {
                             setWorkgroup(0, wg);
@@ -846,11 +849,13 @@ namespace rocRoller
                             {
                                 setWorkitem(0, wi);
 
-                                auto offsetValue = Expression::evaluate(index, runtimeArguments);
-                                auto offset
+                                const auto offsetValue
+                                    = Expression::evaluate(byteIndex, runtimeArguments);
+
+                                const auto offset
                                     = std::visit([](auto x) { return (size_t)x; }, offsetValue);
 
-                                Log::error("offset {}", offset);
+                                Log::error("offset: {}", offset);
                             }
                         }
                     }
