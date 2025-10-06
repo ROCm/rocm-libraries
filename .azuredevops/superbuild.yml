@@ -28,6 +28,7 @@ trigger:
     - shared/mxdatagenerator
     - shared/rocroller
     - projects/hipblas-common
+    - projects/hipblaslt
     - projects/rocprim
     - projects/rocrand
     exclude:
@@ -50,6 +51,7 @@ pr:
     - shared/mxdatagenerator
     - shared/rocroller
     - projects/hipblas-common
+    - projects/hipblaslt
     - projects/rocprim
     - projects/rocrand
     exclude:
