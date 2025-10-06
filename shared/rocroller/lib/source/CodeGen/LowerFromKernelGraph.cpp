@@ -780,18 +780,6 @@ namespace rocRoller
                         auto numElements = getUnsignedInt(evaluate(vgpr.size));
                         auto numBytes    = (numBits * numElements) / 8u;
 
-                        auto coords = m_graph->buildTransformer(tag);
-                        coords.setCoordinate(vgprTag, Expression::literal(0));
-                        auto index = coords.reverse({ldsTag})[0];
-
-                        Log::info("LDS WAVE LOAD: tag {}, numBits {}, numElements {}, numBytes {}, "
-                                  "index {}",
-                                  tag,
-                                  numBits,
-                                  numElements,
-                                  numBytes,
-                                  toString(index));
-
                         KernelArguments              m_arguments;
                         std::array<uint, 3>          m_workgroupOffset, m_workitemOffset;
                         std::array<ExpressionPtr, 3> m_kernelWorkgroupIndexes,
@@ -836,7 +824,19 @@ namespace rocRoller
                             *((uint*)(rawArguments.data() + m_workitemOffset[i])) = v;
                         };
 
-                        // TODO: need to call fillexecutioncoordinates here?
+                        auto coords = m_graph->buildTransformer(tag);
+                        coords.setCoordinate(vgprTag, Expression::literal(0));
+                        coords.fillExecutionCoordinates(
+                            m_context, m_kernelWorkgroupIndexes, m_kernelWorkitemIndexes);
+                        auto index = coords.reverse({ldsTag})[0];
+
+                        Log::info("LDS WAVE LOAD: tag {}, numBits {}, numElements {}, numBytes {}, "
+                                  "index {}",
+                                  tag,
+                                  numBits,
+                                  numElements,
+                                  numBytes,
+                                  toString(index));
 
                         for(uint wg = 0; wg < 1; ++wg)
                         {

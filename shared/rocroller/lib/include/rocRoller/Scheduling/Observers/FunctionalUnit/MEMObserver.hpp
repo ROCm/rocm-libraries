@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 
@@ -42,10 +43,7 @@ namespace rocRoller
         {
         public:
             MEMObserver();
-            MEMObserver(ContextPtr         ctx,
-                        std::string const& commentTag,
-                        int                cyclesPerInst,
-                        int                queueAllotment);
+            MEMObserver(ContextPtr ctx, std::string const& commentTag, int queueAllotment);
 
             InstructionStatus peek(Instruction const& inst) const;
 
@@ -66,7 +64,6 @@ namespace rocRoller
 
             int m_programCycle = 0;
 
-            const int m_cyclesPerInst;
             const int m_queueAllotment;
 
             std::string m_commentTag;
@@ -94,6 +91,7 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+            int  getCyclesForInstruction(Instruction const& inst) const;
         };
 
         class DSMEMObserver : public MEMObserver<DSMEMObserver>
@@ -103,6 +101,38 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+            int  getCyclesForInstruction(Instruction const& inst) const;
+        };
+
+        class LDSObserver
+        {
+        public:
+            LDSObserver(ContextPtr ctx);
+
+            InstructionStatus peek(Instruction const& inst) const;
+            void              modify(Instruction& inst) const;
+            void              observe(Instruction const& inst);
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return true;
+            }
+
+            static std::pair<int, KernelGraph::MemoryTracer::LdsDirection>
+                getLdsInfoFromOpcode(const std::string& opCode);
+
+        private:
+            int calculateDataSlots(Instruction const& inst) const;
+            int predictCompletionCycles(Instruction const& inst) const;
+
+            mutable int m_programCycle = 0;
+
+            static constexpr int COMMAND_QUEUE_SIZE = 8;
+            // In reality it is 40 deep by 16 dwords wide,
+            // simplified to 10 deep by 64 dwords wide
+            static constexpr int DATA_QUEUE_DEPTH = 10;
+
+            std::weak_ptr<Context> m_context;
         };
 
         template <typename Derived>
@@ -112,6 +142,7 @@ namespace rocRoller
 
         static_assert(CObserverConst<VMEMObserver>);
         static_assert(CObserverConst<DSMEMObserver>);
+        static_assert(CObserverConst<LDSObserver>);
     }
 }
 

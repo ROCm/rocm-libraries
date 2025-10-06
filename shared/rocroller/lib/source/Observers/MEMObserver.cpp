@@ -31,6 +31,7 @@
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
 
 namespace rocRoller
@@ -39,10 +40,7 @@ namespace rocRoller
     {
 
         VMEMObserver::VMEMObserver(ContextPtr ctx)
-            : MEMObserver(ctx,
-                          "VMEM",
-                          MEMObserver::getWeights(ctx).vmemCycles,
-                          MEMObserver::getWeights(ctx).vmemQueueSize)
+            : MEMObserver(ctx, "VMEM", MEMObserver::getWeights(ctx).vmemQueueSize)
         {
         }
 
@@ -56,11 +54,16 @@ namespace rocRoller
             return inst.getWaitCount().vmcnt();
         }
 
+        int VMEMObserver::getCyclesForInstruction(Instruction const& inst) const
+        {
+            auto ctx = this->m_context.lock();
+            if(!ctx)
+                return 1;
+            return MEMObserver::getWeights(ctx).vmemCycles;
+        }
+
         DSMEMObserver::DSMEMObserver(ContextPtr ctx)
-            : MEMObserver(ctx,
-                          "DSMEM",
-                          MEMObserver::getWeights(ctx).dsmemCycles,
-                          MEMObserver::getWeights(ctx).dsmemQueueSize)
+            : MEMObserver(ctx, "DSMEM", MEMObserver::getWeights(ctx).dsmemQueueSize)
         {
         }
 
@@ -72,6 +75,121 @@ namespace rocRoller
         int DSMEMObserver::getWait(Instruction const& inst) const
         {
             return inst.getWaitCount().dscnt();
+        }
+
+        int DSMEMObserver::getCyclesForInstruction(Instruction const& inst) const
+        {
+            auto ctx = this->m_context.lock();
+            if(!ctx)
+                return 4;
+
+            auto opCode              = inst.getOpCode();
+            auto [dwords, direction] = LDSObserver::getLdsInfoFromOpcode(opCode);
+
+            KernelGraph::MemoryTracer::MemoryOpLDS memOp{direction};
+
+            // Maybe on average 2-way bank conflict?
+            const uint            waveSize     = 64;
+            const uint            conflictWays = 2;
+            std::vector<uint32_t> addresses;
+            addresses.reserve(waveSize);
+
+            for(uint thread = 0; thread < waveSize; ++thread)
+            {
+                addresses.push_back(thread * dwords * 4 * conflictWays);
+            }
+
+            KernelGraph::MemoryTracer::RuntimeLDSInstruction runtimeInst{memOp, dwords, addresses};
+
+            auto gfx = ctx->targetArchitecture().target().gfx;
+
+            auto cycles
+                = KernelGraph::MemoryTracer::LDSBankModel::getInstructionCycles(runtimeInst, gfx);
+            // Log::error("cycles: {}", cycles);
+            return cycles;
+        }
+
+        LDSObserver::LDSObserver(ContextPtr ctx)
+            : m_context(ctx)
+        {
+        }
+
+        std::pair<int, KernelGraph::MemoryTracer::LdsDirection>
+            LDSObserver::getLdsInfoFromOpcode(const std::string& opCode)
+        {
+            int dwords = 1; // default to b32
+
+            if(opCode.find("_b64") != std::string::npos)
+                dwords = 2;
+            else if(opCode.find("_b96") != std::string::npos)
+                dwords = 3;
+            else if(opCode.find("_b128") != std::string::npos)
+                dwords = 4;
+
+            KernelGraph::MemoryTracer::LdsDirection direction
+                = opCode.find("ds_write") != std::string::npos
+                      ? KernelGraph::MemoryTracer::LdsDirection::Write
+                      : KernelGraph::MemoryTracer::LdsDirection::Read;
+
+            return {dwords, direction};
+        }
+
+        int LDSObserver::calculateDataSlots(Instruction const& inst) const
+        {
+            auto opCode              = inst.getOpCode();
+            auto [dwords, direction] = getLdsInfoFromOpcode(opCode);
+
+            switch(direction)
+            {
+            case KernelGraph::MemoryTracer::LdsDirection::Write:
+                return 1 + dwords;
+            case KernelGraph::MemoryTracer::LdsDirection::Read:
+            default:
+                return 1; // For addresses
+            }
+        }
+
+        int LDSObserver::predictCompletionCycles(Instruction const& inst) const
+        {
+            auto ctx = m_context.lock();
+            if(!ctx)
+                return 4;
+
+            auto opCode              = inst.getOpCode();
+            auto [dwords, direction] = getLdsInfoFromOpcode(opCode);
+
+            KernelGraph::MemoryTracer::MemoryOpLDS memOp{direction};
+
+            KernelGraph::MemoryTracer::RuntimeLDSInstruction runtimeInst{
+                memOp, dwords, {} // TODO: addresses should be apart of Instruction
+            };
+
+            auto gfx = ctx->targetArchitecture().target().gfx;
+
+            return KernelGraph::MemoryTracer::LDSBankModel::getInstructionCycles(runtimeInst, gfx);
+        }
+
+        InstructionStatus LDSObserver::peek(Instruction const& inst) const
+        {
+            InstructionStatus rv;
+
+            auto opCode              = inst.getOpCode();
+            auto [dwords, direction] = getLdsInfoFromOpcode(opCode);
+
+            return rv;
+        }
+
+        void LDSObserver::modify(Instruction& inst) const {}
+
+        void LDSObserver::observe(Instruction const& inst)
+        {
+            if(GPUInstructionInfo::isLDS(inst.getOpCode()))
+            {
+            }
+            else
+            {
+            }
+            m_programCycle += inst.numExecutedInstructions() + inst.peekedStatus().stallCycles;
         }
     }
 }

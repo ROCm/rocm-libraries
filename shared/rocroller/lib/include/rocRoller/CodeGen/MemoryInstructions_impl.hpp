@@ -454,6 +454,25 @@ namespace rocRoller
                                                                 std::string const  comment,
                                                                 bool               high)
     {
+        {
+            // See if I can go from reg -> tag manager -> tag -> transform to get addresses?
+            auto context  = addr->context();
+            auto maybeTag = context->registerTagManager()->findRegister(addr);
+            if(maybeTag)
+            {
+                Log::error("found tag {}", *maybeTag);
+                auto inputs = context->kernel()->kernel_graph()->coordinates.parentNodes(*maybeTag);
+                for(auto& tag : inputs)
+                {
+                    Log::error("input {}", tag);
+                }
+            }
+            else
+            {
+                Log::error("no found tag");
+            }
+        }
+
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
 

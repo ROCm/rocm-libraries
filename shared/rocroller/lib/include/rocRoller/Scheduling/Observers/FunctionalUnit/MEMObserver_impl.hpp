@@ -77,11 +77,9 @@ namespace rocRoller
         template <typename Derived>
         MEMObserver<Derived>::MEMObserver(ContextPtr         ctx,
                                           std::string const& commentTag,
-                                          int                cyclesPerInst,
                                           int                queueAllotment)
             : m_context(ctx)
             , m_commentTag(commentTag)
-            , m_cyclesPerInst(cyclesPerInst)
             , m_queueAllotment(queueAllotment)
         {
         }
@@ -135,8 +133,9 @@ namespace rocRoller
 
                 m_programCycle += instCycles;
 
-                m_incomplete.push_back({.issuedCycle           = m_programCycle,
-                                        .expectedCompleteCycle = m_programCycle + m_cyclesPerInst});
+                m_incomplete.push_back({.issuedCycle = m_programCycle,
+                                        .expectedCompleteCycle
+                                        = m_programCycle + derived->getCyclesForInstruction(inst)});
 
                 static_assert(CIsAnyOf<Derived, VMEMObserver, DSMEMObserver>,
                               "Update the comment below if adding new memory observer");

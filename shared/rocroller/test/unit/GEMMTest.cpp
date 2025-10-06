@@ -1013,6 +1013,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         basicGEMM<float>(gemm);
+        AssertFatal(false);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMapping)
