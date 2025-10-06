@@ -523,7 +523,6 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         plan.device_callback.shared_histograms = chosen_shared_histograms;
         plan.device_callback.rows_per_block    = rows_per_block;
 
-        // 4) 发射（无需再做任何按架构分发）
         plan.launch(grid_size,
                     dim3(block_size, 1),
                     chosen_shared_histograms * block_histogram_bytes,
