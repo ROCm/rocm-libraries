@@ -72,6 +72,15 @@ static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
 {
     dim3 gridDim;
 
+    if(length.size() > 1 && length[0] == 0)
+        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
+
+    if(length.size() > 2 && length[1] == 0)
+        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
+
+    const auto x_total = (length[0] + 1) / 2 - 1;
+    const auto y_total = length[1] - 1;
+
     switch(length.size())
     {
     case 1:
@@ -79,12 +88,12 @@ static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
         break;
     case 2:
         gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize));
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize));
         break;
     case 3:
         gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>((length[0] + 1) / 2 - 1, blockSize),
-                       DivRoundingUp<size_t>(length[1] - 1, blockSize));
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize),
+                       DivRoundingUp<size_t>((y_total == 0 ? 1 : y_total), blockSize));
         break;
     default:
         throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
