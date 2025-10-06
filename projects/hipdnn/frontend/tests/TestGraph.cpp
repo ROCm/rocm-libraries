@@ -1840,4 +1840,96 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
     EXPECT_FALSE(graph.topologicallySortGraph().is_good());
 }
 
+TEST_F(TestGraph, ValidateSortsNodesTopologically)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    // Node 0: batchnorm1
+    BatchnormInferenceAttributes bnAttrs1;
+    bnAttrs1.set_name("batchnorm1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs1);
+
+    // Node 1: pointwise1 (depends on batchnorm1)
+    PointwiseAttributes pwAttrs1;
+    pwAttrs1.set_name("pointwise1");
+    pwAttrs1.set_mode(PointwiseMode::RELU_FWD);
+    auto out1 = graph.pointwise(y1, pwAttrs1);
+
+    // Node 2: pointwise2 (depends on batchnorm1)
+    PointwiseAttributes pwAttrs2;
+    pwAttrs2.set_name("pointwise2");
+    pwAttrs2.set_mode(PointwiseMode::RELU_FWD);
+    auto out2 = graph.pointwise(y1, pwAttrs2);
+
+    //Node 3 Create a combined input by using ADD pointwise
+    PointwiseAttributes pwAdd;
+    pwAdd.set_name("add");
+    pwAdd.set_mode(PointwiseMode::ADD);
+    auto combined = graph.pointwise(out1, out2, pwAdd);
+
+    // Node 4: batchnorm2 (depends on both pointwise1 and pointwise2)
+    BatchnormInferenceAttributes bnAttrs2;
+    bnAttrs2.set_name("batchnorm2");
+    auto y2 = graph.batchnorm_inference(combined, mean, invVariance, scale, bias, bnAttrs2);
+
+    // Node 5: pointwise3 (final node)
+    PointwiseAttributes pwAttrs3;
+    pwAttrs3.set_name("pointwise3");
+    pwAttrs3.set_mode(PointwiseMode::RELU_FWD);
+    auto out3 = graph.pointwise(y2, pwAttrs3);
+
+    auto sortedSubnodesDueToGraphConstructionOrderCopy = graph.getPrivateGraphSubnodes();
+
+    auto& subNodes = graph.getPrivateGraphSubnodes();
+    // Randomize the node order to mess it up
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::shuffle(subNodes.begin(), subNodes.end(), gen);
+
+    //verify for sure the nodes arent sorted.
+    bool notSortedAnymore = false;
+    for(size_t i = 0; i < subNodes.size(); i++)
+    {
+        if(sortedSubnodesDueToGraphConstructionOrderCopy[i] != subNodes[i])
+        {
+            notSortedAnymore = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(notSortedAnymore);
+
+    auto result = graph.validate();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    //auto& sortedNodes = graph.getPrivateGraphSubnodes();
+    ASSERT_EQ(subNodes.size(), sortedSubnodesDueToGraphConstructionOrderCopy.size());
+    EXPECT_EQ(subNodes[0], sortedSubnodesDueToGraphConstructionOrderCopy[0]);
+
+    //due to randomiztion, its possible that these nodes swap positions because the graph is valid
+    //regardless of the order of these two nodes because the graph has a diamond shape.
+    if(subNodes[1] == sortedSubnodesDueToGraphConstructionOrderCopy[1])
+    {
+        EXPECT_EQ(subNodes[1], sortedSubnodesDueToGraphConstructionOrderCopy[1]);
+        EXPECT_EQ(subNodes[2], sortedSubnodesDueToGraphConstructionOrderCopy[2]);
+    }
+    else
+    {
+        EXPECT_EQ(subNodes[1], sortedSubnodesDueToGraphConstructionOrderCopy[2]);
+        EXPECT_EQ(subNodes[2], sortedSubnodesDueToGraphConstructionOrderCopy[1]);
+    }
+
+    EXPECT_EQ(subNodes[3], sortedSubnodesDueToGraphConstructionOrderCopy[3]);
+    EXPECT_EQ(subNodes[4], sortedSubnodesDueToGraphConstructionOrderCopy[4]);
+    EXPECT_EQ(subNodes[5], sortedSubnodesDueToGraphConstructionOrderCopy[5]);
+}
+
 // NOLINTEND
