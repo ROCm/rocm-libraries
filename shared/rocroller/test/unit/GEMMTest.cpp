@@ -1024,7 +1024,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC_X123)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
@@ -1032,6 +1032,22 @@ namespace GEMMDriverTest
         gemm.workgroupMappingDim   = 0;
         gemm.workgroupMappingValue = 6;
         gemm.workgroupRemapXCC     = true;
+        basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC_Q123)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
+        GEMMProblem gemm;
+        Log::info("QQQQQQQQQQQQ");
+
+        gemm.m                     = gemm.macM * 8;
+        gemm.n                     = gemm.macN * 8; // RNorm will fail if using 4
+        gemm.k                     = gemm.macK * 8;
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 1;
+        //gemm.workgroupRemapXCC     = true;  // Use this only when StreamK is on
         basicGEMM<float>(gemm);
     }
 
@@ -1149,8 +1165,8 @@ namespace GEMMDriverTest
         gemm.workgroupMappingDim   = 1;
         gemm.workgroupMappingValue = 3;
 
-        //for(auto twoTile : {true, false})
-        for(auto twoTile : {true})
+        for(auto twoTile : {true, false})
+        //for(auto twoTile : {true})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
@@ -1259,8 +1275,9 @@ namespace GEMMDriverTest
         gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
-        gemm.workgroupMappingDim   = 0;
-        gemm.workgroupMappingValue = 4;
+        // This will run out of SGPR
+        //gemm.workgroupMappingDim   = 0;
+        //gemm.workgroupMappingValue = 4;
 
         for(auto twoTile : {true})
         {
@@ -1282,8 +1299,11 @@ namespace GEMMDriverTest
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
         gemm.numWGs = deviceProperties.multiProcessorCount;
 
+        Log::info("numWGs = {}", gemm.numWGs);
+
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        //gemm.n = gemm.macN * 4;
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
@@ -1293,10 +1313,14 @@ namespace GEMMDriverTest
         {
             for(auto workgroupMappingValue : {1, 2, 6})
             {
-                for(auto workgroupRemapXCC : {true, false})
+                //for(auto workgroupRemapXCC : {true, false})
+                //for(auto workgroupRemapXCC : {true})
+                for(auto workgroupRemapXCC : {false})
                 {
                     for(auto streamKMode :
                         {StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst})
+                    //for(auto streamKMode :
+                    //    {StreamKMode::None})
                     {
                         gemm.workgroupMappingDim   = workgroupMappingDim;
                         gemm.workgroupMappingValue = workgroupMappingValue;

@@ -767,16 +767,10 @@ namespace rocRoller
                 {
                     if(forward
                        && std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
-                    {
-                        Log::info("Forward : {}, {}", tileNumTag, tileNumber);
                         graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
-                    }
                     if(!forward
                        && std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
-                    {
-                        Log::info("Backward : {}, {}", tileNumber, tileNumTag);
                         graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
-                    }
                 }
 
                 tileNumbers.push_back(tileNumber);
@@ -894,9 +888,6 @@ namespace rocRoller
                 accumInfo.tileNumberCoords[dimension]
                     = graph.coordinates.findElements(danglingTileNumberPredicate)
                           .to<std::unordered_set>();
-
-                Log::info(
-                    "tileNumberCoords {} = {}", dimension, accumInfo.tileNumberCoords[dimension]);
             }
 
             return accumInfo;
