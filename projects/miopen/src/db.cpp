@@ -263,7 +263,9 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             return false;
         }
 
-        const auto temp_name = filename + ".temp";
+        std::vector<char> hostname(256);
+        gethostname(hostname.data(), hostname.size());
+        const auto temp_name = filename + "." + hostname.data() + "." + std::to_string(getpid()) + ".temp";
         std::ofstream to(temp_name, std::ios::binary);
 
         if(!to)
