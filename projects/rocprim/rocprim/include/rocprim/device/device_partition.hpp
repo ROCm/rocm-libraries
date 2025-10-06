@@ -213,12 +213,14 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
+    // const auto use_atomic_block_id_variant
+    //     = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
+    //         use_atomic_block_id);
     const auto use_atomic_block_id_variant
-        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
-            use_atomic_block_id);
+        = ::rocprim::detail::constexpr_value_variant<bool, false>::create(false);
 
     bool use_sleepy_scan;
-    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));;
     const auto use_sleepy_scan_variant
         = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(use_sleepy_scan);
 
@@ -306,7 +308,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                 temporary_storage,
                 storage_size,
                 detail::temp_storage::make_linear_partition(
-                    // This is valid even with offset_scan_state_with_sleep_type
                     detail::temp_storage::make_partition(&scan_state_storage, layout),
                     // Note: the following two are to be allocated continuously, so that they can be initialized
                     // simultaneously.
@@ -375,23 +376,17 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                if (use_atomic_block_id)
-                {
-                    ROCPRIM_RETURN_ON_ERROR(
-                        hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream));
-                }
-
-                const unsigned int block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
-                const unsigned int grid_size
+                // Define block and grid sizes for init kernel.
+                const auto init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
+                const auto init_grid_size
                     = ::rocprim::detail::ceiling_div(current_number_of_blocks, block_size);
-                init_lookback_scan_state_kernel<scan_state_type>
-                    <<<dim3(grid_size), dim3(block_size), 0, stream>>>(scan_state,
-                                                                       current_number_of_blocks);
+                init_lookback_scan_state_kernel<<<init_grid_size, init_block_size, 0, stream>>>(
+                    scan_state,
+                    current_number_of_blocks,
+                    block_id);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel",
                                                             current_number_of_blocks,
                                                             start);
-
-                                                            
                 if(debug_synchronous)
                 {
                     start = std::chrono::steady_clock::now();
