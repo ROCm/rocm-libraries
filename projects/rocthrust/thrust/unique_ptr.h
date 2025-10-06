@@ -350,16 +350,17 @@ public:
     return *m_ptr;
   }
 
-  // Calling `->` on a `unique_ptr` from host code (e.g., `my_unique_ptr->member`)
-  // will attempt to dereference a device pointer on the host, leading to a
-  // segmentation fault.
-  //
-  // To access the object's members, you must first explicitly copy the data
-  // from the device to a host-side object (e.g., `host_copy = *my_unique_ptr;`).
-  // THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
-  // {
-  //     return m_ptr;
-  // }
+  // In host code, attempting to use this will produce a clear diagnostic
+  // instead of silently allowing an invalid dereference of device memory.
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
+  {
+
+    static_assert(false,
+                  "thrust::unique_ptr<T>::operator->(): cannot dereference device memory from host. "
+                  "Copy the object to host first (T host = *ptr) or access members inside device code.");
+
+    return m_ptr;
+  }
 
   //==========================================================================
   // Modifiers
