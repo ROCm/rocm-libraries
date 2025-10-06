@@ -38,6 +38,7 @@ using namespace llvm::object;
 #endif
 
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Serialization/comgr/comgr.hpp>
 
 using namespace rocRoller;
 
@@ -72,7 +73,7 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
 
     auto sections = *maybeSections;
     for(const auto& section : sections)
-    {
+    {   
         if(section.sh_type != ELF::SHT_NOTE)
             continue;
 
