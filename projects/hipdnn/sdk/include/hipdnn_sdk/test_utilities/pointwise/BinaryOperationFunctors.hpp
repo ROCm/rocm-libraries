@@ -5,8 +5,8 @@
 
 #include <cmath>
 #include <cstdint>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 namespace hipdnn_sdk
 {
@@ -39,11 +39,56 @@ struct Subtract
 struct ReluBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> decltype(dy * (x > static_cast<X>(0.0) ? static_cast<X>(1.0) : static_cast<X>(0.0)))
+    auto operator()(const X& x, const Dy& dy) const -> X;
+
+    template <>
+    auto operator()<float, float>(const float& x, const float& dy) const -> float
     {
         // dx = dy * (x > 0 ? 1 : 0)
-        auto localGradient = (x > static_cast<X>(0.0)) ? static_cast<X>(1.0) : static_cast<X>(0.0);
+        auto localGradient = (x > 0.0f) ? 1.0f : 0.0f;
         return dy * localGradient;
+    }
+
+    template <>
+    auto operator()<double, double>(const double& x, const double& dy) const -> double
+    {
+        // dx = dy * (x > 0 ? 1 : 0)
+        auto localGradient = (x > 0.0) ? 1.0 : 0.0;
+        return dy * localGradient;
+    }
+
+    template <>
+    auto operator()<half, half>(const half& x, const half& dy) const -> half
+    {
+        // Use float precision for computation to avoid precision loss
+        auto xf = static_cast<float>(x);
+        auto dyf = static_cast<float>(dy);
+
+        auto localGradient = (xf > 0.0f) ? 1.0f : 0.0f;
+        return static_cast<half>(dyf * localGradient);
+    }
+
+    template <>
+    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const
+        -> hip_bfloat16
+    {
+        // Use float precision for computation to avoid precision loss
+        auto xf = static_cast<float>(x);
+        auto dyf = static_cast<float>(dy);
+
+        auto localGradient = (xf > 0.0f) ? 1.0f : 0.0f;
+        return static_cast<hip_bfloat16>(dyf * localGradient);
+    }
+
+    template <>
+    auto operator()<int32_t, int32_t>(const int32_t& x, const int32_t& dy) const -> int32_t
+    {
+        // Use double precision for int32 calculations to avoid precision loss
+        auto xd = static_cast<double>(x);
+        auto dyd = static_cast<double>(dy);
+
+        auto localGradient = (xd > 0.0) ? 1.0 : 0.0;
+        return static_cast<int32_t>(dyd * localGradient);
     }
 };
 
@@ -79,7 +124,7 @@ struct ParameterizedReluBackward
         {
             localGradient = 1.0f;
         }
-        
+
         return dy * localGradient;
     }
 
@@ -89,7 +134,7 @@ struct ParameterizedReluBackward
         auto lowerClipD = static_cast<double>(lowerClip);
         auto upperClipD = static_cast<double>(upperClip);
         auto lowerSlopeD = static_cast<double>(lowerSlope);
-        
+
         double localGradient;
         if(x < lowerClipD)
         {
@@ -103,7 +148,7 @@ struct ParameterizedReluBackward
         {
             localGradient = 1.0;
         }
-        
+
         return dy * localGradient;
     }
 
@@ -113,7 +158,7 @@ struct ParameterizedReluBackward
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float localGradient;
         if(xf < lowerClip)
         {
@@ -127,17 +172,18 @@ struct ParameterizedReluBackward
         {
             localGradient = 1.0f;
         }
-        
+
         return static_cast<half>(dyf * localGradient);
     }
 
     template <>
-    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const -> hip_bfloat16
+    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const
+        -> hip_bfloat16
     {
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float localGradient;
         if(xf < lowerClip)
         {
@@ -151,7 +197,7 @@ struct ParameterizedReluBackward
         {
             localGradient = 1.0f;
         }
-        
+
         return static_cast<hip_bfloat16>(dyf * localGradient);
     }
 
@@ -164,7 +210,7 @@ struct ParameterizedReluBackward
         auto lowerClipD = static_cast<double>(lowerClip);
         auto upperClipD = static_cast<double>(upperClip);
         auto lowerSlopeD = static_cast<double>(lowerSlope);
-        
+
         double localGradient;
         if(xd < lowerClipD)
         {
@@ -178,7 +224,7 @@ struct ParameterizedReluBackward
         {
             localGradient = 1.0;
         }
-        
+
         return static_cast<int32_t>(dyd * localGradient);
     }
 };
@@ -212,19 +258,20 @@ struct SigmoidBackward
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float sigmoidVal = 1.0f / (1.0f + std::exp(-xf));
         auto localGradient = sigmoidVal * (1.0f - sigmoidVal);
         return static_cast<half>(dyf * localGradient);
     }
 
     template <>
-    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const -> hip_bfloat16
+    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const
+        -> hip_bfloat16
     {
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float sigmoidVal = 1.0f / (1.0f + std::exp(-xf));
         auto localGradient = sigmoidVal * (1.0f - sigmoidVal);
         return static_cast<hip_bfloat16>(dyf * localGradient);
@@ -236,7 +283,7 @@ struct SigmoidBackward
         // Use double precision for int32 calculations to avoid precision loss
         auto xd = static_cast<double>(x);
         auto dyd = static_cast<double>(dy);
-        
+
         double sigmoidVal = 1.0 / (1.0 + std::exp(-xd));
         auto localGradient = sigmoidVal * (1.0 - sigmoidVal);
         return static_cast<int32_t>(dyd * localGradient);
@@ -246,7 +293,7 @@ struct SigmoidBackward
 struct TanhBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> decltype(dy * static_cast<X>(1.0));
+    auto operator()(const X& x, const Dy& dy) const -> X;
 
     template <>
     auto operator()<float, float>(const float& x, const float& dy) const -> float
@@ -272,19 +319,20 @@ struct TanhBackward
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float tanhVal = std::tanh(xf);
         auto localGradient = 1.0f - (tanhVal * tanhVal);
         return static_cast<half>(dyf * localGradient);
     }
 
     template <>
-    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const -> hip_bfloat16
+    auto operator()<hip_bfloat16, hip_bfloat16>(const hip_bfloat16& x, const hip_bfloat16& dy) const
+        -> hip_bfloat16
     {
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
         auto dyf = static_cast<float>(dy);
-        
+
         float tanhVal = std::tanh(xf);
         auto localGradient = 1.0f - (tanhVal * tanhVal);
         return static_cast<hip_bfloat16>(dyf * localGradient);
@@ -296,7 +344,7 @@ struct TanhBackward
         // Use double precision for int32 calculations to avoid precision loss
         auto xd = static_cast<double>(x);
         auto dyd = static_cast<double>(dy);
-        
+
         double tanhVal = std::tanh(xd);
         auto localGradient = 1.0 - (tanhVal * tanhVal);
         return static_cast<int32_t>(dyd * localGradient);

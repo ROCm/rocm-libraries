@@ -123,7 +123,7 @@ if(msgpack-cxx_FOUND)
 else()
     find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
     message(STATUS "Found msgpack (<=5.x)")
-    set(msgpack_libs msgpackc)
+    set(msgpack_libs msgpackc-cxx)
 endif()
 
 find_package(hip REQUIRED)
@@ -178,7 +178,6 @@ target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)

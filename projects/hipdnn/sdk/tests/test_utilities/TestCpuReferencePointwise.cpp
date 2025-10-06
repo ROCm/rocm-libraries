@@ -5,52 +5,58 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestConstants.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+
 using namespace hipdnn_sdk::test_utilities;
-using namespace hipdnn_sdk::test_utilities::constants;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
+
+namespace
+{
+
+// Mathematical constants
+constexpr float PI = 3.14159265f;
+constexpr float E = 2.71828183f;
+constexpr float SQRT_2 = 1.41421356f;
+constexpr float SQRT_3 = 1.73205081f;
+constexpr float SQRT_5 = 2.23606798f;
+constexpr float GOLDEN_RATIO = 1.61803399f; // φ
+constexpr float LN_2 = 0.69314718f;
+
+// Common test values
+constexpr float TEST_VALUE_1 = 1.0f;
+constexpr float TEST_VALUE_2 = 2.0f;
+constexpr float TEST_VALUE_3 = 3.0f;
+constexpr float TEST_VALUE_5 = 5.0f;
+constexpr float TEST_VALUE_2_5 = 2.5f;
+constexpr float TEST_VALUE_1_5 = 1.5f;
+constexpr float TEST_VALUE_4 = 4.0f;
+
+// Precision test values
+constexpr float PRECISION_TEST_A = 0.123456789f;
+constexpr float PRECISION_TEST_B = 0.987654321f;
+
+// Broadcasting test values
+constexpr float BROADCAST_MULTIPLIER_10 = 10.0f;
+
+} // namespace
 
 template <typename Input1Type, typename Input2Type = Input1Type, typename OutputType = Input1Type>
 class CpuReferencePointwiseFixture : public ::testing::Test
 {
 protected:
-    // Helper function to get tolerance for any floating-point type
-    template <typename T>
-    constexpr float getToleranceForType() const
+    OutputType getMixedTypeTolerance() const
     {
-        if constexpr(std::is_same_v<T, half>)
-        {
-            return TOLERANCE_HALF;
-        }
-        else if constexpr(std::is_same_v<T, hip_bfloat16>)
-        {
-            return TOLERANCE_BFLOAT16;
-        }
-        else if constexpr(std::is_same_v<T, double>)
-        {
-            return static_cast<float>(TOLERANCE_DOUBLE);
-        }
-        else // float and other types
-        {
-            return TOLERANCE_FLOAT;
-        }
-    }
+        auto input1Tolerance = pointwise::getTolerance<Input1Type>();
+        auto input2Tolerance = pointwise::getTolerance<Input2Type>();
+        auto outputTolerance = pointwise::getTolerance<OutputType>();
 
-    // Mixed-type aware tolerance calculation
-    // Uses the most lenient (largest) tolerance among all involved types
-    OutputType getTolerance() const
-    {
-        float input1Tolerance = getToleranceForType<Input1Type>();
-        float input2Tolerance = getToleranceForType<Input2Type>();
-        float outputTolerance = getToleranceForType<OutputType>();
-
-        // Use the most lenient tolerance to account for mixed-type precision limitations
-        float maxTolerance = std::max({input1Tolerance, input2Tolerance, outputTolerance});
+        // Convert all to common type (float) for comparison
+        float maxTolerance = std::max({static_cast<float>(input1Tolerance),
+                                       static_cast<float>(input2Tolerance),
+                                       static_cast<float>(outputTolerance)});
 
         return static_cast<OutputType>(maxTolerance);
     }
@@ -72,7 +78,27 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
+        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+    }
+
+    void testBinarySubtractOperation()
+    {
+        Tensor<Input1Type> input1({1, 3, 2, 2});
+        Tensor<Input2Type> input2({1, 3, 2, 2});
+        Tensor<OutputType> output({1, 3, 2, 2});
+
+        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
+        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::SUB, output, input1, input2);
+
+        Tensor<OutputType> expected({1, 3, 2, 2});
+        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
+
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -106,7 +132,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -143,27 +169,27 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
-    void testBinarySubtractOperation()
+    void testBinaryAddOperation3D()
     {
-        Tensor<Input1Type> input1({1, 3, 2, 2});
-        Tensor<Input2Type> input2({1, 3, 2, 2});
-        Tensor<OutputType> output({1, 3, 2, 2});
+        Tensor<Input1Type> input1({2, 3, 10});
+        Tensor<Input2Type> input2({2, 3, 10});
+        Tensor<OutputType> output({2, 3, 10});
 
-        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
-        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
+        input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2_5));
+        input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_1_5));
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::SUB, output, input1, input2);
+            PointwiseMode::ADD, output, input1, input2);
 
-        Tensor<OutputType> expected({1, 3, 2, 2});
-        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
+        Tensor<OutputType> expected({2, 3, 10});
+        expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -184,7 +210,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
                               0); // e² - e
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -205,7 +231,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -233,7 +259,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(10)), 3);
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -275,7 +301,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -310,7 +336,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -346,7 +372,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -397,7 +423,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -451,7 +477,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -515,7 +541,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -561,16 +587,16 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testReluBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
-        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
-        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill input with mix of positive and negative values
         input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
@@ -597,16 +623,48 @@ protected:
 
         // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
         Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 * 1.0f), 0, 0, 0, 0); // dy=2.0, x=1.0>0: dx=2.0*1=2.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f), 0, 0, 0, 1); // dy=1.5, x=-2.0<0: dx=1.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 0.0f), 0, 0, 1, 0); // dy=3.0, x=0.0<=0: dx=3.0*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1 * 1.0f), 0, 0, 1, 1); // dy=1.0, x=3.0>0: dx=1.0*1=1.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5 * 0.0f), 0, 1, 0, 0); // dy=2.5, x=-1.0<0: dx=2.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4 * 1.0f), 0, 1, 0, 1); // dy=4.0, x=2.5>0: dx=4.0*1=4.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f), 0, 1, 1, 0); // dy=1.5, x=-5.0<0: dx=1.5*0=0.0
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 1.0f), 0, 1, 1, 1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 * 1.0f),
+                              0,
+                              0,
+                              0,
+                              0); // dy=2.0, x=1.0>0: dx=2.0*1=2.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f),
+                              0,
+                              0,
+                              0,
+                              1); // dy=1.5, x=-2.0<0: dx=1.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 0.0f),
+                              0,
+                              0,
+                              1,
+                              0); // dy=3.0, x=0.0<=0: dx=3.0*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1 * 1.0f),
+                              0,
+                              0,
+                              1,
+                              1); // dy=1.0, x=3.0>0: dx=1.0*1=1.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5 * 0.0f),
+                              0,
+                              1,
+                              0,
+                              0); // dy=2.5, x=-1.0<0: dx=2.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4 * 1.0f),
+                              0,
+                              1,
+                              0,
+                              1); // dy=4.0, x=2.5>0: dx=4.0*1=4.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1_5 * 0.0f),
+                              0,
+                              1,
+                              1,
+                              0); // dy=1.5, x=-5.0<0: dx=1.5*0=0.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3 * 1.0f),
+                              0,
+                              1,
+                              1,
+                              1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -661,16 +719,16 @@ protected:
         expected.setHostValue(static_cast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testParameterizedReluBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
-        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
-        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill forward input with values that will test all three regions: below lower_clip, between clips, above upper_clip
         input.setHostValue(
@@ -718,8 +776,9 @@ protected:
                     for(int w = 0; w < 2; ++w)
                     {
                         auto inputVal = static_cast<float>(input.getHostValue(n, c, h, w));
-                        auto upstreamGradVal = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
-                        
+                        auto upstreamGradVal
+                            = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
+
                         // For x < lower_clip: local_gradient = lower_slope
                         // For lower_clip <= x <= upper_clip: local_gradient = 1.0
                         // For x > upper_clip: local_gradient = 0.0
@@ -736,7 +795,7 @@ protected:
                         {
                             localGradient = 1.0f;
                         }
-                        
+
                         auto downstreamGrad = upstreamGradVal * localGradient;
                         expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
                     }
@@ -744,7 +803,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -810,16 +869,16 @@ protected:
                               1,
                               1); // sigmoid(1.5)
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testSigmoidBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
-        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
-        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill forward input with values that will test sigmoid backward function
         input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
@@ -856,16 +915,19 @@ protected:
                     {
                         auto inputVal = input.getHostValue(n, c, h, w);
                         auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
-                        auto sigmoid = 1.0f / (1.0f + std::exp(-static_cast<float>(inputVal)));
-                        auto localGradient = sigmoid * (1.0f - sigmoid);
-                        auto downstreamGrad = static_cast<float>(upstreamGradVal) * localGradient;
+                        auto sigmoid = static_cast<Input1Type>(1.0)
+                                       / (static_cast<Input1Type>(1.0)
+                                          + std::exp(-static_cast<Input1Type>(inputVal)));
+                        auto localGradient = sigmoid * (static_cast<Input1Type>(1.0) - sigmoid);
+                        auto downstreamGrad
+                            = static_cast<Input2Type>(upstreamGradVal) * localGradient;
                         expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -906,16 +968,16 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testTanhBackwardOperation()
     {
-        Tensor<Input1Type> input({1, 2, 2, 2});         // Forward input (x)
-        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2});  // Upstream gradient (dy)
-        Tensor<OutputType> output({1, 2, 2, 2});        // Downstream gradient (dx)
+        Tensor<Input1Type> input({1, 2, 2, 2}); // Forward input (x)
+        Tensor<Input2Type> upstreamGrad({1, 2, 2, 2}); // Upstream gradient (dy)
+        Tensor<OutputType> output({1, 2, 2, 2}); // Downstream gradient (dx)
 
         // Fill forward input with values that will test tanh backward function
         input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 0, 0); // 0.0
@@ -952,16 +1014,17 @@ protected:
                     {
                         auto inputVal = input.getHostValue(n, c, h, w);
                         auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
-                        auto tanhVal = std::tanh(static_cast<float>(inputVal));
-                        auto localGradient = 1.0f - (tanhVal * tanhVal);
-                        auto downstreamGrad = static_cast<float>(upstreamGradVal) * localGradient;
+                        auto tanhVal = std::tanh(static_cast<Input1Type>(inputVal));
+                        auto localGradient = static_cast<Input1Type>(1.0) - (tanhVal * tanhVal);
+                        auto downstreamGrad
+                            = static_cast<Input2Type>(upstreamGradVal) * localGradient;
                         expected.setHostValue(static_cast<OutputType>(downstreamGrad), n, c, h, w);
                     }
                 }
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1002,7 +1065,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(std::abs(-TEST_VALUE_4)), 0, 1, 1, 1); // |-4| = 4
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1036,7 +1099,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1064,7 +1127,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(1.0f), 3); // max(0, 1) = 1
         expected.setHostValue(static_cast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1098,7 +1161,7 @@ protected:
             }
         }
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1117,7 +1180,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 4});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_2_5));
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1136,7 +1199,7 @@ protected:
         Tensor<OutputType> expected({1, 1, 1, 1});
         expected.setHostValue(static_cast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
-        auto tolerance = getTolerance();
+        auto tolerance = this->getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }

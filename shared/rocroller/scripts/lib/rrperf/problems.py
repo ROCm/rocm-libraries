@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any, List, Optional
 
 import yaml
+from rrperf.utils import get_dataclass_id
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -180,8 +181,8 @@ class GEMMSolution:
     wave_k: int = -1
     wave_b: int = -1
 
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
+    workgroup_size_x: int = -1
+    workgroup_size_y: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
@@ -212,6 +213,7 @@ class GEMMSolution:
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False
+    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
@@ -236,6 +238,10 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     def __post_init__(self):
         convert_class_params(GEMM, self)
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -289,7 +295,7 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -389,6 +395,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "SCH": self.scheduler[0],
             "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
+            "DPFirst": TF(self.streamKTwoTileDPFirst),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -409,6 +416,10 @@ class CodeGen:
 
     numWarmUp: int = 2
     numRuns: int = 10
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -458,7 +469,7 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -491,8 +502,8 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property

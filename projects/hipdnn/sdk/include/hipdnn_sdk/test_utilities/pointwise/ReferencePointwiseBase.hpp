@@ -200,7 +200,10 @@ private:
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
+                input1,
+                input2,
+                output,
+                pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
@@ -212,29 +215,31 @@ private:
 
     static bool canExecuteUnaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
-        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
-               !attrs->in_1_tensor_uid() &&               // Must NOT be set
-               !attrs->in_2_tensor_uid() &&               // Must NOT be set
-               attrs->out_0_tensor_uid() != 0;            // Required: output
+        return attrs->in_0_tensor_uid() != 0 && // Required: first input
+               !attrs->in_1_tensor_uid() && // Must NOT be set
+               !attrs->in_2_tensor_uid() && // Must NOT be set
+               attrs->out_0_tensor_uid() != 0; // Required: output
     }
 
-    static bool canExecuteBinaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool
+        canExecuteBinaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
-        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
-               attrs->in_1_tensor_uid() &&                // Must be set
-               *attrs->in_1_tensor_uid() != 0 &&          // Must be non-zero
-               !attrs->in_2_tensor_uid() &&               // Must NOT be set
-               attrs->out_0_tensor_uid() != 0;            // Required: output
+        return attrs->in_0_tensor_uid() != 0 && // Required: first input
+               attrs->in_1_tensor_uid() && // Must be set
+               *attrs->in_1_tensor_uid() != 0 && // Must be non-zero
+               !attrs->in_2_tensor_uid() && // Must NOT be set
+               attrs->out_0_tensor_uid() != 0; // Required: output
     }
 
-    static bool canExecuteTernaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool
+        canExecuteTernaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
-        return attrs->in_0_tensor_uid() != 0 &&           // Required: first input
-               attrs->in_1_tensor_uid() &&                // Must be set
-               *attrs->in_1_tensor_uid() != 0 &&          // Must be non-zero
-               attrs->in_2_tensor_uid() &&                // Must be set
-               *attrs->in_2_tensor_uid() != 0 &&          // Must be non-zero
-               attrs->out_0_tensor_uid() != 0;            // Required: output
+        return attrs->in_0_tensor_uid() != 0 && // Required: first input
+               attrs->in_1_tensor_uid() && // Must be set
+               *attrs->in_1_tensor_uid() != 0 && // Must be non-zero
+               attrs->in_2_tensor_uid() && // Must be set
+               *attrs->in_2_tensor_uid() != 0 && // Must be non-zero
+               attrs->out_0_tensor_uid() != 0; // Required: output
     }
 
     static bool canExecuteOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
@@ -265,9 +270,9 @@ private:
         case PointwiseMode::TANH_BWD:
             return canExecuteBinaryOperation(attrs);
 
-        // Ternary operations (none implemented yet)
-        // case PointwiseMode::BINARY_SELECT:
-        //     return canExecuteTernaryOperation(attrs);
+            // Ternary operations (none implemented yet)
+            // case PointwiseMode::BINARY_SELECT:
+            //     return canExecuteTernaryOperation(attrs);
 
         default:
             return false;

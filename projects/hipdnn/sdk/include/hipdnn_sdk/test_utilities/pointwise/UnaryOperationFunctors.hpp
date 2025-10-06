@@ -5,9 +5,9 @@
 
 #include <cmath>
 #include <cstdint>
-#include <limits>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <limits>
 
 namespace hipdnn_sdk
 {
@@ -71,7 +71,7 @@ struct ReluForward
     {
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
-        
+
         if(xf <= lowerClip)
         {
             float result = (lowerSlope * (xf - lowerClip)) + lowerClip;
@@ -89,7 +89,7 @@ struct ReluForward
     {
         // Use float precision for computation to avoid precision loss
         auto xf = static_cast<float>(x);
-        
+
         if(xf <= lowerClip)
         {
             float result = (lowerSlope * (xf - lowerClip)) + lowerClip;
@@ -110,7 +110,7 @@ struct ReluForward
         auto lowerClipD = static_cast<double>(lowerClip);
         auto upperClipD = static_cast<double>(upperClip);
         auto lowerSlopeD = static_cast<double>(lowerSlope);
-        
+
         if(xd <= lowerClipD)
         {
             double result = (lowerSlopeD * (xd - lowerClipD)) + lowerClipD;
@@ -123,7 +123,6 @@ struct ReluForward
         return static_cast<int32_t>(xd);
     }
 };
-
 
 struct SigmoidForward
 {
@@ -170,7 +169,6 @@ struct SigmoidForward
     }
 };
 
-
 struct TanhForward
 {
     template <typename X>
@@ -215,7 +213,6 @@ struct TanhForward
         return static_cast<int32_t>(result);
     }
 };
-
 
 struct AbsoluteValue
 {

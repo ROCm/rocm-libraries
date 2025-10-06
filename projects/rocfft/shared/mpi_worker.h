@@ -231,6 +231,9 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
         const auto& brick       = bricks[i];
         size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride, 0, 0);
 
+        if(brick.rank != mpi_rank)
+            continue;
+
         void* brick_ptr   = nullptr;
         auto  local_brick = local_bricks.find(brick.device);
         if(local_brick != local_bricks.end())
