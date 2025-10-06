@@ -27,17 +27,26 @@ public:
 
     Error pre_validate_node() const override
     {
-        HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
+        auto x = attributes.get_x();
+        auto dy = attributes.get_dy();
+        auto dw = attributes.get_dw();
+
+        auto& xDims = x->get_dim();
+        auto& dyDims = dy->get_dim();
+        auto& dwDims = dw->get_dim();
+        auto& dwStrides = dw->get_stride();
+
+        HIPDNN_RETURN_IF_FALSE(x,
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ConvolutionWgradNode missing x (input) for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(
-            attributes.get_dy(),
+            dy,
             ErrorCode::ATTRIBUTE_NOT_SET,
             "ConvolutionWgradNode missing dy (gradient of output) for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(
-            attributes.get_dw(),
+            dw,
             ErrorCode::ATTRIBUTE_NOT_SET,
             "ConvolutionWgradNode missing dw (gradient of weights) for pre-validation");
 
@@ -57,24 +66,17 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode missing dilation for pre-validation");
 
-        auto x = attributes.get_x();
-        auto dy = attributes.get_dy();
-        auto dw = attributes.get_dw();
-
-        auto& xDims = x->get_dim();
-
         HIPDNN_RETURN_IF_FALSE(
             x->validate_dims_and_strides_set_and_positive(),
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
 
+        // dy implicitly checked here too
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor must have at least 3 dimensions (N, C, spatial)");
-
-        auto& dyDims = dy->get_dim();
 
         HIPDNN_RETURN_IF_FALSE(
             dy->validate_dims_and_strides_set_and_positive(),
@@ -87,21 +89,11 @@ public:
                             "ConvolutionWgradNode: dy tensor dimension count must match x tensor "
                             "dimension count");
 
-        HIPDNN_RETURN_IF_LT(
-            dyDims.size(),
-            3,
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: dy tensor must have at least 3 dimensions (N, C, spatial)");
-
-        // Validate batch size matches between x and dy tensors
         HIPDNN_RETURN_IF_NE(
             xDims[0],
             dyDims[0],
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor batch size must match dy tensor batch size");
-
-        auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
 
         if(!dwDims.empty())
         {

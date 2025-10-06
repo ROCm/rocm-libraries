@@ -19,8 +19,8 @@ class ConvWgradAttributes : public Attributes<ConvWgradAttributes>
 public:
     enum class InputNames
     {
-        X = 0, // Input tensor
-        DY = 1 // Gradient of output tensor
+        DY = 0, // Gradient of output tensor
+        X = 1 // Input tensor
     };
     typedef InputNames input_names; // NOLINT(readability-identifier-naming)
 

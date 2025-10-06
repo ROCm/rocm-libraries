@@ -176,7 +176,7 @@ protected:
         convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
         // Create the convolution backward weight operation
-        tensors.dw = graph->conv_wgrad(tensors.x, tensors.dy, convAttrs);
+        tensors.dw = graph->conv_wgrad(tensors.dy, tensors.x, convAttrs);
 
         if(useManualUids)
         {

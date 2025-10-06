@@ -682,8 +682,8 @@ public:
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> x,
-                                                 std::shared_ptr<TensorAttributes> dy,
+    std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
+                                                 std::shared_ptr<TensorAttributes> x,
                                                  ConvWgradAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
