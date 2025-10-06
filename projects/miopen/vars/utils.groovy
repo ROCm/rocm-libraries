@@ -396,11 +396,7 @@ def buildHipClangJob(Map conf=[:]){
         return retimage
 }
 
-def reboot(){
-    build job: 'reboot-slaves', propagate: false , parameters: [string(name: 'server', value: "${env.NODE_NAME}"),]
-}
-
-def buildHipClangJobAndReboot(Map conf=[:]){
+def buildHipClangJob(Map conf=[:]){
     try{
         buildHipClangJob(conf)
         cleanWs()
@@ -409,11 +405,6 @@ def buildHipClangJobAndReboot(Map conf=[:]){
         echo "throwing error exception for the stage"
         echo 'Exception occurred: ' + e.toString()
         throw e
-    }
-    finally{
-        if (conf.get("needs_reboot", true)) {
-            reboot()
-        }
     }
 }
 
