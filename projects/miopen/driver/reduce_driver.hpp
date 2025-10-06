@@ -38,6 +38,7 @@
 #include "../test/verify.hpp"
 
 #include <miopen/miopen.h>
+#include <memory>
 #include <miopen/reduce_common.hpp>
 #include <miopen/tensor.hpp>
 
@@ -47,8 +48,6 @@
 #include <cassert>
 #include <cstdlib>
 #include <float.h>
-#include <memory>
-#include <numeric>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -64,7 +63,7 @@ public:
 
         miopenCreateReduceTensorDescriptor(&reduceDesc);
 
-        if(std::is_same<Tgpu, double>::value)
+        if constexpr(std::is_same_v<Tgpu, double>)
             data_type = miopenDouble;
         else
             data_type = (sizeof(Tgpu) == 4) ? miopenFloat : miopenHalf;
@@ -75,18 +74,14 @@ public:
     InputFlags& GetInputFlags() override { return inflags; }
 
     int GetandSetData() override;
-    std::vector<int> GetInputTensorLengthsFromCmdLine();
-    std::vector<int> GetDimsToReduceFromCmdLine();
 
     int SetReduceTensorDescriptorFromCmdLineArgs();
 
     int AllocateBuffersAndCopy() override;
 
     int RunForwardGPU() override;
-    int RunForwardCPU();
 
     int RunBackwardGPU() override;
-    int RunBackwardCPU();
 
     int VerifyBackward() override;
     int VerifyForward() override;
@@ -141,18 +136,19 @@ int ReduceDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 template <typename Tgpu, typename Tref>
 int ReduceDriver<Tgpu, Tref>::GetandSetData()
 {
-    std::vector<int> inLengths    = GetInputTensorLengthsFromCmdLine();
-    std::vector<int> toReduceDims = GetDimsToReduceFromCmdLine();
+    std::vector<int> inLengths    = inflags.GetValueVectorInt("DimLengths");
+    std::vector<int> toReduceDims = inflags.GetValueVectorInt("DimsToReduce");
     std::vector<int> outLengths   = inLengths;
     std::vector<int> invariantDims;
 
     assert(toReduceDims.size() <= inLengths.size());
-    for(int i = 0; i < toReduceDims.size(); i++)
-        assert(toReduceDims[i] < inLengths.size());
 
-    // set the lengths of the dimensions to be reduced to 1 to represent the output Tensor
-    for(int i = 0; i < toReduceDims.size(); i++)
-        outLengths[toReduceDims[i]] = 1;
+    for(int toReduceDim : toReduceDims) {
+        assert(toReduceDim < inLengths.size());
+
+        // set the lengths of the dimensions to be reduced to 1 to represent the output Tensor
+        outLengths[toReduceDim] = 1;
+    }
 
     SetTensorNd(inputTensor, inLengths, data_type);
     SetTensorNd(outputTensor, outLengths, data_type);
@@ -221,66 +217,6 @@ int ReduceDriver<Tgpu, Tref>::AddCmdLineArgs()
 }
 
 template <typename Tgpu, typename Tref>
-std::vector<int> ReduceDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
-{
-    std::string lengthsStr = inflags.GetValueStr("DimLengths");
-
-    std::vector<int> lengths;
-    std::size_t pos = 0;
-    std::size_t new_pos;
-
-    new_pos = lengthsStr.find(',', pos);
-    while(new_pos != std::string::npos)
-    {
-        std::string sliceStr = lengthsStr.substr(pos, new_pos - pos);
-
-        int len = std::stoi(sliceStr);
-
-        lengths.push_back(len);
-
-        pos     = new_pos + 1;
-        new_pos = lengthsStr.find(',', pos);
-    };
-
-    std::string sliceStr = lengthsStr.substr(pos);
-    int len              = std::stoi(sliceStr);
-
-    lengths.push_back(len);
-
-    return (lengths);
-}
-
-template <typename Tgpu, typename Tref>
-std::vector<int> ReduceDriver<Tgpu, Tref>::GetDimsToReduceFromCmdLine()
-{
-    std::string lengthsStr = inflags.GetValueStr("DimsToReduce");
-
-    std::vector<int> lengths;
-    std::size_t pos = 0;
-    std::size_t new_pos;
-
-    new_pos = lengthsStr.find(',', pos);
-    while(new_pos != std::string::npos)
-    {
-        std::string sliceStr = lengthsStr.substr(pos, new_pos - pos);
-
-        int len = std::stoi(sliceStr);
-
-        lengths.push_back(len);
-
-        pos     = new_pos + 1;
-        new_pos = lengthsStr.find(',', pos);
-    };
-
-    std::string sliceStr = lengthsStr.substr(pos);
-    int len              = std::stoi(sliceStr);
-
-    lengths.push_back(len);
-
-    return (lengths);
-}
-
-template <typename Tgpu, typename Tref>
 int ReduceDriver<Tgpu, Tref>::SetReduceTensorDescriptorFromCmdLineArgs()
 {
     miopenReduceTensorOp_t reduceOp =
@@ -311,6 +247,7 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     using reduce::convert_type;
 
     size_t in_nelem  = GetTensorSize(inputTensor);
+    printf("in_nelem = %zu\n", in_nelem);
     size_t out_nelem = GetTensorSize(outputTensor);
 
     miopenGetReductionWorkspaceSize(
@@ -326,13 +263,13 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 #if MIOPEN_BACKEND_OPENCL
     clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
 #endif
-    in_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_nelem, sizeof(Tgpu)));
-    out_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_nelem, sizeof(Tgpu)));
-    ws_dev  = this->need_indices ? std::unique_ptr<GPUMem>(new GPUMem(
-                                      ctx, ws_nelem * 2, std::max<int>(sizeof(Tgpu), sizeof(int))))
-                                 : std::unique_ptr<GPUMem>(new GPUMem(ctx, ws_nelem, sizeof(Tgpu)));
+    in_dev  =  std::make_unique<GPUMem>(ctx, in_nelem, sizeof(Tgpu));
+    out_dev =  std::make_unique<GPUMem>(ctx, out_nelem, sizeof(Tgpu));
+    ws_dev  = this->need_indices ?  std::make_unique<GPUMem>(
+                                      ctx, ws_nelem * 2, std::max<int>(sizeof(Tgpu), sizeof(int)))
+                                 :  std::make_unique<GPUMem>(ctx, ws_nelem, sizeof(Tgpu));
 
-    indices_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, indices_nelem, sizeof(int)));
+    indices_dev = std::make_unique<GPUMem>(ctx, indices_nelem, sizeof(int));
 
     in              = std::vector<Tgpu>(in_nelem, convert_type<Tgpu>(0.3f));
     out             = std::vector<Tgpu>(out_nelem, convert_type<Tgpu>(0.2f));
@@ -449,12 +386,6 @@ int ReduceDriver<Tgpu, Tref>::RunForwardGPU()
 }
 
 template <typename Tgpu, typename Tref>
-int ReduceDriver<Tgpu, Tref>::RunForwardCPU()
-{
-    return (0);
-}
-
-template <typename Tgpu, typename Tref>
 int ReduceDriver<Tgpu, Tref>::RunBackwardGPU()
 {
     return miopenStatusSuccess;
@@ -480,7 +411,7 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         beta  = 0.0f;
     };
 
-    hostReduction.Run(alpha, in.data(), beta, outhost.data(), outhost_indices.data());
+    hostReduction.Run(alpha, in.data(), beta, outhost, outhost_indices.data());
 
     auto error       = miopen::rms_range(outhost, out);
     double tolerance = 1.5e-4;
@@ -520,7 +451,7 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         };
     };
 
-    if(inflags.GetValueInt("dump_output"))
+    if(inflags.GetValueInt("dump_output") != 0)
     {
         dumpBufferToFile("dump_in.bin", in.data(), in.size());
         dumpBufferToFile("dump_out.bin", out.data(), out.size());
@@ -533,19 +464,13 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         };
     }
 
-    return 0;
-}
-
-template <typename Tgpu, typename Tref>
-int ReduceDriver<Tgpu, Tref>::RunBackwardCPU()
-{
-    return 0;
+    return miopenStatusSuccess;
 }
 
 template <typename Tgpu, typename Tref>
 int ReduceDriver<Tgpu, Tref>::VerifyBackward()
 {
-    return 0;
+    return miopenStatusSuccess;
 }
 
 #endif // GUARD_MIOPEN_CONV_DRIVER_HPP
