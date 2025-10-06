@@ -355,3 +355,104 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
         EXPECT_TRUE(maxdiff < 1e-13) << maxdiff << "\n" << p.str() << "\n";
     }
 }
+
+// Test that the host and device Hermitian symmetrizers produce the same results.
+TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
+{
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<std::vector<size_t>> lengths
+        = {{1},       {2},       {16},      {512},     {1, 1},      {1, 2},      {2, 1},
+           {2, 2},    {8, 1},    {1, 8},    {8, 2},    {2, 8},      {16, 1},     {1, 16},
+           {7, 2},    {2, 7},    {2, 512},  {512, 2},  {16, 512},   {512, 16},   {1, 1, 1},
+           {1, 2, 1}, {2, 1, 1}, {1, 1, 2}, {2, 2, 2}, {8, 1, 2},   {1, 2, 8},   {1, 8, 2},
+           {5, 5, 5}, {8, 5, 5}, {5, 8, 5}, {5, 5, 8}, {512, 7, 2}, {7, 2, 512}, {2, 512, 7}};
+
+    const double                           double_linf_cutoff = 1e-15;
+    std::vector<std::pair<size_t, size_t>> linf_failures;
+
+    const auto array_types
+        = {fft_array_type_hermitian_interleaved, fft_array_type_hermitian_planar};
+
+    for(const auto& length : lengths)
+    {
+        for(const auto& itype : array_types)
+        {
+            // Set up the params class to generate strides etc:
+            rocfft_params p;
+            p.length         = length;
+            p.precision      = fft_precision_double;
+            p.transform_type = fft_transform_type_real_inverse;
+            p.itype          = itype;
+            p.placement      = fft_placement_notinplace;
+            p.validate();
+            ASSERT_TRUE(p.valid(verbose));
+
+            const auto           nbuffer = p.nbuffer(p.itype);
+            std::vector<gpubuf>  gpu_symm_gpubuf(nbuffer), cpu_symm_gpubuf(nbuffer);
+            std::vector<hostbuf> gpu_symm_hostbuf(nbuffer), cpu_symm_hostbuf(nbuffer);
+#ifdef USE_HIPRAND
+            for(size_t i = 0; i < nbuffer; ++i)
+            {
+                ASSERT_TRUE(gpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]) == hipSuccess);
+                ASSERT_TRUE(cpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]) == hipSuccess);
+            }
+
+            p.igen = fft_input_random_generator_device;
+            p.compute_input(gpu_symm_gpubuf, true);
+            p.compute_input(cpu_symm_gpubuf, false);
+
+            for(size_t i = 0; i < nbuffer; ++i)
+            {
+                gpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+                cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+                ASSERT_TRUE(hipMemcpy(gpu_symm_hostbuf[i].data(),
+                                      gpu_symm_gpubuf[i].data(),
+                                      p.ibuffer_sizes()[i],
+                                      hipMemcpyDeviceToHost)
+                            == hipSuccess);
+                ASSERT_TRUE(hipMemcpy(cpu_symm_hostbuf[i].data(),
+                                      cpu_symm_gpubuf[i].data(),
+                                      p.ibuffer_sizes()[i],
+                                      hipMemcpyDeviceToHost)
+                            == hipSuccess);
+            }
+#else
+            for(size_t i = 0; i < nbuffer; ++i)
+            {
+                gpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+                cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
+            }
+
+            p.igen = fft_input_generator_host;
+            p.compute_input(gpu_symm_hostbuf, true);
+            p.compute_input(cpu_symm_hostbuf, false);
+#endif
+
+            const auto diff = distance(gpu_symm_hostbuf,
+                                       cpu_symm_hostbuf,
+                                       p.ilength(),
+                                       p.nbatch,
+                                       p.precision,
+                                       p.itype,
+                                       p.istride,
+                                       p.idist,
+                                       p.itype,
+                                       p.istride,
+                                       p.idist,
+                                       &linf_failures,
+                                       double_linf_cutoff,
+                                       p.ioffset,
+                                       p.ioffset);
+
+            EXPECT_TRUE(diff.l_inf <= double_linf_cutoff)
+                << "Linf test failed.  Linf:" << diff.l_inf << "\tcutoff: " << double_linf_cutoff
+                << "\n"
+                << p.str();
+        }
+    }
+}
