@@ -45,7 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: a58f3a3b207955e463f5079d2cd57f1c34d3cbd0 # 2025-10-01 commit
+          ref: dc05d637054ad197c84b00e24b6262af0ec797c6 # 2025-10-03 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -58,7 +58,6 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          rm ./TheRock/patches/amd-mainline/rocm-libraries/0009-Use-workgroupMappingDim-in-rocroller_host.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
 
       - name: Install requirements
