@@ -367,5 +367,5 @@ public:
     }
 };
 
-typedef ConvolutionWgradNode ConvWgradNode;
+typedef ConvolutionWgradNode WgradNode;
 }
