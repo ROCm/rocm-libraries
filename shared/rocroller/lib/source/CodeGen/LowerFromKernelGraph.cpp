@@ -860,7 +860,8 @@ namespace rocRoller
                     }
                     else
                     {
-                        // Non-Wave LDS Load
+                        Log::info("Skipping LDS address annotations for {}",
+                                  toString(tile.memoryType));
                     }
                 }()
                                                     .to<std::vector>();
@@ -868,16 +869,23 @@ namespace rocRoller
                 for(auto instr : m_loadStoreTileGenerator.genLoadLDSTile(
                         tag, load, m_graph->buildTransformer(tag)))
                 {
-                    if(GPUInstructionInfo::isLDS(instr.getOpCode()) && addresses.size() > 0)
+                    if(GPUInstructionInfo::isLDS(instr.getOpCode()))
                     {
-                        AssertFatal(not instr.addresses.has_value(),
-                                    "Should be unset",
-                                    ShowValue((*instr.addresses).size()));
-                        instr.addresses = addresses;
-
-                        for(const auto addr : addresses)
+                        if(addresses.size() > 0)
                         {
-                            Log::error("  LDS address: {}", addr);
+                            AssertFatal(not instr.addresses.has_value(),
+                                        "Should be unset",
+                                        ShowValue((*instr.addresses).size()));
+                            instr.addresses = addresses;
+
+                            for(const auto addr : addresses)
+                            {
+                                Log::error("  LDS address: {}", addr);
+                            }
+                        }
+                        else
+                        {
+                            co_yield Instruction::Comment("Skipping address annotations");
                         }
                     }
                     co_yield std::move(instr);
