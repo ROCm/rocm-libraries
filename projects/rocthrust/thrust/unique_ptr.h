@@ -112,6 +112,12 @@ private:
   size_t m_size;
 };
 
+// For arrays of trivially destructible element types we intentionally do NOT
+// store the element count. Their destruction is a no-op, so only the raw
+// deallocation is required. Omitting the size keeps this deleter
+// specialization an empty (zero-size) type, allowing unique_ptr<T[]>
+// instantiations that use it to remain a zero-cost abstraction (the deleter
+// need not increase the overall object size).
 template <class T>
 struct default_delete<T[], typename std::enable_if<std::is_trivially_destructible<T>::value>::type>
 {
