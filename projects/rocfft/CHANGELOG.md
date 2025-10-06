@@ -17,6 +17,10 @@ Documentation for rocFFT is available at
   - (64,32,128)
 * Improved performance of 3D MPI pencil decompositions by using sub-communicators for global transpose operations.
 
+### Resolved issues
+
+* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
+
 ## rocFFT 1.0.34 for ROCm 7.0.0
 
 ### Added

@@ -349,6 +349,8 @@ const auto adhoc_tokens = {
     "real_forward_len_378_42_single_ip_batch_66000_istride_44_1_R_ostride_22_1_HI_idist_16632_odist_8316_ioffset_0_0_ooffset_0_0",
     "real_forward_len_527_25_single_ip_batch_67500_istride_26_1_R_ostride_13_1_HI_idist_13702_odist_6851_ioffset_0_0_ooffset_0_0",
     "real_forward_len_630_38_single_ip_batch_65540_istride_40_1_R_ostride_20_1_HI_idist_25200_odist_12600_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_2_5_7_double_ip_batch_1_istride_20_4_1_HI_ostride_40_8_1_R_idist_40_odist_80_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_2_20_double_ip_batch_1_istride_11_1_HI_ostride_22_1_R_idist_22_odist_44_ioffset_0_0_ooffset_0_0"
     // clang-format on
 };
 
