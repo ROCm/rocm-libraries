@@ -15,9 +15,10 @@ if(NOT GTest_FOUND)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    find_package(mxDataGenerator QUIET)
-    if(NOT mxDataGenerator_FOUND)
-        add_subdirectory("${PROJECT_SOURCE_DIR}/../mxdatagenerator" "${PROJECT_BINARY_DIR}/mxdatagenerator")
+    if(ROCROLLER_ENABLE_THEROCK)
+        find_package(mxDataGenerator REQUIRED)
+    else()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
     endif()
 endif()
 
