@@ -89,9 +89,9 @@ namespace rocRoller
             KernelGraph::MemoryTracer::MemoryOpLDS memOp{direction};
 
             // Maybe on average 2-way bank conflict?
-            const uint            waveSize     = 64;
-            const uint            conflictWays = 2;
-            std::vector<uint32_t> addresses;
+            const uint          waveSize     = 64;
+            const uint          conflictWays = 2;
+            std::vector<size_t> addresses;
             addresses.reserve(waveSize);
 
             for(uint thread = 0; thread < waveSize; ++thread)

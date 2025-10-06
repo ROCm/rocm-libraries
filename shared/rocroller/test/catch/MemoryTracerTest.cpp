@@ -258,9 +258,9 @@ namespace MemoryTracerTest
         SECTION("Bank conflicts")
         {
             // Test multiple addresses accessing the same bank
-            std::vector<uint32_t> addresses = {0, 128, 256}; // x / 4 mod 32 = 0 for all addresses
-            uint                  dwords    = 1;
-            auto                  ldsRead   = MemoryOpLDS{LdsDirection::Read};
+            std::vector<size_t> addresses = {0, 128, 256}; // x / 4 mod 32 = 0 for all addresses
+            uint                dwords    = 1;
+            auto                ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942, ldsRead);
@@ -282,9 +282,9 @@ namespace MemoryTracerTest
 
         SECTION("Wrap around")
         {
-            std::vector<uint32_t> addresses = {124}; // 124 / 4 mod 32 = 31
-            uint                  dwords    = 4; // Accesses banks 31, 0, 1, 2
-            auto                  ldsRead   = MemoryOpLDS{LdsDirection::Read};
+            std::vector<size_t> addresses = {124}; // 124 / 4 mod 32 = 31
+            uint                dwords    = 4; // Accesses banks 31, 0, 1, 2
+            auto                ldsRead   = MemoryOpLDS{LdsDirection::Read};
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942, ldsRead);
@@ -323,8 +323,8 @@ namespace MemoryTracerTest
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
-        std::vector<uint32_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
-        uint                  threadsPerClock = 4;
+        std::vector<size_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
+        uint                threadsPerClock = 4;
 
         auto groups = LDSBankModel::divideIntoThreadGroups(addresses, threadsPerClock);
 
@@ -357,22 +357,22 @@ namespace MemoryTracerTest
 
         RuntimeLDSInstruction instr;
         instr.memoryOp = MemoryOpLDS{LdsDirection::Read};
-        instr.dwords   = 2;
+        instr.dwords   = 4;
 
         for(int i = 0; i < 64; ++i) // 64 threads
         {
-            instr.baseAddresses.push_back(i * 8); // Each address is 8 bytes apart
-            // Therefore no bank conflicts occur (note the 2 dwords per access)
+            // No bank conflicts should occur
+            instr.baseAddresses.push_back(i * 4 * instr.dwords);
         }
 
         auto mappings
-            = LDSBankModel::computeThreadGroupBankMappings(instr, GPUArchitectureGFX::GFX942);
+            = LDSBankModel::computeThreadGroupBankMappings(instr, GPUArchitectureGFX::GFX950);
 
         CHECK(mappings.size() == 8); // 64 threads / 8 threads per clock = 8 groups
 
         for(size_t i = 0; i < mappings.size(); ++i)
         {
-            CHECK(mappings[i].size() == 16); // 8 threads * 2 dwords each = 16 banks accessed
+            CHECK(mappings[i].size() == 32); // 8 threads * 4 dwords each = 32 banks accessed
 
             for(const auto& [bank, count] : mappings[i])
             {
@@ -460,9 +460,9 @@ namespace MemoryTracerTest
         const auto gfx = GPUArchitectureGFX::GFX950;
 
         // n-way bank conflict: n threads access the same bank
-        auto generateAddresses = [](uint dwords, uint conflictWays) -> std::vector<uint32_t> {
-            std::vector<uint32_t> addresses;
-            const uint            waveSize = 64;
+        auto generateAddresses = [](uint dwords, uint conflictWays) -> std::vector<size_t> {
+            std::vector<size_t> addresses;
+            const uint          waveSize = 64;
 
             for(uint thread = 0; thread < waveSize; ++thread)
             {

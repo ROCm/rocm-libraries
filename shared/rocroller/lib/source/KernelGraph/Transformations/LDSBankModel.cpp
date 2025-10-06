@@ -230,22 +230,21 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return 32;
     }
 
-    std::vector<std::vector<uint32_t>>
-        LDSBankModel::divideIntoThreadGroups(const std::vector<uint32_t>& addresses,
-                                             uint                         threadsPerClock)
+    std::vector<std::vector<size_t>>
+        LDSBankModel::divideIntoThreadGroups(const std::vector<size_t>& addresses,
+                                             uint                       threadsPerClock)
     {
         AssertFatal(addresses.size() % threadsPerClock == 0,
                     fmt::format("Number of addresses {} is not a multiple of threads per clock {}",
                                 addresses.size(),
                                 threadsPerClock));
 
-        std::vector<std::vector<uint32_t>> threadGroups;
+        std::vector<std::vector<size_t>> threadGroups;
 
         for(size_t groupStart = 0; groupStart < addresses.size(); groupStart += threadsPerClock)
         {
-            size_t groupEnd = std::min(groupStart + threadsPerClock, addresses.size());
-            std::vector<uint32_t> group(addresses.begin() + groupStart,
-                                        addresses.begin() + groupEnd);
+            size_t              groupEnd = std::min(groupStart + threadsPerClock, addresses.size());
+            std::vector<size_t> group(addresses.begin() + groupStart, addresses.begin() + groupEnd);
             threadGroups.push_back(group);
         }
 
@@ -253,10 +252,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
     }
 
     std::map<uint, uint>
-        LDSBankModel::createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
-                                                uint                         dwords,
-                                                GPUArchitectureGFX           gfx,
-                                                const MemoryOpLDS&           memoryOp)
+        LDSBankModel::createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
+                                                uint                       dwords,
+                                                GPUArchitectureGFX         gfx,
+                                                const MemoryOpLDS&         memoryOp)
     {
         std::map<uint, uint> bankToAddressCounts;
         uint                 numBanks = getNumLDSBanks(gfx, memoryOp, dwords);

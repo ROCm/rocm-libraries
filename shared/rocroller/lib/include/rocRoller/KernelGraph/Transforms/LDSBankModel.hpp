@@ -66,9 +66,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct RuntimeLDSInstruction
     {
-        MemoryOpLDS           memoryOp;
-        int                   dwords;
-        std::vector<uint32_t> baseAddresses;
+        MemoryOpLDS         memoryOp;
+        int                 dwords;
+        std::vector<size_t> baseAddresses;
     };
 
     struct OperationAccesses
@@ -216,8 +216,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param threadsPerClock Maximum number of threads that can operate per clock
          * @return Vector of thread groups, each containing addresses for that group
          */
-        static std::vector<std::vector<uint32_t>>
-            divideIntoThreadGroups(const std::vector<uint32_t>& addresses, uint threadsPerClock);
+        static std::vector<std::vector<size_t>>
+            divideIntoThreadGroups(const std::vector<size_t>& addresses, uint threadsPerClock);
 
         /**
          * @brief Determines how many addresses accesses each bank
@@ -232,10 +232,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @return A map, where the key is the bank index and the value is the count of addresses accessing that bank
          */
         static std::map<uint, uint>
-            createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
-                                      uint                         dwords,
-                                      GPUArchitectureGFX           gfx,
-                                      const MemoryOpLDS&           memoryOp);
+            createBankToAddressCounts(const std::vector<size_t>& baseAddresses,
+                                      uint                       dwords,
+                                      GPUArchitectureGFX         gfx,
+                                      const MemoryOpLDS&         memoryOp);
 
         /**
          * @brief Calculate the number of clock cycles needed to resolve bank conflicts
