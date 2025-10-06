@@ -1029,7 +1029,7 @@ struct partition_kernel_impl_
         const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
         const uint32_t flat_block_id        = block_id.get(flat_block_thread_id, storage.block_id);
 
-        size_t     prev_selected_count_values[sizeof...(UnaryPredicates)]{};
+        size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
         load_selected_count(prev_selected_count, prev_selected_count_values);
 
         const auto         block_offset = flat_block_id * items_per_block;

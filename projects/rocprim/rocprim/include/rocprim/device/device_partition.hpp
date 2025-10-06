@@ -220,7 +220,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         = ::rocprim::detail::constexpr_value_variant<bool, false>::create(false);
 
     bool use_sleepy_scan;
-    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));;
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleepy_scan));
+    ;
     const auto use_sleepy_scan_variant
         = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(use_sleepy_scan);
 
@@ -263,7 +264,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             static constexpr bool         is_three_way        = sizeof...(UnaryPredicates) == 2;
             static constexpr const size_t selected_count_size = is_three_way ? 2 : 1;
 
-            const size_t size_limit = params.kernel_config.size_limit;
+            const size_t size_limit         = params.kernel_config.size_limit;
             const size_t aligned_size_limit = ::rocprim::max<size_t>(
                 size_limit - (size_limit % static_cast<size_t>(items_per_block)),
                 items_per_block);
@@ -315,9 +316,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
                     detail::temp_storage::ptr_aligned_array(&prev_selected_count,
                                                             selected_count_size),
-                    detail::temp_storage::ptr_aligned_array(
-                        &block_id_pool,
-                        block_id_type::get_storage_size()),
+                    detail::temp_storage::ptr_aligned_array(&block_id_pool,
+                                                            block_id_type::get_storage_size()),
                     // vsmem
                     detail::temp_storage::make_partition(&vsmem,
                                                          virtual_shared_memory_size,
