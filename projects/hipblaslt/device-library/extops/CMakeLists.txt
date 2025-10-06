@@ -87,7 +87,6 @@ foreach(arch IN LISTS archs)
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
             ${previous_target}
-        COMMAND ${CMAKE_COMMAND} -E echo "Starting extop-library-${arch} for ${arch}"
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library"
         COMMAND ${CMAKE_COMMAND} -E echo "Completed extop-library-${arch} for ${arch}"
