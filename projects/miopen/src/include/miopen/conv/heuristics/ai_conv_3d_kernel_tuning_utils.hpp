@@ -52,19 +52,19 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 // Main template implementation
-template <typename DataType>
 MIOPEN_INTERNALS_EXPORT
-    std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-    RunParameterPredictionModel(
-        const miopen::ExecutionContext& ctx,
-        const miopen::conv::ProblemDescription& problem,
-        std::vector<std::string>& valid_kernels,
-        int& index,
-        int& split_k,
-        std::string& kernel_id,
-        std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-            fill_valid_kernels,
-        std::string solver_name)
+template <typename DataType>
+std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel(
+    const miopen::ExecutionContext& ctx,
+    const miopen::conv::ProblemDescription& problem,
+    std::vector<std::string>& valid_kernels,
+    int& index,
+    int& split_k,
+    std::string& kernel_id,
+    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
+        fill_valid_kernels,
+    std::string solver_name)
 {
     valid_kernels = fill_valid_kernels(problem);
 
