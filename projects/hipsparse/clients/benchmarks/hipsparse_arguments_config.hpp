@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -37,20 +37,20 @@ public:
 
 private:
     std::string b_filename{};
-    char b_transA{};
-    char b_transB{};
-    int  b_baseA{};
-    int  b_baseB{};
-    int  b_baseC{};
-    int  b_baseD{};
-    int  b_action{};
-    int  b_part{};
-    int  b_dir{};
-    int  b_orderA{};
-    int  b_orderB{};
-    int  b_orderC{};
-    int  b_formatA{};
-    int  b_formatB{};
+    char        b_transA{};
+    char        b_transB{};
+    int         b_baseA{};
+    int         b_baseB{};
+    int         b_baseC{};
+    int         b_baseD{};
+    int         b_action{};
+    int         b_part{};
+    int         b_dir{};
+    int         b_orderA{};
+    int         b_orderB{};
+    int         b_orderC{};
+    int         b_formatA{};
+    int         b_formatB{};
 
     int b_csr2csc_alg{};
     int b_dense2sparse_alg{};
