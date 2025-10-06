@@ -14,7 +14,7 @@ extern void set_device(int id);
 extern int get_device_id();
 }
 
-class HandleHipDeviceTest : public ::testing::Test
+class CPU_HandleHipDevice_NONE : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -29,7 +29,7 @@ protected:
     int device_count_ = 0;
 };
 
-TEST_F(HandleHipDeviceTest, ValidDeviceSetSucceeds)
+TEST_F(CPU_HandleHipDevice_NONE, ValidDeviceSetSucceeds)
 {
     if(device_count_ == 0)
     {
@@ -43,7 +43,7 @@ TEST_F(HandleHipDeviceTest, ValidDeviceSetSucceeds)
     EXPECT_EQ(current_device, 0);
 }
 
-TEST_F(HandleHipDeviceTest, NegativeDeviceIdThrowsWithCorrectMessage)
+TEST_F(CPU_HandleHipDevice_NONE, NegativeDeviceIdThrowsWithCorrectMessage)
 {
     const int invalid_id = -10;
     
@@ -58,7 +58,7 @@ TEST_F(HandleHipDeviceTest, NegativeDeviceIdThrowsWithCorrectMessage)
     }
 }
 
-TEST_F(HandleHipDeviceTest, OutOfRangeDeviceIdThrowsWithCorrectMessage)
+TEST_F(CPU_HandleHipDevice_NONE, OutOfRangeDeviceIdThrowsWithCorrectMessage)
 {
     const int out_of_range_id = device_count_ + 10;
     
@@ -73,7 +73,7 @@ TEST_F(HandleHipDeviceTest, OutOfRangeDeviceIdThrowsWithCorrectMessage)
     }
 }
 
-TEST_F(HandleHipDeviceTest, ErrorMessageContainsDeviceIdAndStatus)
+TEST_F(CPU_HandleHipDevice_NONE, ErrorMessageContainsDeviceIdAndStatus)
 {
     const int test_device_id = 9999;
     
@@ -90,11 +90,11 @@ TEST_F(HandleHipDeviceTest, ErrorMessageContainsDeviceIdAndStatus)
     }
 }
 
-TEST_F(HandleHipDeviceTest, MultipleValidDevicesSwitchCorrectly)
+TEST_F(CPU_HandleHipDevice_NONE, MultipleValidDevicesSwitchCorrectly)
 {
     if(device_count_ < 2)
     {
-        GTEST_SKIP() << "Need at least 2 devices for multi-device test";
+        GTEST_SKIP() << "Need at least 2 devices for multi-device TEST_F";
     }
 
     // Switch to device 0
@@ -109,7 +109,7 @@ TEST_F(HandleHipDeviceTest, MultipleValidDevicesSwitchCorrectly)
     EXPECT_EQ(current, 1);
 }
 
-TEST_F(HandleHipDeviceTest, BoundaryConditionLastValidDevice)
+TEST_F(CPU_HandleHipDevice_NONE, BoundaryConditionLastValidDevice)
 {
     if(device_count_ == 0)
     {
@@ -124,7 +124,7 @@ TEST_F(HandleHipDeviceTest, BoundaryConditionLastValidDevice)
     EXPECT_EQ(current, last_valid);
 }
 
-TEST_F(HandleHipDeviceTest, BoundaryConditionFirstInvalidDevice)
+TEST_F(CPU_HandleHipDevice_NONE, BoundaryConditionFirstInvalidDevice)
 {
     int first_invalid = device_count_;
     
@@ -138,7 +138,7 @@ TEST_F(HandleHipDeviceTest, BoundaryConditionFirstInvalidDevice)
     }
 }
 
-TEST_F(HandleHipDeviceTest, GetDeviceIdReturnsValidValue)
+TEST_F(CPU_HandleHipDevice_NONE, GetDeviceIdReturnsValidValue)
 {
     if(device_count_ == 0)
     {
@@ -153,7 +153,7 @@ TEST_F(HandleHipDeviceTest, GetDeviceIdReturnsValidValue)
 #else
 
 // Dummy test for non-HIP builds
-TEST(HandleHipDeviceTest, SkippedForNonHipBackend)
+TEST(CPU_HandleHipDevice_NONE, SkippedForNonHipBackend)
 {
     GTEST_SKIP() << "HIP backend not available";
 }
