@@ -190,6 +190,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "prefetchMixMemOps", params.prefetchMixMemOps);
             iot::mapRequired(io, "betaInFma", params.betaInFma);
             iot::mapRequired(io, "scheduler", params.scheduler);
+            iot::mapRequired(io, "schedulerCost", params.schedulerCost);
             iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
             iot::mapRequired(io, "types", params.types);
@@ -201,6 +202,7 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "streamK", params.streamK);
             iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
+            iot::mapRequired(io, "streamKTwoTileDPFirst", params.streamKTwoTileDPFirst);
 
             iot::mapOptional(io, "version", params.version);
         }

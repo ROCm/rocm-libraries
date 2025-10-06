@@ -36,6 +36,7 @@ public:
     std::string function_name{};
 
 private:
+    std::string b_filename{};
     char b_transA{};
     char b_transB{};
     int  b_baseA{};

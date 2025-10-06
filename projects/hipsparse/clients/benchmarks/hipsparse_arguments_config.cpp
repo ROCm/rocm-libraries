@@ -43,6 +43,10 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
         this->batch_count = 1;
 
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
+        this->category[0] = '\0';
+
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
         this->compute_type = HIP_R_32F;
@@ -101,9 +105,6 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
 void hipsparse_arguments_config::set_description(options_description& desc)
 {
-    // std::string function_name3;
-    // std::string filename3;
-
     desc.add_options()("help,h", "produces this help message")
         // clang-format off
     ("sizem,m",
@@ -162,7 +163,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "Batch count (default: 1)")
 
     ("file",
-     value<std::string>(&filename)->default_value(""),
+     value<std::string>(&this->b_filename)->default_value(""),
      "read from file with file extension detection.")
 
     ("alpha",
@@ -283,11 +284,11 @@ void hipsparse_arguments_config::set_description(options_description& desc)
     ("csr2csc_alg",
      value<int>(&this->b_csr2csc_alg)->default_value(csr2csc_alg_support::get_default_algorithm()),
      csr2csc_alg_support::get_description())
-    
+
     ("dense2sparse_alg",
      value<int>(&this->b_dense2sparse_alg)->default_value(dense2sparse_alg_support::get_default_algorithm()),
      dense2sparse_alg_support::get_description())
-    
+
     ("sparse2dense_alg",
      value<int>(&this->b_sparse2dense_alg)->default_value(sparse2dense_alg_support::get_default_algorithm()),
      sparse2dense_alg_support::get_description())
@@ -323,17 +324,14 @@ void hipsparse_arguments_config::set_description(options_description& desc)
     ("permute",
      value<int>(&this->permute)->default_value(0),
      "Using permutation vector in coosort, csrsort, cscsort. Do not use vector: 0, Use vector: 1 (default 0)")
-     
+
     ("gpsv_alg",
      value<int>(&this->gpsv_alg)->default_value(0),
      "Algorithm for gpsv routine. Currently only qr supported: 0, (default 0)")
-     
+
     ("gtsv_alg",
      value<int>(&this->gtsv_alg)->default_value(0),
      "Algorithm for gtsv routine. Possibly choices are thomas: 1, lu: 2, qr: 3, (default 0)");
-
-    //strcpy(filename, filename3.c_str());
-    //strcpy(function_name, function_name3.c_str());
 }
 
 int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&desc)
@@ -403,6 +401,12 @@ int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&
     this->spmv_alg = (hipsparseSpMVAlg_t)this->b_spmv_alg;
     this->spsm_alg = (hipsparseSpSMAlg_t)this->b_spsm_alg;
     this->spsv_alg = (hipsparseSpSVAlg_t)this->b_spsv_alg;
+
+    strncpy(this->filename, this->b_filename.c_str(), this->b_filename.length());
+    this->filename[this->b_filename.length()] = '\0';
+
+    strncpy(this->function, this->function_name.c_str(), this->function_name.length());
+    this->function[this->function_name.length()] = '\0';
 
     if(this->M < 0 || this->N < 0)
     {
@@ -500,4 +504,3 @@ int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&
 
     return 0;
 }
-

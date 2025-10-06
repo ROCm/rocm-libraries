@@ -66,13 +66,11 @@ namespace rocRoller::KernelGraph
     {
         for(int tag : nodes)
         {
-            for(auto reap :
-                kgraph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>())
+            for(auto reap : kgraph.control.getNeighbours<Graph::Direction::Upstream>(tag))
             {
                 kgraph.control.deleteElement(reap);
             }
-            for(auto reap :
-                kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>())
+            for(auto reap : kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag))
             {
                 kgraph.control.deleteElement(reap);
             }
@@ -128,7 +126,7 @@ namespace rocRoller::KernelGraph
     template <Graph::Direction direction>
     void reconnect(KernelGraph& graph, int newop, int op)
     {
-        auto neighbours = graph.control.getNeighbours<direction>(op).template to<std::vector>();
+        auto neighbours = graph.control.getNeighbours<direction>(op);
         for(auto const& tag : neighbours)
         {
             auto edge = graph.control.getElement(tag);

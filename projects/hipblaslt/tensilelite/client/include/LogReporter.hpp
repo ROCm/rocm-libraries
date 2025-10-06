@@ -211,7 +211,10 @@ namespace TensileLite
                 else if(value == "DID_NOT_SATISFY_ASSERTS")
                     m_rowLevel = LogLevel::Terse;
                 else if(value == "INVALID")
+                {
                     m_rowLevel = LogLevel::Error;
+                    ++m_exceptionsReported;
+                }
             }
 
             virtual bool logAtLevel(LogLevel level) override
@@ -367,8 +370,8 @@ namespace TensileLite
                         std::cout << curRow[ResultKey::BenchmarkRunNumber] << ","
                                   << curRow[ResultKey::ProblemProgress] << ","
                                   << curRow[ResultKey::SolutionProgress]
-                                  << ", Skip Slow Solution: " << curRow[ResultKey::SolutionName]
-                                  << std::endl;
+                                  << ",Solution Skipped (slow or doing restoration): "
+                                  << curRow[ResultKey::SolutionName] << std::endl;
                     else
                         m_csvOutput.writeCurrentRow();
                     if(validation && !std::isnan(currentTimeUS))

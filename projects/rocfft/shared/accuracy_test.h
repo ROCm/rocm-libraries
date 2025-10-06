@@ -569,7 +569,7 @@ inline void run_round_trip_inverse(Tparams&              params,
     catch(fft_params::work_buffer_alloc_failure& e)
     {
         std::stringstream ss;
-        ss << "Failed to allocate work buffer (size: " << params.workbuffersize << ")";
+        ss << "Failed to allocate work buffer (size: " << e.attempted_size << ")";
         ++n_hip_failures;
         if(skip_runtime_fails)
         {
@@ -718,7 +718,7 @@ inline void compare_round_trip_inverse(Tparams&              params,
         << params.str();
 
     EXPECT_TRUE(diff.l_2 / cpu_input_norm.l_2
-                < sqrt(log2(total_length)) * type_epsilon(params.precision))
+                <= sqrt(log2(total_length)) * type_epsilon(params.precision))
         << "L2 test failed. L2: " << diff.l_2
         << "\tnormalized L2: " << diff.l_2 / cpu_input_norm.l_2
         << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)
@@ -770,7 +770,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     {
         ++n_hip_failures;
         std::stringstream ss;
-        ss << "Work buffer allocation failed with size: " << params.workbuffersize;
+        ss << "Work buffer allocation failed with size: " << e.attempted_size;
         if(skip_runtime_fails)
         {
             throw ROCFFT_SKIP{ss.str()};

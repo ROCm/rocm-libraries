@@ -67,9 +67,9 @@ if command -v clang-format >/dev/null; then
             git add -u "$file"
         fi
     done
-else 
+else
     echo "clang-format command not found, skipping file formatting."
-    # exit 127 
+    # exit 127
 fi
 
 # Perform cppcheck for added or modified files

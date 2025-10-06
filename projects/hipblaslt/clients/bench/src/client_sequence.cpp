@@ -522,8 +522,11 @@ int main(int argc, char** argv)
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
         {
             if(layer[gemmIdx].type == Layer::TYPE::GEMM)
+            {
+                (*layer[gemmIdx].gemms)[b].setMaxWorkspaceBytes(layer[gemmIdx].ws_size);
                 CHECK_HIPBLASLT_ERROR((*layer[gemmIdx].gemms)[b].initialize(
                     heuristicResults[gemmIdx].algo, layer[gemmIdx].ws));
+            }
         }
 
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
@@ -579,7 +582,7 @@ int main(int argc, char** argv)
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-        hipGraphLaunch(graph_exec, stream);
+        CHECK_HIP_ERROR(hipGraphLaunch(graph_exec, stream));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
         CHECK_HIP_ERROR(hipGraphExecDestroy(graph_exec));

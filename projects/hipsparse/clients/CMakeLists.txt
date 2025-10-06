@@ -135,13 +135,13 @@ if(BUILD_CLIENTS_TESTS)
     COMPONENT clients-common
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
-  
+
   rocm_install(
     FILES "${HIPSPARSE_CLIENTMATRICES}"
     COMPONENT clients-common
     DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
     )
-  
+
 
 
 

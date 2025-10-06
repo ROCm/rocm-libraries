@@ -40,6 +40,7 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -538,8 +539,7 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK                       = true;
-                params->streamKTwoTile                = gemm.streamKTwoTile;
+                params->streamK                       = gemm.streamK;
             }
 
             auto memoryTypeA = MemoryType::WAVE;
@@ -1095,7 +1095,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1111,7 +1111,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
     }
@@ -1134,7 +1134,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1148,9 +1148,29 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
+    {
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        GEMMProblem gemm;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+        gemm.m      = gemm.macM * 8;
+        gemm.n      = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+        gemm.k = gemm.macK * 8;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+        gemm.streamK   = StreamKMode::TwoTileDPFirst;
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
@@ -1179,7 +1199,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1189,7 +1209,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             for(auto loadLDSA : {false, true})
             {
                 gemm.loadLDSA = loadLDSA;
@@ -1232,12 +1252,12 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<Half>(gemm);
         }
     }

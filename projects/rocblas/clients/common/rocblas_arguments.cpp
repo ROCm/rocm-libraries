@@ -210,6 +210,15 @@ static Arguments& getDefaultArgs()
 }
 static Arguments& gDefArgs = getDefaultArgs();
 
+template <typename T>
+bool member_different(const T& a, T& b)
+{
+    if constexpr(std::is_same_v<T, char[4]> || std::is_same_v<T, char[64]>)
+        return true;
+    else
+        return a != b;
+}
+
 // Function to print Arguments out to stream in YAML format
 rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os, const Arguments& arg)
 {
@@ -220,8 +229,8 @@ rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os, const Argumen
     };
 
     // Print each (name, value) tuple pair if not default value
-#define NAME_VALUE_PAIR(NAME)     \
-    if(arg.NAME != gDefArgs.NAME) \
+#define NAME_VALUE_PAIR(NAME)                     \
+    if(member_different(arg.NAME, gDefArgs.NAME)) \
     print_pair(#NAME, arg.NAME)
 
     // cppcheck-suppress unknownMacro

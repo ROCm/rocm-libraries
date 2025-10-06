@@ -42,13 +42,10 @@ To build hipFFT from source, follow these steps:
 
 #. Install the library build dependencies:
 
-   * On AMD platforms, install :doc:`rocFFT <rocfft:index>`. To build from source,
-     rocFFT must be installed with the development headers.
-     These headers can be added by installing the ``rocfft-dev`` or ``rocfft-devel`` package. If rocFFT was built from
-     source, then these headers are already included.
-   * On NVIDIA platforms, install CUDA cuFFT.
-     cuFFT must be installed with the development headers. For more information,
-     see `CUDA cuFFT <https://developer.nvidia.com/cufft>`_.
+   On AMD platforms, install :doc:`rocFFT <rocfft:index>`. To build from source,
+   rocFFT must be installed with the development headers.
+   These headers can be added by installing the ``rocfft-dev`` or ``rocfft-devel`` package. If rocFFT was built from
+   source, then these headers are already included.
 
 #. Install the client build dependencies for the clients:
 
@@ -64,35 +61,20 @@ To build hipFFT from source, follow these steps:
       mkdir build && cd build
       cmake -LH ..
 
-   Here are some CMake build examples:
+   Here are some CMake build examples for AMD GPUs:
 
-   *  For AMD GPUs
+   *  Building a project using :doc:`HIP language <hip:index>` APIs and hipFFT with the standard host compiler:
 
-      *  Building a project using :doc:`HIP language <hip:index>` APIs and hipFFT with the standard host compiler:
+      .. code-block:: shell
 
-         .. code-block:: shell
+         cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -L ..
 
-            cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -L ..
+   *  Building a project using HIP language APIs, hipFFT, and device kernels with HIP-Clang:
 
-      *  Building a project using HIP language APIs, hipFFT, and device kernels with HIP-Clang:
+      .. code-block:: shell
 
-         .. code-block:: shell
+         cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_BUILD_TYPE=Release -DBUILD_CLIENTS=ON -L ..
 
-            cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_BUILD_TYPE=Release -DBUILD_CLIENTS=ON -L ..
-
-   *  For NVIDIA GPUs
-
-      *  Building a project using HIP language APIs and hipFFT with the standard host compiler:
-
-         .. code-block:: shell
-
-            cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DBUILD_WITH_LIB=CUDA -L ..
-
-      *  Building a project using HIP language APIs, hipFFT, and device kernels with HIP-NVCC:
-
-         .. code-block:: shell
-
-            HIP_PLATFORM=nvidia cmake -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_BUILD_TYPE=Release -DBUILD_CLIENTS=ON -L ..
 
    .. note::
 

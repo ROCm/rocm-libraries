@@ -121,6 +121,11 @@ option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 
+option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
+if(MIOPEN_INCBIN)
+    enable_language(ASM)
+endif()
+
 option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
 message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
 
@@ -130,7 +135,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.0)
+rocm_setup_version(VERSION 3.5.1)
 
 list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 include(TargetFlags)
@@ -201,8 +206,9 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
-
-set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
+    
+# On Windows, internal symbols are only exported when BUILD_TESTING=true. As a result, building driver with BUILD_TESTING=false will result in failure.
+set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))  
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
@@ -394,7 +400,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         message(STATUS "Build without hipbBLASLt")
     endif()
 else()
-    #CK is only enabled when HIP backend is selected   
+    #CK is only enabled when HIP backend is selected
     set(MIOPEN_USE_COMPOSABLEKERNEL Off)
     if(MIOPEN_USE_HIPRTC)
         message(FATAL_ERROR "HIPRTC cannot be used without HIP backend")
@@ -651,25 +657,19 @@ endforeach()
 
 function(install_kdb FILE_NAME COMPONENT_NAME)
     if(EXISTS "${FILE_NAME}")
-        file(READ ${FILE_NAME} __contents LIMIT 7)
-        get_filename_component(__fname ${FILE_NAME} NAME_WLE)
-        if(__contents MATCHES "version")
-            list(APPEND LFS_MISSING_FILES ${__fname})
-        else()
-            unpack_db(${FILE_NAME})
-            if( NOT ENABLE_ASAN_PACKAGING )
-                if( NOT MIOPEN_TEST_DBSYNC )
-                    set(__component_name COMPONENT ${COMPONENT_NAME})
-                endif()
-                rocm_install(FILES ${KERNELS_BINARY_DIR}/${__fname}
-                            DESTINATION ${DATABASE_INSTALL_DIR}
-                            ${__component_name})
+        unpack_db(${FILE_NAME})
+        if( NOT ENABLE_ASAN_PACKAGING )
+            if( NOT MIOPEN_TEST_DBSYNC )
+                set(__component_name COMPONENT ${COMPONENT_NAME})
             endif()
+            rocm_install(FILES ${KERNELS_BINARY_DIR}/${__fname}
+                        DESTINATION ${DATABASE_INSTALL_DIR}
+                        ${__component_name})
         endif()
     else()
-        list(APPEND LFS_MISSING_FILES ${FILE_NAME})
+        list(APPEND DVC_MISSING_FILES ${FILE_NAME})
     endif()
-    set(LFS_MISSING_FILES ${LFS_MISSING_FILES} PARENT_SCOPE)
+    set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
 endfunction()
 
 # Both the lists below should be in sync always
@@ -691,10 +691,10 @@ else()
     endforeach()
 endif()
 
-if(LFS_MISSING_FILES)
-    string(REPLACE ";" ", " __lfs_missing_files "${LFS_MISSING_FILES}")
-    message(WARNING "GIT LFS files not pulled down, skipped: ${__lfs_missing_files}")
-    set(MIOPEN_NO_LFS_PULLED TRUE CACHE INTERNAL "")
+if(DVC_MISSING_FILES)
+    string(REPLACE ";" ", " __dvc_missing_files "${DVC_MISSING_FILES}")
+    message(WARNING "DVC files not pulled down, skipped: ${__dvc_missing_files}")
+    set(MIOPEN_NO_DVC_PULLED TRUE CACHE INTERNAL "")
 else()
     set(CPACK_COMPONENTS_ALL ${COMPONENT_LST})
 endif()

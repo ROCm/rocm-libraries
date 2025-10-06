@@ -116,11 +116,9 @@ struct Arguments
     int timing;
     int iters;
 
-    char matrix_filename[128]; // nos2.bin, bmwcra_1.bin, etc
+    char filename[128]; // nos2.bin, bmwcra_1.bin, etc
     char function[64]; // axpby, spmv_csr, etc
     char category[32]; // quick, pre_checkin, etc
-
-    std::string filename;
 
     Arguments()
     {
@@ -194,6 +192,10 @@ struct Arguments
         this->unit_check = 1;
         this->timing     = 0;
         this->iters      = 10;
+
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
+        this->category[0] = '\0';
     }
 
     template <typename T>
@@ -239,16 +241,6 @@ struct Arguments
         ifs.read(header, sizeof(header));
         ifs >> arg;
         ifs.read(trailer, sizeof(trailer));
-
-        for(int i = 0; i < 10; i++)
-        {
-            std::cout << header[i] << std::endl;
-        }
-
-        for(int i = 0; i < 10; i++)
-        {
-            std::cout << trailer[i] << std::endl;
-        }
 
         if(strcmp(header, "hipSPARSE"))
             error("header");
@@ -327,9 +319,15 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(unit_check);
         HIPSPARSE_FORMAT_CHECK(timing);
         HIPSPARSE_FORMAT_CHECK(iters);
-        HIPSPARSE_FORMAT_CHECK(matrix_filename);
+        HIPSPARSE_FORMAT_CHECK(filename);
         HIPSPARSE_FORMAT_CHECK(function);
         HIPSPARSE_FORMAT_CHECK(category);
+    }
+
+    void set_filename(const std::string& bin_file)
+    {
+        strncpy(this->filename, bin_file.c_str(), bin_file.length());
+        this->filename[bin_file.length()] = '\0';
     }
 
 private:
@@ -399,7 +397,7 @@ private:
             delim = ',';
         };
 
-        print("matrix_filename", arg.matrix_filename);
+        print("filename", arg.filename);
         print("function", arg.function);
         print("category", arg.category);
         print("M", arg.M);

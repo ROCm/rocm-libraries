@@ -54,6 +54,13 @@ namespace rocRoller
     {
         struct ExpressionHasDFTagVisitor
         {
+            template <CNary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return std::ranges::any_of(expr.operands,
+                                           [this](auto const& operand) { return call(operand); });
+            }
+
             template <CTernary Expr>
             bool operator()(Expr const& expr) const
             {
@@ -1026,6 +1033,46 @@ namespace rocRoller
                 }
 
                 co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, mi, maybeScaleBlockSize);
+            }
+
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Concatenate const& expr)
+            {
+                auto                    destResultType = resultType(expr);
+                std::vector<ResultType> operandResultTypes;
+                std::ranges::transform(expr.operands,
+                                       std::back_inserter(operandResultTypes),
+                                       [](auto const& operand) { return resultType(operand); });
+
+                if(dest == nullptr)
+                {
+                    dest = Register::Value::Placeholder(
+                        m_context, destResultType.regType, destResultType.varType, 1);
+                }
+                else
+                {
+                    auto const expectDestRegisterCount
+                        = DataTypeInfo::Get(destResultType.varType).registerCount;
+                    auto const actualDestRegisterCount = dest->registerCount();
+                    AssertFatal(expectDestRegisterCount == actualDestRegisterCount,
+                                "Destination size mismatch.",
+                                ShowValue(expectDestRegisterCount),
+                                ShowValue(actualDestRegisterCount));
+                }
+
+                unsigned offset = 0;
+                for(size_t i = 0; i < expr.operands.size(); ++i)
+                {
+                    auto const& operand           = expr.operands[i];
+                    auto const& operandResultType = operandResultTypes[i];
+                    auto        length
+                        = DataTypeInfo::Get(operandResultType.varType.dataType).registerCount;
+
+                    auto operandDest
+                        = dest->subset(iota<int>(offset, offset + length).to<std::vector>());
+                    offset = offset + length;
+
+                    co_yield call(operandDest, operand);
+                }
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)

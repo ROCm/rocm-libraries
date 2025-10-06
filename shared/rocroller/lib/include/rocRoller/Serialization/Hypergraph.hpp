@@ -39,25 +39,22 @@ namespace rocRoller
     namespace Serialization
     {
         template <typename IO>
-        struct MappingTraits<Graph::HypergraphIncident, IO, EmptyContext>
+        struct MappingTraits<Graph::HypergraphIncidenceContainer, IO, EmptyContext>
         {
-            using iot              = IOTraits<IO>;
-            static const bool flow = true;
+            using iot = IOTraits<IO>;
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc)
+            static void mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence)
             {
-                iot::mapRequired(io, "src", inc.src);
-                iot::mapRequired(io, "dst", inc.dst);
-                iot::mapRequired(io, "edgeOrder", inc.edgeOrder);
+                iot::mapRequired(io, "incidenceBySrc", incidence.m_incidenceBySrc);
+                iot::mapRequired(io, "incidenceByDst", incidence.m_incidenceByDst);
             }
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc, EmptyContext&)
+            static void
+                mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence, EmptyContext&)
             {
-                mapping(io, inc);
+                mapping(io, incidence);
             }
         };
-
-        ROCROLLER_SERIALIZE_VECTOR(false, Graph::HypergraphIncident);
 
         template <CNamedVariant Var>
         struct ElementEntry
@@ -109,8 +106,6 @@ namespace rocRoller
 
             static void mapping(IO& io, HG& graph)
             {
-                iot::mapRequired(io, "nextIndex", graph.m_nextIndex);
-
                 std::vector<ElementEntry<Element>> elements;
                 if(iot::outputting(io))
                 {
@@ -127,24 +122,7 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<typename HG::Incident> incidence;
-
-                if(iot::outputting(io))
-                {
-                    auto const& container = graph.m_incidence.template get<typename HG::BySrc>();
-
-                    incidence.reserve(container.size());
-                    std::copy(
-                        container.begin(), container.end(), std::back_insert_iterator(incidence));
-                }
-
-                iot::mapRequired(io, "incidence", incidence);
-
-                if(!iot::outputting(io))
-                {
-                    for(auto& i : incidence)
-                        graph.m_incidence.insert(std::move(i));
-                }
+                iot::mapRequired(io, "incidence", graph.m_incidence);
             }
 
             static void mapping(IO& io, HG& graph, EmptyContext&)

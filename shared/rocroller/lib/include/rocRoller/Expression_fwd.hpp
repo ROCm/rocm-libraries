@@ -56,6 +56,7 @@ namespace rocRoller
         struct ShiftL;
         struct LogicalShiftR;
         struct ArithmeticShiftR;
+        struct BitfieldCombine;
         struct BitwiseNegate;
         struct BitwiseAnd;
         struct BitwiseOr;
@@ -90,6 +91,8 @@ namespace rocRoller
 
         struct Convert;
 
+        struct Concatenate;
+
         template <DataType DATATYPE>
         struct SRConvert;
 
@@ -111,6 +114,7 @@ namespace rocRoller
             LogicalShiftR,
             ArithmeticShiftR,
 
+            BitfieldCombine,
             BitwiseAnd,
             BitwiseOr,
             BitwiseXor,
@@ -123,6 +127,8 @@ namespace rocRoller
             LessThanEqual,
             Equal,
             NotEqual,
+
+            Concatenate,
 
             // --- Stochastic Rounding Convert (also binary) ---
             SRConvert<DataType::FP8>,

@@ -67,4 +67,3 @@ OutputType inner_product(thrust::execution_policy<DerivedPolicy> &exec,
 } // end detail
 } // end system
 THRUST_NAMESPACE_END
-

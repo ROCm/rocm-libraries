@@ -68,13 +68,13 @@ Building and Running Tests
 ----------------------------
 
 While full test suites can be run with a single ``tox`` command, developers may wish to
-build the Tensile client executable (``tensile-client``) and run individual tests separately. 
+build the Tensile client executable (``tensile-client``) and run individual tests separately.
 This is useful for debugging specific problems or isolating issues in a specific test.
 
 **1. Run Full Test Suite with Tox**
 
-The standard workflow for running an entire test suite (e.g., `pre_checkin`, `unit`, `extended`, 
-`integration`) is to use `tox`. This command will build ``tensile-client`` and execute all 
+The standard workflow for running an entire test suite (e.g., `pre_checkin`, `unit`, `extended`,
+`integration`) is to use `tox`. This command will build ``tensile-client`` and execute all
 tests within the specified suite.
 
    .. code-block:: bash
@@ -84,7 +84,7 @@ tests within the specified suite.
 
 **2. Build with invoke and Run a Test (Default Path)**
 
-This workflow uses ``invoke`` to build the client into the default ``build/`` directory. 
+This workflow uses ``invoke`` to build the client into the default ``build/`` directory.
 The executable will automatically be found when using the default build directory.
 
    .. code-block:: bash
@@ -102,7 +102,7 @@ The executable will automatically be found when using the default build director
 **3. Build with CMake (Custom Location) and Run Test with Path Flag**
 
 This workflow is for when you need to build the client in a location other
-than the default ``build/`` directory by using CMake. The ``--prebuilt-client`` flag is then 
+than the default ``build/`` directory by using CMake. The ``--prebuilt-client`` flag is then
 used to specify this custom path when running a test.
 
    .. code-block:: cmake
@@ -129,7 +129,7 @@ specialized builds (e.g., Debug builds) and setting the architecture.
    .. code-block:: bash
       :linenos:
 
-      # build the client using tox with custom CMake flags 
+      # build the client using tox with custom CMake flags
       TENSILE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox run -e build-client
 
 Options

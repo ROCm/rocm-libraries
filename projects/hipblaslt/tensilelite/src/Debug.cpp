@@ -145,9 +145,9 @@ namespace TensileLite
         return m_solution_index;
     }
 
-    bool Debug::getSolutionSelectionTrace() const
+    bool Debug::usePredictionLibrary() const
     {
-        return m_solselTrace;
+        return m_predictionLib;
     }
 
     int Debug::getGridbasedTopSols() const
@@ -203,9 +203,9 @@ namespace TensileLite
         if(exp_select)
             m_experimentSelection = strtol(exp_select, nullptr, 0);
 
-        const char* solsel_trace = std::getenv("TENSILE_SOLUTION_SELECTION_TRACE");
-        if(solsel_trace)
-            m_solselTrace = strtol(solsel_trace, nullptr, 0) != 0;
+        const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
+        if(prediction_only)
+            m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)

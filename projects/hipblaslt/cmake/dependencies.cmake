@@ -32,7 +32,7 @@ list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 
 # ROCm cmake package
 find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET) # First version with Sphinx doc gen improvement
-if(NOT ROCM_FOUND)
+if(NOT ROCmCMakeBuildTools_FOUND)
   set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
   set(rocm_cmake_tag "rocm-6.4.1" CACHE STRING "rocm-cmake tag to download")
   file(DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip

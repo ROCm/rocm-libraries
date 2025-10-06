@@ -15,6 +15,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/LaunchTimeSubExpressions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerUnsignedArithmeticShiftR.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerBitfieldValues.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LowerBitfieldCombine.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerExponential.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerPRNG.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PositionalArgumentPropagation.cpp"

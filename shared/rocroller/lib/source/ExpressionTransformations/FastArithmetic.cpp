@@ -44,6 +44,7 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
+            x = lowerBitfieldCombine(x);
             x = convertPropagation(x);
             x = fastDivision(x, m_context);
             x = simplify(x);
@@ -54,12 +55,13 @@ namespace rocRoller
             x = combineShifts(x);
             x = fuseTernary(x);
             x = launchTimeSubExpressions(x, m_context);
+            x = convertPropagation(x);
 
             if(!identical(orig, x))
             {
-                auto comment = Instruction::Comment(
-                    concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
-                m_context->schedule(comment);
+                // auto comment = Instruction::Comment(
+                //     concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
+                // m_context->schedule(comment);
 
                 auto origResultType = resultType(orig);
                 AssertFatal(origResultType.varType == resultType(x).varType,

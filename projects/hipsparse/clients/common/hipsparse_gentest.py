@@ -57,7 +57,6 @@ param = {}
 
 
 def main():
-    print("main")
     args.update(parse_args().__dict__)
     for doc in get_yaml_docs():
         process_doc(doc)
@@ -159,10 +158,8 @@ def read_yaml_file(file):
 
 def get_yaml_docs():
     """Parse the YAML file"""
-
     source = read_yaml_file(args['infile'])
 
-    print(source)
     if args.get('template'):
         source = read_yaml_file(args['template']) + source
 
@@ -247,7 +244,6 @@ def write_signature(out):
     """Write the signature used to verify binary file compatibility"""
     if 'signature_written' not in args:
         sig = 0
-        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         byt = bytearray("hipSPARSE", 'utf_8')
         byt.append(0)
         last_ofs = 0
@@ -261,11 +257,8 @@ def write_signature(out):
             last_ofs = member.offset + member.size
         for i in range(0, ctypes.sizeof(param['Arguments']) - last_ofs):
             byt.append(0)
-        print("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
         byt.extend(bytes("HIPsparse", 'utf_8'))
         byt.append(0)
-
-        print(byt)
         out.write(byt)
         args['signature_written'] = True
 
@@ -280,7 +273,6 @@ def write_test(test):
     # scalars, we coerce the string/numeric value into ctype.
     arg = []
     for name, ctype in param['Arguments']._fields_:
-        #print("name", name)
         try:
             if issubclass(ctype, ctypes.Array):
                 if issubclass(ctype._type_, ctypes.c_char):
@@ -304,7 +296,6 @@ def write_test(test):
 
 def instantiate(test):
     """Instantiate a given test case"""
-
     test = test.copy()
 
     # Any Arguments fields declared as enums
@@ -403,8 +394,7 @@ def generate(test, function):
         # For sequence arguments, they are expanded into scalars
         elif (type(test[key]) in (tuple, list) and
               key not in param['lists_to_not_expand']):
-            if key == "matrix_filename" and test[key] != "*":
-                print("test[key]: " + test[key])
+            if key == "filename" and test[key] != "*":
                 cleanlist=[]
                 for test[key] in test[key]:
                     #
@@ -450,9 +440,7 @@ def generate(test, function):
                         #
                         names = glob.glob(filename_arg)
                         if not names:
-                            names = glob.glob(filename_arg + ".csr")
-                            if not names:
-                                names = glob.glob(filename_arg + ".bsr")
+                            names = glob.glob(filename_arg + ".bin")
                             generate(test,function)
 
                         else:

@@ -31,4 +31,3 @@ Notes:
   loading from the rocblas/library directory tree.  If not found in standard ROCm location,
   or the application folder, use env ROCBLAS_TENSILE_LIBPATH to specify the path to the
   rocblas/library folder.
-

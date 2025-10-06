@@ -25,6 +25,8 @@
  *******************************************************************************/
 
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -120,7 +122,7 @@ namespace rocRoller
 
     bool GPUInstructionInfo::isVMEM(std::string const& opCode)
     {
-        return opCode.starts_with("buffer_");
+        return opCode.starts_with("buffer_") || opCode.starts_with("global_");
     }
 
     bool GPUInstructionInfo::isVMEMRead(std::string const& opCode)
@@ -224,5 +226,75 @@ namespace rocRoller
     bool GPUInstructionInfo::isVDivFmas(std::string const& opCode)
     {
         return opCode.starts_with("v_div_fmas_");
+    }
+
+    CoexecCategory GPUInstructionInfo::getCoexecCategory(std::string const& opCode)
+    {
+        if(opCode.empty())
+            return CoexecCategory::NotAnInstruction;
+
+        if(isScalar(opCode))
+            return CoexecCategory::Scalar;
+
+        if(isMFMA(opCode))
+        {
+            if(opCode.find("scale") != std::string::npos)
+                return CoexecCategory::XDL_Scale;
+
+            return CoexecCategory::XDL;
+        }
+
+        if(isDLOP(opCode))
+            return CoexecCategory::XDL;
+
+        if(isVALUTrans(opCode))
+            return CoexecCategory::VALU_Trans;
+
+        if(isVALU(opCode))
+            return CoexecCategory::VALU;
+
+        if(isVMEM(opCode) || isFlat(opCode))
+            return CoexecCategory::VMEM;
+
+        if(isLDS(opCode))
+            return CoexecCategory::LDS;
+
+        if(Settings::Get(Settings::AllowUnknownInstructions))
+        {
+            return CoexecCategory::NotAnInstruction;
+        }
+        else
+        {
+            AssertFatal(false, "Unknown category for ", ShowValue(opCode));
+        }
+
+        return CoexecCategory::Count;
+    }
+
+    std::string toString(CoexecCategory cat)
+    {
+        switch(cat)
+        {
+        case CoexecCategory::NotAnInstruction:
+            return "NotAnInstruction";
+        case CoexecCategory::Scalar:
+            return "Scalar";
+        case CoexecCategory::VMEM:
+            return "VMEM";
+        case CoexecCategory::VALU:
+            return "VALU";
+        case CoexecCategory::VALU_Trans:
+            return "VALU_Trans";
+        case CoexecCategory::XDL:
+            return "XDL";
+        case CoexecCategory::XDL_Scale:
+            return "XDL_Scale";
+        case CoexecCategory::LDS:
+            return "LDS";
+        case CoexecCategory::Count:
+            break;
+        }
+
+        return "Invalid Category";
     }
 }

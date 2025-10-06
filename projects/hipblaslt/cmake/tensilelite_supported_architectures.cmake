@@ -9,10 +9,10 @@ set(SUPPORTED_ARCHITECTURES "")
 
 # Note:
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
-# but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported 
+# but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
 if(NOT BUILD_ADDRESS_SANITIZER)
-    list(APPEND BASE_ARCHITECTURES 
+    list(APPEND BASE_ARCHITECTURES
         "gfx908"
         "gfx90a"
         "gfx942"
@@ -24,9 +24,9 @@ if(NOT BUILD_ADDRESS_SANITIZER)
         "gfx1151"
         "gfx1200"
         "gfx1201")
-    
+
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
-    list(APPEND SUPPORTED_ARCHITECTURES 
+    list(APPEND SUPPORTED_ARCHITECTURES
         "gfx908:xnack+"
         "gfx908:xnack-"
         "gfx90a:xnack+"
@@ -34,7 +34,7 @@ if(NOT BUILD_ADDRESS_SANITIZER)
 
 else()
     # For address sanitizer builds, base and supported are the same
-    list(APPEND BASE_ARCHITECTURES 
+    list(APPEND BASE_ARCHITECTURES
         "gfx908:xnack+"
         "gfx90a:xnack+"
         "gfx942:xnack+"
@@ -48,7 +48,7 @@ function(tensilelite_validate_gpu_targets targets)
 
     string(REGEX REPLACE ";" " " supported_flat "${supported_list}")
     string(REGEX REPLACE " +" ";" supported_list "${supported_flat}")
-    
+
     string(REGEX REPLACE ";" " " target_flat "${target_list}")
     string(REGEX REPLACE " +" ";" target_list "${target_flat}")
 
@@ -67,4 +67,3 @@ endfunction()
 function(tensilelite_get_supported_architectures output_var)
     set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
 endfunction()
-

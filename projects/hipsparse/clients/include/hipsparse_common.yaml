@@ -323,7 +323,7 @@ Arguments:
   - unit_check: c_int
   - timing: c_int
   - iters: c_int
-  - matrix_filename: c_char*128
+  - filename: c_char*128
   - function: c_char*64
   - category: c_char*32
 
@@ -426,6 +426,6 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
-  matrix_filename: '*'
+  filename: '*'
   function: '*'
   category: '*'

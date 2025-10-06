@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_scan.hpp"
+#include <hipcub/block/block_scan.hpp>
 
 // Params for tests
 template<class T,
@@ -2575,6 +2575,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
         test_utils::assert_near(output_reductions,
                                 expected_reductions,
                                 test_utils::precision<T>::value * block_size);
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
 }
 
@@ -3416,6 +3419,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveSumReduce)
         test_utils::assert_near(output_reductions,
                                 expected_reductions,
                                 test_utils::precision<T>::value * block_size);
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
 }
 

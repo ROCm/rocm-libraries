@@ -37,6 +37,7 @@ tags
 .vscode
 
 # build-in-source directory and documentation artifacts
+build/
 _build/
 _images/
 _static/

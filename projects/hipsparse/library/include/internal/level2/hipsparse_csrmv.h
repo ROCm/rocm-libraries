@@ -103,100 +103,15 @@ extern "C" {
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n or \p nnz, \p descr, 
-*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p x, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n or \p nnz, \p descr,
+*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p x,
 *              \p beta or \p y is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // alpha * ( 1.0  0.0  2.0 ) * ( 1.0 ) + beta * ( 4.0 ) = (  31.1 )
-*      //         ( 3.0  0.0  4.0 ) * ( 2.0 )          ( 5.0 ) = (  62.0 )
-*      //         ( 5.0  6.0  0.0 ) * ( 3.0 )          ( 6.0 ) = (  70.7 )
-*      //         ( 7.0  0.0  8.0 ) *                  ( 7.0 ) = ( 123.8 )
-*
-*      int m = 4;
-*      int n = 3;
-*      int nnz = 8;
-*
-*      // CSR row pointers
-*      int hcsrRowPtr[5] = {0, 2, 4, 6, 8};
-*
-*      // CSR column indices
-*      int hcsrColInd[8] = {0, 2, 0, 2, 0, 1, 0, 2};
-*
-*      // CSR values
-*      double hcsrVal[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
-*
-*      // Transposition of the matrix
-*      hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*      // Scalar alpha and beta
-*      double alpha = 3.7;
-*      double beta  = 1.3;
-*
-*      // x and y
-*      double hx[3] = {1.0, 2.0, 3.0};
-*      double hy[4] = {4.0, 5.0, 6.0, 7.0};
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Offload data to device
-*      int* dcsrRowPtr;
-*      int* dcsrColInd;
-*      double*        dcsrVal;
-*      double*        dx;
-*      double*        dy;
-*
-*      hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dcsrVal, sizeof(double) * nnz);
-*      hipMalloc((void**)&dx, sizeof(double) * n);
-*      hipMalloc((void**)&dy, sizeof(double) * m);
-*
-*      hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrVal, hcsrVal, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(double) * m, hipMemcpyHostToDevice);
-*
-*      // Call dcsrmv to perform y = alpha * A x + beta * y
-*      hipsparseDcsrmv(handle,
-*                      trans,
-*                      m,
-*                      n,
-*                      nnz,
-*                      &alpha,
-*                      descr,
-*                      dcsrVal,
-*                      dcsrRowPtr,
-*                      dcsrColInd,
-*                      dx,
-*                      &beta,
-*                      dy);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroyMatDescr(descr);
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dcsrRowPtr);
-*      hipFree(dcsrColInd);
-*      hipFree(dcsrVal);
-*      hipFree(dx);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_csrmv.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

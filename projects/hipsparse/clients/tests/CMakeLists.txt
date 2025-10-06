@@ -206,24 +206,9 @@ endif()
 
 set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
-
-
-
-
-
-
-
-
-
+rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
 set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml)
-
-message("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-message("HIPSPARSE_TEST_SOURCES : ${HIPSPARSE_TEST_SOURCES}")
-message("HIPSPARSE_TEST_YAMLS : ${HIPSPARSE_TEST_YAMLS}")
-message("python : ${python}")
-message("CMAKE_CURRENT_SOURCE_DIR : ${CMAKE_CURRENT_SOURCE_DIR}")
-message("PROJECT_BINARY_DIR : ${PROJECT_BINARY_DIR}")
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
@@ -234,13 +219,7 @@ add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
 add_custom_target(hipsparse-test-data
   DEPENDS "${HIPSPARSE_TEST_DATA}" )
 
-
 add_dependencies(hipsparse-test  hipsparse-test-data hipsparse-common)
-rocm_install(TARGETS hipsparse-test COMPONENT tests)
-
-message("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
-
-
 
 if (WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32

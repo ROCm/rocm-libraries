@@ -30,15 +30,15 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMV_bufferSize computes the required user allocated buffer size needed when computing the 
+*  \p hipsparseSpMV_bufferSize computes the required user allocated buffer size needed when computing the
 *  sparse matrix multiplication with a dense vector:
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$ is 
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$ is
 *  a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$.
 *
-*  \p hipsparseSpMV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for a complete 
+*  \p hipsparseSpMV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -96,16 +96,16 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMV_preprocess performs analysis on the sparse matrix \f$op(A)\f$ when computing the 
+*  \p hipsparseSpMV_preprocess performs analysis on the sparse matrix \f$op(A)\f$ when computing the
 *  sparse matrix multiplication with a dense vector:
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$ 
-*  is a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$. This step is 
+*  where \f$op(A)\f$ is a sparse \f$m \times n\f$ matrix in CSR, CSC, COO, or COO (AoS) format, \f$x\f$
+*  is a dense vector of length \f$n\f$ and \f$y\f$ is a dense vector of length \f$m\f$. This step is
 *  optional but if used may results in better performance.
 *
-*  \p hipsparseSpMV_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for 
+*  \p hipsparseSpMV_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMV for
 *  a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -165,8 +165,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \brief Compute the sparse matrix multiplication with a dense vector
 *
 *  \details
-*  \p hipsparseSpMV multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$ matrix \f$op(A)\f$, defined in CSR, 
-*  CSC, COO, or COO (AoS) format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$ 
+*  \p hipsparseSpMV multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$ matrix \f$op(A)\f$, defined in CSR,
+*  CSC, COO, or COO (AoS) format, with the dense vector \f$x\f$ and adds the result to the dense vector \f$y\f$
 *  that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
@@ -182,12 +182,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *    \right.
 *  \f]
 *
-*  Performing the above operation involves multiple steps. First the user calls \ref hipsparseSpMV_bufferSize to determine the 
-*  size of the required temporary storage buffer. The user then allocates this buffer and calls \ref hipsparseSpMV_preprocess. 
-*  Depending on the algorithm and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally 
-*  the user completes the operation by calling \p hipsparseSpMV. The buffer size and preprecess routines only need to be called 
-*  once for a given sparse matrix \f$op(A)\f$ while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$ 
-*  vectors. Once all calls to \p hipsparseSpMV are complete, the temporary buffer can be deallocated. 
+*  Performing the above operation involves multiple steps. First the user calls \ref hipsparseSpMV_bufferSize to determine the
+*  size of the required temporary storage buffer. The user then allocates this buffer and calls \ref hipsparseSpMV_preprocess.
+*  Depending on the algorithm and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally
+*  the user completes the operation by calling \p hipsparseSpMV. The buffer size and preprecess routines only need to be called
+*  once for a given sparse matrix \f$op(A)\f$ while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$
+*  vectors. Once all calls to \p hipsparseSpMV are complete, the temporary buffer can be deallocated.
 *
 *  \p hipsparseSpMV supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will
@@ -195,21 +195,21 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  <table>
 *  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
-*  <tr><th>CSR Algorithms               
+*  <tr><th>CSR Algorithms
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG2</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms              
+*  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
 *  </table>
 *
 *  \p hipsparseSpMV supports multiple combinations of data types and compute types. The tables below indicate the currently
-*  supported data types that can be used for the sparse matrix \f$op(A)\f$ and the dense vectors \f$x\f$ and \f$y\f$ and the 
-*  compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on memory bandwidth 
+*  supported data types that can be used for the sparse matrix \f$op(A)\f$ and the dense vectors \f$x\f$ and \f$y\f$ and the
+*  compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on memory bandwidth
 *  and storage when a user application allows while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
@@ -248,23 +248,23 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_R_64F <td>HIP_C_64F
 *  </table>
 *
-*  \p hipsparseSpMV supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions 
+*  \p hipsparseSpMV supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and row/column indices arrays of the sparse matrices.
 *
 *  \note
 *  None of the algorithms above are deterministic when \f$A\f$ is transposed.
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref HIPSPARSE_FORMAT_COO, \ref HIPSPARSE_FORMAT_COO_AOS, 
+*  The sparse matrix formats currently supported are: \ref HIPSPARSE_FORMAT_COO, \ref HIPSPARSE_FORMAT_COO_AOS,
 *  \ref HIPSPARSE_FORMAT_CSR, and \ref HIPSPARSE_FORMAT_CSC.
 *
 *  \note
-*  Only the \ref hipsparseSpMV_bufferSize and \ref hipsparseSpMV routines are non blocking and executed asynchronously 
-*  with respect to the host. They may return before the actual computation has finished. The \ref hipsparseSpMV_preprocess 
+*  Only the \ref hipsparseSpMV_bufferSize and \ref hipsparseSpMV routines are non blocking and executed asynchronously
+*  with respect to the host. They may return before the actual computation has finished. The \ref hipsparseSpMV_preprocess
 *  routine is blocking with respect to the host.
 *
 *  \note
-*  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context. 
+*  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context.
 *  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
 *  @param[in]
@@ -295,115 +295,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *               currently not supported.
 *
 *  \par Example
-*  \code{.c}
-*    // A, x, and y are m×k, k×1, and m×1
-*    int m = 3, k = 4;
-*    int nnz_A = 8;
-*    hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*    // alpha and beta
-*    float alpha = 0.5f;
-*    float beta  = 0.25f;
-*
-*    std::vector<int> hcsrRowPtr = {0, 3, 5, 8};
-*    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 0, 2, 3}; 
-*    std::vector<float> hcsrVal     = {1, 2, 3, 4, 5, 6, 7, 8}; 
-*
-*    std::vector<float> hx(k, 1.0f);
-*    std::vector<float> hy(m, 1.0f);
-*
-*    int *dcsrRowPtr;
-*    int *dcsrColInd;
-*    float *dcsrVal;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz_A, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(float) * nnz_A, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseCreateCsr(&matA, m, k, nnz_A,
-*                        dcsrRowPtr, dcsrColInd, dcsrVal,
-*                        HIPSPARSE_INDEX_32I, HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO, HIP_R_32F);
-*
-*    // Allocate memory for the vector x
-*    float* dx;
-*    hipMalloc((void**)&dx, sizeof(float) * k);
-*    hipMemcpy(dx, hx.data(), sizeof(float) * k, hipMemcpyHostToDevice);
-*
-*    hipsparseDnVecDescr_t vecX;
-*    hipsparseCreateDnVec(&vecX, k, dx, HIP_R_32F);
-*
-*    // Allocate memory for the resulting vector y
-*    float* dy;
-*    hipMalloc((void**)&dy, sizeof(float) * m);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*
-*    hipsparseDnMatDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, m, dy, HIP_R_32F);
-*
-*    // Compute buffersize
-*    size_t bufferSize;
-*    hipsparseSpMV_bufferSize(handle,
-*                             transA,
-*                             &alpha,
-*                             matA,
-*                             vecX,
-*                             &beta,
-*                             vecY,
-*                             HIP_R_32F,
-*                             HIPSPARSE_MV_ALG_DEFAULT,
-*                             &bufferSize);
-*
-*    void* buffer;
-*    hipMalloc(&buffer, bufferSize);
-*
-*    // Preprocess operation (Optional)
-*    hipsparseSpMV_preprocess(handle,
-*                            transA,
-*                            &alpha,
-*                            matA,
-*                            vecX,
-*                            &beta,
-*                            vecY,
-*                            HIP_R_32F,
-*                            HIPSPARSE_MV_ALG_DEFAULT,
-*                            buffer);
-*
-*    // Perform operation
-*    hipsparseSpMV(handle,
-*                 transA,
-*                 &alpha,
-*                 matA,
-*                 vecX,
-*                 &beta,
-*                 vecY,
-*                 HIP_R_32F,
-*                 HIPSPARSE_MV_ALG_DEFAULT,
-*                 buffer);
-*
-*    // Copy device to host
-*    hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*    // Destroy matrix descriptors and handles
-*    hipsparseDestroySpMat(matA);
-*    hipsparseDestroyDnVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    hipFree(buffer);
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(dx);
-*    hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_spmv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

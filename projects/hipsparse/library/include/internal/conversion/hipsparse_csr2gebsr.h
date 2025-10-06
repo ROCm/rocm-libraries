@@ -33,9 +33,9 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcsr2gebsr_bufferSize returns the size of the temporary buffer that
-*  is required by \ref hipsparseXcsr2gebsrNnz and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()". 
-*  Once the temporary buffer size has been determined, it must be allocated by the user prior 
-*  to calling \ref hipsparseXcsr2gebsrNnz and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()". 
+*  is required by \ref hipsparseXcsr2gebsrNnz and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
+*  Once the temporary buffer size has been determined, it must be allocated by the user prior
+*  to calling \ref hipsparseXcsr2gebsrNnz and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
 *
 *  See hipsparseScsr2gebsr() for complete code example.
 *
@@ -45,7 +45,7 @@ extern "C" {
 *  @param[in]
 *  handle             handle to the hipsparse library context queue.
 *  @param[in]
-*  dir                direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW 
+*  dir                direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
 *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  m                  number of rows of the sparse CSR matrix.
@@ -65,11 +65,11 @@ extern "C" {
 *  @param[in]
 *  colBlockDim        the col block dimension of the GEneral BSR matrix. Between 1 and \p n
 *  @param[out]
-*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz() 
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by \ref hipsparseXcsr2gebsrNnz()
 *                     and \ref hipsparseScsr2gebsr "hipsparseXcsr2gebsr()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrVal,
 *              \p csrRowPtr, \p csrColInd or \p pBufferSizeInBytes pointer is invalid.
 */
 /**@{*/
@@ -132,13 +132,13 @@ hipsparseStatus_t hipsparseZcsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  GEBSR matrix given a sparse CSR matrix as input.
 *
 *  \details
-*  This is the second step in conveting a CSR matrix to a GEBSR matrix. The user must first call 
-*  \ref hipsparseScsr2gebsr_bufferSize "hipsparseXcsr2gebsr_bufferSize()" to determine the size of 
-*  the required temporary storage buffer. The user then allocates this buffer as well as the 
-*  \p bsrRowPtr array ( size \p mb+1 ) and passes both to \p hipsparseXcsr2gebsrNnz(). This second 
-*  step then computes the number of nonzero block columns per row and the total number of nonzero blocks. 
+*  This is the second step in conveting a CSR matrix to a GEBSR matrix. The user must first call
+*  \ref hipsparseScsr2gebsr_bufferSize "hipsparseXcsr2gebsr_bufferSize()" to determine the size of
+*  the required temporary storage buffer. The user then allocates this buffer as well as the
+*  \p bsrRowPtr array ( size \p mb+1 ) and passes both to \p hipsparseXcsr2gebsrNnz(). This second
+*  step then computes the number of nonzero block columns per row and the total number of nonzero blocks.
 *
-*  In general, when converting a CSR matrix of size \p m x \p n to a GEBSR matrix, the resulting GEBSR matrix will have size 
+*  In general, when converting a CSR matrix of size \p m x \p n to a GEBSR matrix, the resulting GEBSR matrix will have size
 *  \p mb x \p nb where \p mb and \p nb equal:
 *  \f[
 *    \begin{align}
@@ -176,36 +176,36 @@ hipsparseStatus_t hipsparseZcsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  after calling \p hipsparseXcsr2gebsrNnz with \p rowBlockDim=3 and \p colBlockDim=2.
 *
 *  \note
-*  As indicated, \p bsrNnzDevhost can point either to host or device memory. This is controlled 
+*  As indicated, \p bsrNnzDevhost can point either to host or device memory. This is controlled
 *  by setting the pointer mode. See \ref hipsparseSetPointerMode().
 *
-*  It may be the case that \p rowBlockDim does not divide evenly into \p m and/or that \p colBlockDim does not divide 
-*  evenly into \p n. In these cases, the CSR matrix is expanded in size in order to fit full GEBSR blocks. For example, 
-*  using the original CSR matrix but this time with \p rowBlockDim=2 and \p colBlockDim=3, the function 
+*  It may be the case that \p rowBlockDim does not divide evenly into \p m and/or that \p colBlockDim does not divide
+*  evenly into \p n. In these cases, the CSR matrix is expanded in size in order to fit full GEBSR blocks. For example,
+*  using the original CSR matrix but this time with \p rowBlockDim=2 and \p colBlockDim=3, the function
 *  \p hipsparseXcsr2gebsrNnz computes the GEBSR row pointer array and total number of non-zero blocks for the GEBSR matrix:
 *
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c c} 
-*       1 & 0 & 0 \\ 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c c}
+*       1 & 0 & 0 \\
 *       3 & 4 & 0
-*      \end{array} & 
-*      \begin{array}{c c c} 
-*       2 & 4 & 0 \\ 
+*      \end{array} &
+*      \begin{array}{c c c}
+*       2 & 4 & 0 \\
 *       0 & 5 & 1
 *      \end{array} \\
-*    \hline 
-*      \begin{array}{c c c} 
-*       5 & 0 & 6 \\ 
+*    \hline
+*      \begin{array}{c c c}
+*       5 & 0 & 6 \\
 *       0 & 0 & 0
 *      \end{array} &
-*      \begin{array}{c c c} 
-*       7 & 6 & 2 \\ 
+*      \begin{array}{c c c}
+*       7 & 6 & 2 \\
 *       0 & 0 & 0
 *      \end{array}
-*   \end{array} 
-*  \right] 
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  See hipsparseScsr2gebsr() for full code example.
@@ -242,11 +242,11 @@ hipsparseStatus_t hipsparseZcsr2gebsr_bufferSize(hipsparseHandle_t         handl
 *  bsrNnzDevhost total number of nonzero elements in device or host memory.
 *
 *  @param[in]
-*  pbuffer       buffer allocated by the user whose size is determined by calling \ref hipsparseScsr2gebsr_bufferSize 
+*  pbuffer       buffer allocated by the user whose size is determined by calling \ref hipsparseScsr2gebsr_bufferSize
 *                "hipsparseXcsr2gebsr_bufferSize()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrRowPtr, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p rowBlockDim, \p colBlockDim, \p csrRowPtr,
 *              \p csrColInd, \p bsrRowPtr or \p bsrNnzDevhost pointer is invalid.
 */
 HIPSPARSE_EXPORT
@@ -271,13 +271,13 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *  \p hipsparseXcsr2gebsr converts a CSR matrix into a GEBSR matrix. It is assumed,
 *  that \p bsrVal, \p bsrColInd and \p bsrRowPtr are allocated. Allocation size
 *  for \p bsrRowPtr is computed as \p mb+1 where \p mb is the number of block rows in
-*  the GEBSR matrix. The number of nonzero blocks in the resulting GEBSR matrix 
+*  the GEBSR matrix. The number of nonzero blocks in the resulting GEBSR matrix
 *  is computed using \ref hipsparseXcsr2gebsrNnz which also fills in \p bsrRowPtr.
 *
 *  In more detail, \p hipsparseXcsr2gebsr is the third and final step on the conversion from CSR to GEBSR.
-*  The user first determines the size of the required user allocated temporary storage buffer using 
-*  \ref hipsparseScsr2gebsr_bufferSize "hipsparseXcsr2gebsr_bufferSize()". The user then allocates this buffer 
-*  as well as the row pointer array \p bsrRowPtr with size \p mb+1, where \p mb is the number of block rows 
+*  The user first determines the size of the required user allocated temporary storage buffer using
+*  \ref hipsparseScsr2gebsr_bufferSize "hipsparseXcsr2gebsr_bufferSize()". The user then allocates this buffer
+*  as well as the row pointer array \p bsrRowPtr with size \p mb+1, where \p mb is the number of block rows
 *  in the GEBSR matrix and \p nb is the number of block columns in GEBSR matrix:
 *
 *  \f[
@@ -287,10 +287,10 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *    \end{align}
 *  \f]
 *
-*  Both the temporary storage buffer and the GEBSR row pointer array are then passed to \ref hipsparseXcsr2gebsrNnz 
-*  which fills the GEBSR row pointer array \p bsrRowPtr and also computes the number of nonzero blocks, 
-*  \p bsrNnzDevhost, that will exist in the GEBSR matrix. The user then allocates both the GEBSR column indices array 
-*  \p bsrColInd with size \p bsrNnzDevhost as well as the GEBSR values array \p bsrVal with size 
+*  Both the temporary storage buffer and the GEBSR row pointer array are then passed to \ref hipsparseXcsr2gebsrNnz
+*  which fills the GEBSR row pointer array \p bsrRowPtr and also computes the number of nonzero blocks,
+*  \p bsrNnzDevhost, that will exist in the GEBSR matrix. The user then allocates both the GEBSR column indices array
+*  \p bsrColInd with size \p bsrNnzDevhost as well as the GEBSR values array \p bsrVal with size
 *  \p bsrNnzDevhost*rowBlockDim*colBlockDim. Finally, with all arrays allocated, the conversion is completed by calling
 *  \p hipsparseXcsr2gebsr.
 *
@@ -314,25 +314,25 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *
 *  then using \p rowBlockDim=3 and \p colBlockDim=2, the final GEBSR matrix is:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
 *       3 & 4 \\
 *       3 & 0
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
 *       0 & 0 \\
 *       6 & 7
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       4 & 0 \\ 
+*      \end{array} &
+*      \begin{array}{c c}
+*       4 & 0 \\
 *       5 & 1 \\
 *       6 & 2
 *      \end{array}
-*   \end{array} 
-*  \right] 
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  and is represented with the arrays:
@@ -344,7 +344,7 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *    \end{align}
 *  \f]
 *
-*  The above example assumes that the blocks are row ordered. If instead the blocks are column ordered, the \p bsrVal arrays 
+*  The above example assumes that the blocks are row ordered. If instead the blocks are column ordered, the \p bsrVal arrays
 *  becomes:
 *  \f[
 *    \begin{align}
@@ -354,33 +354,33 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *
 *  The block order direction is determined by \p dir.
 *
-*  It may be the case that \p rowBlockDim does not divide evenly into \p m and/or that \p colBlockDim does not divide 
-*  evenly into \p n. In these cases, the CSR matrix is expanded in size in order to fit full GEBSR blocks. For example, 
+*  It may be the case that \p rowBlockDim does not divide evenly into \p m and/or that \p colBlockDim does not divide
+*  evenly into \p n. In these cases, the CSR matrix is expanded in size in order to fit full GEBSR blocks. For example,
 *  using the original CSR matrix but this time with \p rowBlockDim=2 and \p colBlockDim=3, the resulting GEBSR matrix
 *  would looks like:
 *
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c c} 
-*       1 & 0 & 0 \\ 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c c}
+*       1 & 0 & 0 \\
 *       3 & 4 & 0
-*      \end{array} & 
-*      \begin{array}{c c c} 
-*       2 & 4 & 0 \\ 
+*      \end{array} &
+*      \begin{array}{c c c}
+*       2 & 4 & 0 \\
 *       0 & 5 & 1
 *      \end{array} \\
-*    \hline 
-*      \begin{array}{c c c} 
-*       5 & 0 & 6 \\ 
+*    \hline
+*      \begin{array}{c c c}
+*       5 & 0 & 6 \\
 *       0 & 0 & 0
 *      \end{array} &
-*      \begin{array}{c c c} 
-*       7 & 6 & 2 \\ 
+*      \begin{array}{c c c}
+*       7 & 6 & 2 \\
 *       0 & 0 & 0
 *      \end{array}
-*   \end{array} 
-*  \right] 
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  @param[in]
@@ -416,7 +416,7 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *  @param[in]
 *  colBlockDim  col size of the blocks in the sparse GEneral BSR matrix.
 *  @param[in]
-*  pbuffer      buffer allocated by the user whose size is determined by calling \ref hipsparseScsr2gebsr_bufferSize 
+*  pbuffer      buffer allocated by the user whose size is determined by calling \ref hipsparseScsr2gebsr_bufferSize
 *               "hipsparseXcsr2gebsr_bufferSize()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
@@ -424,120 +424,7 @@ hipsparseStatus_t hipsparseXcsr2gebsrNnz(hipsparseHandle_t         handle,
 *              \p bsrRowPtr, \p bsrColInd, \p csrVal, \p csrRowPtr or \p csrColInd pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t csr_descr;
-*    hipsparseCreateMatDescr(&csr_descr);
-*
-*    hipsparseMatDescr_t bsr_descr;
-*    hipsparseCreateMatDescr(&bsr_descr);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0 0 
-*    //     0 4 5 0 0 1
-*    // A = 6 0 0 7 8 0
-*    //     0 0 3 0 2 2
-*    //     1 0 0 0 4 3 
-*    //     7 2 0 0 1 4
-*    int hcsrRowPtr[7] = {0, 3, 6, 9, 12, 15, 19};
-*    int hcsrColInd[19] = {0, 1, 3, 1, 2, 5, 0, 3, 4, 2, 4, 5, 0, 4, 5, 0, 1, 4, 5};
-*    float hcsrVal[19]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 1.0f, 6.0f, 7.0f, 8.0f, 3.0f, 2.0f, 2.0f,
-*                           1.0f, 4.0f, 3.0f, 7.0f, 2.0f, 1.0f, 4.0f}; 
-*
-*    int m           = 6;
-*    int n           = 6;
-*    int nnz         = 19;
-*    int rowBlockDim = 3;
-*    int colBlockDim = 2;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*    int mb = (m + rowBlockDim - 1) / rowBlockDim;
-*    int nb = (n + colBlockDim - 1) / colBlockDim;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dbsrRowPtr = nullptr;
-*    hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
-*
-*    size_t bufferSize;
-*    hipsparseScsr2gebsr_bufferSize(handle, 
-*                                   dir, 
-*                                   m, 
-*                                   n, 
-*                                   csr_descr, 
-*                                   dcsrVal, 
-*                                   dcsrRowPtr, 
-*                                   dcsrColInd, 
-*                                   rowBlockDim, 
-*                                   colBlockDim, 
-*                                   &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnzb;
-*    hipsparseXcsr2gebsrNnz(handle, 
-*                           dir, 
-*                           m, 
-*                           n, 
-*                           csr_descr, 
-*                           dcsrRowPtr, 
-*                           dcsrColInd, 
-*                           bsr_descr, 
-*                           dbsrRowPtr, 
-*                           rowBlockDim, 
-*                           colBlockDim, 
-*                           &nnzb, 
-*                           dbuffer);
-*
-*    int* dbsrColInd = nullptr;
-*    float* dbsrVal = nullptr;
-*    hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
-*    hipMalloc((void**)&dbsrVal, sizeof(float) * rowBlockDim * colBlockDim * nnzb);
-*
-*    hipsparseScsr2gebsr(handle, 
-*                        dir, 
-*                        m, 
-*                        n, 
-*                        csr_descr, 
-*                        dcsrVal, 
-*                        dcsrRowPtr, 
-*                        dcsrColInd, 
-*                        bsr_descr, 
-*                        dbsrVal, 
-*                        dbsrRowPtr, 
-*                        dbsrColInd, 
-*                        rowBlockDim, 
-*                        colBlockDim, 
-*                        dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    
-*    hipFree(dbsrRowPtr);
-*    hipFree(dbsrColInd);
-*    hipFree(dbsrVal);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyMatDescr(csr_descr);
-*    hipsparseDestroyMatDescr(bsr_descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_csr2gebsr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

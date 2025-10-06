@@ -34,7 +34,7 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  \p rocsparse_csr2gebsr_buffer_size returns the size of the temporary buffer that is required
-*  by \ref rocsparse_csr2gebsr_nnz and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()". The 
+*  by \ref rocsparse_csr2gebsr_nnz and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()". The
 *  temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -77,7 +77,7 @@ extern "C" {
 *  col_block_dim   the col block dimension of the GEneral BSR matrix. Between 1 and \p n
 *
 *  @param[out]
-*  buffer_size  number of bytes of the temporary storage buffer required by \ref rocsparse_csr2gebsr_nnz 
+*  buffer_size  number of bytes of the temporary storage buffer required by \ref rocsparse_csr2gebsr_nnz
 *               and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
@@ -139,13 +139,13 @@ rocsparse_status rocsparse_zcsr2gebsr_buffer_size(rocsparse_handle              
 
 /*! \ingroup conv_module
 *  \details
-*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr, 
-*  and the total number of nonzero blocks, \p bsr_nnz_devhost, that will result from converting the CSR format 
-*  input matrix to a GEneral BSR format output matrix. This function is the second step in the conversion and 
+*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr,
+*  and the total number of nonzero blocks, \p bsr_nnz_devhost, that will result from converting the CSR format
+*  input matrix to a GEneral BSR format output matrix. This function is the second step in the conversion and
 *  is used in conjunction with \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" and
 *  \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()".
 *
-*  \p rocsparse_csr2gebsr_nnz accepts both host and device pointers for \p bsr_nnz_devhost which can be set by 
+*  \p rocsparse_csr2gebsr_nnz accepts both host and device pointers for \p bsr_nnz_devhost which can be set by
 *  calling \ref rocsparse_set_pointer_mode prior to calling \p rocsparse_csr2gebsr_nnz.
 *
 *  \note
@@ -175,7 +175,7 @@ rocsparse_status rocsparse_zcsr2gebsr_buffer_size(rocsparse_handle              
 *  bsr_descr        descriptor of the sparse GEneral BSR matrix. Currently, only
 *                   \ref rocsparse_matrix_type_general is supported.
 *  @param[out]
-*  bsr_row_ptr      integer array containing \p mb+1 elements that point to the start of each block row of the 
+*  bsr_row_ptr      integer array containing \p mb+1 elements that point to the start of each block row of the
 *                   General BSR matrix
 *  @param[in]
 *  row_block_dim    the row block dimension of the GEneral BSR matrix. Between \f$1\f$ and \f$\min(m, n)\f$
@@ -223,16 +223,16 @@ rocsparse_status rocsparse_csr2gebsr_nnz(rocsparse_handle          handle,
 *    mb = (m + row\_block\_dim - 1) / row\_block\_dim \\
 *    nb = (n + col\_block\_dim - 1) / col\_block\_dim
 *  \f]
-*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz() 
+*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz()
 *  which also fills in \p bsr_row_ptr.
 *
-*  Converting from a sparse CSR matrix to a sparse GEneral BSR matrix requires three steps. First, 
-*  the user calls \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" in 
+*  Converting from a sparse CSR matrix to a sparse GEneral BSR matrix requires three steps. First,
+*  the user calls \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" in
 *  order to determine the size of the required temporary storage buffer. Once this has been determined,
-*  the user allocates this buffer. The user also now allocates the \p bsr_row_ptr array to have length 
-*  \p mb+1 and passes this to the function \ref rocsparse_csr2gebsr_nnz. This will fill the \p bsr_row_ptr 
-*  array and also compute the total number of nonzero blocks in the GEneral BSR matrix. Now that the total 
-*  number of nonzero blocks is known, the user can allocate the \p bsr_col_ind and \p bsr_val arrays. 
+*  the user allocates this buffer. The user also now allocates the \p bsr_row_ptr array to have length
+*  \p mb+1 and passes this to the function \ref rocsparse_csr2gebsr_nnz. This will fill the \p bsr_row_ptr
+*  array and also compute the total number of nonzero blocks in the GEneral BSR matrix. Now that the total
+*  number of nonzero blocks is known, the user can allocate the \p bsr_col_ind and \p bsr_val arrays.
 *  Finally, the user calls \p rocsparse_csr2gebsr to complete the conversion. See example below.
 *
 *  \note

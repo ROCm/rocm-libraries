@@ -34,12 +34,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(DivideGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(DivideGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(DivideGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(DivideGenerator, Register::Type::Vector, DataType::Int64);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Divide>>
         GetGenerator<Expression::Divide>(Register::ValuePtr dst,

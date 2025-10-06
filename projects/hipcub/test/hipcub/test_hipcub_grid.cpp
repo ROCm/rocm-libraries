@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,12 +29,12 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/block/block_reduce.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/block/block_reduce.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
-#include "hipcub/grid/grid_barrier.hpp"
-#include "hipcub/grid/grid_even_share.hpp"
-#include "hipcub/grid/grid_queue.hpp"
+#include <hipcub/grid/grid_barrier.hpp>
+#include <hipcub/grid/grid_even_share.hpp>
+#include <hipcub/grid/grid_queue.hpp>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_PUSH
@@ -332,5 +332,6 @@ TEST(HipcubGridTests, GridQueue)
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
+        HIP_CHECK(hipFree(queue_allocations));
     }
 }

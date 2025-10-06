@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseXgtsv2_nopivot_bufferSizeExt returns the size of the temporary storage
-*  buffer in bytes that is required by \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()". 
+*  buffer in bytes that is required by \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
@@ -151,6 +151,9 @@ hipsparseStatus_t hipsparseZgtsv2_nopivot_bufferSizeExt(hipsparseHandle_t       
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
 *              \p du, \p B or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*  \par Example
+*  \snippet example_hipsparse_gtsv_no_pivot.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

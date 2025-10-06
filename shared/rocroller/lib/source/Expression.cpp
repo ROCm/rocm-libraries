@@ -55,37 +55,30 @@ namespace rocRoller
                 bool scaleA = false;
                 bool scaleB = false;
 
-                matA = call(a.matA, b.matA);
-                if(a.matA == nullptr && b.matA == nullptr)
-                {
-                    matA = true;
-                }
-
-                matB = call(a.matB, b.matB);
-                if(a.matB == nullptr && b.matB == nullptr)
-                {
-                    matB = true;
-                }
-
-                matC = call(a.matC, b.matC);
-                if(a.matC == nullptr && b.matC == nullptr)
-                {
-                    matC = true;
-                }
-
+                matA   = call(a.matA, b.matA);
+                matB   = call(a.matB, b.matB);
+                matC   = call(a.matC, b.matC);
                 scaleA = call(a.scaleA, b.scaleA);
-                if(a.scaleA == nullptr && b.scaleA == nullptr)
-                {
-                    scaleA = true;
-                }
-
                 scaleB = call(a.scaleB, b.scaleB);
-                if(a.scaleB == nullptr && b.scaleB == nullptr)
+                return matA && matB && matC && scaleA && scaleB;
+            }
+
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
                 {
-                    scaleB = true;
+                    return false;
                 }
 
-                return matA && matB && matC && scaleA && scaleB;
+                bool result = true;
+                for(size_t i = 0; i < a.operands.size(); ++i)
+                {
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    result               = result && call(operandA, operandB);
+                }
+                return result;
             }
 
             template <CTernary T>
@@ -95,24 +88,9 @@ namespace rocRoller
                 bool r1hs = false;
                 bool r2hs = false;
 
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
+                lhs  = call(a.lhs, b.lhs);
                 r1hs = call(a.r1hs, b.r1hs);
-                if(a.r1hs == nullptr && b.r1hs == nullptr)
-                {
-                    r1hs = true;
-                }
-
                 r2hs = call(a.r2hs, b.r2hs);
-
-                if(a.r2hs == nullptr && b.r2hs == nullptr)
-                {
-                    r2hs = true;
-                }
                 return lhs && r1hs && r2hs;
             }
 
@@ -123,27 +101,13 @@ namespace rocRoller
                 bool rhs = false;
 
                 lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
                 rhs = call(a.rhs, b.rhs);
-                if(a.rhs == nullptr && b.rhs == nullptr)
-                {
-                    rhs = true;
-                }
-
                 return lhs && rhs;
             }
 
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                if(a.arg == nullptr && b.arg == nullptr)
-                {
-                    return true;
-                }
                 return call(a.arg, b.arg);
             }
 
@@ -250,37 +214,30 @@ namespace rocRoller
                 bool scaleA = false;
                 bool scaleB = false;
 
-                matA = call(a.matA, b.matA);
-                if(a.matA == nullptr && b.matA == nullptr)
-                {
-                    matA = true;
-                }
-
-                matB = call(a.matB, b.matB);
-                if(a.matB == nullptr && b.matB == nullptr)
-                {
-                    matB = true;
-                }
-
-                matC = call(a.matC, b.matC);
-                if(a.matC == nullptr && b.matC == nullptr)
-                {
-                    matC = true;
-                }
-
+                matA   = call(a.matA, b.matA);
+                matB   = call(a.matB, b.matB);
+                matC   = call(a.matC, b.matC);
                 scaleA = call(a.scaleA, b.scaleA);
-                if(a.scaleA == nullptr && b.scaleA == nullptr)
-                {
-                    scaleA = true;
-                }
-
                 scaleB = call(a.scaleB, b.scaleB);
-                if(a.scaleB == nullptr && b.scaleB == nullptr)
+                return matA && matB && matC && scaleA && scaleB;
+            }
+
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
                 {
-                    scaleB = true;
+                    return false;
                 }
 
-                return matA && matB && matC && scaleA && scaleB;
+                bool result = true;
+                for(size_t i = 0; i < a.operands.size(); ++i)
+                {
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    result               = result && call(operandA, operandB);
+                }
+                return result;
             }
 
             template <CTernary T>
@@ -290,24 +247,9 @@ namespace rocRoller
                 bool r1hs = false;
                 bool r2hs = false;
 
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
+                lhs  = call(a.lhs, b.lhs);
                 r1hs = call(a.r1hs, b.r1hs);
-                if(a.r1hs == nullptr && b.r1hs == nullptr)
-                {
-                    r1hs = true;
-                }
-
                 r2hs = call(a.r2hs, b.r2hs);
-
-                if(a.r2hs == nullptr && b.r2hs == nullptr)
-                {
-                    r2hs = true;
-                }
                 return lhs && r1hs && r2hs;
             }
 
@@ -317,35 +259,15 @@ namespace rocRoller
                 bool lhs = false;
                 bool rhs = false;
 
-                lhs = call(a.lhs, b.lhs);
-                if(a.lhs == nullptr && b.lhs == nullptr)
-                {
-                    lhs = true;
-                }
-
-                rhs = call(a.rhs, b.rhs);
-                if(a.rhs == nullptr && b.rhs == nullptr)
-                {
-                    rhs = true;
-                }
-
+                lhs         = call(a.lhs, b.lhs);
+                rhs         = call(a.rhs, b.rhs);
                 bool result = lhs && rhs;
 
                 // Test if equivalent if expression is commutative
                 if(!result && CCommutativeBinary<T> && m_properties[AlgebraicProperty::Commutative])
                 {
-                    lhs = call(a.lhs, b.rhs);
-                    if(a.lhs == nullptr && b.rhs == nullptr)
-                    {
-                        lhs = true;
-                    }
-
-                    rhs = call(a.rhs, b.lhs);
-                    if(a.rhs == nullptr && b.lhs == nullptr)
-                    {
-                        rhs = true;
-                    }
-
+                    lhs    = call(a.lhs, b.rhs);
+                    rhs    = call(a.rhs, b.lhs);
                     result = lhs && rhs;
                 }
 
@@ -355,10 +277,6 @@ namespace rocRoller
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                if(a.arg == nullptr && b.arg == nullptr)
-                {
-                    return true;
-                }
                 return call(a.arg, b.arg);
             }
 
@@ -445,7 +363,8 @@ namespace rocRoller
             bool        throwIfNotSupported = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) void operator()(Expr& expr)
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) void
+                operator()(Expr& expr)
             {
                 expr.comment = std::move(comment);
             }
@@ -522,7 +441,7 @@ namespace rocRoller
             bool includeRegisterComments = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) std::string
                 operator()(Expr const& expr) const
             {
                 return expr.comment;
@@ -641,6 +560,17 @@ namespace rocRoller
             int operator()(Expr const& expr) const
             {
                 return Expr::Complexity + call(expr.lhs) + call(expr.r1hs) + call(expr.r2hs);
+            }
+
+            template <CNary Expr>
+            int operator()(Expr const& expr) const
+            {
+                auto complexity = Expr::Complexity;
+                for(auto const& operand : expr.operands)
+                {
+                    complexity = complexity + call(operand);
+                }
+                return complexity;
             }
 
             int operator()(ScaledMatrixMultiply const& expr) const

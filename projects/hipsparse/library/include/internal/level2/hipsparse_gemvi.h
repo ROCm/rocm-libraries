@@ -32,7 +32,7 @@ extern "C" {
 /*! \ingroup level2_module
  *  \details
  *  \p hipsparseXgemvi_bufferSize returns the size of the temporary storage buffer in bytes
- *  required by \ref hipsparseSgemvi "hipsparseXgemvi()". The temporary storage buffer must 
+ *  required by \ref hipsparseSgemvi "hipsparseXgemvi()". The temporary storage buffer must
  *  be allocated by the user.
  *
  *  @param[in]
@@ -49,7 +49,7 @@ extern "C" {
  *  pBufferSizeInBytes temporary storage buffer size.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz or 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz or
  *              \p pBufferSizeInBytes is invalid.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
@@ -110,9 +110,9 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *    \right.
  *  \f]
  *
- *  Performing the above operation involves two steps. First, the user calls 
- *  \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()" in order to determine the size of 
- *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to 
+ *  Performing the above operation involves two steps. First, the user calls
+ *  \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()" in order to determine the size of
+ *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to
  *  \p hipsparseXgemvi to complete the computation. Once all calls to \p hipsparseXgemvi are complete the
  *  temporary storage buffer can be freed.
  *
@@ -154,11 +154,14 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  pBuffer     temporary storage buffer
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
  *              \p A, \p x, \p xInd, \p beta, \p y or \p pBuffer is invalid.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ *
+ *  \par Example
+ *  \snippet example_hipsparse_gemvi.cpp doc example
  */
 /**@{*/
 HIPSPARSE_EXPORT

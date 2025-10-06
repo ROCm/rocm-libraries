@@ -29,12 +29,10 @@ Sorts a list of paths by directory and then by filename. Useful for sorting the
 file paths in CMake files.
 """
 
-import os.path
-import sys
-
 # import pathlib
 import collections
-
+import os.path
+import sys
 
 if __name__ == "__main__":
     for arg in sys.argv[1:]:

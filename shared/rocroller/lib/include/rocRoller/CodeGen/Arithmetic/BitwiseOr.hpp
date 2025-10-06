@@ -76,6 +76,6 @@ namespace rocRoller
                                         Register::ValuePtr shiftAmount,
                                         Expression::BitwiseOr const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "BitwiseOrGenerator";
     };
 }

@@ -72,56 +72,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p alpha, \p xVal, \p xInd or \p y is invalid.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      int nnz = 3;
-*
-*      // Sparse index vector
-*      int hxInd[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      double hxVal[3] = {1.0, 2.0, 3.0};
-*
-*      // Dense vector
-*      double hy[9] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-*
-*      // Scalar alpha
-*      double alpha = 3.7;
-*
-*      // Index base
-*      hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*      // Offload data to device
-*      int* dxInd;
-*      double*        dxVal;
-*      double*        dy;
-*
-*      hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dxVal, sizeof(double) * nnz);
-*      hipMalloc((void**)&dy, sizeof(double) * 9);
-*
-*      hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dxVal, hxVal, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(double) * 9, hipMemcpyHostToDevice);
-*
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // Call daxpyi to perform y = y + alpha * x
-*      hipsparseDaxpyi(handle, nnz, &alpha, dxVal, dxInd, dy, idxBase);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * 9, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE 
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dxInd);
-*      hipFree(dxVal);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_axpyi.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

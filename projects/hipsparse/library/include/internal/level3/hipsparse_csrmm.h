@@ -111,94 +111,14 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc
-*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, 
+*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
 *              \p B, \p beta or \p C is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      //     1 2 0 3 0 0
-*      // A = 0 4 5 0 0 0
-*      //     0 0 0 7 8 0
-*      //     0 0 1 2 4 1
-*
-*      int m   = 4;
-*      int k   = 6;
-*      int nnz = 11;
-*      hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*      int hcsrRowPtr[4 + 1] = {0, 3, 5, 7, 11};
-*      int hcsrColInd[11]    = {0, 1, 3, 1, 2, 3, 4, 2, 3, 4, 5};
-*      float hcsrVal[11]      = {1, 2, 3, 4, 5, 7, 8, 1, 2, 4, 1};
-*
-*      // Set dimension n of B
-*      int n = 3;
-*
-*      // Allocate and generate dense matrix B (k x n)
-*      float hB[6 * 3] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 
-*                         11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f};
-*
-*      int* dcsrRowPtr = NULL;
-*      int* dcsrColInd = NULL;
-*      float* dcsrVal = NULL;
-*      hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*      hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*      // Copy B to the device
-*      float* dB;
-*      hipMalloc((void**)&dB, sizeof(float) * k * n);
-*      hipMemcpy(dB, hB, sizeof(float) * k * n, hipMemcpyHostToDevice);
-*
-*      // alpha and beta
-*      float alpha = 1.0f;
-*      float beta  = 0.0f;
-*
-*      // Allocate memory for the resulting matrix C
-*      float* dC;
-*      hipMalloc((void**)&dC, sizeof(float) * m * n);
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Perform the matrix multiplication
-*      hipsparseScsrmm(handle,
-*                      HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*                      m,
-*                      n,
-*                      k,
-*                      nnz,
-*                      &alpha,
-*                      descr,
-*                      dcsrVal,
-*                      dcsrRowPtr,
-*                      dcsrColInd,
-*                      dB,
-*                      k,
-*                      &beta,
-*                      dC,
-*                      m);
-*
-*      // Copy results to host
-*      float hC[6 * 3];
-*      hipMemcpy(hC, dC, sizeof(float) * m * n, hipMemcpyDeviceToHost);
-*
-*      hipFree(dcsrRowPtr);
-*      hipFree(dcsrColInd);
-*      hipFree(dcsrVal);
-*      hipFree(dB);
-*      hipFree(dC);
-*  \endcode
+*  \snippet example_hipsparse_csrmm.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -371,7 +291,7 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc
-*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, 
+*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
 *              \p B, \p beta or \p C is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
