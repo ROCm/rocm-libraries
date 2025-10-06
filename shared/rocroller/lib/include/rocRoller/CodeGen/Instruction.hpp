@@ -230,6 +230,8 @@ namespace rocRoller
         using AllocationArray = std::array<std::shared_ptr<Register::Allocation>, MaxAllocations>;
         AllocationArray allocations() const;
 
+        std::optional<std::vector<size_t>> addresses;
+
     private:
         /**
          * toString = preamble + functional + coda

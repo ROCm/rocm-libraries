@@ -334,7 +334,16 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     rocRoller::toString(gfx));
 
         const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
-        uint       cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
+
+        for(const auto& mapping : threadGroupBankMappings)
+        {
+            for(const auto& [bankIndex, count] : mapping)
+            {
+                Log::error("Bank {} accessed {} times", bankIndex, count);
+            }
+        }
+
+        uint cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
 
         return cycles;
     }

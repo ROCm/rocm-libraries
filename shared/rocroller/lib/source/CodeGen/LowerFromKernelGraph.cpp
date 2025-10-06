@@ -844,8 +844,7 @@ namespace rocRoller
                         for(uint wg = 0; wg < 1; ++wg)
                         {
                             setWorkgroup(0, wg);
-                            for(uint wi = 0; wi < 64;
-                                ++wi) // TODO: should be product of invocation's workgroup size
+                            for(uint wi = 0; wi < 64; ++wi)
                             {
                                 setWorkitem(0, wi);
 
