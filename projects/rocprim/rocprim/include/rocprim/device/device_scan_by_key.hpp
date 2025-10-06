@@ -243,7 +243,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
             const unsigned int size_limit = params.kernel_config.size_limit;
             const unsigned int aligned_size_limit
-                = std::max(size_limit - (size_limit % items_per_block), items_per_block);
+                = std::max<size_t>(size_limit - (size_limit % static_cast<size_t>(items_per_block)),
+                           items_per_block);
 
             const unsigned int limited_size
                 = static_cast<unsigned int>(std::min<size_t>(size, aligned_size_limit));

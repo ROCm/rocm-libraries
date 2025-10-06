@@ -227,9 +227,9 @@ inline auto scan_impl(void*               temporary_storage,
             const unsigned int items_per_block  = block_size * items_per_thread;
 
             const size_t size_limit = params.kernel_config.size_limit;
-            const size_t aligned_size_limit
-                = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block),
-                                         items_per_block);
+            const size_t aligned_size_limit = ::rocprim::max<size_t>(
+                size_limit - (size_limit % static_cast<size_t>(items_per_block)),
+                items_per_block);
             size_t     limited_size     = std::min<size_t>(size, aligned_size_limit);
             const bool use_limited_size = limited_size == aligned_size_limit;
 

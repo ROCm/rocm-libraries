@@ -226,7 +226,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
             using scan_state_type = detail::lookback_scan_state<offset_type, use_sleepy_scan>;
-            using block_id_type   = detail::block_id_wrapper<unsigned int, use_atomic_block_id>;
+            using block_id_type   = detail::block_id_wrapper<uint32_t, use_atomic_block_id>;
 
             using config = wrapped_partition_config<Config, SubAlgo, key_type, value_type>;
 
@@ -262,9 +262,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             static constexpr const size_t selected_count_size = is_three_way ? 2 : 1;
 
             const size_t size_limit = params.kernel_config.size_limit;
-            const size_t aligned_size_limit
-                = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block),
-                                         items_per_block);
+            const size_t aligned_size_limit = ::rocprim::max<size_t>(
+                size_limit - (size_limit % static_cast<size_t>(items_per_block)),
+                items_per_block);
             const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
             const bool   use_limited_size = limited_size == aligned_size_limit;
 
@@ -280,9 +280,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             ROCPRIM_RETURN_ON_ERROR(
                 scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-            using block_id_wrapper_type = block_id_wrapper<uint32_t, UsingOrderedBlockId>;
-
-            typename block_id_wrapper_type::id_type* block_id_pool = nullptr;
+            typename block_id_type::id_type* block_id_pool = nullptr;
 
             // vsmem size
             void*  vsmem                      = nullptr;
@@ -300,7 +298,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                      value_type,
                                                      flag_type,
                                                      scan_state_type,
-                                                     block_id_wrapper_type>(target_arch);
+                                                     block_id_type>(target_arch);
             virtual_shared_memory_size *= number_of_blocks;
 
             // temporary storage partition
@@ -318,7 +316,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                             selected_count_size),
                     detail::temp_storage::ptr_aligned_array(
                         &block_id_pool,
-                        block_id_wrapper_type::get_storage_size()),
+                        block_id_type::get_storage_size()),
                     // vsmem
                     detail::temp_storage::make_partition(&vsmem,
                                                          virtual_shared_memory_size,
@@ -335,7 +333,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             std::chrono::steady_clock::time_point start;
 
             // Create and initialize lookback_scan_state obj
-            scan_state_type scan_state;
+            scan_state_type scan_state{};
             ROCPRIM_RETURN_ON_ERROR(
                 scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream));
 
@@ -377,6 +375,12 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
+                if (use_atomic_block_id)
+                {
+                    ROCPRIM_RETURN_ON_ERROR(
+                        hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream));
+                }
+
                 const unsigned int block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
                 const unsigned int grid_size
                     = ::rocprim::detail::ceiling_div(current_number_of_blocks, block_size);
@@ -387,8 +391,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                             current_number_of_blocks,
                                                             start);
 
-                ROCPRIM_RETURN_ON_ERROR(block_id.reset_from_host(stream));
-
+                                                            
                 if(debug_synchronous)
                 {
                     start = std::chrono::steady_clock::now();
