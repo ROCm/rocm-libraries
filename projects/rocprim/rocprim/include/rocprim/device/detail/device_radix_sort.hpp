@@ -1079,8 +1079,8 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                Key   ordered_block_keys[items_per_block];
-                Value ordered_block_values[items_per_block];
+                Key   ordered_block_keys[BlockSize];
+                Value ordered_block_values[BlockSize];
             };
         };
     };
@@ -1182,15 +1182,6 @@ struct onesweep_iteration_helper
 
         ::rocprim::syncthreads();
 
-        // Order keys in shared memory.
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
-        {
-            storage.ordered_block_keys[ranks[i]] = keys[i];
-        }
-
-        ::rocprim::syncthreads();
-
         // Compute the global prefix for each histogram.
         // At this point `lookback_states` already hold `onesweep_lookback_state::EMPTY`.
         ROCPRIM_UNROLL
@@ -1240,26 +1231,37 @@ struct onesweep_iteration_helper
             }
         }
 
-        ::rocprim::syncthreads();
-
-        // Scatter the keys to global memory in a sorted fashion.
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        ROCPRIM_NO_UNROLL
+        for(unsigned int j = 0, x = 0; j < ItemsPerThread; ++j, x+=BlockSize)
         {
-            const unsigned int rank = i * BlockSize + flat_id;
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                const int offset = ranks[i] - x;
+                if(offset >= 0 && offset < static_cast<int>(BlockSize))
+                {
+                    storage.ordered_block_keys[offset] = keys[i];
+                }
+            }
+
+            ::rocprim::syncthreads();
+
+            const unsigned int rank = x + flat_id;
             if(IsFull || rank < valid_items)
             {
-                Key                key = storage.ordered_block_keys[rank];
+                Key                key = storage.ordered_block_keys[flat_id];
                 const unsigned int digit
                     = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
                 key_codec::decode_inplace(key, decomposer);
                 const Offset global_offset        = storage.global_digit_offsets[digit];
                 keys_output[rank + global_offset] = key;
             }
+
+            ::rocprim::syncthreads();
         }
 
         // Gather and scatter values if necessary.
-        if(with_values)
+        if constexpr(with_values)
         {
             Value values[ItemsPerThread];
             if constexpr(IsFull)
@@ -1294,39 +1296,56 @@ struct onesweep_iteration_helper
             // Compute digits up-front so that we can re-use shared memory between ordered_block_keys and
             // ordered_block_values.
             unsigned int digits[ItemsPerThread];
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            ROCPRIM_NO_UNROLL
+            for(unsigned int j = 0, x = 0; j < ItemsPerThread; ++j, x+=BlockSize)
             {
-                const unsigned int rank = i * BlockSize + flat_id;
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                {
+                    const int offset = ranks[i] - x;
+                    if(offset >= 0 && offset < static_cast<int>(BlockSize))
+                    {
+                        storage.ordered_block_keys[offset] = keys[i];
+                    }
+                }
+
+                ::rocprim::syncthreads();
+
+                const unsigned int rank = x + flat_id;
                 if(IsFull || rank < valid_items)
                 {
-                    const Key key = storage.ordered_block_keys[rank];
-                    digits[i] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
+                            const Key key = storage.ordered_block_keys[rank - x];
+                            digits[j] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
                 }
+
+                ::rocprim::syncthreads();
             }
-
-            ::rocprim::syncthreads();
-
-            // Order values in shared memory
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                storage.ordered_block_values[ranks[i]] = values[i];
-            }
-
-            ::rocprim::syncthreads();
-
+           
             // And scatter the values to global memory.
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            ROCPRIM_NO_UNROLL
+            for(unsigned int j = 0, x = 0; j < ItemsPerThread; ++j, x+=BlockSize)
             {
-                const unsigned int rank = i * BlockSize + flat_id;
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                {
+                    const int offset = ranks[i] - x;
+                    if(offset >= 0 && offset < static_cast<int>(BlockSize))
+                    {
+                        storage.ordered_block_values[offset] = values[i];
+                    }
+                }
+
+                ::rocprim::syncthreads();
+
+                const unsigned int rank = x + flat_id;
                 if(IsFull || rank < valid_items)
                 {
-                    const Value  value                  = storage.ordered_block_values[rank];
-                    const Offset global_offset          = storage.global_digit_offsets[digits[i]];
-                    values_output[rank + global_offset] = value;
+                            const Value  value                  = storage.ordered_block_values[rank - x];
+                            const Offset global_offset          = storage.global_digit_offsets[digits[j]];
+                            values_output[rank + global_offset] = value;
                 }
+
+                ::rocprim::syncthreads();
             }
         }
 
