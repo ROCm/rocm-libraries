@@ -404,7 +404,22 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
 
                 for(size_t i = 0; i < nbuffer; ++i)
                 {
-                    ASSERT_TRUE(gpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]) == hipSuccess);
+                    auto hip_status = gpu_symm_gpubuf[i].alloc(p.ibuffer_sizes()[i]);
+                    if(hip_status != hipSuccess)
+                    {
+                        ++n_hip_failures;
+                        std::stringstream msg;
+                        msg << "allocation failure for gpu buffer of " << i << " size "
+                            << p.ibuffer_sizes()[i] << "(" << bytes_to_GiB(p.ibuffer_sizes()[i])
+                            << " GiB)"
+                            << " with code " << hipError_to_string(hip_status);
+
+                        if(skip_runtime_fails)
+                            GTEST_SKIP() << msg.str();
+                        else
+                            GTEST_FAIL() << msg.str();
+                    }
+
                     cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
                 }
 
@@ -417,11 +432,24 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                 for(size_t i = 0; i < nbuffer; ++i)
                 {
                     gpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
-                    ASSERT_TRUE(hipMemcpy(gpu_symm_hostbuf[i].data(),
-                                          gpu_symm_gpubuf[i].data(),
-                                          p.ibuffer_sizes()[i],
-                                          hipMemcpyDeviceToHost)
-                                == hipSuccess);
+                    auto hip_status = hipMemcpy(gpu_symm_hostbuf[i].data(),
+                                                gpu_symm_gpubuf[i].data(),
+                                                p.ibuffer_sizes()[i],
+                                                hipMemcpyDeviceToHost);
+                    if(hip_status != hipSuccess)
+                    {
+                        ++n_hip_failures;
+                        std::stringstream msg;
+                        msg << "hipMemcpy failure for buffer of " << i << " size "
+                            << p.ibuffer_sizes()[i] << "(" << bytes_to_GiB(p.ibuffer_sizes()[i])
+                            << " GiB)"
+                            << " with code " << hipError_to_string(hip_status);
+
+                        if(skip_runtime_fails)
+                            GTEST_SKIP() << msg.str();
+                        else
+                            GTEST_FAIL() << msg.str();
+                    }
                 }
 
                 const auto diff = distance(gpu_symm_hostbuf,
