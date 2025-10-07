@@ -406,17 +406,7 @@ inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T,
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-  // The initial `std::common_type` approach was considered to support comparisons
-  // between related types (e.g., a base and derived class pointer). However,
-  // a bug in `thrust::device_delete` prevented testing with class hierarchies.
-  //
-  // Testing was pivoted to use unrelated types (e.g., `int*` and `float*`),
-  // which revealed that `std::common_type` is ill-formed for such cases.
-  //
-  // The standard-compliant and robust solution for comparing any two object
-  // pointers is to cast them to `const void*`. This correctly handles all
-  // cases: related, unrelated, and incomplete types.
-  return std::equal_to<const void*>()(x.get_raw(), y.get_raw()); // const void*
+  return x.get() == y.get();
 }
 
 #if THRUST_STD_VER <= 17
@@ -430,11 +420,10 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-  // Similar to `operator==`, the `const void*` cast provides a robust,
-  // standard-compliant way to establish a strict total ordering for any two
-  // object pointers, which was necessary after testing with unrelated types
-  // proved the `std::common_type` approach to be insufficient.
-  return std::less<const void*>()(x.get_raw(), y.get_raw()); // const void*
+  using P1 = typename unique_ptr<T1, D1>::element_type*;
+  using P2 = typename unique_ptr<T2, D2>::element_type*;
+  using CTP = typename std::common_type<P1, P2>::type;
+  return std::less<CTP>()(thrust::raw_pointer_cast(x.get()), thrust::raw_pointer_cast(y.get()));
 }
 
 template <class T1, class D1, class T2, class D2>
