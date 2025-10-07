@@ -21,16 +21,13 @@ project_map = {
     "prim": {
         "cmake_options": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "rocprim, rocthrust, hipcub",
-        "subtree_checkout": "projects/rocprim\nprojects/hipcub\nprojects/rocthrust",
     },
     "rand": {
         "cmake_options": "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "rocrand, hiprand",
-        "subtree_checkout": "projects/rocrand\nprojects/hiprand",
     },
     "blas": {
         "cmake_options": "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "hipblaslt, rocblas, hipblas",
-        "subtree_checkout": "projects/hipblaslt\nprojects/hipblas-common\nprojects/rocblas\nprojects/hipblas\nshared/mxdatagenerator\nshared/rocroller\nshared/tensile",
     }
 }
