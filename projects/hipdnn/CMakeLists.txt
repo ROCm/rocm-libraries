@@ -17,6 +17,13 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE 
 
 set(HIPDNN_VERSION "0.0.1")
 
+project(
+    hipDNN
+    VERSION ${HIPDNN_VERSION}
+    LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
 if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
         message(STATUS "The CMake generator is Ninja.")
@@ -25,13 +32,11 @@ if(NOT WIN32)
     endif()
 endif()
 
-project(
-    hipDNN
-    VERSION ${HIPDNN_VERSION}
-    LANGUAGES CXX)
-
 if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    # Only set if not already specified by user
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    endif()
     message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
 endif()
 
@@ -43,19 +48,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for official hipDNN engine plugins")
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE PATH "Build directory for official hipDNN engine plugins")
-set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for official hipDNN engine plugins (relative to CMAKE_INSTALL_PREFIX)")
+set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for official hipDNN engine plugins (relative to CMAKE_INSTALL_PREFIX)")
 
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/lib/test_plugins" CACHE INTERNAL "Build directory for test plugins")
+set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
 
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
-option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
+option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema during build" ON)
+option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 list(
     APPEND
@@ -169,4 +178,8 @@ if(CODE_COVERAGE)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
     )
+endif()
+
+if(NOT HIP_DNN_SKIP_TESTS)
+    install_hipdnn_ctest_files()
 endif()
