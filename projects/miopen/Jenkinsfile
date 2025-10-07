@@ -688,7 +688,7 @@ pipeline {
                     agent{ label rocmnode("gfx90a") }
                     environment{
                         // Can be removed altogether with when WORKAROUND_SWDEV_290754.
-                        NOMLIR_build_cmd = "CTEST_PARALLEL_LEVEL=1 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
+                        NOMLIR_build_cmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
                     }
                     steps{
                         script {
@@ -784,7 +784,7 @@ pipeline {
                     agent{ label rocmnode("gfx90a") }
                     environment{
                         make_targets =   "test_conv2d"
-                        execute_cmd = "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=1 bin/test_conv2d --disable-verification-cache"
+                        execute_cmd = "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache"
                     }
                     steps{
                         script {
