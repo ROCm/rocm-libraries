@@ -401,7 +401,7 @@ public:
 };
 
 template <class T, class D>
-class unique_ptr<T[], D>
+class __attribute__((trivial_abi)) unique_ptr<T[], D>
 {
 public:
   using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
