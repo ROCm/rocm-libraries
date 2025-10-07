@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,24 +41,23 @@
 #define warpSize 32
 #endif
 
-void BatchNormFusedInferencGPU(const miopen::Handle& handle,
-                               miopenBatchNormMode_t bn_mode,
-                               miopenActivationMode_t activ_mode,
-                               const float activ_alpha,
-                               const float activ_beta,
-                               const float activ_gamma,
-                               const miopen::TensorDescriptor& xDesc,
-                               ConstData_t x,
-                               const miopen::TensorDescriptor& yDesc,
-                               Data_t y,
-                               const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
-                               ConstData_t bnScale,
-                               ConstData_t bnBias,
-                               ConstData_t estimatedMean,
-                               ConstData_t estimatedVariance,
-                               double epsilon,
-                               PerfHelper<float>& perf_helper,
-                               bool use_hip)
+void BatchNormInferenceGPU(const miopen::Handle& handle,
+                           miopenBatchNormMode_t bn_mode,
+                           miopenActivationMode_t activ_mode,
+                           const float activ_alpha,
+                           const float activ_beta,
+                           const float activ_gamma,
+                           const miopen::TensorDescriptor& xDesc,
+                           ConstData_t x,
+                           const miopen::TensorDescriptor& yDesc,
+                           Data_t y,
+                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           ConstData_t bnScale,
+                           ConstData_t bnBias,
+                           ConstData_t estimatedMean,
+                           ConstData_t estimatedVariance,
+                           double epsilon,
+                           PerfHelper<float>& perf_helper)
 {
     int n, c, h, w;
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
@@ -71,29 +70,25 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
         read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     }
     // For vectorized r/rw of the input/output data of FP_TYPE
-    std::string READ_TYPE = (use_hip ? "FP_TYPE" : "_FLOAT");
+    std::string READ_TYPE = "FP_TYPE";
     READ_TYPE             = (read_unit == 1) ? READ_TYPE : READ_TYPE + std::to_string(read_unit);
     // For vectorized r/rw of the other data of FP_TYPE_PREC
-    std::string PREC_READ_TYPE = (use_hip ? "FP_TYPE_PREC" : "_FLOAT_PREC");
+    std::string PREC_READ_TYPE = "FP_TYPE_PREC";
     PREC_READ_TYPE = (read_unit == 1) ? PREC_READ_TYPE : PREC_READ_TYPE + std::to_string(read_unit);
     // Setup the kernel launch parameters
     size_t xlocalsize = 256;
     size_t xgridsize  = read_len / read_unit;
-    // HIP runtime does not support non-uniform blocks,
-    if(use_hip)
+    // HIP runtime does not support non-uniform blocks
+    if(xgridsize < xlocalsize)
     {
-        // check if xgridsize is less than xlocalsize
-        if(xgridsize < xlocalsize)
-        {
-            // round up the xlocalsize to the nearest wavefront size
-            xlocalsize = AlignUp(xgridsize, warpSize);
-            // Set xgridsize to the xlocalsize, to launch only one block
-            xgridsize = xlocalsize;
-        }
-        else
-        {
-            xgridsize = AlignUp(xgridsize, xlocalsize);
-        }
+        // round up the xlocalsize to the nearest wavefront size
+        xlocalsize = AlignUp(xgridsize, warpSize);
+        // Set xgridsize to the xlocalsize, to launch only one block
+        xgridsize = xlocalsize;
+    }
+    else
+    {
+        xgridsize = AlignUp(xgridsize, xlocalsize);
     }
     size_t ylocalsize = 1;
     size_t ygridsize  = (bn_mode == miopenBNSpatial) ? size_t(c) : 1;
@@ -118,25 +113,22 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
         {"MIOPEN_USE_FP16", static_cast<int>(xDesc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)}};
 
-    std::string kernel_file =
-        (use_hip ? "MIOpenBatchNormActivInferHIP.cpp" : "MIOpenBatchNormActivInfer.cl");
+    std::string kernel_file = "MIOpenBatchNormActivInfer.cpp";
     std::string kernel_name = "MIOpenBatchNormActivInfer";
-
-    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::OpenCL{})
-                                 : build_params.GenerateFor(miopen::kbp::HIP{});
+    std::string params      = build_params.GenerateFor(miopen::kbp::HIP{});
 
     if(bn_mode == miopenBNSpatial)
     {
-        kernel_name += use_hip ? "SpatialEstHIP" : "SpatialEst";
+        kernel_name += "SpatialEst";
     }
     else
     {
-        kernel_name += use_hip ? "PerActEstHIP" : "PerActEst";
+        kernel_name += "PerActEst";
     }
 
     // Generate the network config
     std::ostringstream ss;
-    ss << (use_hip ? "hip" : "ocl");
+    ss << "hip";
     ss << "fp16" << static_cast<int>(xDesc.GetType() == miopenHalf);
     ss << "fp32" << static_cast<int>(xDesc.GetType() == miopenFloat);
     ss << "fp64" << static_cast<int>(xDesc.GetType() == miopenDouble);
@@ -163,24 +155,20 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
 
     if constexpr(PERF_ENABLE)
     {
-        // disable the perf test for FP16 as OpenCL FP16 is broken
-        if(xDesc.GetType() != miopenHalf)
-        {
-            perf_helper.perfTest(handle,
-                                 kernel_name,
-                                 network_config,
-                                 use_hip,
-                                 static_cast<float>(activ_alpha),
-                                 static_cast<float>(activ_beta),
-                                 static_cast<float>(activ_gamma),
-                                 static_cast<double>(epsilon),
-                                 x,
-                                 y,
-                                 bnBias,
-                                 bnScale,
-                                 estimatedMean,
-                                 estimatedVariance);
-        }
+        perf_helper.perfTest(handle,
+                             kernel_name,
+                             network_config,
+                             true,
+                             static_cast<float>(activ_alpha),
+                             static_cast<float>(activ_beta),
+                             static_cast<float>(activ_gamma),
+                             static_cast<double>(epsilon),
+                             x,
+                             y,
+                             bnBias,
+                             bnScale,
+                             estimatedMean,
+                             estimatedVariance);
     }
 }
 
@@ -189,7 +177,7 @@ template <typename XDataType,
           typename ScaleDataType,
           typename BiasDataType,
           typename MeanVarDataType>
-struct BatchNormInferFusedTest
+struct BatchNormActivInferTest
     : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNTestCase>>
 {
 protected:
@@ -235,33 +223,32 @@ protected:
         estVariance_dev = handle.Write(estVariance.data);
     }
 
-    void RunTestGPU(bool hip_en)
+    void RunTestGPU()
     {
         auto&& handle    = get_handle();
-        auto& output_ref = hip_en ? output.data : ref_out.data;
+        auto& output_ref = output.data;
         // Clear the output data
         std::fill(
             output_ref.begin(), output_ref.end(), std::numeric_limits<YDataType>::quiet_NaN());
         out_dev = handle.Write(output_ref);
         // Execute the implementation
-        BatchNormFusedInferencGPU(handle,
-                                  bn_config.mode,
-                                  activ_mode,
-                                  activ_alpha,
-                                  activ_beta,
-                                  activ_gamma,
-                                  input.desc,
-                                  in_dev.get(),
-                                  output.desc,
-                                  out_dev.get(),
-                                  scale.desc,
-                                  scale_dev.get(),
-                                  shift_dev.get(),
-                                  estMean_dev.get(),
-                                  estVariance_dev.get(),
-                                  epsilon,
-                                  perf_helper,
-                                  hip_en);
+        BatchNormInferenceGPU(handle,
+                              bn_config.mode,
+                              activ_mode,
+                              activ_alpha,
+                              activ_beta,
+                              activ_gamma,
+                              input.desc,
+                              in_dev.get(),
+                              output.desc,
+                              out_dev.get(),
+                              scale.desc,
+                              scale_dev.get(),
+                              shift_dev.get(),
+                              estMean_dev.get(),
+                              estVariance_dev.get(),
+                              epsilon,
+                              perf_helper);
         // Read the output
         output_ref = handle.Read<YDataType>(out_dev, output.data.size());
     }
@@ -293,9 +280,12 @@ protected:
             << "Non finite number found in the GPU data";
         EXPECT_FALSE(miopen::find_idx(ref_out, miopen::not_finite) >= 0)
             << "Non finite number found in the CPU/GPU data";
-        auto error             = miopen::max_diff(ref_out, output);
-        const double tolerance = 20;
-        double threshold       = std::numeric_limits<YDataType>::epsilon() * tolerance;
+        auto error         = miopen::rms_range(ref_out, output);
+        auto mantissa_bits = std::is_same<YDataType, float>::value              ? 23
+                             : std::is_same<YDataType, half_float::half>::value ? 10
+                                                                                : 7;
+        auto threshold =
+            std::max(2.0 * std::sqrt(input.data.size()) / (1 << 23), 1.0 / (1 << mantissa_bits));
         EXPECT_LE(error, threshold);
     }
 
@@ -362,31 +352,31 @@ template <typename XDataType,
           typename BiasDataType,
           typename MeanVarDataType>
 const std::string
-    BatchNormInferFusedTest<XDataType, YDataType, ScaleDataType, BiasDataType, MeanVarDataType>::
-        sPerfTestFilename = "BatchNormInferFusedPerf.csv";
+    BatchNormActivInferTest<XDataType, YDataType, ScaleDataType, BiasDataType, MeanVarDataType>::
+        sPerfTestFilename = "BatchNormActivInferPerf.csv";
 
-namespace BatchNormInferFused {
+namespace BatchNormActivInfer {
 
-struct GPU_bn_infer_fused_spatial_FP32 : BatchNormInferFusedTest<float, float, float, float, float>
+struct GPU_bn_activ_infer_spatial_FP32 : BatchNormActivInferTest<float, float, float, float, float>
 {
 };
 
-struct GPU_bn_infer_fused_per_act_FP32 : BatchNormInferFusedTest<float, float, float, float, float>
+struct GPU_bn_activ_infer_per_act_FP32 : BatchNormActivInferTest<float, float, float, float, float>
 {
 };
 
-struct GPU_bn_infer_fused_spatial_FP16
-    : BatchNormInferFusedTest<half_float::half, half_float::half, float, float, float>
+struct GPU_bn_activ_infer_spatial_FP16
+    : BatchNormActivInferTest<half_float::half, half_float::half, float, float, float>
 {
 };
 
-struct GPU_bn_infer_fused_per_act_FP16
-    : BatchNormInferFusedTest<half_float::half, half_float::half, float, float, float>
+struct GPU_bn_activ_infer_per_act_FP16
+    : BatchNormActivInferTest<half_float::half, half_float::half, float, float, float>
 {
 };
 
-} // namespace BatchNormInferFused
-using namespace BatchNormInferFused;
+} // namespace BatchNormActivInfer
+using namespace BatchNormActivInfer;
 
 std::vector<miopenActivationMode_t> ActivationConfigs()
 {
@@ -403,7 +393,7 @@ std::vector<miopenActivationMode_t> ActivationConfigs()
 }
 
 template <typename T>
-std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
+std::vector<BNTestCase> BNActivInferTestConfigs(miopenBatchNormMode_t mode)
 {
     if constexpr(PERF_ENABLE)
     {
@@ -472,85 +462,78 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
     }
     else
     {
-        // clang-format off
-        return {
-            {64, 128, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 2048, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 64, 112, 112, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 64, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0}};
-        // clang-format on
+        return {{64, 128, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 2048, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 256, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 256, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 256, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 512, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 512, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 512, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 64, 112, 112, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                {64, 64, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0}};
     }
 }
 
-TEST_P(GPU_bn_infer_fused_spatial_FP32, PortTest)
+TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
 {
-    // Run the OpenCL reference
-    RunTestGPU(false);
-    // Optionally use the CPU output as reference, might have to tweak the tolerance
-    // RunTestCPU();
+    // Run the spatial CPU reference for FP32
+    RunTestCPU();
     // Run the HIP implementation
-    RunTestGPU(true);
+    RunTestGPU();
+    // Compare the outputs
+    Verify();
+};
+
+TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
+{
+    // Run the per act CPU reference for FP32
+    RunTestCPU();
+    // Run the HIP implementation
+    RunTestGPU();
+    // Compare the outputs
+    Verify();
+};
+
+TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
+{
+    // Run the spatial CPU reference for FP16
+    RunTestCPU();
+    // Run the HIP implementation
+    RunTestGPU();
+    // Compare the outputs
+    Verify();
+};
+
+TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
+{
+    // Run the per act CPU reference for FP16
+    RunTestCPU();
+    // Run the HIP implementation
+    RunTestGPU();
     // Compare the outputs, we expect the outputs to be exactly the same
     Verify();
 };
 
-TEST_P(GPU_bn_infer_fused_per_act_FP32, PortTest)
-{
-    // Run the OpenCL reference
-    RunTestGPU(false);
-    // Optionally use the CPU output as reference, might have to tweak the tolerance
-    // RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs, we expect the outputs to be exactly the same
-    Verify();
-};
-
-TEST_P(GPU_bn_infer_fused_spatial_FP16, PortTest)
-{
-    // Run the CPU reference FP16 is broken in OpenCL
-    RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs.
-    Verify();
-};
-
-TEST_P(GPU_bn_infer_fused_per_act_FP16, PortTest)
-{
-    // Run the CPU reference FP16 is broken in OpenCL
-    RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs.
-    Verify();
-};
-
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_infer_fused_spatial_FP32,
+    GPU_bn_activ_infer_spatial_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNSpatial))));
+                     testing::ValuesIn(BNActivInferTestConfigs<float>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_infer_fused_per_act_FP32,
+    GPU_bn_activ_infer_per_act_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNPerActivation))));
+                     testing::ValuesIn(BNActivInferTestConfigs<float>(miopenBNPerActivation))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_infer_fused_spatial_FP16,
+    GPU_bn_activ_infer_spatial_FP16,
     testing::Combine(
         testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
+        testing::ValuesIn(BNActivInferTestConfigs<half_float::half>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_infer_fused_per_act_FP16,
+    GPU_bn_activ_infer_per_act_FP16,
     testing::Combine(
         testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+        testing::ValuesIn(BNActivInferTestConfigs<half_float::half>(miopenBNPerActivation))));

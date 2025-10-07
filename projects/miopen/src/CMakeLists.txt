@@ -31,32 +31,38 @@ if(MIOPEN_ENABLE_SQLITE)
     add_subdirectory(sqlite)
 endif()
 
-# Truncation rounding or (default) rounding to nearest even (RNE) is enabled.
-# This switch controls two related but different aspects of MIOpen behavior
-# 1.  How host code performs conversions of float to bfloat16, important only
-#     for testing.
-# 2.  How BF16 kernels (which are kind of mixed-precision now and expected to
-#     remain in the future)  perform final conversion (and rounding) of FP32
-#     to BF16 results. This affects the main functionality of the library.
-option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
-option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+# Truncation rounding or (default) rounding to nearest even (RNE) is enabled. This switch controls
+# two related but different aspects of MIOpen behavior 1.  How host code performs conversions of
+# float to bfloat16, important only for testing. 2.  How BF16 kernels (which are kind of
+# mixed-precision now and expected to remain in the future)  perform final conversion (and rounding)
+# of FP32 to BF16 results. This affects the main functionality of the library.
+option(MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON)
+option(MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
+option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
-configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
+configure_file(
+    "${PROJECT_SOURCE_DIR}/include/miopen/config.h.in"
+    "${PROJECT_BINARY_DIR}/include/miopen/config.h"
+)
 
-# configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
-configure_file( "${PROJECT_SOURCE_DIR}/include/miopen/version.h.in" "${PROJECT_BINARY_DIR}/include/miopen/version.h" )
+# configure a header file to pass the CMake version settings to the source, and package the header
+# files in the output archive
+configure_file(
+    "${PROJECT_SOURCE_DIR}/include/miopen/version.h.in"
+    "${PROJECT_BINARY_DIR}/include/miopen/version.h"
+)
 
-message( STATUS "MIOpen_VERSION= ${MIOpen_VERSION}" )
+message(STATUS "MIOpen_VERSION= ${MIOpen_VERSION}")
 if(NOT MIOPEN_GENERATOR_IS_MULTI_CONFIG)
-    message( STATUS "CMAKE_BUILD_TYPE= ${CMAKE_BUILD_TYPE}" )
+    message(STATUS "CMAKE_BUILD_TYPE= ${CMAKE_BUILD_TYPE}")
 endif()
 
 # This is incremented when the ABI to the library changes
-set( MIOpen_SOVERSION 1.0 )
+set(MIOpen_SOVERSION 1.0)
 
+# Add kernel files to be embedded into the binary
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
     set(KERNELS_DECLS)
@@ -65,15 +71,21 @@ function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
         get_filename_component(BASE_NAME ${KERNEL_FILE} NAME_WE)
         string(TOUPPER "${BASE_NAME}" KEY_NAME)
         string(MAKE_C_IDENTIFIER "${KEY_NAME}" VAR_NAME)
-        string(APPEND KERNELS_DECLS "extern const size_t ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE;\n")
+        string(APPEND KERNELS_DECLS
+               "extern const size_t ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE;\n"
+        )
         string(APPEND KERNELS_DECLS "extern const char ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}[];\n")
-        list(APPEND INIT_KERNELS_LIST "    { \"${KERNEL_FILENAME}\", { ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}, ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE } }")
+        list(
+            APPEND
+            INIT_KERNELS_LIST
+            "    { \"${KERNEL_FILENAME}\", { ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}, ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE } }"
+        )
     endforeach()
     string(REPLACE ";" ",\n" INIT_KERNELS "${INIT_KERNELS_LIST}")
     configure_file(kernels/${FILE_NAME}.in ${PROJECT_BINARY_DIR}/${FILE_NAME})
 endfunction()
 
-set( MIOpen_Source
+set(MIOpen_Source
     activ/problem_description.cpp
     activ_api.cpp
     adam/problem_description.cpp
@@ -367,26 +379,48 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
 endif()
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f16_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f32_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f16_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f32_instance.cpp)
+    list(APPEND MIOpen_Source
+         kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f16_instance.cpp
+    )
+    list(APPEND MIOpen_Source
+         kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f32_instance.cpp
+    )
+    list(APPEND MIOpen_Source
+         kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f16_instance.cpp
+    )
+    list(APPEND MIOpen_Source
+         kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f32_instance.cpp
+    )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
-    file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_INCLUDE "kernels/static_composable_kernel/include/*/*.hpp")
-    file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE "kernels/static_composable_kernel/src/*/*.cpp")
-    file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE "legacy_composable_kernel/composable_kernel/include/*.hpp")
-    file(GLOB_RECURSE COMPOSABLE_KERNEL_SOURCE "legacy_composable_kernel/composable_kernel/src/*.cpp")
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL
+                                                                         "HIP"
+   OR MIOPEN_BACKEND STREQUAL "HIPNOGPU"
+)
+    file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_INCLUDE
+         "kernels/static_composable_kernel/include/*/*.hpp"
+    )
+    file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE
+         "kernels/static_composable_kernel/src/*/*.cpp"
+    )
+    file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE
+         "legacy_composable_kernel/composable_kernel/include/*.hpp"
+    )
+    file(GLOB_RECURSE COMPOSABLE_KERNEL_SOURCE
+         "legacy_composable_kernel/composable_kernel/src/*.cpp"
+    )
     file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_SOURCE "kernels/dynamic_igemm/*.s")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE "kernels/dynamic_igemm/*.inc")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_DYNAMIC_CPP_SOURCE "kernels/dynamic_igemm/*.cpp")
     file(GLOB_RECURSE GPU_REFERENCE_KERNEL_HIP "kernels/gpu_reference_kernel/*.cpp")
     file(GLOB_RECURSE GPU_REFERENCE_KERNEL_ASM "kernels/gpu_reference_kernel/*.s")
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
-    file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
-    file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
+    file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE
+         "kernels/gpu_general_tensor_reorder_kernel/*.hpp"
+    )
+    file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE
+         "kernels/gpu_general_tensor_reorder_kernel/*.cpp"
+    )
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -529,7 +563,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/xform_data_filter.inc
         kernels/xform_kd_cov2.inc
         kernels/xform_metadata.inc
-        )
+    )
 
     set(MIOPEN_KERNELS
         ${STATIC_COMPOSABLE_KERNEL_SOURCE}
@@ -657,8 +691,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v30_3_1_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v30_3_1_fp32_f3x2_stride2.s
         kernels/MIOpenConvBwdBias.cl
-        kernels/MIOpenBatchNormActivInfer.cl
-        kernels/MIOpenBatchNormActivInferHIP.cpp
+        kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cl
         kernels/MIOpenDropoutHIP.cpp
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
@@ -672,18 +705,18 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/xform_bidirect_winograd_data.s
         kernels/xform_bidirect_winograd_filter.s
         kernels/xform_bidirect_winograd_out.s
-        kernels/UniversalTranspose.cl)
+        kernels/UniversalTranspose.cl
+    )
 
-    # Kernels in development lists.
-    # Should be ALWAYS empty in develop branch (at the time of PR merge)
-    # Intention: to speed up kernel development rebuild time
+    # Kernels in development lists. Should be ALWAYS empty in develop branch (at the time of PR
+    # merge) Intention: to speed up kernel development rebuild time
     set(MIOPEN_DEVELOPMENT_KERNELS)
 
     # Only referenced by MIOPEN_DEVELOPMENT_KERNELS
     set(MIOPEN_DEVELOPMENT_KERNEL_INCLUDES)
 
-    LIST(LENGTH MIOPEN_DEVELOPMENT_KERNELS MIOPEN_DEVELOPMENT_KERNELS_COUNT)
-    LIST(LENGTH MIOPEN_DEVELOPMENT_KERNEL_INCLUDES MIOPEN_DEVELOPMENT_KERNEL_INCLUDES_COUNT)
+    list(LENGTH MIOPEN_DEVELOPMENT_KERNELS MIOPEN_DEVELOPMENT_KERNELS_COUNT)
+    list(LENGTH MIOPEN_DEVELOPMENT_KERNEL_INCLUDES MIOPEN_DEVELOPMENT_KERNEL_INCLUDES_COUNT)
 
     add_kernels("kernel.cpp" "MIOPEN_KERNEL_" "" "${MIOPEN_KERNELS}")
     add_kernels("kernel_includes.cpp" "MIOPEN_KERNEL_" "_INCLUDE" "${MIOPEN_KERNEL_INCLUDES}")
@@ -693,11 +726,16 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     endif()
 
     if(${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES_COUNT})
-        add_kernels("kernel_includes.cpp" "MIOPEN_KERNEL_" "_INCLUDE" "${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES}")
+        add_kernels(
+            "kernel_includes.cpp" "MIOPEN_KERNEL_" "_INCLUDE"
+            "${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES}"
+        )
     endif()
 
     configure_file(db_path.cpp.in ${PROJECT_BINARY_DIR}/db_path.cpp)
-    list(APPEND MIOpen_Source
+    list(
+        APPEND
+        MIOpen_Source
         activ.cpp
         adam.cpp
         addlayernorm.cpp
@@ -737,51 +775,43 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         softmarginloss.cpp
         transformers_adam_w.cpp
         ${PROJECT_BINARY_DIR}/db_path.cpp
-        )
+    )
 
-    list(INSERT MIOpen_Source 0
-        ${PROJECT_BINARY_DIR}/kernel.cpp
-        ${PROJECT_BINARY_DIR}/kernel_includes.cpp
-        )
+    list(INSERT MIOpen_Source 0 ${PROJECT_BINARY_DIR}/kernel.cpp
+         ${PROJECT_BINARY_DIR}/kernel_includes.cpp
+    )
 endif()
 
 if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
-    list(APPEND MIOpen_Source
-        gemm_v2.cpp
+    list(APPEND MIOpen_Source gemm_v2.cpp)
+endif()
+
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    list(APPEND MIOpen_Source ocl/handleocl.cpp ocl_kernel.cpp ocl/oclerrors.cpp ocl/clhelper.cpp)
+endif()
+
+if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+    list(APPEND MIOpen_Source hip/hiperrors.cpp hip/handlehip.cpp hipoc/hipoc_kernel.cpp
+         hipoc/hipoc_program.cpp
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "OpenCL" )
-    list(APPEND MIOpen_Source
-        ocl/handleocl.cpp
-        ocl_kernel.cpp
-        ocl/oclerrors.cpp
-        ocl/clhelper.cpp
+if(MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    list(APPEND MIOpen_Source hip/hiperrors.cpp nogpu/handle.cpp hipoc/hipoc_kernel.cpp
+         hipoc/hipoc_program.cpp
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
-    list(APPEND MIOpen_Source
-        hip/hiperrors.cpp
-        hip/handlehip.cpp
-        hipoc/hipoc_kernel.cpp
-        hipoc/hipoc_program.cpp
-        )
-endif()
-
-if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
-    list(APPEND MIOpen_Source
-        hip/hiperrors.cpp
-        nogpu/handle.cpp
-        hipoc/hipoc_kernel.cpp
-        hipoc/hipoc_program.cpp
-        )
-endif()
-
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
-    set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL
+                                                                         "HIP"
+   OR MIOPEN_BACKEND STREQUAL "HIPNOGPU"
+)
+    set(KERNELS_SRC_BATCH_FACTOR 50
+        CACHE STRING "Amount of kernel source files to inline to a single object file."
+    )
     set(KERNELS_BATCH_ID 0)
 
+    # Inline kernels in batches of BATCH_FACTOR
     function(inline_kernels_src BATCH_FACTOR KERNELS KERNEL_INCLUDES EXTRA_OPTIONS MESSAGE_SUFFIX)
         set(KERNELS_BATCH)
         set(KERNELS_BATCH_SIZE 0)
@@ -794,28 +824,40 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
             math(EXPR PROCESSED "1+${PROCESSED}")
             if((KERNELS_BATCH_SIZE EQUAL ${BATCH_FACTOR}) OR (PROCESSED EQUAL KERNELS_NUMBER))
                 set(KERNEL_SRC_HPP_FILENAME batch_${KERNELS_BATCH_ID}.cpp.hpp)
-                set(KERNEL_SRC_HPP_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/${KERNEL_SRC_HPP_FILENAME})
-                set(KERNEL_SRC_CPP_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.cpp)
-                set(KERNEL_SRC_ASM_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.S)
-                set(KERNEL_SRC_BIN_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.bin)
+                set(KERNEL_SRC_HPP_PATH
+                    ${PROJECT_BINARY_DIR}/inlined_kernels/${KERNEL_SRC_HPP_FILENAME}
+                )
+                set(KERNEL_SRC_CPP_PATH
+                    ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.cpp
+                )
+                set(KERNEL_SRC_ASM_PATH
+                    ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.S
+                )
+                set(KERNEL_SRC_BIN_PATH
+                    ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.bin
+                )
 
                 if(MIOPEN_INCBIN)
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                         DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        COMMAND
+                            $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH}
+                            ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern
+                            ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
-                        )
+                    )
                     list(APPEND MIOpen_Source ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH})
                 else()
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                         DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern
+                                ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
-                        )
+                    )
                     configure_file(kernels/kernels_batch.cpp.in ${KERNEL_SRC_CPP_PATH})
                     list(APPEND MIOpen_Source ${KERNEL_SRC_CPP_PATH} ${KERNEL_SRC_HPP_PATH})
                 endif()
@@ -829,18 +871,29 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         set(MIOpen_Source ${MIOpen_Source} PARENT_SCOPE)
     endfunction()
 
-    inline_kernels_src(${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_KERNELS}" "${MIOPEN_KERNEL_INCLUDES}" "" "")
-    inline_kernels_src(${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_KERNEL_INCLUDES}" "" "-no-recurse;-mark-includes" " (includes)")
+    inline_kernels_src(
+        ${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_KERNELS}" "${MIOPEN_KERNEL_INCLUDES}" "" ""
+    )
+    inline_kernels_src(
+        ${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_KERNEL_INCLUDES}" "" "-no-recurse;-mark-includes"
+        " (includes)"
+    )
 
     set(MIOPEN_DEVELOPMENT_KERNELS_DEPS ${MIOPEN_KERNEL_INCLUDES})
     list(APPEND MIOPEN_DEVELOPMENT_KERNELS_DEPS ${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES})
 
     if(${MIOPEN_DEVELOPMENT_KERNELS_COUNT})
-        inline_kernels_src(${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_DEVELOPMENT_KERNELS}" "${MIOPEN_DEVELOPMENT_KERNELS_DEPS}" "" " (dev kernels)")
+        inline_kernels_src(
+            ${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_DEVELOPMENT_KERNELS}"
+            "${MIOPEN_DEVELOPMENT_KERNELS_DEPS}" "" " (dev kernels)"
+        )
     endif()
 
     if(${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES_COUNT})
-        inline_kernels_src(${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES}" "" "-no-recurse;-mark-includes" " (dev includes)")
+        inline_kernels_src(
+            ${KERNELS_SRC_BATCH_FACTOR} "${MIOPEN_DEVELOPMENT_KERNEL_INCLUDES}" ""
+            "-no-recurse;-mark-includes" " (dev includes)"
+        )
     endif()
 
 endif()
@@ -850,23 +903,16 @@ if(MIOPEN_USE_COMGR)
 endif()
 
 if(MIOPEN_USE_MLIR)
-    list(APPEND MIOpen_Source
-        conv/invokers/mlir_impl_gemm.cpp
-        mlir_build.cpp
-        solver/conv/mlir_common.cpp
-        )
+    list(APPEND MIOpen_Source conv/invokers/mlir_impl_gemm.cpp mlir_build.cpp
+         solver/conv/mlir_common.cpp
+    )
 endif()
 
 # build library
 if(MIOPEN_ENABLE_SQLITE)
-    add_library( MIOpen
-        ${MIOpen_Source}
-        $<TARGET_OBJECTS:sqlite_memvfs>
-        )
+    add_library(MIOpen ${MIOpen_Source} $<TARGET_OBJECTS:sqlite_memvfs>)
 else()
-    add_library( MIOpen
-        ${MIOpen_Source}
-        )
+    add_library(MIOpen ${MIOpen_Source})
 endif()
 
 rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
@@ -879,30 +925,33 @@ endif()
 
 find_package(zstd)
 if(zstd_FOUND)
-    target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
+    target_link_libraries(
+        MIOpen
+        PRIVATE
+            $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
+    )
 endif()
 
+# Link libraries to TARGET
 function(target_internal_library TARGET)
     target_link_libraries(${TARGET} PRIVATE ${ARGN})
     target_link_libraries(${TARGET} INTERFACE $<BUILD_INTERFACE:${ARGN}>)
 endfunction()
 
-target_include_directories(MIOpen PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
-)
+target_include_directories(MIOpen PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>)
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
-        # global when you build it so we dont have access to it.
+    if(MIOPEN_BUILD_CK)
+        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased
+        # target only is not global when you build it so we dont have access to it.
         set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
 
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
-        target_include_directories(MIOpen SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
+        target_include_directories(
+            MIOpen SYSTEM PRIVATE ${MIOPEN_CK_INCLUDE_DIR} ${MIOPEN_CK_BUILD_INCLUDE_DIR}
+                                  ${MIOPEN_CK_LIBRARY_INCLUDE_DIR}
+        )
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
@@ -915,9 +964,11 @@ if(WIN32)
 endif()
 
 target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
-# Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
-#               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2 ${MIOPEN_CK_LINK_FLAGS})
+# Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS} We can
+# remove ${CMAKE_DL_LIBS} once root cause is identified.
+target_link_libraries(
+    MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2 ${MIOPEN_CK_LINK_FLAGS}
+)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)
@@ -926,12 +977,16 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
-    # On Windows, export selected internal symbols only when tests are built. The officially released
-    # binaries must not have internals exposed because doing so violates the threats model requirements.
-    # We cannot use the CMake property CMAKE_EXPORT_ALL_SYMBOLS here because the number of automatically
-    # exported symbols exceeds the maximum allowed number in a DLL library (64K).
-    # See details here: https://learn.microsoft.com/en-us/cpp/build/exporting-from-a-dll?view=msvc-170
-    generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
+    # On Windows, export selected internal symbols only when tests are built. The officially
+    # released binaries must not have internals exposed because doing so violates the threats model
+    # requirements. We cannot use the CMake property CMAKE_EXPORT_ALL_SYMBOLS here because the
+    # number of automatically exported symbols exceeds the maximum allowed number in a DLL library
+    # (64K). See details here:
+    # https://learn.microsoft.com/en-us/cpp/build/exporting-from-a-dll?view=msvc-170
+    generate_export_header(
+        MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME
+        ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h
+    )
     target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
 endif()
 
@@ -943,38 +998,41 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
     file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
-    if(NOT ENABLE_ASAN_PACKAGING )
+    if(NOT ENABLE_ASAN_PACKAGING)
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
-        configure_file("${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${MODEL_FILE_FILENAME}" COPYONLY)
+        configure_file(
+            "${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${MODEL_FILE_FILENAME}"
+            COPYONLY
+        )
     endforeach()
 endif()
 
-############################################################
+# ##################################################################################################
 # MIOpen depends on OpenCL
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}")
+    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS})
+    target_link_libraries(MIOpen PUBLIC ${OPENCL_LIBRARIES})
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
 elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
-    target_link_libraries( MIOpen PRIVATE hip::device )
-    target_link_libraries( MIOpen INTERFACE hip::host )
+    target_link_libraries(MIOpen PRIVATE hip::device)
+    target_link_libraries(MIOpen INTERFACE hip::host)
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
-            target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
+            target_link_libraries(MIOpen PRIVATE hiprtc::hiprtc)
         else()
-            target_link_libraries( MIOpen PRIVATE hiprtc)
+            target_link_libraries(MIOpen PRIVATE hiprtc)
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
         # Workaround hip not setting its usage requirements correctly
-        target_compile_definitions( MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1 )
+        target_compile_definitions(MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1)
     endif()
     # This is helpful for the tests
-    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:hip::device> )
+    target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:hip::device>)
     list(APPEND PACKAGE_DEPENDS PACKAGE hip)
 endif()
 
@@ -989,20 +1047,19 @@ if(MIOPEN_OFFLINE_COMPILER_PATHS_V2)
 endif()
 
 if(rocblas_FOUND)
-    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:roc::rocblas> )
-    target_link_libraries( MIOpen PRIVATE roc::rocblas )
+    target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:roc::rocblas>)
+    target_link_libraries(MIOpen PRIVATE roc::rocblas)
     list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE rocblas)
 endif()
 
 if(hipblaslt_FOUND)
-    target_link_libraries( MIOpen PRIVATE roc::hipblaslt )
-    target_include_directories( MIOpen INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
+    target_link_libraries(MIOpen PRIVATE roc::hipblaslt)
+    target_include_directories(MIOpen INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}>)
 endif()
 
-target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
+target_include_directories(MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR})
 
-# For backward compatibility with ROCm 5.3
-# Build with library libMLIRMIOpen
+# For backward compatibility with ROCm 5.3 Build with library libMLIRMIOpen
 if(LIBMLIRMIOPEN)
     target_link_libraries(MIOpen PRIVATE ${LIBMLIRMIOPEN})
 endif()
@@ -1015,12 +1072,12 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-target_internal_library(MIOpen
-    Boost::filesystem
-)
+target_internal_library(MIOpen Boost::filesystem)
 list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
 if(NOT WIN32 AND NOT APPLE)
-    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
+    file(
+        WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def
+        "
 MIOPEN_${MIOPEN_BACKEND}_1
 {
 global:
@@ -1034,19 +1091,20 @@ local:
         std::*;
     };
 };
-")
+"
+    )
     target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
-#######################################
+# ##################################################################################################
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
     target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
+    target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
-############################################################
+# ##################################################################################################
 # MIOpen depends on librt for Boost.Interprocess
 if(NOT WIN32 AND NOT APPLE)
     find_library(LIBRT rt)
@@ -1062,27 +1120,20 @@ if(MIOPEN_USE_ROCTRACER)
     target_link_libraries(MIOpen PRIVATE ${rocTracer})
 endif()
 
-############################################################
+# ##################################################################################################
 # Installation
 set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
-set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
+    set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
 
 rocm_install_targets(
-  TARGETS MIOpen
-  INCLUDE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_BINARY_DIR}/include
+    TARGETS MIOpen INCLUDE ${PROJECT_SOURCE_DIR}/include ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
 )
 
 rocm_export_targets(
-  TARGETS MIOpen
-  DEPENDS
-    ${PACKAGE_DEPENDS}
-  STATIC_DEPENDS
-    ${PACKAGE_STATIC_DEPENDS}
+    TARGETS MIOpen DEPENDS ${PACKAGE_DEPENDS} STATIC_DEPENDS ${PACKAGE_STATIC_DEPENDS}
 )
 
 # Install db files
@@ -1090,22 +1141,31 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
     include(embed)
     if(MIOPEN_EMBED_BINCACHE AND MIOPEN_BINCACHE_PATH STREQUAL "")
         if(MIOPEN_NO_DVC_PULLED)
-            message(WARNING "Binary cache files have not been pulled down from DVC, will not embed.")
+            message(
+                WARNING "Binary cache files have not been pulled down from DVC, will not embed."
+            )
         else()
             set(MIOPEN_BINCACHE_PATH ${KERNELS_BINARY_DIR})
             message("MIOPEN_BINCACHE_PATH: ${MIOPEN_BINCACHE_PATH}")
         endif()
     else()
-        message(WARNING "MIOPEN_EMBED_BINCACHE is set and MIOPEN_BINCACHE_PATH was used to override default binary cache files. Proceed at your own risk!")
+        message(
+            WARNING
+                "MIOPEN_EMBED_BINCACHE is set and MIOPEN_BINCACHE_PATH was used to override default binary cache files. Proceed at your own risk!"
+        )
     endif()
-# embed find db
+    # embed find db
     foreach(EMBED_ARCH ${MIOPEN_EMBED_DB})
         message(STATUS "Adding find db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt")
+        list(APPEND CODE_OBJECTS
+             "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt"
+        )
         message(STATUS "Adding perf db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}")
+        list(APPEND CODE_OBJECTS
+             "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}"
+        )
     endforeach()
-# Embed Bin Cache
+    # Embed Bin Cache
     if(NOT MIOPEN_BINCACHE_PATH STREQUAL "")
         foreach(EMBED_ARCH ${MIOPEN_EMBED_DB})
             message(STATUS "Adding binary cache for arch: ${EMBED_ARCH}")
@@ -1114,5 +1174,5 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
         endforeach()
     endif()
     add_embed_library(miopen_data ${CODE_OBJECTS})
-    target_link_libraries(MIOpen PRIVATE $<BUILD_INTERFACE:miopen_data> )
+    target_link_libraries(MIOpen PRIVATE $<BUILD_INTERFACE:miopen_data>)
 endif()
