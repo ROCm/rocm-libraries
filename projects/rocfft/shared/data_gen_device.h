@@ -866,11 +866,11 @@ static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
 {
     dim3 gridDim;
 
-    if(length.size() > 1 && length[0] == 0)
+    if(!length.empty() && std::count(length.begin(), length.end() - 1, static_cast<size_t>(0)) > 0)
         throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
 
-    if(length.size() > 2 && length[1] == 0)
-        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
+    if(batch == 0)
+        throw std::runtime_error("Invalid zero batch for impose_hermitian_symmetry");
 
     const auto x_total = (length[0] + 1) / 2 - 1;
     const auto y_total = length[1] - 1;
