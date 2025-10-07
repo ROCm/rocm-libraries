@@ -56,7 +56,6 @@ namespace detail
             hipError_t error = (__VA_ARGS__);                                   \
             if(error != hipSuccess)                                             \
             {                                                                   \
-                std::cout << "in " << __FILE__ << ":" << __LINE__ << std::endl; \
                 return error;                                                   \
             }                                                                   \
         }                                                                       \
