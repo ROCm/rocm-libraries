@@ -934,7 +934,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinaryToDiscardIterator) THRUST_D
   }
 }
 
-#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 TYPED_TEST(TransformInOutTests, TestTransformUnaryCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

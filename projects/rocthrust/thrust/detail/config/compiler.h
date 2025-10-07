@@ -79,9 +79,6 @@
 //! deprecated [Since 2.7]
 #    define THRUST_MSVC_VERSION_FULL _MSC_FULL_VER
 #  endif
-#elif defined(__INTEL_COMPILER)
-//! deprecated [Since 2.7]
-#  define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_INTEL
 #elif defined(__clang__)
 //! deprecated [Since 2.7]
 #  define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG

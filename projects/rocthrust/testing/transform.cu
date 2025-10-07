@@ -665,7 +665,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinaryToDiscardIterator
 }
 DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
-#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 template <typename T>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
 {

@@ -466,7 +466,6 @@ public:
   THRUST_DIAG_PUSH
   THRUST_DIAG_SUPPRESS_CLANG("-Wreorder")
   THRUST_DIAG_SUPPRESS_GCC("-Wreorder")
-  THRUST_DIAG_SUPPRESS_ICC(2407)
   template <typename ComputeContent>
   THRUST_HOST explicit async_addressable_value_with_keep_alives(
     unique_stream&& stream, keep_alives_type&& keep_alives, ComputeContent&& compute_content)
