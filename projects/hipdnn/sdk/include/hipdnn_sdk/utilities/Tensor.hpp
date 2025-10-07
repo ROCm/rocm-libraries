@@ -8,6 +8,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <typeindex>
 #include <vector>
 
 namespace hipdnn_sdk
@@ -44,16 +45,40 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
-template <typename T>
-class TensorBase
+class ITensor
 {
 public:
-    virtual ~TensorBase() = default;
-
-    using value_type = T;
+    virtual ~ITensor() = default;
 
     virtual const std::vector<int64_t>& dims() const = 0;
     virtual const std::vector<int64_t>& strides() const = 0;
+
+    virtual void* rawHostData() = 0;
+
+    virtual std::type_index getType() const = 0;
+
+    template <typename T>
+    bool isType() const
+    {
+        return getType() == std::type_index(typeid(T));
+    }
+};
+
+template <typename T>
+class TensorBase : public ITensor
+{
+public:
+    using value_type = T;
+
+    std::type_index getType() const override
+    {
+        return std::type_index(typeid(T));
+    }
+
+    void* rawHostData() override
+    {
+        return memory().hostData();
+    }
 
     virtual IMigratableMemory<T>& memory() = 0;
     virtual const IMigratableMemory<T>& memory() const = 0;
