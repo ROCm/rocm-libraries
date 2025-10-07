@@ -149,8 +149,8 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpArray)
         A* ptr1 = p1.get_raw();
         A* ptr2 = p2.get_raw();
 
-        ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
-        ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
+        ASSERT_FALSE(p1 == p2); 
+        ASSERT_TRUE(p1 != p2);
         ASSERT_EQ((p1 < p2), (ptr1 < ptr2));
         ASSERT_EQ((p1 <= p2), (ptr1 <= ptr2));
         ASSERT_EQ((p1 > p2), (ptr1 > ptr2));
@@ -171,8 +171,8 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpArray)
         A* ptr1 = p1.get_raw();
         B* ptr2 = p2.get_raw();
 
-        ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
-        ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
+        ASSERT_FALSE(p1 == p2);
+        ASSERT_TRUE(p1 != p2);
         ASSERT_EQ((p1 < p2), (ptr1 < ptr2));
         ASSERT_EQ((p1 <= p2), (ptr1 <= ptr2));
         ASSERT_EQ((p1 > p2), (ptr1 > ptr2));
