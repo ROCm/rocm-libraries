@@ -9,6 +9,8 @@
 hipCUB documentation
 ===========================
 
+(preview)
+
 hipCUB is a thin, header-only wrapper library for `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_.
 
 The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipcub.
