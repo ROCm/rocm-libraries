@@ -25,12 +25,13 @@ std::string GetSystemHostname()
     }
 #elif defined(_WIN32)
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) == 0) {
-        if (gethostname(name, sizeof(name)) == 0) {
-            WSACleanup();
+    int wsaResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (wsaResult == 0) {
+        int hostnameResult = gethostname(name, sizeof(name));
+        WSACleanup();
+        if (hostnameResult == 0) {
             return {name};
         }
-        WSACleanup();
     }
 #endif
     return {"unknown host"};
