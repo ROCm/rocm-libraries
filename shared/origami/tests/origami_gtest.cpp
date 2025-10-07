@@ -276,8 +276,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         for(const auto& input_case : test.inputs)
         {
             EstimateMallHit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("numActiveCUs"), 
-                          input_case.values.at("splittingFactor"), input_case.expected_gt);
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"),input_case.values.at("element_size_A"),
+                           input_case.values.at("numActiveCUs"), input_case.values.at("splittingFactor"), input_case.expected_gt);
         }
     }
     else if(test.name == "CheckLDSCapacity")
