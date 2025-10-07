@@ -323,7 +323,7 @@ Arguments:
   - unit_check: c_int
   - timing: c_int
   - iters: c_int
-  - filename: c_char*256
+  - filename: c_char*192
   - function: c_char*64
   - category: c_char*32
 
