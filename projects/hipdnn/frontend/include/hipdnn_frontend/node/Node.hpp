@@ -55,6 +55,16 @@ public:
         return {};
     }
 
+    virtual std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const
+    {
+        return {};
+    }
+
+    virtual std::vector<std::shared_ptr<TensorAttributes>> getNodeOutputTensorAttributes() const
+    {
+        return {};
+    }
+
 protected:
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 
@@ -77,6 +87,11 @@ protected:
         {
             node->gatherHipdnnTensorIdsSubtree(usedIds);
         }
+
+        //todo next pr
+        //loop all nodes and build unique attribute list
+        //loop through all attributes and build usedIds list
+        //throw if duplicate id found
     }
 
     Error populateHipdnnTensorIdsSubtree(
@@ -173,6 +188,34 @@ public:
         }
 
         return {};
+    }
+
+    std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const override
+    {
+        std::vector<std::shared_ptr<TensorAttributes>> inputAttributes;
+        for(auto& tensorAttrPair : self().attributes.inputs)
+        {
+            if(tensorAttrPair.second)
+            {
+                inputAttributes.push_back(tensorAttrPair.second);
+            }
+        }
+
+        return inputAttributes;
+    }
+
+    std::vector<std::shared_ptr<TensorAttributes>> getNodeOutputTensorAttributes() const override
+    {
+        std::vector<std::shared_ptr<TensorAttributes>> outputAttributes;
+        for(auto& tensorAttrPair : self().attributes.outputs)
+        {
+            if(tensorAttrPair.second)
+            {
+                outputAttributes.push_back(tensorAttrPair.second);
+            }
+        }
+
+        return outputAttributes;
     }
 
 protected:
