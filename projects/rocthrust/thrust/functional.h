@@ -119,101 +119,6 @@ struct identity
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \addtogroup function_object_adaptors Function Object Adaptors
- *  \ingroup function_objects
- *  \{
- */
-
-/*! \p unary_function is an empty base class: it contains no member functions
- *  or member variables, but only type information. The only reason it exists
- *  is to make it more convenient to define types that are models of the
- *  concept Adaptable Unary Function. Specifically, any model of Adaptable
- *  Unary Function must define nested aliases. Those are
- *  provided by the base class \p unary_function.
- *
- *  deprecated [Since 2.6]
- *
- *  The following code snippet demonstrates how to construct an
- *  Adaptable Unary Function using \p unary_function.
- *
- *  \code
- *  struct sine : public thrust::unary_function<float,float>
- *  {
- *    __host__ __device__
- *    float operator()(float x) { return sinf(x); }
- *  };
- *  \endcode
- *
- *  \note Because C++11 language support makes the functionality of
- *        \c unary_function obsolete, its use is optional if C++11 language
- *        features are enabled.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/unary_function
- *  \see binary_function
- */
-template <typename Argument, typename Result>
-struct THRUST_DEPRECATED unary_function
-{
-  /*! \typedef argument_type
-   *  \brief The type of the function object's argument.
-   */
-  using argument_type = Argument;
-
-  /*! \typedef result_type;
-   *  \brief The type of the function object's result.
-   */
-  using result_type = Result;
-}; // end unary_function
-
-/*! \p binary_function is an empty base class: it contains no member functions
- *  or member variables, but only type information. The only reason it exists
- *  is to make it more convenient to define types that are models of the
- *  concept Adaptable Binary Function. Specifically, any model of Adaptable
- *  Binary Function must define nested aliases. Those are
- *  provided by the base class \p binary_function.
- *
- *  deprecated [Since 2.6]
- *
- *  The following code snippet demonstrates how to construct an
- *  Adaptable Binary Function using \p binary_function.
- *
- *  \code
- *  struct exponentiate : public thrust::binary_function<float,float,float>
- *  {
- *    __host__ __device__
- *    float operator()(float x, float y) { return powf(x,y); }
- *  };
- *  \endcode
- *
- *  \note Because C++11 language support makes the functionality of
- *        \c binary_function obsolete, its use is optional if C++11 language
- *        features are enabled.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/binary_function
- *  \see unary_function
- */
-template <typename Argument1, typename Argument2, typename Result>
-struct THRUST_DEPRECATED binary_function
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   */
-  using first_argument_type = Argument1;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   */
-  using second_argument_type = Argument2;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   */
-  using result_type = Result;
-}; // end binary_function
-
-/*! \}
- */
-
 /*! \addtogroup predefined_function_objects Predefined Function Objects
  *  \ingroup function_objects
  */
@@ -270,7 +175,6 @@ struct THRUST_DEPRECATED binary_function
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/plus
- *  \see binary_function
  */
 template <typename T = void>
 struct plus : public _THRUST_STD::plus<T>
@@ -326,7 +230,6 @@ struct plus : public _THRUST_STD::plus<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/minus
- *  \see binary_function
  */
 template <typename T = void>
 struct minus : public _THRUST_STD::minus<T>
@@ -382,7 +285,6 @@ struct minus : public _THRUST_STD::minus<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/multiplies
- *  \see binary_function
  */
 template <typename T = void>
 struct multiplies : public _THRUST_STD::multiplies<T>
@@ -438,7 +340,6 @@ struct multiplies : public _THRUST_STD::multiplies<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/divides
- *  \see binary_function
  */
 template <typename T = void>
 struct divides : public _THRUST_STD::divides<T>
@@ -494,7 +395,6 @@ struct divides : public _THRUST_STD::divides<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/modulus
- *  \see binary_function
  */
 template <typename T = void>
 struct modulus : public _THRUST_STD::modulus<T>
@@ -547,7 +447,6 @@ struct modulus : public _THRUST_STD::modulus<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/negate
- *  \see unary_function
  */
 template <typename T = void>
 struct negate : _THRUST_STD::negate<T>
@@ -590,8 +489,6 @@ struct negate : _THRUST_STD::negate<T>
  *                    thrust::square<float>());
  *  // V2 is now {1, 4, 9, ..., 1000000}
  *  \endcode
- *
- *  \see unary_function
  */
 template <typename T = void>
 struct square
@@ -650,7 +547,6 @@ struct square<void>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/equal_to
- *  \see binary_function
  */
 template <typename T = void>
 struct equal_to : public _THRUST_STD::equal_to<T>
@@ -684,7 +580,6 @@ struct equal_to : public _THRUST_STD::equal_to<T>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/not_equal_to
- *  \see binary_function
  */
 template <typename T = void>
 struct not_equal_to : public _THRUST_STD::not_equal_to<T>
@@ -718,7 +613,6 @@ struct not_equal_to : public _THRUST_STD::not_equal_to<T>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/greater
- *  \see binary_function
  */
 template <typename T = void>
 struct greater : public _THRUST_STD::greater<T>
@@ -752,7 +646,6 @@ struct greater : public _THRUST_STD::greater<T>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/less
- *  \see binary_function
  */
 template <typename T = void>
 struct less : public _THRUST_STD::less<T>
@@ -786,7 +679,6 @@ struct less : public _THRUST_STD::less<T>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/greater_equal
- *  \see binary_function
  */
 template <typename T = void>
 struct greater_equal : public _THRUST_STD::greater_equal<T>
@@ -820,7 +712,6 @@ struct greater_equal : public _THRUST_STD::greater_equal<T>
  * Comparable</a>.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/less_equal
- *  \see binary_function
  */
 template <typename T = void>
 struct less_equal : public _THRUST_STD::less_equal<T>
@@ -861,7 +752,6 @@ struct less_equal : public _THRUST_STD::less_equal<T>
  *  \tparam T must be convertible to \c bool.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_and
- *  \see binary_function
  */
 template <typename T = void>
 struct logical_and : public _THRUST_STD::logical_and<T>
@@ -894,7 +784,6 @@ struct logical_and : public _THRUST_STD::logical_and<T>
  *  \tparam T must be convertible to \c bool.
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_or
- *  \see binary_function
  */
 template <typename T = void>
 struct logical_or : public _THRUST_STD::logical_or<T>
@@ -941,7 +830,6 @@ struct logical_or : public _THRUST_STD::logical_or<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_not
- *  \see unary_function
  */
 template <typename T = void>
 struct logical_not : public _THRUST_STD::logical_not<T>
@@ -1003,8 +891,6 @@ struct logical_not : public _THRUST_STD::logical_not<T>
  *                    thrust::bit_and<int>());
  *  // V3 is now {1&13, 2&13, 3&13, ..., 1000%13}
  *  \endcode
- *
- *  \see binary_function
  */
 template <typename T = void>
 struct bit_and : public _THRUST_STD::bit_and<T>
@@ -1058,8 +944,6 @@ struct bit_and : public _THRUST_STD::bit_and<T>
  *                    thrust::bit_or<int>());
  *  // V3 is now {1|13, 2|13, 3|13, ..., 1000|13}
  *  \endcode
- *
- *  \see binary_function
  */
 template <typename T = void>
 struct bit_or : public _THRUST_STD::bit_or<T>
@@ -1113,8 +997,6 @@ struct bit_or : public _THRUST_STD::bit_or<T>
  *                    thrust::bit_xor<int>());
  *  // V3 is now {1^13, 2^13, 3^13, ..., 1000^13}
  *  \endcode
- *
- *  \see binary_function
  */
 template <typename T = void>
 struct bit_xor : public _THRUST_STD::bit_xor<T>
@@ -1164,7 +1046,6 @@ struct bit_xor : public _THRUST_STD::bit_xor<T>
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/identity
- *  \see unary_function
  */
 // TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to _THRUST_STD::identity
 template <typename T = void>
@@ -1235,7 +1116,6 @@ struct identity<void> : ::internal::identity
  *
  *  \see minimum
  *  \see min
- *  \see binary_function
  */
 template <typename T = void>
 struct maximum : ::internal::maximum<T>
@@ -1282,7 +1162,6 @@ struct maximum : ::internal::maximum<T>
  *
  *  \see maximum
  *  \see max
- *  \see binary_function
  */
 template <typename T = void>
 struct minimum : ::internal::minimum<T>
@@ -1322,7 +1201,6 @@ struct minimum : ::internal::minimum<T>
  *
  *  \see identity
  *  \see project2nd
- *  \see binary_function
  */
 template <typename T1 = void, typename T2 = void>
 struct project1st
@@ -1388,7 +1266,6 @@ struct project1st<void, void>
  *
  *  \see identity
  *  \see project1st
- *  \see binary_function
  */
 template <typename T1 = void, typename T2 = void>
 struct project2nd
