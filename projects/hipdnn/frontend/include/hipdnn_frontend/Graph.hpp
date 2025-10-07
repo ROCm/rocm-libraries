@@ -147,8 +147,8 @@ private:
         return {ErrorCode::OK, ""};
     }
 
-    GraphStructure buildAdjacencyList(
-        const std::unordered_map<std::shared_ptr<TensorAttributes>, size_t>& tensorProducer) const
+    GraphStructure buildAdjacencyList(const std::unordered_map<std::shared_ptr<TensorAttributes>,
+                                                               size_t>& tensorToOutputNodeMap) const
     {
         size_t nodeCount = _sub_nodes.size();
         GraphStructure structure;
@@ -159,8 +159,8 @@ private:
             auto inputs = _sub_nodes[j]->getNodeInputTensorAttributes();
             for(auto& input : inputs)
             {
-                auto it = tensorProducer.find(input);
-                if(it != tensorProducer.end())
+                auto it = tensorToOutputNodeMap.find(input);
+                if(it != tensorToOutputNodeMap.end())
                 {
                     size_t i = it->second;
                     structure.adjacencyList[i].push_back(j);
@@ -171,9 +171,9 @@ private:
         return structure;
     }
 
-    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorProducerMap() const
+    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOutputNodeMap() const
     {
-        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorProducer;
+        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOutputNodeMap;
         size_t nodeCount = _sub_nodes.size();
 
         for(size_t i = 0; i < nodeCount; ++i)
@@ -181,11 +181,11 @@ private:
             auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
             for(auto& output : outputs)
             {
-                tensorProducer[output] = i;
+                tensorToOutputNodeMap[output] = i;
             }
         }
 
-        return tensorProducer;
+        return tensorToOutputNodeMap;
     }
 
     void reorderNodesTopologically(const std::vector<size_t>& topologicalOrder)
@@ -244,8 +244,8 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        auto tensorProducer = buildTensorProducerMap();
-        auto graphStructure = buildAdjacencyList(tensorProducer);
+        auto tensorToOutputNodeMap = buildTensorToOutputNodeMap();
+        auto graphStructure = buildAdjacencyList(tensorToOutputNodeMap);
 
         auto sortResult = performTopologicalSortWithComponentDetection(graphStructure);
 
