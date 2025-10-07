@@ -265,33 +265,37 @@ namespace rocRoller
                         auto        aIdx = graphIndices[a];
                         auto        bIdx = graphIndices[b];
 
-                        if(aRec.control != bRec.control)
-                        {
-                            auto order = kgraph.control.compareNodes(
-                                rocRoller::UpdateCache, aRec.control, bRec.control);
+                        // This can happen with Exchange nodes
+                        // when scaleSkipPermlane=True, because
+                        // src and dst of each Exchange point
+                        // to the same macrotile (register allocation),
+                        // and therefore recorded twice in the
+                        // ControlFlowRWTracer.
+                        if(aRec.control == bRec.control)
+                            continue;
 
-                            switch(order)
-                            {
-                                namespace CG = ControlGraph;
-                            case CG::NodeOrdering::LeftFirst:
-                                ordering.addElement(CG::Sequence{}, {aIdx}, {bIdx});
-                                break;
-                            case CG::NodeOrdering::LeftInBodyOfRight:
-                                Throw<FatalError>(
-                                    "Nodes that use MacroTiles should not have bodies");
-                                break;
-                            case CG::NodeOrdering::Undefined:
-                                break;
-                            case CG::NodeOrdering::RightInBodyOfLeft:
-                                Throw<FatalError>(
-                                    "Nodes that use MacroTiles should not have bodies");
-                                break;
-                            case CG::NodeOrdering::RightFirst:
-                                ordering.addElement(CG::Sequence{}, {bIdx}, {aIdx});
-                                break;
-                            case CG::NodeOrdering::Count:
-                                Throw<FatalError>("Should not get here!");
-                            }
+                        auto order = kgraph.control.compareNodes(
+                            rocRoller::UpdateCache, aRec.control, bRec.control);
+
+                        switch(order)
+                        {
+                            namespace CG = ControlGraph;
+                        case CG::NodeOrdering::LeftFirst:
+                            ordering.addElement(CG::Sequence{}, {aIdx}, {bIdx});
+                            break;
+                        case CG::NodeOrdering::LeftInBodyOfRight:
+                            Throw<FatalError>("Nodes that use MacroTiles should not have bodies");
+                            break;
+                        case CG::NodeOrdering::Undefined:
+                            break;
+                        case CG::NodeOrdering::RightInBodyOfLeft:
+                            Throw<FatalError>("Nodes that use MacroTiles should not have bodies");
+                            break;
+                        case CG::NodeOrdering::RightFirst:
+                            ordering.addElement(CG::Sequence{}, {bIdx}, {aIdx});
+                            break;
+                        case CG::NodeOrdering::Count:
+                            Throw<FatalError>("Should not get here!");
                         }
                     }
                 }
