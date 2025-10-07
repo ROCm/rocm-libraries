@@ -56,3 +56,17 @@ Executes the backward pass of a batch normalization graph to compute gradients o
     where `nhw = N * H * W`.
     
 - For training, `d_x` would subsequently be passed to the preceding layer, and `d_scale` and `d_bias` can be used by an optimizer to update the learnable parameters `scale` and `bias`.
+
+### [**`ConvForward`**](./convolution/ConvForward.cpp)
+
+Executes the forward pass of a convolution operation on a 4D input tensor.
+
+- For an input tensor `x` of shape `(N, C, H, W)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution operation computes the output tensor `y` of shape `(N, K, P, Q)`:
+    ```python
+    y[n, k, p, q] = sum(x[n, c, h, w] * w[k, c, r, s])
+    ```
+    where the summation iterates over the input channels `C` and the spatial dimensions of the filter `(R, S)`, and the indices `(h, w)` are determined by the convolution stride, padding, and dilation. For each output position `(p, q)`, the corresponding input indices `(h, w)` are computed as:
+    ```python
+    h = p * stride_height - padding_height + r * dilation_height
+    w = q * stride_width - padding_width + s * dilation_width
+    ```
