@@ -238,8 +238,8 @@ TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
   // value categories when casting to different type
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
-  // unfortunately, old versions of MSVC pick the `const int&` overload instead of `int&&`
-#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1929)
+  // unfortunately, old versions of MSVC or nvcc in MSVC mode pick the `const int&` overload instead of `int&&`
+#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1929) && !(defined(_MSC_VER) && (defined(__NVCC__) && (__CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1201)))
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
 #endif
