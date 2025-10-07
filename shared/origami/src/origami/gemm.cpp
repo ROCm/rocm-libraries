@@ -846,8 +846,8 @@ namespace origami
             mall_m = grid_m;
         }
         // Clamp tile dimensions
-        mall_m = std::max(std::min(grid_m, mall_m), (size_t)1);
-        mall_n = std::max(std::min(grid_n, mall_n), (size_t)1);
+        mall_m = std::max(std::min(grid_m, mall_m), static_cast<size_t>(1));
+        mall_n = std::max(std::min(grid_n, mall_n), static_cast<size_t>(1));
         // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
         double min_load
             = static_cast<double>((mall_m * MT_M * MT_K * safe_ceil_div(element_size_A, 8))
