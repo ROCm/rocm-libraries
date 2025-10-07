@@ -19,10 +19,8 @@ on:
     # branches:
     #   - 'develop'
     #   - 'docs/**'
-    paths:
-      - 'projects/**/docs/**'
-      - 'shared/**/docs/**'
     types: [opened, synchronize, reopened]
+
 
   # Allow manual triggering via comment
   issue_comment:
