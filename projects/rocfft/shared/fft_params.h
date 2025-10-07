@@ -2555,6 +2555,9 @@ public:
         // Don't bother iterating over the data if we don't have to
         if(scale_factor == 1.0)
             return;
+#ifdef _OPENMP
+        auto partition_count = compute_partition_count(output.front().size());
+#endif
 
         switch(otype)
         {
@@ -2574,6 +2577,9 @@ public:
 
                 auto output_begin
                     = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
@@ -2588,6 +2594,9 @@ public:
                 const size_t num_elems = output.front().size() / elem_size;
 
                 auto output_begin = reinterpret_cast<rocfft_complex<float>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
@@ -2603,6 +2612,9 @@ public:
 
                 auto output_begin
                     = reinterpret_cast<rocfft_complex<double>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
@@ -2624,6 +2636,9 @@ public:
                 const size_t num_elems = output.front().size() / elem_size;
 
                 auto output_begin = reinterpret_cast<rocfft_fp16*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
@@ -2638,6 +2653,9 @@ public:
                 const size_t num_elems = output.front().size() / elem_size;
 
                 auto output_begin = reinterpret_cast<float*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
@@ -2652,6 +2670,9 @@ public:
                 const size_t num_elems = output.front().size() / elem_size;
 
                 auto output_begin = reinterpret_cast<double*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
                 for(size_t i = 0; i < num_elems; ++i)
                 {
                     auto& element = output_begin[i];
