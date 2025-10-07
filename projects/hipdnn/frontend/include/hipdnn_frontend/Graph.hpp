@@ -154,7 +154,7 @@ private:
         GraphStructure structure;
         structure.adjacencyList.resize(nodeCount);
 
-        for(size_t j = 0; j < nodeCount; ++j)
+        for(size_t inputNodeIndex = 0; inputNodeIndex < nodeCount; ++inputNodeIndex)
         {
             auto inputs = _sub_nodes[j]->getNodeInputTensorAttributes();
             for(auto& input : inputs)
@@ -162,8 +162,8 @@ private:
                 auto it = tensorToOriginNode.find(input);
                 if(it != tensorToOriginNode.end())
                 {
-                    size_t i = it->second;
-                    structure.adjacencyList[i].push_back(j);
+                    size_t outputNodeIndex = it->second;
+                    structure.adjacencyList[outputNodeIndex].push_back(inputNodeIndex);
                 }
             }
         }
