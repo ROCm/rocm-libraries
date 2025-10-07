@@ -243,6 +243,7 @@ public:
             {
                 errorMsg += std::to_string(uid) + ", ";
             }
+            errorMsg.erase(errorMsg.length() - 2);
             return {ErrorCode::INVALID_VALUE, errorMsg};
         }
 

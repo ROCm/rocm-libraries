@@ -106,6 +106,20 @@ protected:
         }
         return {};
     }
+
+    static void processTensorUid(const std::shared_ptr<TensorAttributes>& tensor,
+                                 std::unordered_set<int64_t>& usedIds,
+                                 std::unordered_set<int64_t>& duplicateIds)
+    {
+        if(tensor && tensor->has_uid())
+        {
+            if(usedIds.find(tensor->get_uid()) != usedIds.end())
+            {
+                duplicateIds.insert(tensor->get_uid());
+            }
+            usedIds.insert(tensor->get_uid());
+        }
+    }
 };
 
 // Any class extending BaseNode must have an attributes member with an inputs & outputs map.
@@ -132,27 +146,12 @@ public:
     {
         for(auto& [_, tensor] : self().attributes.inputs)
         {
-            if(tensor && tensor->has_uid())
-            {
-                if(usedIds.find(tensor->get_uid()) != usedIds.end())
-                {
-                    duplicateIds.insert(tensor->get_uid());
-                }
-
-                usedIds.insert(tensor->get_uid());
-            }
+            processTensorUid(tensor, usedIds, duplicateIds);
         }
 
         for(auto& [_, tensor] : self().attributes.outputs)
         {
-            if(tensor && tensor->has_uid())
-            {
-                if(usedIds.find(tensor->get_uid()) != usedIds.end())
-                {
-                    duplicateIds.insert(tensor->get_uid());
-                }
-                usedIds.insert(tensor->get_uid());
-            }
+            processTensorUid(tensor, usedIds, duplicateIds);
         }
     }
     // NOLINTNEXTLINE(readability-identifier-naming)

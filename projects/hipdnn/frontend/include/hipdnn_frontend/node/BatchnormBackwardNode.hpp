@@ -131,14 +131,7 @@ public:
 
         for(auto& tensor : attributes.peer_stats)
         {
-            if(tensor && tensor->has_uid())
-            {
-                if(usedIds.find(tensor->get_uid()) != usedIds.end())
-                {
-                    duplicateIds.insert(tensor->get_uid());
-                }
-                usedIds.insert(tensor->get_uid());
-            }
+            processTensorUid(tensor, usedIds, duplicateIds);
         }
     }
 
