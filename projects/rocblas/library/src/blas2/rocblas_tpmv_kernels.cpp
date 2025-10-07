@@ -68,7 +68,8 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvn_kernel_calc(bool        is_upper,
                 //cppcheck-suppress duplicateExpression
                 res *= AP[tmpv_calc_lowerat(tid, tid)];
             }
-            for(rocblas_int col = 0, index = tid; col < tid; index += n - col - 1, ++col)
+            size_t index = tid;
+            for(rocblas_int col = 0; col < tid; index += n - col - 1, ++col)
             {
                 res += AP[index] * x[col * incx];
             }
