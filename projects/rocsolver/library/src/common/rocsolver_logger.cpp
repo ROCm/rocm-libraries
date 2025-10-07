@@ -273,7 +273,6 @@ rocblas_status rocsolver_log_end_impl()
 #if ROCSOLVER_USE_ASYNC_LOGGER
 void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
 {
-    printf("entering accumulate_times \n");
     for(auto& kv : m)
     {
         rocsolver_profile_entry& entry = kv.second;
