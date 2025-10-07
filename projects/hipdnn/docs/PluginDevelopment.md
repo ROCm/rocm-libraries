@@ -50,7 +50,7 @@ For adding new operations to the SDK (schemas, nodes, attributes), see the [How-
 
 The plugin API defines how kernel engine plugins interact with hipDNN:
 
-- **Graph Processing**: Graphs are passed in a serialized format to plugins using FlatBuffers
+- **Graph Processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers
 - **SDK Data Objects**: Plugins use SDK data objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
