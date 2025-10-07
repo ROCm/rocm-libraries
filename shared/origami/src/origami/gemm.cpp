@@ -508,7 +508,7 @@ namespace origami
         // Number of CUs that might share the same K-tiles, adjusted for K-splitting.
         // This affects contention on the L2 cache partitions (XCDs).
         const size_t effective_cus = safe_ceil_div(concurrent_workgroups, splittingFactor);
-        const size_t cu_per_xcd    = std::max(safe_ceil_div(effective_cus, hardware.NUM_XCD), (size_t)1);
+        const size_t cu_per_xcd    = std::max(safe_ceil_div(effective_cus, hardware.NUM_XCD), static_cast<size_t>(1));
 
         // Initial guess for the L2 tile dimensions (a tile of workgroups).
         size_t l2_tile_n = std::min(static_cast<size_t>(WGM), workgroups_n);
