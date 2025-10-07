@@ -91,11 +91,6 @@ protected:
         {
             node->gatherHipdnnTensorIdsSubtree(usedIds, duplicateIds);
         }
-
-        //todo next pr
-        //loop all nodes and build unique attribute list
-        //loop through all attributes and build usedIds list
-        //throw if duplicate id found
     }
 
     Error populateHipdnnTensorIdsSubtree(
