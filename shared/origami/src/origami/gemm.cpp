@@ -615,8 +615,8 @@ namespace origami
         }
 
         // Clamp initial tile dimensions to the actual grid size.
-        mall_tile_m = std::max(std::min(workgroups_m, mall_tile_m), (size_t)1);
-        mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), (size_t)1);
+        mall_tile_m = std::max(std::min(workgroups_m, mall_tile_m), static_cast<size_t>(1));
+        mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), static_cast<size_t>(1));
 
         // --- CRITICAL: Shrink tile to fit into MALL Capacity ---
         const size_t element_bytes       = safe_ceil_div(element_size, 8);
