@@ -523,8 +523,8 @@ namespace origami
         }
 
         // Clamp initial tile dimensions to the actual grid size.
-        l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), (size_t)1);
-        l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), (size_t)1);
+        l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), static_cast<size_t>(1));
+        l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), static_cast<size_t>(1));
 
         // Calculate memory footprint in bytes.
         const size_t element_bytes       = safe_ceil_div(element_size, 8);
