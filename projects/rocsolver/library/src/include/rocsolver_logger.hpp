@@ -142,11 +142,6 @@ struct rocsolver_log_entry
 
     // Copy constructor
     rocsolver_log_entry(const rocsolver_log_entry&) = default;
-
-    // Destructor
-    ~rocsolver_log_entry()
-    {
-    }
 };
 
 /***************************************************************************
@@ -162,8 +157,10 @@ struct rocsolver_profile_entry
     int level;
     int calls;
     double total_time; // stores accumulated elapsed time in microseconds
+#if ROCSOLVER_USE_ASYNC_LOGGER
     std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
     std::unique_ptr<rocsolver_profile_map> internal_calls;
+#endif
 
     rocsolver_profile_entry()
         : level(0)
@@ -177,11 +174,6 @@ struct rocsolver_profile_entry
 
     // Copy constructor is deleted
     rocsolver_profile_entry(const rocsolver_profile_entry&) = delete;
-
-    // Destructor
-    ~rocsolver_profile_entry()
-    {
-    }
 };
 
 /***************************************************************************
@@ -340,13 +332,6 @@ public:
     {
         return (rocsolver_logger::_instance != nullptr)
             && (rocsolver_logger::_instance->layer_mode & rocblas_layer_mode_ex_log_kernel);
-    }
-
-    // return true if event caching is enabled
-    static __forceinline__ bool is_event_caching_enabled()
-    {
-        return (rocsolver_logger::_instance != nullptr)
-            && (rocsolver_logger::_instance->layer_mode & rocsolver_layer_mode_log_event_caching);
     }
 
     // logging function to be called upon entering a top-level (i.e. impl) function

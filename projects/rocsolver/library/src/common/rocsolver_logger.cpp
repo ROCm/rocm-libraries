@@ -244,7 +244,7 @@ rocblas_status rocsolver_log_end_impl()
         return rocblas_status_internal_error;
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
-    // Clean up any remaining events in the cache
+    // Clean up any events in the cache
     // Only destroy events that are actually in use (from 0 to event_cache_head-1)
     for(size_t i = 0; i < logger->event_cache_head; ++i)
     {
@@ -285,17 +285,9 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
                 THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
             entry.total_time += ms * 1000; // us
             
-            // return events to cache or destroy them
-            if(is_event_caching_enabled())
-            {
-                release_event(pair.first);
-                release_event(pair.second);
-            }
-            else
-            {
-                THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
-                THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
-            }
+            // return events to cache
+            release_event(pair.first);
+            release_event(pair.second);
         }
         entry.events.clear();
         // recurse on internal calls
@@ -306,7 +298,7 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
 
 hipEvent_t rocsolver_logger::get_event()
 {
-    if(is_event_caching_enabled() && event_cache_head > 0)
+    if(event_cache_head > 0)
     {
         // Return an event from cache by decrementing head
         --event_cache_head;
@@ -322,22 +314,15 @@ hipEvent_t rocsolver_logger::get_event()
 
 void rocsolver_logger::release_event(hipEvent_t event)
 {
-    if(is_event_caching_enabled())
+    // Ensure cache has enough space
+    if(event_cache_head >= event_cache.size())
     {
-        // Ensure cache has enough space
-        if(event_cache_head >= event_cache.size())
-        {
-            event_cache.resize(event_cache_head + 1);
-        }
-        
-        // Store event at head position and increment head
-        event_cache[event_cache_head] = event;
-        ++event_cache_head;
+        event_cache.resize(event_cache_head + 1);
     }
-    else
-    {
-        THROW_IF_HIP_ERROR(hipEventDestroy(event));
-    }
+    
+    // Store event at head position and increment head
+    event_cache[event_cache_head] = event;
+    ++event_cache_head;
 }
 #endif
 

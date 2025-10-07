@@ -690,16 +690,6 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
 
     syevd_heevd_initData<true, false, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
-    // if(profile > 0)
-    // {
-    //     if(profile_kernels)
-    //         rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile
-    //                                      | rocblas_layer_mode_ex_log_kernel | rocsolver_layer_mode_log_event_caching);
-    //     else
-    //         rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile | rocsolver_layer_mode_log_event_caching);
-    //     rocsolver_log_set_max_levels(profile);
-    // }
-
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
@@ -718,23 +708,11 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
     {
         if(profile_kernels)
             rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile
-                                         | rocblas_layer_mode_ex_log_kernel | rocsolver_layer_mode_log_event_caching);
+                                         | rocblas_layer_mode_ex_log_kernel);
         else
-            rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile | rocsolver_layer_mode_log_event_caching);
+            rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile);
         rocsolver_log_set_max_levels(profile);
-        // if(profile_kernels)
-        //     rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile
-        //                                  | rocblas_layer_mode_ex_log_kernel);
-        // else
-        //     rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile);
-        // rocsolver_log_set_max_levels(profile);
     }
-
-    printf("stream id: %d\n", stream);
-    // hipStream_t new_stream;
-    // CHECK_HIP_ERROR(hipStreamCreate(&new_stream));
-    // CHECK_ROCBLAS_ERROR(rocblas_set_stream(handle, new_stream));
-    // printf("new stream id: %d\n", new_stream);
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
