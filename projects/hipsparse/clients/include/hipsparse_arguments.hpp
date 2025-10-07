@@ -248,8 +248,8 @@ struct Arguments
             error("trailer");
 
         auto check_func = [&, sig = (uint8_t)0](const auto& elem, auto name) mutable {
-            static_assert(sizeof(elem) <= 191,
-                          "One of the fields of Arguments is too large (> 191 bytes)");
+            static_assert(sizeof(elem) <= 255,
+                          "One of the fields of Arguments is too large (> 255 bytes)");
             for(uint8_t i = 0; i < sizeof(elem); ++i)
                 if(reinterpret_cast<const uint8_t*>(&elem)[i] ^ sig ^ i)
                     error(name);
