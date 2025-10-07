@@ -119,6 +119,7 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+    virtual void fillWithData(const T* data, size_t maxElementsCopied) = 0;
 
 protected:
     bool isPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) const
@@ -217,18 +218,28 @@ public:
         return _memory;
     }
 
+    void fillWithData(const T* data, size_t maxElementsCopied) override
+    {
+        size_t elementsCopied = std::min(maxElementsCopied, _memory.count());
+        _memory.markHostModified();
+        std::memcpy(_memory.hostData(), data, elementsCopied);
+    }
+
     void fillWithValue(T value) override
     {
+        _memory.markHostModified();
         T* data = _memory.hostData();
         std::fill(data, data + _memory.count(), value);
     }
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
+
         std::mt19937 generator(seed);
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
 
+        _memory.markHostModified();
         auto* data = _memory.hostData();
         for(size_t i = 0; i < _memory.count(); ++i)
         {

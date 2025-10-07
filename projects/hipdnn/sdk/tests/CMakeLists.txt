@@ -27,6 +27,7 @@ add_executable(hipdnn_sdk_tests
     utilities/TestMigratableMemory.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
+    utilities/TestLoadGraphAndTensors.cpp
     utilities/TestScopedResource.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestTensor.cpp
