@@ -75,10 +75,11 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_d
         KeysInputIterator>::value_type* __restrict__ last_keys_of_each_block,
     size_t                 num_last_keys_of_each_block,
     const ItemPerBlockType items_per_block,
-    BlockIdWrapper /* block_id */)
+    BlockIdWrapper block_id)
 {
     init_lookback_scan_state_kernel_impl(lookback_scan_state,
                                          number_of_blocks,
+                                         block_id,
                                          save_index,
                                          save_dest);
 
