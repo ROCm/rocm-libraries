@@ -95,7 +95,7 @@ namespace rocRoller
 
             KernelGraph::MemoryTracer::MemoryOpLDS memOp{direction};
 
-            Log::error("{}", inst.toString(LogLevel::Debug));
+            Log::info("inst: {}", inst.toString(LogLevel::Debug));
 
             // Currently only annotates MemoryType::WAVE
             if(not inst.addresses.has_value())
@@ -111,7 +111,7 @@ namespace rocRoller
 
             auto cycles
                 = KernelGraph::MemoryTracer::LDSBankModel::getInstructionCycles(runtimeInst, gfx);
-            Log::error("cycles: {}, dwords: {}", cycles, dwords);
+            Log::info("cycles: {}, dwords: {}", cycles, dwords);
             return cycles;
         }
 

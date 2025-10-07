@@ -338,7 +338,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         {
             for(const auto& [bankIndex, count] : mapping)
             {
-                Log::error("Bank {} accessed {} times", bankIndex, count);
+                // Log::error("Bank {} accessed {} times", bankIndex, count);
             }
         }
 

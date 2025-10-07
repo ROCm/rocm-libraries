@@ -831,15 +831,14 @@ namespace rocRoller
                             m_context, m_kernelWorkgroupIndexes, m_kernelWorkitemIndexes);
                         auto index = coords.reverse({ldsTag})[0];
 
-                        Log::info("LDS WAVE LOAD: tag {}, numBits {}, numElements {}, numBytes {}, "
-                                  "index {}",
+                        Log::info("LoadLDSTile: tag {}, numBits {}, numElements {}, numBytes {}",
                                   tag,
                                   numBits,
                                   numElements,
-                                  numBytes,
-                                  toString(index));
+                                  numBytes);
 
                         const auto byteIndex = index * Expression::literal(numBytes);
+                        Log::info("Offset expression: {}", toString(byteIndex));
 
                         for(uint wg = 0; wg < 1; ++wg)
                         {
@@ -854,14 +853,16 @@ namespace rocRoller
                                 const auto offset
                                     = std::visit([](auto x) { return (size_t)x; }, offsetValue);
 
+                                Log::info("  wg {}, wi {}, offset {}", wg, wi, offset);
+
                                 co_yield offset;
                             }
                         }
                     }
                     else
                     {
-                        Log::info("Skipping LDS address annotations for {}",
-                                  toString(tile.memoryType));
+                        Log::info("Skipping LDS address annotations due to",
+                                  ShowValue(tile.memoryType));
                     }
                 }()
                                                     .to<std::vector>();
@@ -877,11 +878,6 @@ namespace rocRoller
                                         "Should be unset",
                                         ShowValue((*instr.addresses).size()));
                             instr.addresses = addresses;
-
-                            for(const auto addr : addresses)
-                            {
-                                Log::error("  LDS address: {}", addr);
-                            }
                         }
                         else
                         {
