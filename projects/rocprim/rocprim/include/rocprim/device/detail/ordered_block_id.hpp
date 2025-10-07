@@ -236,31 +236,34 @@ hipError_t check_if_using_atomic_block_id(hipStream_t stream, bool& enable)
         use_atomic_block_id option = use_atomic_block_id::hotfix;
     };
 
+    static_assert(std::is_trivially_copyable_v<data_t>);
+
     // Store our data in a static atomic.
-    static std::atomic<data_t> cache = {};
+    static std::atomic<data_t> cache{data_t{}};
 
     // First load the atomic, if it's invalid, we need to check the env vars.
-    data_t data = cache.load();
+    data_t data = cache.load(std::memory_order_acquire);
     if(!data.valid)
     {
         // Try to parse the env var, if it fails fall back to the default option.
         auto* env = std::getenv("ROCPRIM_USE_ATOMIC_BLOCK_ID");
+
+        data.option = use_atomic_block_id::default_option;
         try
         {
-            data = {
-                .valid  = true,
-                .option = use_atomic_block_id{std::stoi(env)},
-            };
+            if(env != nullptr)
+            {
+                data.option = use_atomic_block_id{std::stoi(env)};
+            }
         }
         catch(std::exception)
         {
-            data = {
-                .valid  = true,
-                .option = use_atomic_block_id::default_option,
-            };
+            data.option = use_atomic_block_id::default_option;
         }
+
+        data.valid = true;
         // Now finally update our static atomic.
-        cache.store(data);
+        cache.store(data, std::memory_order_release);
     }
 
     // Now we have our data, we need to check what the behaviour is.
