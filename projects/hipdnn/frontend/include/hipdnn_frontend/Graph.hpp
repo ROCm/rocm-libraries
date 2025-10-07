@@ -156,7 +156,7 @@ private:
 
         for(size_t inputNodeIndex = 0; inputNodeIndex < nodeCount; ++inputNodeIndex)
         {
-            auto inputs = _sub_nodes[j]->getNodeInputTensorAttributes();
+            auto inputs = _sub_nodes[inputNodeIndex]->getNodeInputTensorAttributes();
             for(auto& input : inputs)
             {
                 auto it = tensorToOriginNode.find(input);
