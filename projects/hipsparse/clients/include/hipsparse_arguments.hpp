@@ -116,7 +116,7 @@ struct Arguments
     int timing;
     int iters;
 
-    char filename[128]; // nos2.bin, bmwcra_1.bin, etc
+    char filename[256]; // nos2.bin, bmwcra_1.bin, etc
     char function[64]; // axpby, spmv_csr, etc
     char category[32]; // quick, pre_checkin, etc
 
@@ -326,6 +326,8 @@ struct Arguments
 
     void set_filename(const std::string& bin_file)
     {
+        std::cout << "bin_file: " << bin_file << " bin_file.length(): " << bin_file.length()
+                  << std::endl;
         strncpy(this->filename, bin_file.c_str(), bin_file.length());
         this->filename[bin_file.length()] = '\0';
     }
