@@ -405,8 +405,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -419,8 +418,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -433,8 +431,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -444,7 +441,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
     case fft_array_type_complex_planar:
     case fft_array_type_hermitian_planar:
     {
-        // planar wouldn't run callbacks
+        throw std::runtime_error("planar callbacks are not supported");
     }
     break;
     case fft_array_type_real:
@@ -460,8 +457,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -474,8 +470,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -488,8 +483,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
