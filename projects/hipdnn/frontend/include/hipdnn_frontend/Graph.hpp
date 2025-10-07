@@ -148,7 +148,7 @@ private:
     }
 
     GraphStructure buildAdjacencyList(const std::unordered_map<std::shared_ptr<TensorAttributes>,
-                                                               size_t>& tensorToOutputNodeMap) const
+                                                               size_t>& tensorToOriginNode) const
     {
         size_t nodeCount = _sub_nodes.size();
         GraphStructure structure;
@@ -159,8 +159,8 @@ private:
             auto inputs = _sub_nodes[j]->getNodeInputTensorAttributes();
             for(auto& input : inputs)
             {
-                auto it = tensorToOutputNodeMap.find(input);
-                if(it != tensorToOutputNodeMap.end())
+                auto it = tensorToOriginNode.find(input);
+                if(it != tensorToOriginNode.end())
                 {
                     size_t i = it->second;
                     structure.adjacencyList[i].push_back(j);
@@ -171,9 +171,9 @@ private:
         return structure;
     }
 
-    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOutputNodeMap() const
+    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOriginNodeMap() const
     {
-        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOutputNodeMap;
+        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOriginNode;
         size_t nodeCount = _sub_nodes.size();
 
         for(size_t i = 0; i < nodeCount; ++i)
@@ -181,11 +181,11 @@ private:
             auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
             for(auto& output : outputs)
             {
-                tensorToOutputNodeMap[output] = i;
+                tensorToOriginNode[output] = i;
             }
         }
 
-        return tensorToOutputNodeMap;
+        return tensorToOriginNode;
     }
 
     void reorderNodesTopologically(const std::vector<size_t>& topologicalOrder)
@@ -244,8 +244,8 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        auto tensorToOutputNodeMap = buildTensorToOutputNodeMap();
-        auto graphStructure = buildAdjacencyList(tensorToOutputNodeMap);
+        auto tensorToOriginNode = buildTensorToOriginNodeMap();
+        auto graphStructure = buildAdjacencyList(tensorToOriginNode);
 
         auto sortResult = performTopologicalSortWithComponentDetection(graphStructure);
 

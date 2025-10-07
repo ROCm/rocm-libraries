@@ -139,52 +139,53 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
 {
     size_t nodeCount = structure.adjacencyList.size();
 
-    if(topologicalOrder.size() != nodeCount)
+    if(topologicalOrder.size() == nodeCount)
     {
-        HIPDNN_FE_LOG_ERROR("Graph contains a cycle - not a DAG. Processed {}/{} nodes",
-                            topologicalOrder.size(),
-                            nodeCount);
-
-        // Log which nodes are part of the cycle
-        std::vector<size_t> cycleNodes;
-        std::vector<int> inDegrees = computeInDegrees(structure);
-
-        // Recalculate which nodes weren't processed
-        for(auto processed : topologicalOrder)
-        {
-            for(auto neighbor : structure.adjacencyList[processed])
-            {
-                inDegrees[neighbor]--;
-            }
-        }
-
-        for(size_t i = 0; i < nodeCount; ++i)
-        {
-            if(inDegrees[i] > 0)
-            {
-                cycleNodes.push_back(i);
-            }
-        }
-
-        if(!cycleNodes.empty())
-        {
-            std::string nodeList;
-            for(auto idx : cycleNodes)
-            {
-                if(!nodeList.empty())
-                {
-                    nodeList += ", ";
-                }
-                nodeList += std::to_string(idx);
-            }
-
-            HIPDNN_FE_LOG_ERROR("Nodes involved in cycle: [{}]", nodeList);
-        }
-
-        return true; // Cycle detected
+        //No cycle detected
+        return false;
     }
 
-    return false; // No cycle
+    HIPDNN_FE_LOG_ERROR("Graph contains a cycle - not a DAG. Processed {}/{} nodes",
+                        topologicalOrder.size(),
+                        nodeCount);
+
+    // Log which nodes are part of the cycle
+    std::vector<size_t> cycleNodes;
+    std::vector<int> inDegrees = computeInDegrees(structure);
+
+    // Recalculate which nodes weren't processed
+    for(auto processed : topologicalOrder)
+    {
+        for(auto neighbor : structure.adjacencyList[processed])
+        {
+            inDegrees[neighbor]--;
+        }
+    }
+
+    for(size_t i = 0; i < nodeCount; ++i)
+    {
+        if(inDegrees[i] > 0)
+        {
+            cycleNodes.push_back(i);
+        }
+    }
+
+    if(!cycleNodes.empty())
+    {
+        std::string nodeList;
+        for(auto idx : cycleNodes)
+        {
+            if(!nodeList.empty())
+            {
+                nodeList += ", ";
+            }
+            nodeList += std::to_string(idx);
+        }
+
+        HIPDNN_FE_LOG_ERROR("Nodes involved in cycle: [{}]", nodeList);
+    }
+
+    return true;
 }
 
 inline TopologicalSortResult
