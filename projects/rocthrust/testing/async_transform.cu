@@ -17,7 +17,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/copy.h>
 #  include <thrust/async/transform.h>
@@ -100,14 +100,13 @@ DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(
   transform_unary_async_invoker_device_on
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -122,14 +121,13 @@ DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(
   transform_unary_async_invoker_device_allocator_on
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
