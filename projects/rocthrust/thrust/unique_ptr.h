@@ -183,12 +183,15 @@ struct unique_ptr_deleter_sfinae<Deleter&>
 } // namespace detail
 
 template <class T, class D = default_delete<T>>
-class unique_ptr
+class __attribute__((trivial_abi)) unique_ptr
 {
 public:
   using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
   using element_type = T;
   using deleter_type = D;
+
+  // TODO: When a standard “trivially relocatable” facility lands, add an
+  // annotation/macro here to advertise that unique_ptr can be bitwise relocated
 
 private:
   pointer m_ptr;
@@ -354,7 +357,6 @@ public:
   // instead of silently allowing an invalid dereference of device memory.
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
   {
-
     static_assert(false,
                   "thrust::unique_ptr<T>::operator->(): cannot dereference device memory from host. "
                   "Copy the object to host first (T host = *ptr) or access members inside device code.");
