@@ -11,6 +11,8 @@ subtree_to_project_map = {
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
     "projects/rocthrust": "prim",
+    "shared/mxdatagenerator": "blas",
+    "shared/origami": "blas",
     "shared/rocroller": "blas",
     "shared/tensile": "blas"
 }
