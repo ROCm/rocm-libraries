@@ -53,34 +53,7 @@ auto hipsparse_simple_dispatch(const Arguments& arg)
         return TEST<hipComplex>{}(arg);
     case HIP_C_64F:
         return TEST<hipDoubleComplex>{}(arg);
-    case HIP_R_8I:
-    case HIP_R_32I:
-    case HIP_R_16F:
-    case HIP_C_8I:
-    case HIP_R_8U:
-    case HIP_C_8U:
-    case HIP_C_32I:
-    case HIP_R_32U:
-    case HIP_C_32U:
-    case HIP_R_16BF:
-    case HIP_C_16BF:
-    case HIP_R_4I:
-    case HIP_C_4I:
-    case HIP_R_4U:
-    case HIP_C_4U:
-    case HIP_R_16I:
-    case HIP_C_16I:
-    case HIP_R_16U:
-    case HIP_C_16U:
-    case HIP_R_64I:
-    case HIP_C_64I:
-    case HIP_R_64U:
-    case HIP_C_64U:
-    case HIP_R_8F_E4M3:
-    case HIP_R_8F_E5M2:
-    case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_8F_E5M2_FNUZ:
-    case HIP_C_16F:
+    default:
         return TEST<void>{}(arg);
     }
     return TEST<void>{}(arg);
@@ -89,8 +62,6 @@ auto hipsparse_simple_dispatch(const Arguments& arg)
 template <template <typename...> class TEST>
 auto hipsparse_it_dispatch(const Arguments& arg)
 {
-    //std::cout << "hipsparse_it_dispatch category: " << arg.category << " function: " << arg.function << std::endl;
-    //std::cout << "arg.index_type_I: " << arg.index_type_I << " arg.compute_type: " << arg.compute_type << std::endl;
     const auto I = arg.index_type_I;
     if(I == HIPSPARSE_INDEX_32I)
     {
@@ -104,34 +75,7 @@ auto hipsparse_it_dispatch(const Arguments& arg)
             return TEST<int32_t, hipComplex>{}(arg);
         case HIP_C_64F:
             return TEST<int32_t, hipDoubleComplex>{}(arg);
-        case HIP_R_8I:
-        case HIP_R_32I:
-        case HIP_R_16F:
-        case HIP_C_8I:
-        case HIP_R_8U:
-        case HIP_C_8U:
-        case HIP_C_32I:
-        case HIP_R_32U:
-        case HIP_C_32U:
-        case HIP_R_16BF:
-        case HIP_C_16BF:
-        case HIP_R_4I:
-        case HIP_C_4I:
-        case HIP_R_4U:
-        case HIP_C_4U:
-        case HIP_R_16I:
-        case HIP_C_16I:
-        case HIP_R_16U:
-        case HIP_C_16U:
-        case HIP_R_64I:
-        case HIP_C_64I:
-        case HIP_R_64U:
-        case HIP_C_64U:
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
-        case HIP_C_16F:
+        default:
             return TEST<void>{}(arg);
         }
     }
@@ -147,34 +91,7 @@ auto hipsparse_it_dispatch(const Arguments& arg)
             return TEST<int64_t, hipComplex>{}(arg);
         case HIP_C_64F:
             return TEST<int64_t, hipDoubleComplex>{}(arg);
-        case HIP_R_8I:
-        case HIP_R_32I:
-        case HIP_R_16F:
-        case HIP_C_8I:
-        case HIP_R_8U:
-        case HIP_C_8U:
-        case HIP_C_32I:
-        case HIP_R_32U:
-        case HIP_C_32U:
-        case HIP_R_16BF:
-        case HIP_C_16BF:
-        case HIP_R_4I:
-        case HIP_C_4I:
-        case HIP_R_4U:
-        case HIP_C_4U:
-        case HIP_R_16I:
-        case HIP_C_16I:
-        case HIP_R_16U:
-        case HIP_C_16U:
-        case HIP_R_64I:
-        case HIP_C_64I:
-        case HIP_R_64U:
-        case HIP_C_64U:
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
-        case HIP_C_16F:
+        default:
             return TEST<void>{}(arg);
         }
     }
@@ -200,34 +117,7 @@ auto hipsparse_ijt_dispatch(const Arguments& arg)
             return TEST<int32_t, int32_t, hipComplex>{}(arg);
         case HIP_C_64F:
             return TEST<int32_t, int32_t, hipDoubleComplex>{}(arg);
-        case HIP_R_8I:
-        case HIP_R_32I:
-        case HIP_R_16F:
-        case HIP_C_8I:
-        case HIP_R_8U:
-        case HIP_C_8U:
-        case HIP_C_32I:
-        case HIP_R_32U:
-        case HIP_C_32U:
-        case HIP_R_16BF:
-        case HIP_C_16BF:
-        case HIP_R_4I:
-        case HIP_C_4I:
-        case HIP_R_4U:
-        case HIP_C_4U:
-        case HIP_R_16I:
-        case HIP_C_16I:
-        case HIP_R_16U:
-        case HIP_C_16U:
-        case HIP_R_64I:
-        case HIP_C_64I:
-        case HIP_R_64U:
-        case HIP_C_64U:
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
-        case HIP_C_16F:
+        default:
             return TEST<void>{}(arg);
         }
     }
@@ -243,34 +133,7 @@ auto hipsparse_ijt_dispatch(const Arguments& arg)
             return TEST<int64_t, int32_t, hipComplex>{}(arg);
         case HIP_C_64F:
             return TEST<int64_t, int32_t, hipDoubleComplex>{}(arg);
-        case HIP_R_8I:
-        case HIP_R_32I:
-        case HIP_R_16F:
-        case HIP_C_8I:
-        case HIP_R_8U:
-        case HIP_C_8U:
-        case HIP_C_32I:
-        case HIP_R_32U:
-        case HIP_C_32U:
-        case HIP_R_16BF:
-        case HIP_C_16BF:
-        case HIP_R_4I:
-        case HIP_C_4I:
-        case HIP_R_4U:
-        case HIP_C_4U:
-        case HIP_R_16I:
-        case HIP_C_16I:
-        case HIP_R_16U:
-        case HIP_C_16U:
-        case HIP_R_64I:
-        case HIP_C_64I:
-        case HIP_R_64U:
-        case HIP_C_64U:
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
-        case HIP_C_16F:
+        default:
             return TEST<void>{}(arg);
         }
     }
@@ -286,34 +149,7 @@ auto hipsparse_ijt_dispatch(const Arguments& arg)
             return TEST<int64_t, int64_t, hipComplex>{}(arg);
         case HIP_C_64F:
             return TEST<int64_t, int64_t, hipDoubleComplex>{}(arg);
-        case HIP_R_8I:
-        case HIP_R_32I:
-        case HIP_R_16F:
-        case HIP_C_8I:
-        case HIP_R_8U:
-        case HIP_C_8U:
-        case HIP_C_32I:
-        case HIP_R_32U:
-        case HIP_C_32U:
-        case HIP_R_16BF:
-        case HIP_C_16BF:
-        case HIP_R_4I:
-        case HIP_C_4I:
-        case HIP_R_4U:
-        case HIP_C_4U:
-        case HIP_R_16I:
-        case HIP_C_16I:
-        case HIP_R_16U:
-        case HIP_C_16U:
-        case HIP_R_64I:
-        case HIP_C_64I:
-        case HIP_R_64U:
-        case HIP_C_64U:
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
-        case HIP_C_16F:
+        default:
             return TEST<void>{}(arg);
         }
     }

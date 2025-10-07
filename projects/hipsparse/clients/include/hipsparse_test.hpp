@@ -144,8 +144,8 @@ public:
         return std::move(name);
     }
 
-    HipSPARSE_TestName()                                     = default;
-    HipSPARSE_TestName(const HipSPARSE_TestName&)            = delete;
+    HipSPARSE_TestName()                          = default;
+    HipSPARSE_TestName(const HipSPARSE_TestName&) = delete;
     HipSPARSE_TestName& operator=(const HipSPARSE_TestName&) = delete;
 };
 
