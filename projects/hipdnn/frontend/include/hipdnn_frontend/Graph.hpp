@@ -230,8 +230,20 @@ public:
     Error checkNoDuplicateTensorIds()
     {
         std::unordered_set<int64_t> usedTensorUids;
-        gatherHipdnnTensorIdsSubtree(usedTensorUids);
-        //todo
+        std::unordered_set<int64_t> duplicateTensorUids;
+
+        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorUids);
+
+        if(!duplicateTensorUids.empty())
+        {
+            std::string errorMsg = "Duplicate tensor UIDs found in the graph: ";
+            for(const auto& uid : duplicateTensorUids)
+            {
+                errorMsg += std::to_string(uid) + ", ";
+            }
+            return {ErrorCode::INVALID_VALUE, errorMsg};
+        }
+
         return {ErrorCode::OK, ""};
     }
 

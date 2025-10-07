@@ -47,7 +47,9 @@ public:
     }
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
-        gather_hipdnn_tensor_ids([[maybe_unused]] std::unordered_set<int64_t>& usedIds) const {};
+        gather_hipdnn_tensor_ids([[maybe_unused]] std::unordered_set<int64_t>& usedIds,
+                                 [[maybe_unused]] std::unordered_set<int64_t>& duplicateIds) const {
+        };
 
     virtual flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
         pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
@@ -80,12 +82,14 @@ protected:
         return {};
     }
 
-    void gatherHipdnnTensorIdsSubtree(std::unordered_set<int64_t>& usedIds) const
+    void gatherHipdnnTensorIdsSubtree(std::unordered_set<int64_t>& usedIds,
+                                      std::unordered_set<int64_t>& duplicateIds) const
     {
-        gather_hipdnn_tensor_ids(usedIds);
+        gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+
         for(const auto& node : _sub_nodes)
         {
-            node->gatherHipdnnTensorIdsSubtree(usedIds);
+            node->gatherHipdnnTensorIdsSubtree(usedIds, duplicateIds);
         }
 
         //todo next pr
@@ -127,12 +131,19 @@ private:
 
 public:
     // NOLINTNEXTLINE(readability-identifier-naming)
-    void gather_hipdnn_tensor_ids(std::unordered_set<int64_t>& usedIds) const override
+    void gather_hipdnn_tensor_ids(
+        [[maybe_unused]] std::unordered_set<int64_t>& usedIds,
+        [[maybe_unused]] std::unordered_set<int64_t>& duplicateIds) const override
     {
         for(auto& [_, tensor] : self().attributes.inputs)
         {
             if(tensor && tensor->has_uid())
             {
+                if(usedIds.find(tensor->get_uid()) != usedIds.end())
+                {
+                    duplicateIds.insert(tensor->get_uid());
+                }
+
                 usedIds.insert(tensor->get_uid());
             }
         }
@@ -141,6 +152,10 @@ public:
         {
             if(tensor && tensor->has_uid())
             {
+                if(usedIds.find(tensor->get_uid()) != usedIds.end())
+                {
+                    duplicateIds.insert(tensor->get_uid());
+                }
                 usedIds.insert(tensor->get_uid());
             }
         }

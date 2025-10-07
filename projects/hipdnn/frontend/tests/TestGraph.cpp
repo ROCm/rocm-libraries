@@ -1932,4 +1932,9 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     EXPECT_EQ(subNodes[5], sortedSubnodesDueToGraphConstructionOrderCopy[5]);
 }
 
-// NOLINTEND
+//todo Write a test that has duplicate tensor uids during validate
+TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
+{
+    GraphTestUtils graph;
+
+    // NOLINTEND
