@@ -30,33 +30,51 @@ namespace rocRoller
 {
     namespace Expression
     {
-
-        struct GetBitFieldCombineInfo
+        std::vector<ExpressionPtr> splitBitfield(BitfieldCombine const& expr, const size_t dstSize)
         {
-            struct Result
-            {
-                bool          split     = false;
-            };
+            constexpr uint32_t         DWORD = 32;
+            std::vector<ExpressionPtr> fields;
+            uint32_t                   dstStartBit = expr.dstOffset;
+            uint32_t                   dstEndBit   = expr.dstOffset + expr.width - 1;
+            uint32_t                   numDwords   = (dstSize + DWORD - 1) / DWORD;
 
-            Result operator()(auto const& expr) const
+            for(int i = 0; i < numDwords; ++i)
             {
-                return {};
+                int dwordStartBit = i * DWORD;
+                int dwordEndBit   = dwordStartBit + DWORD - 1;
+
+                // No overlap with this dword
+                if(dstStartBit > dwordEndBit || dstEndBit < dwordStartBit)
+                {
+                    std::cout << "No overlap with dword " << i
+                              << ": dwordStartBit=" << dwordStartBit
+                              << ", dwordEndBit=" << dwordEndBit << std::endl;
+
+                    auto dstDWord = std::make_shared<Expression>(
+                        BitFieldExtract{expr.rhs, "", DataType::UInt32, dwordStartBit, DWORD});
+
+                    // If we can evaluate at translation time, do it now to simplify the expression
+                    auto srcEval = tryEvaluate(dstDWord);
+                    if(srcEval.has_value())
+                    {
+                        std::cout << "Extracted field evaluated to " << srcEval.value()
+                                  << std::endl;
+                        fields.push_back(std::make_shared<Expression>(srcEval.value()));
+                    }
+                    else
+                    {
+                        std::cout << "Extracted field: " << dstDWord << std::endl;
+                        fields.push_back(dstDWord);
+                    }
+                    continue;
+                }
+
+                std::cout << "Bitfield overlaps dword " << i << ": dwordStartBit=" << dwordStartBit
+                          << ", dwordEndBit=" << dwordEndBit << std::endl;
             }
 
-            Result operator()(BitfieldCombine const& expr) const
-            {   
-                Result result;
-                if (resultVariableType(expr.rhs).getElementSize() > 4u)
-                    result.split = true;
-
-                return result;
-            }
-
-            Result call(Expression const& expr) const
-            {
-                return std::visit(*this, expr);
-            }
-        };
+            return fields;
+        }
 
         struct SplitBitfieldCombineExpressionVisitor
         {
@@ -114,15 +132,36 @@ namespace rocRoller
 
             ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
-                auto cpy = expr;
+                // Print debug info
+                std::cout << "Visiting BitfieldCombine: " << expr << std::endl;
+
+                constexpr uint32_t DWORD = 32;
+                auto               cpy   = expr;
 
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
 
-                // Print debug info
-                std::cout << "Visiting BitfieldCombine: " << expr << std::endl;
-                std::cout << "Should split: " << GetBitFieldCombineInfo().call(expr).split << std::endl;
-                return std::make_shared<Expression>(cpy);
+                auto dstSize = resultVariableType(expr.rhs).getElementSize() * 8;
+                AssertFatal(expr.dstOffset + expr.width <= dstSize,
+                            "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
+                            expr.dstOffset,
+                            expr.width,
+                            dstSize);
+
+                auto srcSize = resultVariableType(expr.lhs).getElementSize() * 8;
+                AssertFatal(expr.srcOffset + expr.width <= srcSize,
+                            "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
+                            expr.srcOffset,
+                            expr.width,
+                            srcSize);
+
+                // No need to split if destination size is less than or equal to 32 bits
+                if(dstSize <= DWORD)
+                    return std::make_shared<Expression>(cpy);
+
+                std::vector<ExpressionPtr> fields = splitBitfield(expr, dstSize);
+                auto concatenateExpr = std::make_shared<Expression>(Concatenate{fields});
+                return concatenateExpr;
             }
 
             template <CValue Value>
