@@ -21,19 +21,19 @@ std::string GetSystemHostname()
     char name[256] = "";
 #ifdef __linux__
     if (gethostname(name, sizeof(name)) == 0) {
-        return std::string(name);
+        return {name};
     }
 #elif defined(_WIN32)
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) == 0) {
         if (gethostname(name, sizeof(name)) == 0) {
             WSACleanup();
-            return std::string(name);
+            return {name};
         }
         WSACleanup();
     }
 #endif
-    return "unknown host";
+    return {"unknown host"};
 }
 
 } // namespace sysinfo
