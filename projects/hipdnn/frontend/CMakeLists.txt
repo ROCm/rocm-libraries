@@ -28,12 +28,12 @@ configure_package_config_file(
 )
 
 export(
-    TARGETS hipdnn_frontend hipdnn_backend
+    TARGETS hipdnn_frontend
     FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
 )
 
 install( 
-    TARGETS hipdnn_frontend hipdnn_backend
+    TARGETS hipdnn_frontend
     EXPORT hipdnn_frontend_targets
 )
 
@@ -45,4 +45,9 @@ install(
 install(EXPORT hipdnn_frontend_targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
     FILE hipdnn_frontendTargets.cmake
+)
+
+install(
+    FILES "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
 )

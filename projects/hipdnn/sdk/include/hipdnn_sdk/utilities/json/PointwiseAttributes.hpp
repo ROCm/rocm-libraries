@@ -65,13 +65,15 @@ void to_json(nlohmann::json& pointwiseJson, PointwiseAttributes const& pw)
     inputs["operation"] = pw.operation();
     inputs["relu_lower_clip"] = pw.relu_lower_clip();
     inputs["relu_upper_clip"] = pw.relu_upper_clip();
-    inputs["relu_lower_slope"] = pw.relu_lower_slope();
+    inputs["relu_lower_clip_slope"] = pw.relu_lower_clip_slope();
     inputs["axis_tensor_uid"] = pw.axis_tensor_uid();
     inputs["in_0_tensor_uid"] = pw.in_0_tensor_uid();
     inputs["in_1_tensor_uid"] = pw.in_1_tensor_uid();
     inputs["in_2_tensor_uid"] = pw.in_2_tensor_uid();
-
     pointwiseJson["outputs"]["out_0_tensor_uid"] = pw.out_0_tensor_uid();
+    inputs["swish_beta"] = pw.swish_beta();
+    inputs["elu_alpha"] = pw.elu_alpha();
+    inputs["softplus_beta"] = pw.softplus_beta();
 }
 
 }
@@ -90,12 +92,15 @@ auto to<data_objects::PointwiseAttributes>(flatbuffers::FlatBufferBuilder& build
         inputs.at("operation").get<PointwiseMode>(),
         inputs.at("relu_lower_clip").get<std::optional<float>>(),
         inputs.at("relu_upper_clip").get<std::optional<float>>(),
-        inputs.at("relu_lower_slope").get<std::optional<float>>(),
+        inputs.at("relu_lower_clip_slope").get<std::optional<float>>(),
         inputs.at("axis_tensor_uid").get<std::optional<int64_t>>(),
         inputs.at("in_0_tensor_uid").get<int64_t>(),
         inputs.at("in_1_tensor_uid").get<std::optional<int64_t>>(),
         inputs.at("in_2_tensor_uid").get<std::optional<int64_t>>(),
-        outputs.at("out_0_tensor_uid").get<int64_t>());
+        outputs.at("out_0_tensor_uid").get<int64_t>(),
+        inputs.at("swish_beta").get<std::optional<float>>(),
+        inputs.at("elu_alpha").get<std::optional<float>>(),
+        inputs.at("softplus_beta").get<std::optional<float>>());
 }
 
 }
