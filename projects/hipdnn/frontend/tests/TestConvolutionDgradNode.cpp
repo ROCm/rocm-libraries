@@ -478,11 +478,46 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensorIds)
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
 
     EXPECT_TRUE(usedIds.find(1) != usedIds.end());
     EXPECT_TRUE(usedIds.find(2) != usedIds.end());
     EXPECT_TRUE(usedIds.find(3) != usedIds.end());
+    EXPECT_TRUE(duplicateIds.empty());
+}
+
+TEST(TestConvolutionDgradNode, GatherHipdnnTensorsCollectsDuplicates)
+{
+    ConvDgradAttributes convAttributes;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_uid(1).set_name("DyTensor");
+    convAttributes.set_dy(dyTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_uid(2).set_name("WTensor");
+    convAttributes.set_w(wTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_uid(1).set_name("DxTensor"); // Duplicate ID
+    convAttributes.set_dx(dxTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+
+    std::unordered_set<int64_t> usedIds;
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+
+    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
+    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
+    EXPECT_TRUE(duplicateIds.find(1) != duplicateIds.end());
+    EXPECT_EQ(duplicateIds.size(), 1);
 }
 
 TEST(TestConvolutionDgradNode, PopulateHipdnnTensorIds)

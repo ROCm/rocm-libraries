@@ -281,7 +281,9 @@ public:
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
         std::unordered_set<int64_t> usedTensorUids;
-        gatherHipdnnTensorIdsSubtree(usedTensorUids);
+        std::unordered_set<int64_t> duplicateTensorIds;
+
+        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorIds);
 
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
         int64_t currentTensorId = 0;
