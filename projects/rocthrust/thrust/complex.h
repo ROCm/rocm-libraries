@@ -345,21 +345,15 @@ public:
 private:
 #if defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))
   struct __align__(sizeof(T) * 2) storage
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-  struct storage
-#else // !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL || (defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11)
-      // || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))))
+#else // defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__
+      // < 7))
   struct alignas(sizeof(T) * 2) storage
-#endif // !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL || (defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11)
-       // || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))))
+#endif // defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__
+       // < 7))
   {
     T x; /**< @brief The first \p complex. */
     T y; /**< @brief The second \p complex. */
-  }
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-  __attribute__((aligned(sizeof(T) * 2)))
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-  ;
+  };
   storage data;
 };
 

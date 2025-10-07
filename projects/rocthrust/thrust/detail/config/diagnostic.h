@@ -29,7 +29,6 @@
 #  define THRUST_DIAG_SUPPRESS_GCC(str)   _CCCL_DIAG_SUPPRESS_GCC(str)
 #  define THRUST_DIAG_SUPPRESS_NVHPC(str) _CCCL_DIAG_SUPPRESS_NVHPC(str)
 #  define THRUST_DIAG_SUPPRESS_MSVC(str)  _CCCL_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str)   _CCCL_DIAG_SUPPRESS_ICC(str)
 #  define THRUST_SUPPRESS_DEPRECATED_PUSH _CCCL_SUPPRESS_DEPRECATED_PUSH
 #  define THRUST_SUPPRESS_DEPRECATED_POP  _CCCL_SUPPRESS_DEPRECATED_POP
 
@@ -45,7 +44,6 @@
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#    define THRUST_DIAG_SUPPRESS_ICC(str)
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(GCC diagnostic push)
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(GCC diagnostic pop)
@@ -53,15 +51,6 @@
 #    define THRUST_DIAG_SUPPRESS_GCC(str) THRUST_PRAGMA(GCC diagnostic ignored str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#    define THRUST_DIAG_SUPPRESS_ICC(str)
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-#    define THRUST_DIAG_PUSH THRUST_PRAGMA(GCC diagnostic push)
-#    define THRUST_DIAG_POP  THRUST_PRAGMA(GCC diagnostic pop)
-#    define THRUST_DIAG_SUPPRESS_CLANG(str)
-#    define THRUST_DIAG_SUPPRESS_GCC(str) THRUST_PRAGMA(GCC diagnostic ignored str)
-#    define THRUST_DIAG_SUPPRESS_NVHPC(str)
-#    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#    define THRUST_DIAG_SUPPRESS_ICC(str) THRUST_PRAGMA(warning disable str)
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(diagnostic push)
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(diagnostic pop)
@@ -69,7 +58,6 @@
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str) THRUST_PRAGMA(diag_suppress str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#    define THRUST_DIAG_SUPPRESS_ICC(str)
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(warning(push))
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(warning(pop))
@@ -77,7 +65,6 @@
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str) THRUST_PRAGMA(warning(disable : str))
-#    define THRUST_DIAG_SUPPRESS_ICC(str)
 #  else
 #    define THRUST_DIAG_PUSH
 #    define THRUST_DIAG_POP
@@ -85,7 +72,6 @@
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#    define THRUST_DIAG_SUPPRESS_ICC(str)
 #  endif
 
 // Convenient shortcuts to silence common warnings
@@ -94,12 +80,6 @@
       THRUST_DIAG_PUSH                           \
       THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated") \
       THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated-declarations")
-#    define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-#    define THRUST_SUPPRESS_DEPRECATED_PUSH \
-      THRUST_DIAG_PUSH                      \
-      THRUST_DIAG_SUPPRESS_ICC(1478)        \
-      THRUST_DIAG_SUPPRESS_ICC(1786)
 #    define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH    \

@@ -279,11 +279,6 @@ THRUST_HOST void test_async_copy_counting_iterator_input_to_host_vector()
     f0.wait();
 
     ASSERT_EQ(d0, d1);
-
-#  if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
-    // ICC fails this for some unknown reason - see #1468.
-    GTEST_NONFATAL_FAILURE_("Known failure");
-#  endif
   }
 }
 
