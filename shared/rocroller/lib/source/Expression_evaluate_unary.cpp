@@ -181,6 +181,34 @@ namespace rocRoller::Expression::EvaluateDetail
     };
 
     template <>
+    struct OperationEvaluatorVisitor<BitFieldExtract>
+    {
+        BitFieldExtract expr;
+
+        template <CCommandArgumentValue ARG>
+        requires(!std::same_as<bool, ARG> && std::unsigned_integral<ARG>) CommandArgumentValue
+            operator()(ARG const& arg) const
+        {
+            ARG  mask       = (static_cast<ARG>(1) << this->expr.width) - 1;
+            ARG  result     = (arg >> this->expr.offset) & mask;
+            auto resultExpr = literal(result);
+
+            return evaluate(convert(expr.outputDataType, resultExpr));
+        }
+
+        template <typename ARG>
+        CommandArgumentValue operator()(ARG const&) const
+        {
+            Throw<FatalError>("BitFieldExtract: unsupported argument type");
+        }
+
+        CommandArgumentValue call(CommandArgumentValue const& arg) const
+        {
+            return std::visit(*this, arg);
+        }
+    };
+
+    template <>
     struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
     {
         int evaluate(uint32_t const& arg) const
@@ -292,18 +320,6 @@ namespace rocRoller::Expression::EvaluateDetail
             evaluate(T const& arg) const
         {
             return LFSRRandomNumberGenerator(arg);
-        }
-    };
-
-    template <>
-    struct OperationEvaluatorVisitor<BitFieldExtract>
-        : public UnaryEvaluatorVisitor<BitFieldExtract>
-    {
-        template <typename T>
-        constexpr T evaluate(T const& arg) const
-        {
-            Throw<FatalError>("BitFieldExtract present in runtime expression.");
-            return T{};
         }
     };
 

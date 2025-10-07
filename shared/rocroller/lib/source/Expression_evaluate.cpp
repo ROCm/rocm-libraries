@@ -72,11 +72,6 @@ namespace rocRoller
                 throw std::runtime_error("N-ary operation present in runtime expression");
             }
 
-            CommandArgumentValue operator()(BitFieldExtract const& expr)
-            {
-                throw std::runtime_error("BitFieldExtract present in runtime expression.");
-            }
-
             CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
                 throw std::runtime_error("BitfieldCombine present in runtime expression.");
@@ -195,6 +190,20 @@ namespace rocRoller
                 return evaluate(expr) == val;
             }
             return false;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+                return evaluate(expr);
+            return std::nullopt;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+                return evaluate(expr);
+            return std::nullopt;
         }
     }
 }
