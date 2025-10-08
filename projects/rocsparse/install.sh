@@ -183,7 +183,7 @@ install_packages( )
     else
       library_dependencies_centos+=( "numactl-libs" )
     fi
-    elif [[ "${MAJORVERSION}" == "9" ]]; then
+    if [[ "${MAJORVERSION}" == "9" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
     elif [[ "${MAJORVERSION}" == "8" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
