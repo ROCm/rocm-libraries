@@ -99,8 +99,7 @@ THRUST_HOST_DEVICE ::std::false_type and_helper(...);
 } // namespace detail
 
 template <typename... Pred>
-#  if defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && defined(__has_attribute) \
-    && __has_attribute(__nodebug__)
+#  if THRUST_CUDA_COMPILER(CLANG) && defined(__has_attribute) && __has_attribute(__nodebug__)
 using _And __attribute__((__nodebug__)) = decltype(detail::and_helper<Pred...>(0));
 #  else
 using _And = decltype(detail::and_helper<Pred...>(0));

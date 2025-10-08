@@ -17,23 +17,21 @@
 
 #include <thrust/detail/config.h>
 
-#if !defined(THRUST_LEGACY_GCC)
+#include <thrust/device_vector.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/remove.h>
+#include <thrust/sort.h>
+#include <thrust/transform.h>
+#include <thrust/zip_function.h>
 
-#  include <thrust/device_vector.h>
-#  include <thrust/iterator/zip_iterator.h>
-#  include <thrust/remove.h>
-#  include <thrust/sort.h>
-#  include <thrust/transform.h>
-#  include <thrust/zip_function.h>
+#include <iostream>
 
-#  include <iostream>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
-#  include "test_param_fixtures.hpp"
-#  include "test_utils.hpp"
-
-#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <iterator>
-#  endif
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 using IntType = ::testing::Types<Params<int>>;
 
@@ -64,9 +62,9 @@ TYPED_TEST(ZipFunctionIntTests, TestZipFunctionCtor)
 
   ASSERT_EQ(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
   ASSERT_EQ(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#  ifdef __cpp_deduction_guides
+#ifdef __cpp_deduction_guides
   ASSERT_EQ(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#  endif // __cpp_deduction_guides
+#endif // __cpp_deduction_guides
 }
 
 TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
@@ -197,4 +195,3 @@ TYPED_TEST(ZipFunctionIntFloatTests, TestNestedZipFunction2)
   auto nestedTupleIt = thrust::make_zip_iterator(tupleIt, _THRUST_STD::begin(C));
   thrust::sort(nestedTupleIt, nestedTupleIt + n, SortPred{});
 }
-#endif // !THRUST_LEGACY_GCC

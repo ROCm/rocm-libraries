@@ -51,17 +51,17 @@
 #    define THRUST_DEPRECATED              [[deprecated]]
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED_BECAUSE(MSG) [[deprecated(MSG)]]
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  elif THRUST_COMPILER(MSVC)
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED              __declspec(deprecated)
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED_BECAUSE(MSG) __declspec(deprecated(MSG))
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#  elif THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED              __attribute__((deprecated))
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED_BECAUSE(MSG) __attribute__((deprecated(MSG)))
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
+#  elif THRUST_COMPILER(GCC)
 //! deprecated [Since 2.8]
 #    define THRUST_DEPRECATED              __attribute__((deprecated))
 //! deprecated [Since 2.8]

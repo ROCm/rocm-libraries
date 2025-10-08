@@ -92,7 +92,7 @@ THRUST_HOST_DEVICE OutputIterator general_copy(InputIterator first, InputIterato
   for (; first != last; ++first, (void) ++result)
   {
     // gcc 4.2 crashes while instantiating iter_assign
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION < 40300)
+#if THRUST_COMPILER(GCC, <, 4, 3)
     *result = *first;
 #else
     general_copy_detail::iter_assign(result, first);
@@ -109,7 +109,7 @@ THRUST_HOST_DEVICE OutputIterator general_copy_n(InputIterator first, Size n, Ou
   for (; n > Size(0); ++first, (void) ++result, (void) --n)
   {
     // gcc 4.2 crashes while instantiating iter_assign
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION < 40300)
+#if THRUST_COMPILER(GCC, <, 4, 3)
     *result = *first;
 #else
     general_copy_detail::iter_assign(result, first);

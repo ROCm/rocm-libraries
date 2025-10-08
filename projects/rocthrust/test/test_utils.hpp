@@ -46,7 +46,7 @@
 #include <string>
 
 // HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 #  include <hip/hip_runtime.h>
 #  include <hip/hip_runtime_api.h>
 
@@ -68,8 +68,7 @@
       } while (0)
 #  endif
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
+#endif // THRUST_COMPILER(HIP)
 
 namespace test
 {
@@ -925,13 +924,11 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
   }
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
-#elif defined(__NVCC__) || defined(_NVHPC_CUDA)                                \
-  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#elif THRUST_HAS_CUDA_COMPILER
 #  define THRUST_DEVICE_BACKEND                 cuda
 #  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name

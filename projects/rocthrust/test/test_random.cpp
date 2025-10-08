@@ -235,7 +235,7 @@ struct ValidateDistributionUnqual
   Distribution d0, d1;
 };
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 
 TEST(RandomTests, UsingHip)
 {

@@ -230,7 +230,7 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceMultiset)
 
 // FIXME: disabled on Windows, because it causes a failure on the internal CI system in one specific configuration.
 // That failure will be tracked in a new NVBug, this is disabled to unblock submitting all the other changes.
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#if !THRUST_COMPILER(MSVC)
 void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);

@@ -57,7 +57,7 @@
 
 namespace bench_utils
 {
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if THRUST_COMPILER(HIP)
 
 #  define HIP_CHECK(condition)                                                     \
     {                                                                              \
@@ -125,9 +125,7 @@ public:
     return elapsed_time / 1000.0;
   }
 };
-#elif (defined(__NVCC__) || defined(_NVHPC_CUDA)                                    \
-       || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-       || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)
+#elif THRUST_HAS_CUDA_COMPILER
 
 #  define CUDA_SAFE_CALL_NO_SYNC(call)                                                                              \
     do                                                                                                              \

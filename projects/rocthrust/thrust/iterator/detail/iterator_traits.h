@@ -21,14 +21,13 @@
 #  include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 // clang-format on
 #else
-#  if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
-#    if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  if !THRUST_COMPILER(NVRTC)
+#    if THRUST_COMPILER(MSVC)
 #      include <xutility> // for ::std::input_iterator_tag
-#    else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
-          // THRUST_HOST_COMPILER_MSVC vvv
+#    else // ^^^ THRUST_COMPILER(MSVC) ^^^ / vvv !THRUST_COMPILER(MSVC) vvv
 #      include <iterator> // for ::std::input_iterator_tag
-#    endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-#  endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+#    endif // !THRUST_COMPILER(MSVC)
+#  endif // !THRUST_COMPILER(NVRTC)
 
 #  include <type_traits>
 #endif

@@ -48,8 +48,7 @@
 #    define THRUST_HAS_CPP_ATTRIBUTE(__x) 0
 #  endif // !__has_cpp_attribute
 
-#  if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) \
-    || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_CPP_DIALECT >= 2017)
+#  if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) || (THRUST_COMPILER(MSVC) && THRUST_CPP_DIALECT >= 2017)
 #    define THRUST_NODISCARD [[nodiscard]]
 #  else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
 #    define THRUST_NODISCARD

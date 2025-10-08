@@ -28,10 +28,10 @@
 
 #include <unittest/unittest.h>
 
-#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#if THRUST_COMPILER(GCC, >=, 7)
 // This header pulls in an unsuppressable warning on GCC 6
 #  include _THRUST_STD_INCLUDE(complex)
-#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#endif // THRUST_COMPILER(GCC, >=, 7)
 #include _THRUST_STD_INCLUDE(tuple)
 #include _THRUST_STD_INCLUDE(utility)
 
@@ -189,20 +189,19 @@ static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "")
 void TestTriviallyRelocatable()
 {
   static_assert(thrust::is_trivially_relocatable<int>::value, "");
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   static_assert(thrust::is_trivially_relocatable<__half>::value, "");
   static_assert(thrust::is_trivially_relocatable<int1>::value, "");
   static_assert(thrust::is_trivially_relocatable<int2>::value, "");
   static_assert(thrust::is_trivially_relocatable<int3>::value, "");
   static_assert(thrust::is_trivially_relocatable<int4>::value, "");
-#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC                                          \
-      || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC && !defined(__CUDACC_RTC_INT128__)) \
-      || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1105)         \
-      || !defined(__SIZEOF_INT128__))
+#  if !(THRUST_COMPILER(MSVC) || (THRUST_COMPILER(NVRTC) && !defined(__CUDACC_RTC_INT128__)) \
+        || THRUST_CUDA_COMPILER(NVCC, <, 11, 5) || !defined(__SIZEOF_INT128__))
   static_assert(thrust::is_trivially_relocatable<__int128>::value, "");
-#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC &&
-       // !defined(__CUDACC_RTC_INT128__)) || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ <
-       // 1105) || !defined(__SIZEOF_INT128__))
-#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#  endif // !(THRUST_COMPILER(MSVC) || (THRUST_COMPILER(NVRTC) && !defined(__CUDACC_RTC_INT128__)) \
+         //   || THRUST_CUDA_COMPILER(NVCC, <, 11, 5) || !defined(__SIZEOF_INT128__))
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#if THRUST_COMPILER(GCC, >=, 7)
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
@@ -210,7 +209,7 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
                 "");
-#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+#endif // THRUST_COMPILER(GCC, >=, 7)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(thrust::is_trivially_relocatable<
                   _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,

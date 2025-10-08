@@ -42,7 +42,7 @@
 
 #if THRUST_CPP_DIALECT >= 2014
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if THRUST_COMPILER(HIP)
 
 #    include <thrust/system/hip/config.h>
 
@@ -106,6 +106,6 @@ auto get_async_universal_host_pinned_allocator(thrust::detail::execution_policy_
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_COMPILER(HIP)
 
 #endif

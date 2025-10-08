@@ -39,13 +39,13 @@
 #      define THRUST_NO_RTTI
 #    elif defined(__CUDA_ARCH__)
 #      define THRUST_NO_RTTI // No RTTI in CUDA device code
-#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#    elif THRUST_COMPILER(NVRTC)
 #      define THRUST_NO_RTTI
-#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#    elif THRUST_COMPILER(MSVC)
 #      if _CPPRTTI == 0
 #        define THRUST_NO_RTTI
 #      endif
-#    elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#    elif THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #      if !(defined(__has_feature) && __has_feature(cxx_rtti))
 #        define THRUST_NO_RTTI
 #      endif

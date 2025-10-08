@@ -29,12 +29,11 @@
 
 #  include <thrust/detail/config/compiler.h>
 
-#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  if THRUST_COMPILER(MSVC)
 #    define THRUST_FORCEINLINE __forceinline
-#  else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
-        // THRUST_HOST_COMPILER_MSVC vvv
+#  else // ^^^ THRUST_COMPILER(MSVC) ^^^ / vvv THRUST_COMPILER(MSVC) vvv
 #    define THRUST_FORCEINLINE __inline__ __attribute__((__always_inline__))
-#  endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#  endif // !THRUST_COMPILER(MSVC)
 
 #endif
 

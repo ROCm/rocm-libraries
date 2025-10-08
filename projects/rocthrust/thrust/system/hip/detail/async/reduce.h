@@ -44,7 +44,7 @@
 
 #if THRUST_CPP_DIALECT >= 2014
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if THRUST_COMPILER(HIP)
 
 #    include <thrust/system/hip/config.h>
 
@@ -247,6 +247,6 @@ auto async_reduce_into(
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_COMPILER(HIP)
 
 #endif

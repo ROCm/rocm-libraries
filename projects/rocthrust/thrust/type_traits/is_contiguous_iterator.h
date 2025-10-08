@@ -39,7 +39,7 @@
 #include <type_traits>
 #include <utility>
 
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER < 1916 // MSVC 2017 version 15.9
+#if THRUST_COMPILER(MSVC, <, 19, 16) // MSVC 2017 version 15.9
 #  include <array>
 #  include <string>
 #  include <vector>
@@ -140,7 +140,7 @@ struct is_libcxx_wrap_iter : false_type
 #if defined(_LIBCPP_VERSION)
 template <typename Iterator>
 struct is_libcxx_wrap_iter<
-#  if _LIBCPP_VERSION < 14000 || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if _LIBCPP_VERSION < 14000 || THRUST_COMPILER(HIP)
   _VSTD::__wrap_iter<Iterator>
 #  else
   std::__wrap_iter<Iterator>

@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 #  include <thrust/functional.h>
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>

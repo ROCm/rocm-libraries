@@ -33,7 +33,7 @@ THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -234,7 +234,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
   // value categories when casting to different type
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
   // unfortunately, old versions of MSVC or nvcc in MSVC mode pick the `const int&` overload instead of `int&&`
-#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1929) && !(defined(_MSC_VER) && (defined(__NVCC__) && (__CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1201)))
+#if !THRUST_COMPILER(MSVC, <, 19, 29) && !(THRUST_COMPILER(MSVC) && THRUST_CUDA_COMPILER(NVCC, <, 12, 1))
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
 #endif
@@ -342,9 +342,8 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestNot1);
 // - GCC 11
 // - CPP system for both host and device
 // - C++11 dialect
-#if !(defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000          \
-      && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP \
-      && THRUST_CPP_DIALECT == 2011)
+#if !(THRUST_COMPILER(GCC, >=, 11) && THRUST_COMPILER(GCC, <, 12) && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP \
+      && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP && THRUST_CPP_DIALECT == 2011)
 
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot2()
