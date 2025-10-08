@@ -18,6 +18,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "batchnorm_inference_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
+#include "convolution_wrw_attributes_generated.h"
 #include "data_types_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "tensor_attributes_generated.h"
@@ -46,11 +47,12 @@ enum class NodeAttributes : uint8_t {
   BatchnormAttributes = 4,
   ConvolutionFwdAttributes = 5,
   ConvolutionBwdAttributes = 6,
+  ConvolutionWrwAttributes = 7,
   MIN = NONE,
-  MAX = ConvolutionBwdAttributes
+  MAX = ConvolutionWrwAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[7] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[8] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -58,13 +60,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[7] {
     NodeAttributes::BatchnormBackwardAttributes,
     NodeAttributes::BatchnormAttributes,
     NodeAttributes::ConvolutionFwdAttributes,
-    NodeAttributes::ConvolutionBwdAttributes
+    NodeAttributes::ConvolutionBwdAttributes,
+    NodeAttributes::ConvolutionWrwAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[8] = {
+  static const char * const names[9] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -72,13 +75,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "BatchnormAttributes",
     "ConvolutionFwdAttributes",
     "ConvolutionBwdAttributes",
+    "ConvolutionWrwAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ConvolutionBwdAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ConvolutionWrwAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -111,6 +115,10 @@ template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::ConvolutionBwdA
   static const NodeAttributes enum_value = NodeAttributes::ConvolutionBwdAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::ConvolutionWrwAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -137,6 +145,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::Convolutio
 
 template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::ConvolutionBwdAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -217,6 +229,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::ConvolutionBwdAttributes ?
       reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value) : nullptr;
   }
+  hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *AsConvolutionWrwAttributes() {
+    return type == NodeAttributes::ConvolutionWrwAttributes ?
+      reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *AsConvolutionWrwAttributes() const {
+    return type == NodeAttributes::ConvolutionWrwAttributes ?
+      reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -249,6 +269,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::ConvolutionBwdAttributes: {
       return *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      return *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -308,6 +332,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *attributes_as_ConvolutionBwdAttributes() const {
     return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes ? static_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *attributes_as_ConvolutionWrwAttributes() const {
+    return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes ? static_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -347,6 +374,10 @@ template<> inline const hipdnn_sdk::data_objects::ConvolutionFwdAttributes *Node
 
 template<> inline const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *Node::attributes_as<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>() const {
   return attributes_as_ConvolutionBwdAttributes();
+}
+
+template<> inline const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *Node::attributes_as<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>() const {
+  return attributes_as_ConvolutionWrwAttributes();
 }
 
 struct NodeBuilder {
@@ -706,6 +737,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -749,6 +784,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -780,6 +819,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value);
       return CreateConvolutionBwdAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value);
+      return CreateConvolutionWrwAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -808,6 +851,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::ConvolutionBwdAttributes: {
       value = new hipdnn_sdk::data_objects::ConvolutionBwdAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      value = new hipdnn_sdk::data_objects::ConvolutionWrwAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(u.value));
       break;
     }
     default:
@@ -844,6 +891,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::ConvolutionBwdAttributes: {
       auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value);
       delete ptr;
       break;
     }

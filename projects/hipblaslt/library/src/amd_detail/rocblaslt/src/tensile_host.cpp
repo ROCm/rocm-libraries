@@ -2607,12 +2607,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
         {
+            auto autoGsuVal = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(
                 *hardware,
                 data->problem.c().sizes()[0],
                 data->problem.c().sizes()[1],
                 data->problem.a().sizes()[data->problem.boundIndices()[0].a],
-                data->problem.batchSize(0));
+                data->problem.batchSize(0),
+                autoGsuVal);
 
             hipblasltClientPerformanceArgs::totalGranularity = Granularity.totalGranularity;
             hipblasltClientPerformanceArgs::tilesPerCu       = Granularity.tilesPerCu;
