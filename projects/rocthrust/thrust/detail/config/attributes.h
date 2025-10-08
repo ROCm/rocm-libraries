@@ -46,22 +46,21 @@
 #  endif // !__has_declspec_attribute
 
 // MSVC needs extra help with empty base classes
-#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || THRUST_HAS_DECLSPEC_ATTRIBUTE(empty_bases)
+#  if THRUST_COMPILER(MSVC) || THRUST_HAS_DECLSPEC_ATTRIBUTE(empty_bases)
 #    define THRUST_DECLSPEC_EMPTY_BASES __declspec(empty_bases)
-#  else // !THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  else // ^^^ THRUST_COMPILER(MSVC) ^^^ / vvv !THRUST_COMPILER(MSVC) vvv
 #    define THRUST_DECLSPEC_EMPTY_BASES
-#  endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  endif // !THRUST_COMPILER(MSVC)
 
 // NVCC below 11.3 does not support nodiscard on friend operators
 // It always fails with clang
-#  if (defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ <= 11 && __CUDACC_VER_MINOR__ < 3)) \
-    || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#  if THRUST_CUDACC_BELOW(11, 3) || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #    define THRUST_NODISCARD_FRIEND friend
 #  else
 #    define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
 #  endif
 
-#  if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11 || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 3))
+#  if THRUST_CUDACC_BELOW(11, 3)
 #    define THRUST_ALIAS_ATTRIBUTE(...)
 #  else
 #    define THRUST_ALIAS_ATTRIBUTE(...) __VA_ARGS__

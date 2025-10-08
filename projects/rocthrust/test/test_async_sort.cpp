@@ -18,13 +18,13 @@
 #include <thrust/detail/config.h>
 
 // Disabled on MSVC && NVCC < 11.1 for GH issue #1098.
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && defined(__CUDACC__)
+#if THRUST_COMPILER(MSVC) && defined(__CUDACC__)
 #  if (__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 1)
 #    define THRUST_BUG_1098_ACTIVE
 #  endif // NVCC version check
 #endif // MSVC + NVCC check
 
-#if THRUST_CPP_DIALECT >= 2017 && !defined(THRUST_BUG_1098_ACTIVE)
+#if THRUST_CPP_DIALECT >= 2014 && !defined(THRUST_BUG_1098_ACTIVE)
 
 #  include <thrust/async/sort.h>
 #  include <thrust/device_vector.h>

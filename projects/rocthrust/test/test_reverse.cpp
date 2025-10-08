@@ -101,6 +101,14 @@ TYPED_TEST(ReverseTests, TestReverseCopySimple)
 
   using Vector = typename TestFixture::input_type;
 
+#if THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
+
+  if (typeid(Vector) == typeid(thrust::host_vector<custom_numeric>))
+  {
+    KNOWN_FAILURE // WAR NVBug 2481122
+  }
+#endif // THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
+
   using Iterator = typename Vector::iterator;
 
   Vector input{1, 2, 3, 4, 5};

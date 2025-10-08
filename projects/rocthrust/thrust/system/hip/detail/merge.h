@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>

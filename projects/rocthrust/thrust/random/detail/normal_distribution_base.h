@@ -39,7 +39,7 @@
 #include <cmath>
 #include <limits>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 #  include <thrust/random/detail/erfcinv.h>
 #endif
 
@@ -153,9 +153,7 @@ private:
 template <typename RealType>
 struct normal_distribution_base
 {
-#if (defined(__NVCC__) || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-     || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)                                         \
-  || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if THRUST_HAS_CUDA_COMPILER && !THRUST_CUDA_COMPILER(NVHPC)
   using type = normal_distribution_nvcc<RealType>;
 #else
   using type = normal_distribution_portable<RealType>;

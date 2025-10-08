@@ -303,10 +303,10 @@ private:
 // MSVC 2013 and 2015 incorrectly warning about returning a reference to
 // a local/temporary here.
 // See goo.gl/LELTNp
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+#if THRUST_COMPILER(MSVC2017)
   THRUST_DIAG_PUSH
   THRUST_DIAG_SUPPRESS_MSVC(4172)
-#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+#endif // THRUST_COMPILER(MSVC2017)
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE typename super_t::reference dereference() const
@@ -334,9 +334,9 @@ private:
     return m_f(x);
   }
 
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+#if THRUST_COMPILER(MSVC2017)
   THRUST_DIAG_POP
-#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (THRUST_MSVC_VERSION < 1920)
+#endif // THRUST_COMPILER(MSVC2017)
 
   // tag this as mutable per Dave Abrahams in this thread:
   // http://lists.boost.org/Archives/boost/2004/05/65332.php

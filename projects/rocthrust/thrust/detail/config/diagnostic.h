@@ -37,28 +37,28 @@
 #  include <thrust/detail/config/compiler.h>
 
 // Enable us to selectively silence host compiler warnings
-#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #    define THRUST_DIAG_PUSH                THRUST_PRAGMA(clang diagnostic push)
 #    define THRUST_DIAG_POP                 THRUST_PRAGMA(clang diagnostic pop)
 #    define THRUST_DIAG_SUPPRESS_CLANG(str) THRUST_PRAGMA(clang diagnostic ignored str)
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
+#  elif THRUST_COMPILER(GCC)
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(GCC diagnostic push)
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(GCC diagnostic pop)
 #    define THRUST_DIAG_SUPPRESS_CLANG(str)
 #    define THRUST_DIAG_SUPPRESS_GCC(str) THRUST_PRAGMA(GCC diagnostic ignored str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
+#  elif THRUST_COMPILER(NVHPC)
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(diagnostic push)
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(diagnostic pop)
 #    define THRUST_DIAG_SUPPRESS_CLANG(str)
 #    define THRUST_DIAG_SUPPRESS_GCC(str)
 #    define THRUST_DIAG_SUPPRESS_NVHPC(str) THRUST_PRAGMA(diag_suppress str)
 #    define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  elif THRUST_COMPILER(MSVC)
 #    define THRUST_DIAG_PUSH THRUST_PRAGMA(warning(push))
 #    define THRUST_DIAG_POP  THRUST_PRAGMA(warning(pop))
 #    define THRUST_DIAG_SUPPRESS_CLANG(str)
@@ -75,25 +75,25 @@
 #  endif
 
 // Convenient shortcuts to silence common warnings
-#  if THRUST_HOST_COMPILER == THRUST_DEVICE_COMPILER_CLANG
+#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH      \
       THRUST_DIAG_PUSH                           \
       THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated") \
       THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated-declarations")
 #    define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
+#  elif THRUST_COMPILER(GCC)
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH    \
       THRUST_DIAG_PUSH                         \
       THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated") \
       THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated-declarations")
 #    define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
+#  elif THRUST_COMPILER(NVHPC)
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH         \
       THRUST_DIAG_PUSH                              \
       THRUST_DIAG_SUPPRESS_NVHPC(deprecated_entity) \
       THRUST_DIAG_SUPPRESS_NVHPC(deprecated_entity_with_custom_message)
 #    define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
-#  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  elif THRUST_COMPILER(MSVC)
 #    define THRUST_SUPPRESS_DEPRECATED_PUSH \
       THRUST_DIAG_PUSH                      \
       THRUST_DIAG_SUPPRESS_MSVC(4996)

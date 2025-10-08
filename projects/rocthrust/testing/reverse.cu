@@ -72,13 +72,13 @@ DECLARE_UNITTEST(TestReverseDispatchImplicit);
 template <typename Vector>
 void TestReverseCopySimple()
 {
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION >= 80000 && THRUST_GCC_VERSION < 100000
+#if THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
 
   if (typeid(Vector) == typeid(thrust::host_vector<custom_numeric>))
   {
     KNOWN_FAILURE // WAR NVBug 2481122
   }
-#endif
+#endif // THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
 
   using Iterator = typename Vector::iterator;
 

@@ -27,7 +27,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 #  include <rocprim/rocprim.hpp>
 
 #  include <thrust/binary_search.h>

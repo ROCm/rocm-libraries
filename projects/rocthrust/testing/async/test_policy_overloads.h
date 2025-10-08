@@ -117,7 +117,7 @@ private:
   {
     // When a policy uses the default stream, the algorithm implementation
     // should spawn a new stream in the returned event:
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if THRUST_COMPILER(HIP)
     auto using_default_stream = [](auto& e) {
       ASSERT_NOT_EQUAL(thrust::hip_rocprim::default_stream(), e.stream().native_handle());
     };
@@ -129,7 +129,7 @@ private:
     // When a policy uses a non-default stream, the implementation should pass
     // the stream through to the output:
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if THRUST_COMPILER(HIP)
     thrust::system::hip::detail::unique_stream test_stream{};
 #  else
     thrust::system::cuda::detail::unique_stream test_stream{};
@@ -283,7 +283,7 @@ private:
     auto const stream_a = e_a.stream().native_handle();
 
     // Execution on default stream should create a new stream in the result:
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  if THRUST_COMPILER(HIP)
     ASSERT_NOT_EQUAL_QUIET(thrust::hip_rocprim::default_stream(), stream_a);
 #  else
     ASSERT_NOT_EQUAL_QUIET(thrust::cuda_cub::default_stream(), stream_a);

@@ -146,7 +146,7 @@ OutputIt THRUST_HOST cross_system_copy_n(
   return ret;
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_COMPILER(HIP)
 // non-trivial copy D->H, only supported with NVCC compiler
 // because copy ctor must have  __device__ annotations, which is nvcc-only
 // feature

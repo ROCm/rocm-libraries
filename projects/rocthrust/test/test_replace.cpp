@@ -25,20 +25,19 @@
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
 // GCC 12 + omp + c++11 miscompiles some test cases and emits spurious warnings.
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ == 12 && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP \
-  && THRUST_CPP_DIALECT == 2011
+#if THRUST_COMPILER(GCC, ==, 12) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP && THRUST_CPP_DIALECT == 2011
 #  define THRUST_GCC12_OMP_MISCOMPILE
 #endif
 
 // New GCC, new miscompile. 13 + TBB this time.
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ == 13 && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
+#if THRUST_COMPILER(GCC, ==, 13) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
 #  define THRUST_GCC13_TBB_MISCOMPILE
 #endif
 

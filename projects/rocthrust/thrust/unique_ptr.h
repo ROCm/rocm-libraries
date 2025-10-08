@@ -352,7 +352,7 @@ public:
 
 private:
   pointer m_ptr;
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
+#if THRUST_COMPILER(MSVC) && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
   [[msvc::no_unique_address]] deleter_type m_deleter;
 #elif THRUST_HAS_CPP_ATTRIBUTE(no_unique_address)
   [[no_unique_address]] deleter_type m_deleter;
@@ -727,7 +727,7 @@ private:
   friend class unique_ptr;
 
   pointer m_ptr;
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
+#if THRUST_COMPILER(MSVC) && THRUST_HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
   [[msvc::no_unique_address]] deleter_type m_deleter;
 #elif THRUST_HAS_CPP_ATTRIBUTE(no_unique_address)
   [[no_unique_address]] deleter_type m_deleter;

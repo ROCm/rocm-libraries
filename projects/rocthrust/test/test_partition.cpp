@@ -26,7 +26,7 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000
+#if THRUST_COMPILER(GCC, >=, 11) && THRUST_COMPILER(GCC, <, 12)
 #  define WAIVE_GCC11_FAILURES
 #endif
 
