@@ -855,8 +855,6 @@ namespace rocRoller
                                 const auto offset
                                     = std::visit([](auto x) { return (size_t)x; }, offsetValue);
 
-                                Log::info("  wg {}, wi {}, offset {}", wg, wi, offset);
-
                                 co_yield offset;
                             }
                         }
@@ -868,6 +866,10 @@ namespace rocRoller
                     }
                 }()
                                                     .to<std::vector>();
+
+                std::stringstream ss;
+                streamJoin(ss, addresses, ", ");
+                Log::info("LDS addresses: {}", ss.str());
 
                 for(auto instr : m_loadStoreTileGenerator.genLoadLDSTile(
                         tag, load, m_graph->buildTransformer(tag)))
