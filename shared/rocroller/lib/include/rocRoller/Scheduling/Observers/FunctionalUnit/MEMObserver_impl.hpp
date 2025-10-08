@@ -89,12 +89,22 @@ namespace rocRoller
         {
             InstructionStatus rv;
             const auto*       derived = static_cast<const Derived*>(this);
-            if(derived->isMEMInstruction(inst) && m_incomplete.size() >= m_queueAllotment)
+            if(derived->isMEMInstruction(inst))
             {
-                auto complete  = m_incomplete.front().expectedCompleteCycle;
-                rv.stallCycles = std::max(complete - m_programCycle, 0);
+                if(m_incomplete.size() >= m_queueAllotment)
+                {
+                    auto complete  = m_incomplete.front().expectedCompleteCycle;
+                    rv.stallCycles = std::max(complete - m_programCycle, 0);
+                }
+                if constexpr(std::is_same_v<Derived, DSMEMObserver>)
+                {
+                    Log::info("peek: {}: CBNW: {}, Inc: {}, Stall: {}",
+                              inst.toString(LogLevel::Info),
+                              m_completeButNotWaited.size(),
+                              m_incomplete.size(),
+                              rv.stallCycles);
+                }
             }
-
             return rv;
         }
 
