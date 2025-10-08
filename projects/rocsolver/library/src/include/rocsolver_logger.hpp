@@ -39,7 +39,7 @@
 #include <vector>
 
 #ifndef ROCSOLVER_USE_ASYNC_LOGGER
-#define ROCSOLVER_USE_ASYNC_LOGGER 1  // Default to async logger
+#define ROCSOLVER_USE_ASYNC_LOGGER 1 // Default to async logger
 #endif
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
@@ -210,7 +210,7 @@ private:
     void accumulate_times(rocsolver_profile_map& m);
     std::vector<hipEvent_t> event_cache;
     size_t event_cache_head = 0; // index pointing to the next available event
-    
+
     // event pool management for caching
     hipEvent_t get_event();
     void release_event(hipEvent_t event);
@@ -287,9 +287,10 @@ private:
         const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
-        for (const std::string& caller_name : from_stack.callers) {
+        for(const std::string& caller_name : from_stack.callers)
+        {
             rocsolver_profile_entry& entry = (*map)[caller_name];
-            if (!entry.internal_calls)
+            if(!entry.internal_calls)
                 entry.internal_calls = std::make_unique<rocsolver_profile_map>();
             map = entry.internal_calls.get();
         }
@@ -381,7 +382,7 @@ public:
             hipStream_t stream;
             rocblas_get_stream(handle, &stream);
             THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
-            
+
             auto profile_lock = acquire_lock();
             accumulate_times(profile);
             profile_lock.unlock();

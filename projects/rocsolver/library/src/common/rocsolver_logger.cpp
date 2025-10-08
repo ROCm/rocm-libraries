@@ -283,7 +283,7 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
             if(pair.first && pair.second)
                 THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
             entry.total_time += ms * 1000; // us
-            
+
             // return events to cache
             release_event(pair.first);
             release_event(pair.second);
@@ -318,7 +318,7 @@ void rocsolver_logger::release_event(hipEvent_t event)
     {
         event_cache.resize(event_cache_head + 1);
     }
-    
+
     // Store event at head position and increment head
     event_cache[event_cache_head] = event;
     ++event_cache_head;
