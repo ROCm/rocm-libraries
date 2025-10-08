@@ -393,7 +393,6 @@ bool ConvAsmBwdWrW3x3::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW3X3))
         return false;
-    // SCG
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90")))
         return false;

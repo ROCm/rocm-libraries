@@ -523,7 +523,6 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U))
         return false;
-    // SCG
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx90")))
         return false;
