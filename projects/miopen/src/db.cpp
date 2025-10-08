@@ -264,7 +264,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             return false;
         }
 
-        const auto temp_name = filename + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid()) + ".temp";
+        const auto temp_name = filename.string() + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid()) + ".temp";
         std::ofstream to(temp_name, std::ios::binary);
 
         if(!to)
@@ -279,7 +279,8 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
         Copy(from, to, pos->begin);
         record.WriteContents(to);
         from.seekg(pos->end);
-        Copy(from, to, from_size - pos->end);
+        if(from_size > pos->end)
+            Copy(from, to, from_size - pos->end);
 
         from.close();
         to.close();
