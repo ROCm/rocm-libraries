@@ -123,7 +123,8 @@
 #define MIOPEN_NEURON_CLIPPED_RELU 7 // min(alpha, max(0, x))
 #define MIOPEN_NEURON_LEAKY_RELU 8   // alpha * x | x <= 0; x | x > 0
 #define MIOPEN_NEURON_ELU 9          // alpha * (e^x - 1) | x <= 0; x | x > 0
-#define MIOPEN_NEURON_TOTAL 10
+#define MIOPEN_NEURON_CLAMP 10       // max(alpha, min(beta, x))
+#define MIOPEN_NEURON_TOTAL 11
 
 #define kBNLL_THRESHOLD static_cast<FP_TYPE>(50.0)
 
@@ -306,6 +307,19 @@ __forceinline__ __device__ void ActivationFunction_ELU(T (&__restrict__ res)[N],
 }
 
 template <typename T, size_t N>
+__forceinline__ __device__ void ActivationFunction_Clamp(T (&__restrict__ res)[N],
+                                                         const T (&__restrict__ data)[N],
+                                                         const T /*gamma*/,
+                                                         const T beta,
+                                                         const T alpha)
+{
+    for(uint i = 0; i < N; ++i)
+    {
+        res[i] = miopen::fmax(alpha, miopen::fmin(beta, data[i]));
+    }
+}
+
+template <typename T, size_t N>
 __forceinline__ __device__ void ActivationFunction(T (&__restrict__ res)[N],
                                                    const T (&__restrict__ data)[N],
                                                    const T gamma,
@@ -352,6 +366,10 @@ __forceinline__ __device__ void ActivationFunction(T (&__restrict__ res)[N],
     else if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_ELU)
     {
         ActivationFunction_ELU(res, data, gamma, beta, alpha);
+    }
+    else if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_CLAMP)
+    {
+        ActivationFunction_Clamp(res, data, gamma, beta, alpha);
     }
 }
 
@@ -534,6 +552,24 @@ __forceinline__ __device__ void ActivationFunction_ELU_Diff(T (&__restrict__ bot
 }
 
 template <typename T, size_t N>
+__forceinline__ __device__ void ActivationFunction_Clamp_Diff(T (&__restrict__ bot_diff)[N],
+                                                              const T (&__restrict__ top_diff)[N],
+                                                              const T (&__restrict__ bot_data)[N],
+                                                              const T* /*top_data*/,
+                                                              const T /*diff_scale*/,
+                                                              const T /*gamma*/,
+                                                              const T beta,
+                                                              const T alpha)
+{
+    for(uint i = 0; i < N; ++i)
+    {
+        bot_diff[i] =
+            top_diff[i] *
+            ((bot_data[i] > alpha && bot_data[i] <= beta) ? static_cast<T>(1) : static_cast<T>(0));
+    }
+}
+
+template <typename T, size_t N>
 __forceinline__ __device__ void ActivationFunction_Diff(T (&__restrict__ bot_diff)[N],
                                                         const T (&__restrict__ top_diff)[N],
                                                         const T (&__restrict__ bot_data)[N],
@@ -592,6 +628,11 @@ __forceinline__ __device__ void ActivationFunction_Diff(T (&__restrict__ bot_dif
     else if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_ELU)
     {
         ActivationFunction_ELU_Diff(
+            bot_diff, top_diff, bot_data, top_data, diff_scale, gamma, beta, alpha);
+    }
+    else if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_CLAMP)
+    {
+        ActivationFunction_Clamp_Diff(
             bot_diff, top_diff, bot_data, top_data, diff_scale, gamma, beta, alpha);
     }
 }
