@@ -30,7 +30,7 @@ class TensorAttributes:
     def random(min_val, max_val, dtype: torch.dtype, dims: list[int], generator: torch.Generator = None):
         if (dtype == torch.int or dtype == torch.int8 or dtype == torch.int16
             or dtype == torch.int32 or dtype == torch.int64):
-            return TensorAttributes(torch.randint(min_val, max_val, dtype=dtype, size=dims, generator=generator))
+            return TensorAttributes(torch.randint(low=int(min_val), high=int(max_val), dtype=dtype, size=dims, generator=generator))
 
         tensor = torch.rand(dtype=dtype, size=dims, generator=generator)
         return TensorAttributes(tensor*(max_val - min_val) + min_val)

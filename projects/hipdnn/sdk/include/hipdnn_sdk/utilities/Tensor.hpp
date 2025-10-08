@@ -222,7 +222,7 @@ public:
     {
         size_t elementsCopied = std::min(maxElementsCopied, _memory.count());
         _memory.markHostModified();
-        std::memcpy(_memory.hostData(), data, elementsCopied);
+        std::memcpy(_memory.hostData(), data, elementsCopied * sizeof(T));
     }
 
     void fillWithValue(T value) override

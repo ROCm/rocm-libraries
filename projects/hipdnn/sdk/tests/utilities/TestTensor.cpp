@@ -188,6 +188,18 @@ TEST(TestTensor, SetHostValueWithVector)
     EXPECT_FLOAT_EQ(tensor.getHostValue(1, 2, 1), 30.0f);
 }
 
+TEST(TestTensor, FillWithData)
+{
+    std::vector<int> data{0, 1, 2, 3};
+    Tensor<int> tensor({2, 2});
+    tensor.fillWithData(data.data(), data.size());
+
+    for(size_t i = 0; i < data.size(); i++)
+    {
+        EXPECT_EQ(data[i], tensor.memory().hostData()[i]);
+    }
+}
+
 TEST(TestTensor, MixedIndexingMethods)
 {
     Tensor<float> tensor({3, 4, 5});

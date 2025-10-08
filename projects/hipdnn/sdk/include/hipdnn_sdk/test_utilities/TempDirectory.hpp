@@ -39,4 +39,31 @@ public:
     }
 };
 
+class RAIIFileDeleter
+{
+    std::filesystem::path _path;
+
+public:
+    RAIIFileDeleter(std::filesystem::path path)
+        : _path(std::move(path))
+    {
+    }
+    const std::filesystem::path& path() const
+    {
+        return _path;
+    }
+
+    RAIIFileDeleter(const RAIIFileDeleter&) = delete;
+    RAIIFileDeleter& operator=(const RAIIFileDeleter&) = delete;
+    RAIIFileDeleter(RAIIFileDeleter&&) = default;
+    RAIIFileDeleter& operator=(RAIIFileDeleter&&) = default;
+    ~RAIIFileDeleter()
+    {
+        if(!_path.empty())
+        {
+            std::filesystem::remove(_path);
+        }
+    }
+};
+
 }

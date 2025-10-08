@@ -41,7 +41,7 @@ constexpr auto datatypeToNative()
     }
 }
 
-std::variant<float, half, double, int32_t, hip_bfloat16>
+inline std::variant<float, half, double, int32_t, hip_bfloat16>
     datatypeToNativeVariant(hipdnn_sdk::data_objects::DataType type)
 {
     using DataType = hipdnn_sdk::data_objects::DataType;
