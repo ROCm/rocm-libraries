@@ -102,7 +102,7 @@ namespace rocRoller
                     AssertFatal(resultVariableType(rhs).getElementSize() == 4u,
                                 "Currently BitfieldCombine only supports: dst size = 1 dword");
                     AssertFatal(resultVariableType(rhs).getElementSize() * 8u
-                                    > expr.dstOffset + expr.width,
+                                    >= expr.dstOffset + expr.width,
                                 "Bitfield exceeds the number of bits of destination, destination "
                                 "size (bytes), offset, width = ",
                                 ShowValue(resultVariableType(rhs).getElementSize()),

@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Expression_evaluate_detail.hpp>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
@@ -74,7 +75,8 @@ namespace rocRoller
 
             CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
-                throw std::runtime_error("BitfieldCombine present in runtime expression.");
+                auto exprPtr = std::make_shared<Expression>(expr);
+                return evaluate(lowerBitfieldCombine(exprPtr));
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)
