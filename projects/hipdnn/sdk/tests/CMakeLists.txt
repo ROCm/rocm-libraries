@@ -20,6 +20,7 @@ add_executable(hipdnn_sdk_tests
     plugin/TestPluginLastErrorManager.cpp
     plugin/TestPluginDataTypeHelpers.cpp
     plugin/flatbuffer_utilities/TestGraphWrapper.cpp
+    plugin/flatbuffer_utilities/TestNodeWrapper.cpp
     plugin/flatbuffer_utilities/TestEngineConfigWrapper.cpp
     plugin/flatbuffer_utilities/TestEngineDetailsWrapper.cpp
     utilities/TestAllocators.cpp

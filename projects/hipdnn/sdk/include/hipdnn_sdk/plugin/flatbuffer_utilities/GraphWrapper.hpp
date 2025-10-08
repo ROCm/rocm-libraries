@@ -108,7 +108,6 @@ public:
 
     const INodeWrapper& getNodeWrapper(uint32_t index) const
     {
-
         throwIfNotValid();
 
         if(_nodeWrappers.empty())
