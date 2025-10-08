@@ -31,27 +31,27 @@ struct BatchnormFwdTensorBundle : public GraphTensorBundle
             if(attr->name()->str() == X_TENSOR_NAME)
             {
                 auto& tensor = tensors[id];
-                fillTensorWithRandomValues(tensor, 0.0f, 1.0f, seed);
+                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
             }
             else if(attr->name()->str() == SCALE_TENSOR_NAME)
             {
                 auto& tensor = tensors[id];
-                fillTensorWithRandomValues(tensor, 0.0f, 1.0f, seed);
+                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
             }
             else if(attr->name()->str() == BIAS_TENSOR_NAME)
             {
                 auto& tensor = tensors[id];
-                fillTensorWithRandomValues(tensor, 0.0f, 1.0f, seed);
+                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
             }
             else if(attr->name()->str() == MEAN_TENSOR_NAME)
             {
                 auto& tensor = tensors[id];
-                fillTensorWithRandomValues(tensor, 0.0f, 1.0f, seed);
+                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
             }
             else if(attr->name()->str() == INV_VARIANCE_TENSOR_NAME)
             {
                 auto& tensor = tensors[id];
-                fillTensorWithRandomValues(tensor, 0.1f, 1.0f, seed);
+                tensor->fillTensorWithRandomValues(0.1f, 1.0f, seed);
             }
         }
     }

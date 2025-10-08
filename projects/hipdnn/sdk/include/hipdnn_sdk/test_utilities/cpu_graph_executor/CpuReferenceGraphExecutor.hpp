@@ -56,34 +56,12 @@ private:
         {
             if(attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
             {
-                auto* tensorPtr = constructTensorForAttribute(*attr, virtualTensors);
-                updatedVariantPack[id] = tensorPtr;
+                auto tensor = createTensorFromAttribute(*attr);
+                virtualTensors.push_back(std::move(tensor));
+                updatedVariantPack[id] = virtualTensors.back()->rawHostData();
             }
         }
         return updatedVariantPack;
-    }
-
-    static void* constructTensorForAttribute(const hipdnn_sdk::data_objects::TensorAttributes& attr,
-                                             std::vector<std::unique_ptr<ITensor>>& virtualTensors)
-    {
-        auto dims = convertFlatBufferVectorToStdVector(attr.dims());
-        auto strides = convertFlatBufferVectorToStdVector(attr.strides());
-
-        switch(attr.data_type())
-        {
-        case hipdnn_sdk::data_objects::DataType::FLOAT:
-            virtualTensors.push_back(std::make_unique<Tensor<float>>(dims, strides));
-            break;
-        case hipdnn_sdk::data_objects::DataType::HALF:
-            virtualTensors.push_back(std::make_unique<Tensor<half>>(dims, strides));
-            break;
-        case hipdnn_sdk::data_objects::DataType::BFLOAT16:
-            virtualTensors.push_back(std::make_unique<Tensor<hip_bfloat16>>(dims, strides));
-            break;
-        default:
-            throw std::runtime_error("Unsupported data type for tensor");
-        }
-        return virtualTensors.back()->rawHostData();
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
