@@ -1072,11 +1072,12 @@ struct onesweep_iteration_helper
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
 
     static constexpr unsigned int OffsetSize = sizeof(Offset) * radix_size;
-    static constexpr unsigned int OrderedSize = rocprim::max(sizeof(Key), sizeof(Value)) * BlockSize;
+    static constexpr unsigned int BiggestTypeSize = rocprim::max(sizeof(Key), sizeof(Value));
+    static constexpr unsigned int OrderedSize = BiggestTypeSize * BlockSize;
     static constexpr unsigned int RankSize = sizeof(typename radix_rank_type::storage_type);
     static constexpr unsigned int Diff = (RankSize - OffsetSize) / OrderedSize;
 
-    static constexpr unsigned int N = rocprim::min(rocprim::max(Diff, 1u), ItemsPerThread);
+    static constexpr unsigned int N = BiggestTypeSize <= sizeof(uint16_t) ? ItemsPerThread : rocprim::min(rocprim::max(Diff, 1u), ItemsPerThread);
     static constexpr unsigned int WindowOffset = BlockSize * N;
     static constexpr bool Divisible = ItemsPerThread % N == 0;
 
