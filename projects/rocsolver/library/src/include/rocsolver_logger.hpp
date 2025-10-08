@@ -288,17 +288,22 @@ public:
     {
         if (rocsolver_logger::_instance != nullptr)
             return true;
+        bool update = false;
+        auto lock = acquire_lock();
         if (rocsolver_logger::env_var_status == -1)
         {
-        const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
             if (check_env_variable())
             {
                 rocsolver_logger::env_var_status = 1;
-                rocsolver_log_begin();
+                update = true;
             }
             else
                 rocsolver_logger::env_var_status = 0;
         }
+        lock.unlock();
+
+        if (update)
+            rocsolver_log_begin();
 
         return rocsolver_logger::env_var_status;
     }
