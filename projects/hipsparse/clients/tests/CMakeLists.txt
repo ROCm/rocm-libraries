@@ -214,14 +214,26 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml)
 
 message("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 message("Python3_EXECUTABLE : ${Python3_EXECUTABLE}")
+message("python : ${python}")
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${Python3_EXECUTABLE} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
+                   COMMAND ${python} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS ../common/hipsparse_gentest.py hipsparse_test.yaml ../include/hipsparse_common.yaml ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 message("HIPSPARSE_TEST_DATA : ${HIPSPARSE_TEST_DATA}")
+
+# Check for a specific file
+if(EXISTS "${HIPSPARSE_TEST_DATA}")
+    message(STATUS "File found!")
+    # Perform actions if the file exists
+else()
+    message(WARNING "File NOT found!")
+    # Perform alternative actions or error handling
+endif()
+
+
 add_custom_target(hipsparse-test-data
   DEPENDS "${HIPSPARSE_TEST_DATA}" )
 
