@@ -289,6 +289,11 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
         fs::rename(temp_name, filename);
         /// \todo What if rename fails? Thou shalt not loose the original file.
         fs::permissions(filename, FS_ENUM_PERMS_ALL);
+        while(fs::exists(temp_name))
+        {
+            MIOPEN_LOG_I2("Waiting for rename ");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
     return true;
 }
