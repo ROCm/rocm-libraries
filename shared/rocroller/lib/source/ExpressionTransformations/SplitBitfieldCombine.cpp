@@ -34,43 +34,44 @@ namespace rocRoller
         {
             constexpr uint32_t         DWORD = 32;
             std::vector<ExpressionPtr> fields;
-            uint32_t                   dstStartBit = expr.dstOffset;
-            uint32_t                   dstEndBit   = expr.dstOffset + expr.width - 1;
-            uint32_t                   numDwords   = (dstSize + DWORD - 1) / DWORD;
+            uint32_t                   combineStartBit = expr.dstOffset;
+            uint32_t                   combineEndBit   = expr.dstOffset + expr.width - 1;
+            uint32_t                   numDwords       = (dstSize + DWORD - 1) / DWORD;
 
             for(int i = 0; i < numDwords; ++i)
             {
-                int dwordStartBit = i * DWORD;
-                int dwordEndBit   = dwordStartBit + DWORD - 1;
+                uint32_t dwordStartBit = i * DWORD;
+                uint32_t dwordEndBit   = dwordStartBit + DWORD - 1;
+
+                // Get new destination dword
+                ExpressionPtr dstDWord     = bfe(DataType::UInt32, expr.rhs, dwordStartBit, DWORD);
+                auto          dstDWordEval = tryEvaluate(dstDWord);
+                if(dstDWordEval.has_value())
+                    dstDWord = literal(dstDWordEval.value());
 
                 // No overlap with this dword
-                if(dstStartBit > dwordEndBit || dstEndBit < dwordStartBit)
+                if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)
                 {
-                    std::cout << "No overlap with dword " << i
-                              << ": dwordStartBit=" << dwordStartBit
-                              << ", dwordEndBit=" << dwordEndBit << std::endl;
-
-                    auto dstDWord = std::make_shared<Expression>(
-                        BitFieldExtract{expr.rhs, "", DataType::UInt32, dwordStartBit, DWORD});
-
-                    // If we can evaluate at translation time, do it now to simplify the expression
-                    auto srcEval = tryEvaluate(dstDWord);
-                    if(srcEval.has_value())
-                    {
-                        std::cout << "Extracted field evaluated to " << srcEval.value()
-                                  << std::endl;
-                        fields.push_back(std::make_shared<Expression>(srcEval.value()));
-                    }
-                    else
-                    {
-                        std::cout << "Extracted field: " << dstDWord << std::endl;
-                        fields.push_back(dstDWord);
-                    }
-                    continue;
+                    fields.push_back(dstDWord);
                 }
+                else
+                {
+                    uint32_t      overlapStart = std::max(combineStartBit, dwordStartBit);
+                    uint32_t      overlapEnd   = std::min(combineEndBit, dwordEndBit);
+                    uint32_t      overlapWidth = overlapEnd - overlapStart + 1;
+                    ExpressionPtr subBitfieldCombine
+                        = bfc(expr.lhs,
+                              dstDWord,
+                              expr.srcOffset + (overlapStart - combineStartBit),
+                              overlapStart - dwordStartBit,
+                              overlapWidth);
+                    // auto subBitfieldCombineEval = tryEvaluate(subBitfieldCombine);
+                    // if(subBitfieldCombineEval.has_value())
+                    //     subBitfieldCombine
+                    //         = literal(subBitfieldCombineEval.value());
 
-                std::cout << "Bitfield overlaps dword " << i << ": dwordStartBit=" << dwordStartBit
-                          << ", dwordEndBit=" << dwordEndBit << std::endl;
+                    fields.push_back(subBitfieldCombine);
+                }
             }
 
             return fields;
