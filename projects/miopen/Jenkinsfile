@@ -135,7 +135,7 @@ pipeline {
             description: "Navi3 currently fails to build with instruction not supported on this GPU error")
         booleanParam(
             name: "TARGET_NAVI35",
-            defaultValue: true,// env.BRANCH_NAME == "develop" ? true : false,
+            defaultValue: env.BRANCH_NAME == "develop" ? true : false,
             description: "Navi3.5 Strix Halo")
         booleanParam(
             name: "TARGET_NAVI4",
