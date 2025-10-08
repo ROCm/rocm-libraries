@@ -155,6 +155,8 @@ class rocsolver_logger
 private:
     // static singleton instance
     static rocsolver_logger* _instance;
+    // is env var for logging enabled
+    static int env_var_status;
     // static mutex for multithreading
     static std::mutex _mutex;
     // profile logging data keyed by function name
@@ -272,10 +274,39 @@ public:
         return rocsolver_logger::_instance;
     }
 
+    // check environment variable
+    static bool check_env_variable()
+    {
+        const char* env;
+        if((env = std::getenv("ROCSOLVER_LOGGING_ENABLED")) != nullptr)
+            return true;
+        return false;
+    }
+
+    // check environment variable, checking if it is cached already
+    static bool check_env_variable_cached()
+    {
+        if (rocsolver_logger::_instance != nullptr)
+            return true;
+        if (rocsolver_logger::env_var_status == -1)
+        {
+            if (check_env_variable())
+            {
+                rocsolver_logger::env_var_status = 1;
+                // call that rocsolver_log_begin_impl function, and get the depth/layer mode from other ROCSOLVER environment variables...
+                rocsolver_log_begin();
+            }
+            else
+                rocsolver_logger::env_var_status = 0;
+        }
+
+        return rocsolver_logger::env_var_status;
+    }
+
     // returns true if logging facilities are enabled
     static __forceinline__ bool is_logging_enabled()
     {
-        return (rocsolver_logger::_instance != nullptr)
+        return (check_env_variable_cached())
             && (rocsolver_logger::_instance->layer_mode
                 & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_bench
                    | rocblas_layer_mode_log_profile));
@@ -284,7 +315,7 @@ public:
     // returns true if logging facilities are enabled for kernels
     static __forceinline__ bool is_kernel_logging_enabled()
     {
-        return (rocsolver_logger::_instance != nullptr)
+        return (check_env_variable_cached())
             && (rocsolver_logger::_instance->layer_mode & rocblas_layer_mode_ex_log_kernel);
     }
 

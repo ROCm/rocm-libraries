@@ -41,6 +41,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 // initialize the static variable
 rocsolver_logger* rocsolver_logger::_instance = nullptr;
+int rocsolver_logger::env_var_status = -1;
 std::mutex rocsolver_logger::_mutex;
 
 static std::string rocblas_version()
