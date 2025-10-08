@@ -1048,8 +1048,9 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_XDLOPS))
         return false;
-
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    // SCG
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
 
     if(problem.GetConv().attribute.deterministic)
@@ -1062,7 +1063,7 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     // Missing intrinsic: llvm.amdgcn.mfma.f32.16x16x8bf16
-    if(problem.IsBfp16() && static_ck::GfxHasMissingBf16Intrinsics(ctx.GetStream().GetDeviceName()))
+    if(problem.IsBfp16() && static_ck::GfxHasMissingBf16Intrinsics(name))
         return false;
 
     if(!IsXdlopsSupport(ctx))
@@ -1083,7 +1084,7 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     if(!problem.Is2d())
         return false;
 
-    if(ctx.GetStream().GetDeviceName() == "gfx90a" && problem.IsGfx90aFp16altRequired())
+    if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
 
     if(!static_ck::IsIndexRangeLargeEnough(problem))

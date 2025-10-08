@@ -728,19 +728,5 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // space between this comment and the newly registered solver(s)!
 }
 
-bool ThisSolverIsDeprecatedStatic::IsDisabled(const ExecutionContext& ctx)
-{
-    const bool device_is_allowed = [&]() {
-        const auto device = ctx.GetStream().GetTargetProperties().Name();
-        return device == "gfx803"                       // Fiji
-               || device == "gfx900"                    // Vega10
-               || device == "gfx906"                    // Vega20, MI50/60
-               || device == "gfx908"                    // MI100
-               || device == "gfx90a"                    // MI200
-               || miopen::StartsWith(device, "gfx103"); // Navi2x
-    }();
-    return !device_is_allowed;
-}
-
 } // namespace solver
 } // namespace miopen
