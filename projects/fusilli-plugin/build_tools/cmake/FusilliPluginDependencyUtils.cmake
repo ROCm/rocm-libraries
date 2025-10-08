@@ -217,5 +217,7 @@ macro(_fetch_Fusilli)
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../sharkfuser
     )
     set(FUSILLI_BUILD_TESTS OFF)
+    set(FUSILLI_BUILD_BENCHMARKS OFF)
+    set(FUSILLI_SYSTEMS_AMDGPU ON)
     FetchContent_MakeAvailable(Fusilli)
 endmacro()
