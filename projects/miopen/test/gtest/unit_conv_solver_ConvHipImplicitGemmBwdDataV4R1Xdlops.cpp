@@ -114,7 +114,6 @@ const auto& GetTestParams()
         }
 
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.EnableDeprecatedSolvers();
         p.Tunable(5);
         p.SetConvAttrFp16Alt(0);
         return p;
@@ -130,7 +129,6 @@ const auto& GetTestParamsFull()
 {
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx908);
-        p.EnableDeprecatedSolvers();
         p.Tunable(1000);
         return p;
     }();

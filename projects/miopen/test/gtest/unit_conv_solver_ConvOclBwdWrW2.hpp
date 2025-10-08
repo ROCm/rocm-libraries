@@ -72,7 +72,6 @@ const auto& GetTestParams()
         Gpu supported_gpus = Gpu::All;
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.EnableDeprecatedSolvers();
         p.Tunable(5);
         p.SetTolerance(Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X, miopenFloat, 2.0f);
         p.SetTolerance(Gpu::gfx950, miopenFloat, 2.5f);

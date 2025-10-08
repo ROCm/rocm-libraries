@@ -51,7 +51,6 @@ const auto& GetTestParams()
         Gpu supported_gpus = Gpu::All;
 #endif
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.EnableDeprecatedSolvers();
         return p;
     }();
     return params;
