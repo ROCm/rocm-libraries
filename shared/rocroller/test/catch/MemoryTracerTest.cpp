@@ -452,6 +452,25 @@ namespace MemoryTracerTest
         }
     }
 
+    TEST_CASE("LDS model sample addresses", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        std::vector<size_t> addresses
+            = {0,  64,  128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960,
+               16, 80,  144, 208, 272, 336, 400, 464, 528, 592, 656, 720, 784, 848, 912, 976,
+               32, 96,  160, 224, 288, 352, 416, 480, 544, 608, 672, 736, 800, 864, 928, 992,
+               48, 112, 176, 240, 304, 368, 432, 496, 560, 624, 688, 752, 816, 880, 944, 1008};
+
+        RuntimeLDSInstruction instr = {
+            .memoryOp = MemoryOpLDS{LdsDirection::Read}, .dwords = 4, .baseAddresses = addresses};
+
+        auto expectedCycles
+            = LDSBankModel::getInstructionDataCycles(instr, GPUArchitectureGFX::GFX950);
+        CHECK(expectedCycles == 16);
+    }
+
     TEST_CASE("LDS model get instruction cycles", "[lds-bank-model]")
     {
         using namespace rocRoller;
