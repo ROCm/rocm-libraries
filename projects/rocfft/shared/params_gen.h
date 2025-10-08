@@ -478,9 +478,7 @@ inline auto param_generator_real(const double                             base_p
 }
 
 template <class Tcontainer>
-auto param_generator_token(const double      base_prob,
-                           const Tcontainer& tokens,
-                           const bool        check_round_trip = true)
+auto param_generator_token(const double base_prob, const Tcontainer& tokens)
 {
     std::vector<fft_params> params;
 
@@ -491,7 +489,6 @@ auto param_generator_token(const double      base_prob,
     {
         fft_params param;
         param.from_token(token);
-        param.check_round_trip = check_round_trip;
         param.validate();
         if(param.valid())
         {

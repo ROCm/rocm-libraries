@@ -397,8 +397,8 @@ const auto adhoc_hermitian_input_tokens = {
     // clang-format on
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    adhoc_token_hermitian_input,
-    accuracy_test,
-    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_hermitian_input_tokens, false)),
-    accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(adhoc_token_hermitian_input,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_token(test_prob,
+                                                                   adhoc_hermitian_input_tokens)),
+                         accuracy_test::TestName);

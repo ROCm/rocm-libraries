@@ -793,14 +793,6 @@ public:
     // affect how the FFT library behaves.
     bool check_output_strides = false;
 
-    // Decides whether to check the round-trip transform in accuracy tests.
-    // Only set to false in some specific tests where the round-trip is
-    // not expected to be checked, e.g., accuracy tests that exercise the
-    // input Hermitian symmetrizer.
-    // NOTE: this flag is also not included in tokens, since it doesn't
-    // affect how the FFT library behaves.
-    bool check_round_trip = true;
-
     // scaling factor - we do a pointwise multiplication of outputs by
     // this factor
     double scale_factor = 1.0;
