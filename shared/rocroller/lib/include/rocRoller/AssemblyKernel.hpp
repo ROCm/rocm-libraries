@@ -241,6 +241,7 @@ namespace rocRoller
         std::vector<AssemblyKernel> kernels;
 
         static AssemblyKernels fromYAML(std::string const& str);
+        static AssemblyKernels fromELF(std::string const& filename);
     };
 }
 

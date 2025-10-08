@@ -148,7 +148,7 @@ namespace rocRoller
                 return false;
             }
 
-        private:
+private:
             template <typename T>
             void comgrNodeInputHelper(amd_comgr_metadata_node_t& n, T& obj)
             {
@@ -158,8 +158,38 @@ namespace rocRoller
                 {
                     std::string str(size - 1, '\0');
                     amd_comgr_get_metadata_string(n, &size, str.data());
-                    std::stringstream ss(str);
-                    ss >> obj;
+                    
+                    // Parse the string based on type
+                    if constexpr (std::is_integral_v<T>)
+                    {
+                        if constexpr (std::is_signed_v<T>)
+                        {
+                            obj = static_cast<T>(std::strtoll(str.c_str(), nullptr, 10));
+                        }
+                        else
+                        {
+                            obj = static_cast<T>(std::strtoull(str.c_str(), nullptr, 10));
+                        }
+                    }
+                    else if constexpr (std::is_floating_point_v<T>)
+                    {
+                        if constexpr (std::is_same_v<T, float>)
+                        {
+                            obj = std::strtof(str.c_str(), nullptr);
+                        }
+                        else if constexpr (std::is_same_v<T, double>)
+                        {
+                            obj = std::strtod(str.c_str(), nullptr);
+                        }
+                        else
+                        {
+                            obj = static_cast<T>(std::strtold(str.c_str(), nullptr));
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, bool>)
+                    {
+                        obj = (str == "true" || str == "1" || str == "True" || str == "TRUE");
+                    }
                 }
                 else
                 {
@@ -194,6 +224,56 @@ namespace rocRoller
             float floatVal;
             comgrNodeInputHelper(n, floatVal);
             val.data = floatVal;
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, FP8& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            // Assuming FP8 has a constructor or assignment from string
+            // You may need to adjust this based on FP8's actual interface
+            val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, BF8& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, FP6& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, BF6& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, FP4& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, E8M0& val)
+        {
+            std::string str;
+            comgrNodeInputHelper(n, str);
+            val.scale = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
         }
 
         template <>

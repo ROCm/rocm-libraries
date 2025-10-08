@@ -24,36 +24,23 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/AssemblyKernel.hpp>
+#pragma once
 
-#include <rocRoller/CodeGen/ArgumentLoader.hpp>
-
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Serialization/ELF.hpp>
+#include <rocRoller/Serialization/comgr/comgr.hpp>
 
 namespace rocRoller
 {
-    std::string AssemblyKernel::amdgpu_metadata_yaml()
+    namespace Serialization
     {
-        AssemblyKernels tmp;
-        tmp.kernels = {*this};
-
-        return Serialization::toYAML(tmp);
-    }
-
-    std::string AssemblyKernel::args_string()
-    {
-        return Serialization::toYAML(m_arguments);
-    }
-
-    AssemblyKernels AssemblyKernels::fromYAML(std::string const& str)
-    {
-        return Serialization::fromYAML<AssemblyKernels>(str);
-    }
-
-    AssemblyKernels AssemblyKernels::fromELF(std::string const& str)
-    {
-        return Serialization::fromELF<AssemblyKernels>(str);
-    }
-}
+        template <typename T>
+        T fromELF(std::string const& elf)
+        {
+            T rv;
+            amd_comgr_metadata_node_t comgrNode;
+            Serialization::ComgrNodeInput comgrNodeInput(comgrNode, nullptr);
+            comgrNodeInput.input(comgrNode, rv);
+            return rv;
+        }
+    } // namespace Serialization
+} // namespace rocRoller

@@ -24,36 +24,45 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/AssemblyKernel.hpp>
+#pragma once
 
-#include <rocRoller/CodeGen/ArgumentLoader.hpp>
-
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
-#include <rocRoller/Serialization/ELF.hpp>
+#include <istream>
+#include <string>
 
 namespace rocRoller
 {
-    std::string AssemblyKernel::amdgpu_metadata_yaml()
+    namespace Serialization
     {
-        AssemblyKernels tmp;
-        tmp.kernels = {*this};
+        /**
+         * Note that the functions declared here will assume that you have included the serialization headers for any
+         * type(s) you want to serialize.
+         */
 
-        return Serialization::toYAML(tmp);
-    }
+        /**
+         * Returns T converted to ELF as a string.
+         */
+        template <typename T>
+        std::string toELF(T obj);
 
-    std::string AssemblyKernel::args_string()
-    {
-        return Serialization::toYAML(m_arguments);
-    }
+        /**
+         * Parses ELF as a string into a T.
+         */
+        template <typename T>
+        T fromELF(std::string const& elf);
 
-    AssemblyKernels AssemblyKernels::fromYAML(std::string const& str)
-    {
-        return Serialization::fromYAML<AssemblyKernels>(str);
-    }
+        /**
+         * Writes T to stream as ELF
+         */
+        template <typename T>
+        void writeELF(std::ostream& stream, T obj);
 
-    AssemblyKernels AssemblyKernels::fromELF(std::string const& str)
-    {
-        return Serialization::fromELF<AssemblyKernels>(str);
+        /**
+         * Reads the file `filename` and returns a T parsed from the ELF data it contains.
+         */
+        template <typename T>
+        T readELFFile(std::string const& filename);
+
     }
 }
+
+#include <rocRoller/Serialization/ELF_impl.hpp>
