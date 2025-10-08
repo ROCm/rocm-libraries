@@ -290,10 +290,10 @@ public:
             return true;
         if (rocsolver_logger::env_var_status == -1)
         {
+        const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
             if (check_env_variable())
             {
                 rocsolver_logger::env_var_status = 1;
-                // call that rocsolver_log_begin_impl function, and get the depth/layer mode from other ROCSOLVER environment variables...
                 rocsolver_log_begin();
             }
             else
