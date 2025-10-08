@@ -895,6 +895,23 @@ def checkSpaceFillAlgoIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
+def checkSpaceFillAlgoWGMIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 2:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        for pair in value:
+            if len(pair) != 2:
+                msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
+                raise Exception(msgBase.format(name, value))
+            for dim in pair:
+                if dim not in range(0,256):
+                    msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
+                    raise Exception(msgBase.format(name, value, dim))
+
 
 def checkParametersAreValid(param, validParams):
     """Ensures paramaters in params exist and have valid values as specified by validParames"""
@@ -922,3 +939,5 @@ def checkParametersAreValid(param, validParams):
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
+        elif name == "SFCWGM":
+            checkSpaceFillAlgoWGMIsValid(name, value)

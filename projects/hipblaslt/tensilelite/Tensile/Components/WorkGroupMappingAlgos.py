@@ -348,8 +348,6 @@ def wgmXCC1(writer, kernel, sgprWGID, sgprNumTilesM, sgprNumTilesN):
 # Remap XCC
 def chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN):
 
-    # TODO: Query arch specific values instead of hard code
-    numTotalCU = 256
     numXCC = 8
 
     module = Module()

@@ -423,7 +423,7 @@ defaultBenchmarkCommonParameters = [
     {"MbskPrefetchMethod": [0]},
     {"UseCustomMainLoopSchedule": [1]},
     {"SpaceFillingAlgo": [[]]},
-    {"SFCWGM": [0x01010101]}
+    {"SFCWGM": [[[1,1],[1,1]]]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

@@ -77,7 +77,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
-        - SFCWGM: [0x02020505, 0x03040108]
+        - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -115,7 +115,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
-        - SFCWGM: [0x02020505, 0x03040108]
+        - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -151,7 +151,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
-        - SFCWGM: [0x02020505, 0x03040108]
+        - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -186,7 +186,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
-        - SFCWGM: [0x02020505, 0x03040108]
+        - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
