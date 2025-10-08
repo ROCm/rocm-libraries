@@ -856,46 +856,87 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     auto zero64 = Expression::literal(0, DataType::UInt64);
     auto zero32 = Expression::literal(0, DataType::UInt32);
-    auto two32 = Expression::literal(2, DataType::UInt32);
+    auto two32  = Expression::literal(2, DataType::UInt32);
+    auto r
+        = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::UInt32, 1);
+    r->allocateNow();
+    auto reg32 = r->expression();
+
+    SECTION("Combine into first dword of 64bit and fold to constant")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 16, 8});
+
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{
+                Expression::literal(0x00ff0000ul, DataType::UInt32), zero32}});
+
+        CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into second dword of 64bit and fold to constant")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 48, 8});
+
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{
+                zero32, Expression::literal(0x00ff0000ul, DataType::UInt32)}});
+
+        CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into middle of first and second dword of 64bit and fold to constant")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 24, 16});
+
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{
+                Expression::literal(0xff000000ul, DataType::UInt32),
+                Expression::literal(0x000000fful, DataType::UInt32)}});
+
+        CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
+    }
 
     SECTION("Combine into first dword of 64bit")
     {
         auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitfieldCombine{two32, zero64, "", 0, 16, 8});
+            Expression::BitfieldCombine{reg32, zero64, "", 0, 16, 8});
 
         auto expect_1 = std::make_shared<Expression::Expression>(
-            Expression::BitfieldCombine{two32, zero32, "", 0, 16, 8});
-        auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{std::vector<Expression::ExpressionPtr>{expect_1, zero32}});
+            Expression::BitfieldCombine{reg32, zero32, "", 0, 16, 8});
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{expect_1, zero32}});
 
-        splitBitfieldCombine(bfc);
         CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     SECTION("Combine into second dword of 64bit")
     {
         auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitfieldCombine{two32, zero64, "", 0, 48, 8});
+            Expression::BitfieldCombine{reg32, zero64, "", 0, 48, 8});
 
         auto expect_1 = std::make_shared<Expression::Expression>(
-        Expression::BitfieldCombine{two32, zero32, "", 0, 16, 8});
-        auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{std::vector<Expression::ExpressionPtr>{zero32, expect_1}});
+            Expression::BitfieldCombine{reg32, zero32, "", 0, 16, 8});
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{zero32, expect_1}});
 
-        splitBitfieldCombine(bfc);
         CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     SECTION("Combine into middle of first and second dword of 64bit")
     {
         auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitfieldCombine{two32, zero64, "", 0, 24, 16});
+            Expression::BitfieldCombine{reg32, zero64, "", 0, 24, 16});
 
         auto expect_1 = std::make_shared<Expression::Expression>(
-        Expression::BitfieldCombine{two32, zero32, "", 0, 24, 8});
+            Expression::BitfieldCombine{reg32, zero32, "", 0, 24, 8});
         auto expect_2 = std::make_shared<Expression::Expression>(
-        Expression::BitfieldCombine{two32, zero32, "", 8, 0, 8});
-        auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{std::vector<Expression::ExpressionPtr>{expect_1, expect_2}});
+            Expression::BitfieldCombine{reg32, zero32, "", 8, 0, 8});
+        auto expected = std::make_shared<Expression::Expression>(
+            Expression::Concatenate{std::vector<Expression::ExpressionPtr>{expect_1, expect_2}});
 
-        splitBitfieldCombine(bfc);
         CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
     }
 

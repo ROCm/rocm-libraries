@@ -65,10 +65,10 @@ namespace rocRoller
                               expr.srcOffset + (overlapStart - combineStartBit),
                               overlapStart - dwordStartBit,
                               overlapWidth);
-                    // auto subBitfieldCombineEval = tryEvaluate(subBitfieldCombine);
-                    // if(subBitfieldCombineEval.has_value())
-                    //     subBitfieldCombine
-                    //         = literal(subBitfieldCombineEval.value());
+
+                    auto subBitfieldCombineEval = tryEvaluate(subBitfieldCombine);
+                    if(subBitfieldCombineEval.has_value())
+                        subBitfieldCombine = literal(subBitfieldCombineEval.value());
 
                     fields.push_back(subBitfieldCombine);
                 }
