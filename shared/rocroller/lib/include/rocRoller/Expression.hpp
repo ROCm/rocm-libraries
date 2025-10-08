@@ -679,6 +679,8 @@ namespace rocRoller
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
 
+        ExpressionPtr bfc(ExpressionPtr src, ExpressionPtr dst, unsigned srcOffset, unsigned dstOffset, unsigned width);
+
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
 
