@@ -21,7 +21,8 @@ class IReferenceValidation
 public:
     virtual ~IReferenceValidation() = default;
 
-    virtual bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation)
+    virtual bool allClose(const IMigratableMemory<T>& reference,
+                          const IMigratableMemory<T>& implementation)
         = 0;
 };
 

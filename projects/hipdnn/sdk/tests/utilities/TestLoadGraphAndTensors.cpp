@@ -99,6 +99,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 
     using ExpectedType = std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<float>>>;
+
     ASSERT_TRUE(std::holds_alternative<ExpectedType>(res.tensorMap));
     const ExpectedType& tensorMap = std::get<ExpectedType>(res.tensorMap);
 

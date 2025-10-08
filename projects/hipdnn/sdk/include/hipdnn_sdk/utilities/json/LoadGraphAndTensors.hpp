@@ -11,18 +11,34 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
+#include <type_traits>
 #include <variant>
 
 namespace hipdnn_sdk::json
 {
 
+template <class T>
+using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<T>>>;
+
 namespace detail
 {
+
 template <class... Ts>
 struct TensorMapVariant
 {
-    using Type
-        = std::variant<std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<Ts>>>...>;
+    using Type = std::variant<TensorMap<Ts>...>;
+};
+
+template <class T>
+struct DataTypeFromTensorMap
+{
+};
+
+template <class T>
+struct DataTypeFromTensorMap<
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<T>>>>
+{
+    using Type = T;
 };
 
 template <class T>
@@ -56,7 +72,21 @@ std::unique_ptr<utilities::Tensor<T>>
 }
 }
 
-using TensorMapVariant = detail::TensorMapVariant<float, double, half, hip_bfloat16, int32_t>::Type;
+using TensorMapVariant =
+    typename detail::TensorMapVariant<float, double, half, hip_bfloat16, int32_t>::Type;
+// using TensorMapVariant = std::variant<
+//     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<float>>>,
+//     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<double>>>,
+//     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<half>>>,
+//     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<hip_bfloat16>>>,
+//     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<int32_t>>>>;
+
+template <class T>
+using DataTypeFromTensorMap =
+    typename detail::DataTypeFromTensorMap<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
+
+using T = DataTypeFromTensorMap<
+    const std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<float>>>&>;
 
 struct GraphAndTensorMap
 {

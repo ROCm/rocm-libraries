@@ -2,17 +2,91 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_sdk/utilities/Visitor.hpp>
+#include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
+
+class TestCpuFpReferenceBatchnormFwdInference
+    : public ::testing::TestWithParam<std::filesystem::path>
+{
+public:
+    hipdnn_sdk::json::GraphAndTensorMap graphAndTensors;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void SetUp() override
+    {
+        auto const& path = GetParam();
+
+        graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
+    }
+
+    // void TearDown() override {
+
+    // }
+};
+
+TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
+{
+    auto const& graph = graphAndTensors.graph();
+    ASSERT_EQ(graph.nodes()->size(), 1);
+
+    ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
+              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+
+    auto const& attributes = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
+
+    int64_t inputUid = attributes.x_tensor_uid();
+    int64_t meanUid = attributes.mean_tensor_uid();
+    int64_t invVarianceUid = attributes.inv_variance_tensor_uid();
+    int64_t biasUid = attributes.bias_tensor_uid();
+    int64_t scaleUid = attributes.scale_tensor_uid();
+    int64_t outputUid = attributes.y_tensor_uid();
+
+    EXPECT_EQ(graphAndTensors.deviceBuffers().size(), 6);
+
+    std::visit(
+        Visitor{[&](auto const& tensorMap) {
+                    using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
+
+                    const Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
+
+                    Tensor<DataType> cpuOutput(referenceOutput.dims(), referenceOutput.strides());
+
+                    CpuFpReferenceBatchnormImpl<DataType, DataType>::batchnormFwdInference(
+                        *tensorMap.at(inputUid),
+                        *tensorMap.at(scaleUid),
+                        *tensorMap.at(biasUid),
+                        *tensorMap.at(meanUid),
+                        *tensorMap.at(invVarianceUid),
+                        cpuOutput,
+                        1e-5);
+                    auto tolerance
+                        = hipdnn_sdk::test_utilities::batchnorm::getToleranceInference<DataType>();
+                    auto validator
+                        = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<DataType>(tolerance);
+                    EXPECT_TRUE(validator.allClose(cpuOutput.memory(), referenceOutput.memory()));
+                },
+                [&](hipdnn_sdk::json::TensorMap<int> const&) { FAIL(); }},
+        graphAndTensors.tensorMap);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuFpReferenceBatchnormFwdInference,
+                         testing::ValuesIn(std::vector<std::filesystem::path>{
+                             "../lib/test_graphs/BatchnormForwardInference.json",
+                             "../lib/test_graphs/BatchnormForwardInferenceLarge.json"}));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {
