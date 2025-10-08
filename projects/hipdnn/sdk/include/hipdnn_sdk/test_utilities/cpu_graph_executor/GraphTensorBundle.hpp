@@ -32,6 +32,16 @@ struct GraphTensorBundle
         }
     }
 
+    void randomizeTensor(int64_t uid, float min, float max, unsigned int seed)
+    {
+        auto it = tensors.find(uid);
+        if(it == tensors.end())
+        {
+            throw std::runtime_error("Tensor with uid " + std::to_string(uid) + " not found");
+        }
+        it->second->fillTensorWithRandomValues(min, max, seed);
+    }
+
     std::unordered_map<int64_t, void*> toVariantPack()
     {
         std::unordered_map<int64_t, void*> variantPack;

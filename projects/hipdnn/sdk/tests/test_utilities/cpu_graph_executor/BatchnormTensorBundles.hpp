@@ -6,10 +6,9 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-
-#include "TensorNames.hpp"
 
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
@@ -21,39 +20,20 @@ namespace hipdnn_sdk_test_utils
 struct BatchnormFwdTensorBundle : public GraphTensorBundle
 {
     BatchnormFwdTensorBundle(
+        const hipdnn_plugin::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
         : GraphTensorBundle(tensorMap)
     {
-        for(const auto& [id, attr] : tensorMap)
-        {
-            if(attr->name()->str() == X_TENSOR_NAME)
-            {
-                auto& tensor = tensors[id];
-                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
-            }
-            else if(attr->name()->str() == SCALE_TENSOR_NAME)
-            {
-                auto& tensor = tensors[id];
-                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
-            }
-            else if(attr->name()->str() == BIAS_TENSOR_NAME)
-            {
-                auto& tensor = tensors[id];
-                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
-            }
-            else if(attr->name()->str() == MEAN_TENSOR_NAME)
-            {
-                auto& tensor = tensors[id];
-                tensor->fillTensorWithRandomValues(0.0f, 1.0f, seed);
-            }
-            else if(attr->name()->str() == INV_VARIANCE_TENSOR_NAME)
-            {
-                auto& tensor = tensors[id];
-                tensor->fillTensorWithRandomValues(0.1f, 1.0f, seed);
-            }
-        }
+        const auto& attributes
+            = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+
+        randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.bias_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.mean_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.inv_variance_tensor_uid(), 0.1f, 1.0f, seed);
     }
 };
 

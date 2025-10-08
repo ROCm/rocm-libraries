@@ -4,7 +4,6 @@
 #pragma once
 
 #include "BatchnormTensorBundles.hpp"
-#include "TensorNames.hpp"
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -171,39 +170,30 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        X_TENSOR_NAME, hipdnn_frontend::fromSdkType(inputDataType), dims, strides);
+        "x", hipdnn_frontend::fromSdkType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        SCALE_TENSOR_NAME,
-        hipdnn_frontend::fromSdkType(scaleBiasDataType),
-        derivedDims,
-        derivedStrides);
+        "scale", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
     scaleAttr.set_uid(uid++);
     auto scaleTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        BIAS_TENSOR_NAME,
-        hipdnn_frontend::fromSdkType(scaleBiasDataType),
-        derivedDims,
-        derivedStrides);
+        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
     biasAttr.set_uid(uid++);
     auto biasTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
     auto meanAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        MEAN_TENSOR_NAME,
-        hipdnn_frontend::fromSdkType(meanVarianceDataType),
-        derivedDims,
-        derivedStrides);
+        "mean", hipdnn_frontend::fromSdkType(meanVarianceDataType), derivedDims, derivedStrides);
     meanAttr.set_uid(uid++);
     auto meanTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(meanAttr));
 
     auto varianceAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        INV_VARIANCE_TENSOR_NAME,
+        "invVariance",
         hipdnn_frontend::fromSdkType(meanVarianceDataType),
         derivedDims,
         derivedStrides);
@@ -221,7 +211,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     {
         yTensorAttr->set_uid(uid++);
     }
-    yTensorAttr->set_name(Y_TENSOR_NAME);
+    yTensorAttr->set_name("Y");
     yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
     yTensorAttr->set_dim(dims);
     yTensorAttr->set_stride(strides);

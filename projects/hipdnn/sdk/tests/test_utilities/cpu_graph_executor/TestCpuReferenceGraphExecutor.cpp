@@ -46,7 +46,8 @@ public:
 
         GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-        BatchnormFwdTensorBundle tensorBundle(graphWrapper.getTensorMap(), seed);
+        BatchnormFwdTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
         auto variantPack = tensorBundle.toVariantPack();
 
