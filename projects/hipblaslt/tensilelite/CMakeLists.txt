@@ -3,6 +3,17 @@
 
 add_subdirectory(rocisa)
 
+include(CheckCXXCompilerFlag)
+# Check for GCC/Clang flag
+check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2_GCC)
+# Check for MSVC flag
+check_cxx_compiler_flag("/arch:AVX2" COMPILER_SUPPORTS_AVX2_MSVC)
+if(COMPILER_SUPPORTS_AVX2_GCC)
+    set(AVX2_FLAG "-mavx2")
+elseif(COMPILER_SUPPORTS_AVX2_MSVC)
+    set(AVX2_FLAG "/arch:AVX2")
+endif()
+ 
 if(TENSILELITE_ENABLE_AUTOBUILD)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     include(tensilelite_auto_build)
@@ -16,7 +27,7 @@ if(TENSILELITE_ENABLE_HOST)
         PROPERTIES
             POSITION_INDEPENDENT_CODE ON
     )
-    target_compile_options(tensilelite-host PUBLIC -fvisibility=hidden)
+    target_compile_options(tensilelite-host PUBLIC -fvisibility=hidden ${AVX2_FLAG})
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)
     target_compile_definitions(tensilelite-host
         PUBLIC

@@ -261,6 +261,47 @@ class MLPClassificationLibrary:
         self.problemFeatures = problem_features
 
 
+class TwoTowersEmbeddingLibrary:
+    Tag = "TwoTowersEmbedding"
+    StateKeys = [("type", "tag"), "table", "query_tower", "sol_embeddings"]
+
+    @classmethod
+    def FromOriginalState(cls, d, solutions):
+        origTable = d["table"]
+        table = []
+
+        try:
+            indexStart  = origTable[0]
+            indexOffset = origTable[1]
+            for index in range(indexStart, indexStart + indexOffset):
+                value = IndexSolutionLibrary(solutions[index])
+                table.append(value)
+        except KeyError:
+            pass
+        
+        query_tower = d["query_tower"]
+        sol_embeddings = d["sol_embeddings"]
+        
+        return cls(table, query_tower, sol_embeddings)
+
+    @property
+    def tag(self):
+        return self.__class__.Tag
+
+    def merge(self, other):
+        raise RuntimeError(
+            "TwoTowersEmbeddingLibrary does not support merging yet."
+        )
+
+    def remapSolutionIndices(self, indexMap):
+        pass
+
+    def __init__(self, table, query_tower, sol_embeddings):
+        self.table = table
+        self.query_tower = query_tower
+        self.sol_embeddings = sol_embeddings
+
+
 class ProblemMapLibrary:
     Tag = "ProblemMap"
     StateKeys = [("type", "tag"), ("property", "mappingProperty"), ("map", "mapping")]
@@ -442,6 +483,13 @@ class MasterSolutionLibrary:
                 regressionLib = MLPClassificationLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": regressionLib})
+            elif d["LibraryType"] == "TwoTowersEmbedding":
+                predicate = Properties.Predicate(tag="TruePred")
+
+                regressionLib = TwoTowersEmbeddingLibrary.FromOriginalState(d["Library"], solutions)
+                library = PredicateLibrary(tag="Problem")
+                library.rows.append({"predicate": predicate, "library": regressionLib})
+                
             else:
                 assert 0 and "Unrecognized LibraryType."
 

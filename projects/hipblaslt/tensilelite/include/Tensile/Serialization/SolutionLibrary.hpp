@@ -42,6 +42,8 @@
 #include <Tensile/Serialization/ExactLogicLibrary.hpp>
 #include <Tensile/Serialization/GranularitySelectionLibrary.hpp>
 #include <Tensile/Serialization/MLPClassificationLibrary.hpp>
+#include <Tensile/Serialization/TwoTowersEmbeddingLibrary.hpp>
+
 #include <Tensile/Serialization/MapLibrary.hpp>
 #include <Tensile/Serialization/MatchingLibrary.hpp>
 #include <Tensile/Serialization/PlaceholderLibrary.hpp>
@@ -81,7 +83,9 @@ namespace TensileLite
                      Base::template Pair<ProblemMatchingLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<GranularitySelectionLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<PlaceholderLibrary<MyProblem, MySolution>>(),
-                     Base::template Pair<MLPClassificationLibrary<MyProblem, MySolution>>()});
+                     Base::template Pair<MLPClassificationLibrary<MyProblem, MySolution>>(),
+                     Base::template Pair<TwoTowersEmbeddingLibrary<MyProblem, MySolution>>()});
+
             }
         };
 

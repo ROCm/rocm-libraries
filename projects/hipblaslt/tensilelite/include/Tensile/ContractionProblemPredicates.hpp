@@ -1881,6 +1881,36 @@ namespace TensileLite
                 }
             };
 
+            struct ExperimentalTwoTowers : public Predicate_CRTP<ExperimentalTwoTowers, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                ExperimentalTwoTowers() = default;
+                static std::string Type()
+                {
+                    return "ExperimentalTwoTowers";
+                }
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return (problem.performanceMetric() == PerformanceMetric::ExperimentalTwoTowers);
+                }
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.performanceMetric(),
+                                        "==",
+                                        "sol: PerformanceMetric::ExperimentalTwoTowers",
+                                        PerformanceMetric::ExperimentalTwoTowers);
+                }
+            };
+
+            
             struct EqualityMatching
                 : public Predicate_CRTP<EqualityMatching, ContractionProblemGemm>
             {

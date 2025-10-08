@@ -23,6 +23,7 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Predicates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Properties.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/SolutionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/TwoTowersEmbeddingLibrary.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPU.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPUPredicates.hpp"
@@ -84,6 +85,7 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TwoTowersEmbedding.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
 )

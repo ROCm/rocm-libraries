@@ -101,6 +101,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::GroupedGemmEqual>(),
                      Base::template Pair<Predicates::Contraction::CUEfficiency>(),
                      Base::template Pair<Predicates::Contraction::ExperimentalMLP>(),
+                     Base::template Pair<Predicates::Contraction::ExperimentalTwoTowers>(),
                      Base::template Pair<Predicates::Contraction::ExperimentalStreamK>(),
                      Base::template Pair<Predicates::Contraction::EqualityMatching>(),
                      Base::template Pair<Predicates::Contraction::RangeMatching>(),
@@ -397,6 +398,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::ExperimentalMLP, IO>
             : public AutoMappingTraits<Predicates::Contraction::ExperimentalMLP, IO>
+        {
+        };
+        
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ExperimentalTwoTowers, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ExperimentalTwoTowers, IO>
         {
         };
 
