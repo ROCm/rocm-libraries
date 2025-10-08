@@ -52,7 +52,8 @@ T sigmoid(T x)
 template <typename Tgpu, typename Tcheck>
 int mloGLUForwardContiguousDim0RunHost(const Tgpu* input,
                                        miopenTensorDescriptor_t outputDesc,
-                                       Tcheck* outputHost)
+                                       Tcheck* outputHost,
+                                       bool parallel)
 {
     auto output_numel    = miopen::deref(outputDesc).GetElementSize();
     auto inputFirstHalf  = input;
@@ -60,12 +61,25 @@ int mloGLUForwardContiguousDim0RunHost(const Tgpu* input,
 
     int ret = 0;
 
-    par_for(output_numel, 1<<17, [&](const size_t& o){
-        Tcheck valA   = static_cast<Tcheck>(inputFirstHalf[o]);
-        Tcheck valB   = static_cast<Tcheck>(inputSecondHalf[o]);
-        Tcheck val    = valA * sigmoid(valB);
-        outputHost[o] = val;
-    });
+    if(parallel)
+    {
+        par_for(output_numel, [&](const size_t& o) {
+            Tcheck valA   = static_cast<Tcheck>(inputFirstHalf[o]);
+            Tcheck valB   = static_cast<Tcheck>(inputSecondHalf[o]);
+            Tcheck val    = valA * sigmoid(valB);
+            outputHost[o] = val;
+        });
+    }
+    else
+    {
+        for(size_t o = 0; o < output_numel; ++o)
+        {
+            Tcheck valA   = static_cast<Tcheck>(inputFirstHalf[o]);
+            Tcheck valB   = static_cast<Tcheck>(inputSecondHalf[o]);
+            Tcheck val    = valA * sigmoid(valB);
+            outputHost[o] = val;
+        }
+    }
 
     return ret;
 }
@@ -74,7 +88,8 @@ template <typename Tgpu, typename Tcheck>
 int mloGLUBackwardCongiguousDim0RunHost(const Tgpu* input,
                                         miopenTensorDescriptor_t outputGradDesc,
                                         const Tgpu* outputGrad,
-                                        Tcheck* inputGradHost)
+                                        Tcheck* inputGradHost,
+                                        bool parallel)
 {
     int ret = 0;
 
@@ -84,15 +99,29 @@ int mloGLUBackwardCongiguousDim0RunHost(const Tgpu* input,
     auto inputFistHalf_grad   = inputGradHost;
     auto inputSecondHalf_grad = inputGradHost + outputGrad_numel;
 
-    par_for(outputGrad_numel, 1<<17, [&](const auto& o)
+    if(parallel)
     {
-        Tcheck inputFirstHalf_v = static_cast<Tcheck>(inputFirstHalf[o]);
-        Tcheck sigmoid_v        = sigmoid(static_cast<Tcheck>(inputSecondHalf[o]));
-        Tcheck grad_v           = static_cast<Tcheck>(outputGrad[o]);
+        par_for(outputGrad_numel, [&](const auto& o) {
+            Tcheck inputFirstHalf_v = static_cast<Tcheck>(inputFirstHalf[o]);
+            Tcheck sigmoid_v        = sigmoid(static_cast<Tcheck>(inputSecondHalf[o]));
+            Tcheck grad_v           = static_cast<Tcheck>(outputGrad[o]);
 
-        inputFistHalf_grad[o]   = sigmoid_v * grad_v;
-        inputSecondHalf_grad[o] = (1 - sigmoid_v) * sigmoid_v * grad_v * inputFirstHalf_v;
-    });
+            inputFistHalf_grad[o]   = sigmoid_v * grad_v;
+            inputSecondHalf_grad[o] = (1 - sigmoid_v) * sigmoid_v * grad_v * inputFirstHalf_v;
+        });
+    }
+    else
+    {
+        for(size_t o = 0; o < outputGrad_numel; ++o)
+        {
+            Tcheck inputFirstHalf_v = static_cast<Tcheck>(inputFirstHalf[o]);
+            Tcheck sigmoid_v        = sigmoid(static_cast<Tcheck>(inputSecondHalf[o]));
+            Tcheck grad_v           = static_cast<Tcheck>(outputGrad[o]);
+
+            inputFistHalf_grad[o]   = sigmoid_v * grad_v;
+            inputSecondHalf_grad[o] = (1 - sigmoid_v) * sigmoid_v * grad_v * inputFirstHalf_v;
+        }
+    }
 
     return ret;
 }
@@ -142,6 +171,7 @@ private:
     InputFlags inflags;
 
     int forw;
+    bool multithreaded;
 
     miopenTensorDescriptor_t inputTensor;
     miopenTensorDescriptor_t outputTensor;
@@ -183,6 +213,8 @@ int GLUDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     {
         MIOPEN_THROW("Invalid Forward Mode");
     }
+
+    multithreaded = static_cast<bool>(inflags.GetValueInt("multithreaded"));
 
     return miopenStatusSuccess;
 }
@@ -241,6 +273,8 @@ int GLUDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag(
+        "multithreaded", 'm', "0", "Run CPU forward/backward in multithreaded mode (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -371,7 +405,7 @@ template <typename Tgpu, typename Tref>
 int GLUDriver<Tgpu, Tref>::RunForwardCPU()
 {
     MIOPEN_THROW_IF(dim != 0, "This driver only supports dim = 0");
-    mloGLUForwardContiguousDim0RunHost<Tgpu, Tref>(in.data(), outputTensor, outhost.data());
+    mloGLUForwardContiguousDim0RunHost<Tgpu, Tref>(in.data(), outputTensor, outhost.data(), multithreaded);
 
     return miopenStatusSuccess;
 }
@@ -455,7 +489,7 @@ int GLUDriver<Tgpu, Tref>::RunBackwardCPU()
 {
     MIOPEN_THROW_IF(dim != 0, "This driver only supports dim = 0");
     mloGLUBackwardCongiguousDim0RunHost<Tgpu, Tref>(
-        in.data(), outputTensorGrad, outGrad.data(), inGradhost.data());
+        in.data(), outputTensorGrad, outGrad.data(), inGradhost.data(), multithreaded);
 
     return miopenStatusSuccess;
 }
