@@ -2751,6 +2751,10 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
                 }
             }
 
+            // if this axis is already done, move to the next one
+            if(fft_done[pencil_axis])
+                continue;
+
             // create the next field by splitting using a heuristic approach
             rocfft_field_t nextField;
             bool           writeToUserOutput = i == transpose_sequence.size() - 1;
@@ -2804,18 +2808,15 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
             currentAntecedents = transposeItems;
 
             // once data is transposed, plan intermediate FFT
-            if(!fft_done[pencil_axis])
-            {
-                std::vector<size_t> fftItems;
-                C2CField(currentField,
-                         {static_cast<size_t>(pencil_axis)},
-                         writeToUserOutput ? outputBufs : currentBufs,
-                         writeToUserOutput ? outputBufs : currentBufs,
-                         currentAntecedents,
-                         fftItems);
-                fft_done[pencil_axis] = 1;
-                currentAntecedents    = fftItems;
-            }
+            std::vector<size_t> fftItems;
+            C2CField(currentField,
+                     {static_cast<size_t>(pencil_axis)},
+                     writeToUserOutput ? outputBufs : currentBufs,
+                     writeToUserOutput ? outputBufs : currentBufs,
+                     currentAntecedents,
+                     fftItems);
+            fft_done[pencil_axis] = 1;
+            currentAntecedents    = fftItems;
         }
     }
     // default general decomposition without sub-communicators
