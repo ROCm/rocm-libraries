@@ -325,8 +325,6 @@ struct Arguments
 
     void set_filename(const std::string& bin_file)
     {
-        std::cout << "bin_file: " << bin_file << " bin_file.length(): " << bin_file.length()
-                  << std::endl;
         strncpy(this->filename, bin_file.c_str(), bin_file.length());
         this->filename[bin_file.length()] = '\0';
     }

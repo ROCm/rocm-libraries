@@ -71,11 +71,6 @@ HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSparseToDenseAlg_
                                                       hipsparse_sparsetodensealg2string);
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseDenseToSparseAlg_t,
                                                       hipsparse_densetosparsealg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_gtsv_interleaved_alg,
-//                                                       hipsparse_gtsvinterleavedalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_gpsv_interleaved_alg,
-//                                                       hipsparse_gpsvalg2string);
-
 #undef HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE
 
 template <typename T>
