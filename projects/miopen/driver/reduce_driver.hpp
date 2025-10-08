@@ -115,6 +115,7 @@ private:
     std::vector<int> outhost_indices;
 
     bool need_indices;
+    bool cpu_parallel;
     std::size_t ws_sizeInBytes;
     std::size_t indices_sizeInBytes;
 
@@ -212,6 +213,7 @@ int ReduceDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag("dump_output", 'o', "0", "Dumps the output buffers (Default=0)", "int");
     inflags.AddInputFlag("in_data", 'd', "", "Input data filename (Default=)", "string");
+    inflags.AddInputFlag("multithreaded", 'm', "0", "Run CPU part in parallel (Default=0)", "int");
 
     return 0;
 }
@@ -227,6 +229,8 @@ int ReduceDriver<Tgpu, Tref>::SetReduceTensorDescriptorFromCmdLineArgs()
     miopenReduceTensorIndices_t indicesOpt =
         static_cast<miopenReduceTensorIndices_t>(inflags.GetValueInt("IndicesUsed"));
     miopenIndicesType_t indicesType = MIOPEN_32BIT_INDICES;
+
+    cpu_parallel = static_cast<bool>(inflags.GetValueInt("multithreaded"));
 
     // no other place is better to place this line of codes
     this->need_indices =
@@ -247,7 +251,6 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     using reduce::convert_type;
 
     size_t in_nelem  = GetTensorSize(inputTensor);
-    printf("in_nelem = %zu\n", in_nelem);
     size_t out_nelem = GetTensorSize(outputTensor);
 
     miopenGetReductionWorkspaceSize(
@@ -405,13 +408,17 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
 
     auto reduceOp = static_cast<miopenReduceTensorOp_t>(inflags.GetValueInt("ReduceOp"));
 
-    if(indices_sizeInBytes > 0)
+    if(this->need_indices)
     {
         alpha = 1.0f;
         beta  = 0.0f;
     };
 
-    hostReduction.Run(alpha, in.data(), beta, outhost, outhost_indices.data());
+    if(cpu_parallel) {
+        hostReduction.Run<true>(alpha, in.data(), beta, outhost, outhost_indices.data());
+    }else {
+        hostReduction.Run<false>(alpha, in.data(), beta, outhost, outhost_indices.data());
+    }
 
     auto error       = miopen::rms_range(outhost, out);
     double tolerance = 1.5e-4;

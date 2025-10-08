@@ -73,6 +73,7 @@ public:
         this->reduceAllDims = this->invariantDims.empty();
     };
 
+    template <bool parallel>
     void
     Run(float alpha, const Tgpu* in_data, float beta, std::vector<Tref>& out_data, int* indices)
     ~miopenReductionHost(){};
@@ -82,19 +83,19 @@ public:
         if(compTypeVal == miopenFloat)
         {
             if constexpr(std::is_same_v<Tref, double>)
-                RunImpl<double>(alpha, in_data, beta, out_data, indices);
+                RunImpl<double, parallel>(alpha, in_data, beta, out_data, indices);
             else
-                RunImpl<float>(alpha, in_data, beta, out_data, indices);
+                RunImpl<float, parallel>(alpha, in_data, beta, out_data, indices);
         }
         else if(compTypeVal == miopenHalf)
         {
             if constexpr(std::is_same_v<Tref, double> || std::is_same_v<Tref, float>)
-                RunImpl<Tref>(alpha, in_data, beta, out_data, indices);
+                RunImpl<Tref, parallel>(alpha, in_data, beta, out_data, indices);
             else
-                RunImpl<float16>(alpha, in_data, beta, out_data, indices);
+                RunImpl<float16, parallel>(alpha, in_data, beta, out_data, indices);
         }
         else if(compTypeVal == miopenDouble)
-            RunImpl<double>(alpha, in_data, beta, out_data, indices);
+            RunImpl<double, parallel>(alpha, in_data, beta, out_data, indices);
     };
 
 private:
@@ -117,8 +118,9 @@ private:
 
     bool reduceAllDims;
 
-    template <typename compType>
-    void RunImpl(float alpha, const Tgpu* in_data, float beta, std::vector<Tref>& out_data, int* indices)
+    template <typename compType, bool parallel>
+    void RunImpl(
+        float alpha, const Tgpu* in_data, float beta, std::vector<Tref>& out_data, int* indices)
     {
         bool need_indices =
             (indicesOpt == MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES) &&
@@ -126,12 +128,12 @@ private:
              reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
         if(need_indices)
-            RunImpl_generic<compType, true>(alpha, in_data, beta, out_data, indices);
+            RunImpl_generic<compType, true, parallel>(alpha, in_data, beta, out_data, indices);
         else
-            RunImpl_generic<compType, false>(alpha, in_data, beta, out_data);
+            RunImpl_generic<compType, false, parallel>(alpha, in_data, beta, out_data);
     };
 
-    template <typename compType, bool UseIdx>
+    template <typename compType, bool UseIdx, bool parallel>
     void RunImpl_generic(float alpha,
                          const Tgpu* in_data,
                          float beta,
@@ -161,8 +163,7 @@ private:
 
         if(reduceAllDims)
         {
-            std::vector<std::vector<int>> idx_all;
-            get_all_indexes(inLengths, 0, idx_all);
+            const auto idx_all = get_all_indexes(inLengths);
 
             compType accuVal = ReduceOpZeroVal<compType>(this->reduceOp);
             int accuIndex    = 0;
@@ -186,10 +187,7 @@ private:
                 }
             }
 
-            if constexpr(!UseIdx)
-            {
-                PosUnaryOp(accuVal);
-            }
+            PosUnaryOp(accuVal);
 
             if(!float_equal_one(alpha))
                 accuVal *= convert_type<compType>(alpha);
@@ -204,12 +202,10 @@ private:
         }
         else
         {
-            std::vector<std::vector<int>> inv_idx, red_idx;
-            get_all_indexes(this->invariantLengths, 0, inv_idx);
-            get_all_indexes(this->toReduceLengths, 0, red_idx);
+            const auto inv_idx = get_all_indexes(this->invariantLengths);
+            const auto red_idx = get_all_indexes(this->toReduceLengths);
 
-            for(const auto& i1 : inv_idx)
-            {
+            auto work_iter = [&](const std::vector<int>& i1) {
                 std::vector<int> src_index(this->inLengths.size(), 0);
                 std::vector<int> dst_index(this->inLengths.size(), 0);
 
@@ -261,6 +257,22 @@ private:
                 if constexpr(UseIdx)
                 {
                     indices[dst_offset] = accuIndex;
+                }
+            };
+
+            if constexpr(parallel)
+            {
+                const auto inv_size = inv_idx.size();
+                par_for(inv_size, [&](const int i) {
+                    const auto& i1 = inv_idx[i];
+                    work_iter(i1);
+                });
+            }
+            else
+            {
+                for(const auto& i1 : inv_idx)
+                {
+                    work_iter(i1);
                 }
             }
         }
