@@ -131,6 +131,18 @@ if(BUILD_CLIENTS_TESTS)
   add_custom_target(hipsparse-common DEPENDS "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}" "${HIPSPARSE_CLIENTMATRICES}" "${HIPSPARSE_GENTEST}" "${HIPSPARSE_CONVERT}")
 
   rocm_install(
+    FILES "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
+    )
+  #
+  rocm_install(
+    PROGRAMS "${HIPSPARSE_GENTEST}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipsparse/test"
+    )
+
+  rocm_install(
     PROGRAMS "${HIPSPARSE_CONVERT}"
     COMPONENT clients-common
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -141,8 +153,5 @@ if(BUILD_CLIENTS_TESTS)
     COMPONENT clients-common
     DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
     )
-
-
-
 
 endif()
