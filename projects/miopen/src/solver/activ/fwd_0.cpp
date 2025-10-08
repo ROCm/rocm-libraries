@@ -107,8 +107,8 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
-        {"MIOPEN_MAP_SZ", x_elem_sz},
         {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
+        {"MIOPEN_ROW_WIDTH", x_width2D},
     };
 
     if(problem.GetXDesc().GetType() == miopenFloat)

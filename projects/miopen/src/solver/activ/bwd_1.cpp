@@ -60,7 +60,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
     const auto& xDesc  = problem.GetXDesc();
     const auto& yDesc  = problem.GetYDesc();
     const auto& dxDesc = problem.GetDXDesc();
-    const auto& dyDesc = problem.GetDXDesc();
+    const auto& dyDesc = problem.GetDYDesc();
 
     int ndOut       = 1;
     int cdOut       = 1;
