@@ -1250,6 +1250,7 @@ struct onesweep_iteration_helper
             }
         }
 
+        unsigned int digits[ItemsPerThread];
         ROCPRIM_NO_UNROLL
         for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, N); ++j, x+=WindowOffset)
         {
@@ -1280,6 +1281,10 @@ struct onesweep_iteration_helper
                     key_codec::decode_inplace(key, decomposer);
                     const Offset global_offset        = storage.global_digit_offsets[digit];
                     keys_output[rank + global_offset] = key;
+                    if constexpr(with_values)
+                    {
+                        digits[n + j * N] = digit;
+                    }
                 }
             }
 
@@ -1317,38 +1322,6 @@ struct onesweep_iteration_helper
                                               values,
                                               valid_items);
                 }
-            }
-
-            // Compute digits up-front so that we can re-use shared memory between ordered_block_keys and
-            // ordered_block_values.
-            unsigned int digits[ItemsPerThread];
-            ROCPRIM_NO_UNROLL
-            for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, N); ++j, x+=WindowOffset)
-            {
-                ROCPRIM_UNROLL
-                for(unsigned int i = 0; i < ItemsPerThread; ++i)
-                {
-                    const int offset = ranks[i] - x;
-                    if(offset >= 0 && offset < static_cast<int>(WindowOffset))
-                    {
-                        storage.ordered_block_keys[offset] = keys[i];
-                    }
-                }
-
-                ::rocprim::syncthreads();
-
-                ROCPRIM_UNROLL
-                for (unsigned int n = 0; n < N; ++n)
-                {
-                    const unsigned int rank = x + n * BlockSize + flat_id;
-                    if((Divisible && IsFull) || rank < valid_items)
-                    {
-                        const Key key = storage.ordered_block_keys[rank - x];
-                        digits[n + j * N] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
-                    }
-                }
-
-                ::rocprim::syncthreads();
             }
            
             // And scatter the values to global memory.
