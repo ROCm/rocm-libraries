@@ -18,12 +18,14 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 
-class TestCpuFpReferenceBatchnormFwdInference
-    : public ::testing::TestWithParam<std::filesystem::path>
+namespace fs = std::filesystem;
+
+class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
 {
 public:
     hipdnn_sdk::json::GraphAndTensorMap graphAndTensors;
 
+protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
@@ -31,11 +33,18 @@ public:
 
         graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
     }
-
-    // void TearDown() override {
-
-    // }
 };
+
+inline std::vector<fs::path> jsonFilesInDirectory(fs::path const& path)
+{
+    std::vector<fs::path> paths;
+    std::copy_if(fs::directory_iterator(path),
+                 fs::directory_iterator(),
+                 std::back_inserter(paths),
+                 [](fs::path const& p) { return p.extension() == ".json"; });
+
+    return paths;
+}
 
 TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
 {
@@ -84,9 +93,7 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuFpReferenceBatchnormFwdInference,
-                         testing::ValuesIn(std::vector<std::filesystem::path>{
-                             "../lib/test_graphs/BatchnormForwardInference.json",
-                             "../lib/test_graphs/BatchnormForwardInferenceLarge.json"}));
+                         testing::ValuesIn(jsonFilesInDirectory("../lib/test_graphs/")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {
