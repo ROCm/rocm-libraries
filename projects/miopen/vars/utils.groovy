@@ -336,7 +336,7 @@ def buildHipClangJob(Map conf=[:]){
         def variant = env.STAGE_NAME
 
         def needs_gpu = conf.get("needs_gpu", true)
-        def lfs_pull = conf.get("lfs_pull", false)
+        def dvc_pull = conf.get("dvc_pull", false)
 
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
@@ -376,10 +376,17 @@ def buildHipClangJob(Map conf=[:]){
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: 420, unit:'MINUTES')
                 {
-                    if (lfs_pull) {
+                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to 
+                    // create a unique hash to store its local cache in. When Jenkins runs this Docker container, it
+                    // runs as a UID that doesn't have an entry in /etc/passwd within the container. getuser() throws
+                    // an exception if it can't get the user name for the current user's UID, but it will check the 
+                    // LOGNAME environment variable and use that value if it's available.
+                    // https://github.com/iterative/dvc/blob/3915fa26aa7d95d5cbe345e62846bfd82dccbfc7/dvc/repo/__init__.py#L646
+                    // https://docs.python.org/3/library/getpass.html#getpass.getuser
+                    if (dvc_pull) {
                         sh """
                             cd ${env.WORKSPACE}/${env.REPO_DIR}
-                            git lfs pull --exclude=
+                            LOGNAME=temp-user dvc pull -v
                            """.stripIndent()
                     }
                     cmake_build(conf)
@@ -388,28 +395,6 @@ def buildHipClangJob(Map conf=[:]){
         }
         return retimage
 }
-
-def reboot(){
-    build job: 'reboot-slaves', propagate: false , parameters: [string(name: 'server', value: "${env.NODE_NAME}"),]
-}
-
-def buildHipClangJobAndReboot(Map conf=[:]){
-    try{
-        buildHipClangJob(conf)
-        cleanWs()
-    }
-    catch(e){
-        echo "throwing error exception for the stage"
-        echo 'Exception occurred: ' + e.toString()
-        throw e
-    }
-    finally{
-        if (conf.get("needs_reboot", true)) {
-            reboot()
-        }
-    }
-}
-
 
 def RunPerfTest(Map conf=[:]){
     def dockerOpts="--device=/dev/kfd --device=/dev/dri --group-add video --group-add render --cap-add=SYS_PTRACE --security-opt seccomp=unconfined"

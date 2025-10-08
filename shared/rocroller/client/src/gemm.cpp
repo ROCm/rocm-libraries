@@ -380,6 +380,10 @@ namespace rocRoller::Client::GEMMClient
                   << (double)problemParams.m * problemParams.n * problemParams.k * 2.0 / averageTime
                          * 1.e-9
                   << std::endl;
+        std::cerr << "Average GFLOPS:      "
+                  << (double)problemParams.m * problemParams.n * problemParams.k * 2.0 / averageTime
+                         * 1.e-9
+                  << std::endl;
 
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
@@ -758,6 +762,12 @@ namespace rocRoller::Client::GEMMClient
             Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
         }
 
+        if(solution.schedulerCost != "")
+        {
+            auto cost = fromString<Scheduling::CostFunction>(solution.schedulerCost);
+            Settings::getInstance()->set(Settings::SchedulerCost, cost);
+        }
+
         auto context
             = Context::ForTarget(arch,
                                  solution.generateKernelName(),
@@ -1071,14 +1081,14 @@ int main(int argc, const char* argv[])
     rocRoller::Client::GEMMClient::SolutionParameters solution{
         .macM = 64,
         .macN = 64,
-        .macK = 64,
+        .macK = -1,
 
         .waveM = -1,
         .waveN = -1,
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX         = 128,
+        .workgroupSizeX         = -1,
         .workgroupSizeY         = 2,
         .workgroupMappingDim    = -1,
         .workgroupRemapXCC      = false,
@@ -1117,8 +1127,9 @@ int main(int argc, const char* argv[])
         .scheduler         = "Priority",
         .matchMemoryAccess = true,
 
-        .streamK        = false,
-        .streamKTwoTile = false,
+        .streamK               = false,
+        .streamKTwoTile        = false,
+        .streamKTwoTileDPFirst = false,
 
         .version = rocRoller::Version::Git(),
     };
@@ -1268,7 +1279,7 @@ int main(int argc, const char* argv[])
     app.add_option(
         "--mi",
         [&solution](auto& args) -> bool { return ParseMI(args[0], solution); },
-        "MI instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
+        "MI instruction to use");
 
     app.add_option(
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
@@ -1299,6 +1310,8 @@ int main(int argc, const char* argv[])
     app.add_flag(
         "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
     app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");
+    app.add_option(
+        "--schedulerCost", solution.schedulerCost, "Which scheduler cost function to use.");
     app.add_flag("--matchMemoryAccess",
                  solution.matchMemoryAccess,
                  "Match memory access to transpose.  Currently decreases performance.");
@@ -1315,6 +1328,9 @@ int main(int argc, const char* argv[])
                        "Mix global and LDS memory operations during prefetching.");
     app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
     app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
+    app.add_flag("--streamKTwoTileDPFirst",
+                 solution.streamKTwoTileDPFirst,
+                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
 
     app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
     app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");
@@ -1365,7 +1381,7 @@ int main(int argc, const char* argv[])
                  benchmarkParams.visualize,
                  "Dump out volumes describing memory access patterns.");
 
-    app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
+    app.add_flag("--noCheck", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
     app.add_option("--yaml", io.resultsPath, "Save results to file.");
 
@@ -1527,8 +1543,19 @@ int main(int argc, const char* argv[])
         types.scaleBlockSize = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
     }
 
-    AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
-                || (types.typeAcc == "bf16"));
+    if(solution.workgroupSizeX == -1)
+        solution.workgroupSizeX = 2 * arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+    if(solution.workgroupSizeY == -1)
+        solution.workgroupSizeY = 2;
+
+    const DataType typeA   = fromString<DataType>(types.typeA);
+    const DataType typeB   = fromString<DataType>(types.typeB);
+    const DataType typeC   = fromString<DataType>(types.typeC);
+    const DataType typeD   = fromString<DataType>(types.typeD);
+    const DataType typeAcc = fromString<DataType>(types.typeAcc);
+
+    AssertFatal((typeAcc == DataType::Float) || (typeAcc == DataType::Half)
+                || (typeAcc == DataType::BFloat16));
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMappingDim = solution.workgroupMappingDim;
@@ -1538,11 +1565,16 @@ int main(int argc, const char* argv[])
     io.doSaveAsm = asmOption->count() > 0;
     io.doSaveCO  = coOption->count() > 0;
 
-    // Set default MI sizes
+    // Set default MI and macK sizes
     if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
-           && types.typeD == "float")
+        if(solution.macK == -1)
+            solution.macK = 64;
+        if(solution.waveB == -1)
+            solution.waveB = 1;
+
+        if(typeA == DataType::Float && typeB == DataType::Float && typeC == DataType::Float
+           && typeD == DataType::Float)
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1550,10 +1582,8 @@ int main(int argc, const char* argv[])
                 solution.waveN = 32;
             if(solution.waveK == -1)
                 solution.waveK = 2;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
-        else if(types.typeA == "half" && types.typeB == "half")
+        else if(typeA == DataType::Half && typeB == DataType::Half)
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1561,10 +1591,8 @@ int main(int argc, const char* argv[])
                 solution.waveN = 32;
             if(solution.waveK == -1)
                 solution.waveK = 8;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
-        else if(types.typeA == "bf16" && types.typeB == "bf16")
+        else if(typeA == DataType::BFloat16 && typeB == DataType::BFloat16)
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1572,11 +1600,9 @@ int main(int argc, const char* argv[])
                 solution.waveN = 16;
             if(solution.waveK == -1)
                 solution.waveK = 8;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
-        else if((types.typeA == "fp8" && types.typeB == "fp8")
-                || (types.typeA == "bf8" && types.typeB == "bf8"))
+        else if((typeA == DataType::FP8 && typeB == DataType::FP8)
+                || (typeA == DataType::BF8 && typeB == DataType::BF8))
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1584,67 +1610,92 @@ int main(int argc, const char* argv[])
                 solution.waveN = 16;
             if(solution.waveK == -1)
                 solution.waveK = 32;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
     }
     else if(arch.HasCapability(GPUCapability::HasWMMA))
     {
-        if(arch.target().isRDNA4GPU())
+        if(solution.waveM == -1)
+            solution.waveM = 16;
+        if(solution.waveN == -1)
+            solution.waveN = 16;
+        if(solution.waveB == -1)
+            solution.waveB = 1;
+
+        if((typeA == DataType::Half && typeB == DataType::Half)
+           || (typeA == DataType::BFloat16 && typeB == DataType::BFloat16))
         {
-            if((types.typeA == "half" && types.typeB == "half")
-               || (types.typeA == "bf16" && types.typeB == "bf16")
-               || (types.typeA == "fp8" && types.typeB == "fp8")
-               || (types.typeA == "bf8" && types.typeB == "bf8")
-               || (types.typeA == "bf8" && types.typeB == "fp8")
-               || (types.typeA == "fp8" && types.typeB == "bf8"))
+            if(solution.macK == -1)
+                solution.macK = 64;
+
+            if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
             {
-                if(solution.waveM == -1)
-                    solution.waveM = 16;
-                if(solution.waveN == -1)
-                    solution.waveN = 16;
                 if(solution.waveK == -1)
                     solution.waveK = 16;
-                if(solution.waveB == -1)
-                    solution.waveB = 1;
             }
-            else
-            {
-                // Override default settings for the `example` and `generate` subcommands.
-                if(example->parsed() || generate->parsed())
-                {
-                    types.typeA    = "half";
-                    types.typeB    = "half";
-                    types.typeC    = "half";
-                    types.typeD    = "half";
-                    solution.waveM = 16;
-                    solution.waveN = 16;
-                    solution.waveK = 16;
-                    solution.waveB = 1;
-                }
-                else
-                {
-                    Throw<FatalError>("Unsupported MI on: ",
-                                      arch.target().toString(),
-                                      ShowValue(types.typeA),
-                                      ShowValue(types.typeB),
-                                      ShowValue(types.typeC),
-                                      ShowValue(types.typeD),
-                                      ShowValue(types.typeAcc));
-                }
-            }
-            // TODO Support prefetch on gfx12
-            solution.prefetch = false;
         }
-        else
+        else if(isUnpackedF8(fromString<DataType>(solution.types.typeA))
+                && isUnpackedF8(fromString<DataType>(solution.types.typeB)))
         {
-            Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
+            if(solution.macK == -1)
+                solution.macK = 64;
+
+            if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f8))
+            {
+                if(solution.waveK == -1)
+                    solution.waveK = 16;
+            }
         }
     }
     else
     {
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
+
+    if(arch.target().isRDNA4GPU())
+    {
+        // Override default settings for the `example` and `generate` subcommands.
+        if((example->parsed() || generate->parsed()) && typeA == DataType::Float
+           && typeB == DataType::Float)
+        {
+            std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
+                      << std::endl;
+            types.typeA    = "half";
+            types.typeB    = "half";
+            types.typeC    = "half";
+            types.typeD    = "half";
+            solution.waveM = 16;
+            solution.waveN = 16;
+            solution.waveK = 16;
+            solution.waveB = 1;
+            solution.macK  = 64;
+        }
+
+        if(solution.prefetch)
+        {
+            std::cout << "Warning: disabling prefetching for RDNA4." << std::endl;
+            solution.prefetch = false;
+        }
+    }
+
+    AssertFatal(solution.waveM > 0 && solution.waveN > 0 && solution.waveK > 0
+                    && solution.waveB > 0,
+                fmt::format("MI tile sizes must be set greater than zero. "
+                            "waveM: {} waveN: {} waveK: {} waveB: {}",
+                            solution.waveM,
+                            solution.waveN,
+                            solution.waveK,
+                            solution.waveB));
+
+    AssertFatal(solution.macK >= solution.waveK && solution.macM >= solution.waveM
+                    && solution.macN >= solution.waveN,
+                fmt::format("Macro tile sizes must be greater than or equal to MI tile sizes. "
+                            "macM: {} waveM: {} macN: {} waveN: {} macK: {} waveK: {}",
+                            solution.macM,
+                            solution.waveM,
+                            solution.macN,
+                            solution.waveN,
+                            solution.macK,
+                            solution.waveK));
 
     if(types.scaleSkipPermlane)
     {

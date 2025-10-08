@@ -50,64 +50,31 @@ namespace rocRoller::KernelGraph
         template <Expression::CUnary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.arg)
-            {
-                call(expr.arg);
-            }
+            call(expr.arg);
         }
 
         template <Expression::CBinary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.rhs)
-            {
-                call(expr.rhs);
-            }
+            call(expr.lhs);
+            call(expr.rhs);
         }
 
         void operator()(Expression::ScaledMatrixMultiply const& expr)
         {
-            if(expr.matA)
-            {
-                call(expr.matA);
-            }
-            if(expr.matB)
-            {
-                call(expr.matB);
-            }
-            if(expr.matC)
-            {
-                call(expr.matC);
-            }
-            if(expr.scaleA)
-            {
-                call(expr.scaleA);
-            }
-            if(expr.scaleB)
-            {
-                call(expr.scaleB);
-            }
+            call(expr.matA);
+            call(expr.matB);
+            call(expr.matC);
+            call(expr.scaleA);
+            call(expr.scaleB);
         }
 
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.r1hs)
-            {
-                call(expr.r1hs);
-            }
-            if(expr.r2hs)
-            {
-                call(expr.r2hs);
-            }
+            call(expr.lhs);
+            call(expr.r1hs);
+            call(expr.r2hs);
         }
 
         template <Expression::CNary Expr>
@@ -216,6 +183,21 @@ namespace rocRoller::KernelGraph
         }
     }
 
+    // It can be removed once trackConnections can be used
+    void ControlFlowRWTracer::trackOffsetAndStride(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            auto maybeStride = m_graph.coordinates.get<Stride>(c.coordinate).has_value();
+            auto maybeOffset = m_graph.coordinates.get<Offset>(c.coordinate).has_value();
+            if(maybeStride || maybeOffset)
+            {
+                trackRegister(control, c.coordinate, rw);
+            }
+        }
+    }
+
     bool ControlFlowRWTracer::hasGeneratedInputs(int const& tag)
     {
         auto inputs = m_graph.control.getInputNodeIndices<Sequence>(tag);
@@ -275,6 +257,7 @@ namespace rocRoller::KernelGraph
     {
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.expression);
+
         for(auto src : visitor.tags)
         {
             trackRegister(tag, src, ReadWrite::READ);
@@ -375,8 +358,8 @@ namespace rocRoller::KernelGraph
         // auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
         // generate(init);
 
-        // auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
-        // generate(incr);
+        auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
+        generate(incr);
 
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.condition);
@@ -408,6 +391,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, lds, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
@@ -440,6 +424,7 @@ namespace rocRoller::KernelGraph
 
         trackConnections(tag, {dst}, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
@@ -526,6 +511,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, lds, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTileDirect2LDS const& op, int tag)
@@ -535,6 +521,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, source, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {source, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
@@ -553,6 +540,7 @@ namespace rocRoller::KernelGraph
 
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)

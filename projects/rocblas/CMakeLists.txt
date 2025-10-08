@@ -152,16 +152,14 @@ option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
 set( HIPBLASLT_VERSION 1.0.0 CACHE STRING "The version of HipBLASLt to be used" )
 
-if( WIN32 OR NOT BUILD_WITH_TENSILE OR NOT BUILD_SHARED_LIBS )
+if( NOT BUILD_WITH_TENSILE )
   set( BUILD_WITH_HIPBLASLT OFF )
 endif()
 
-if( NOT SKIP_LIBRARY )
-  if(BUILD_WITH_HIPBLASLT)
-    # don't wait until after Tensile to find hipblaslt if enabled
-    find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
-    message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
-  endif()
+if(BUILD_WITH_HIPBLASLT)
+  # don't wait until after Tensile to find hipblaslt if enabled; needed for clients-only build too
+  find_package( hipblaslt ${HIPBLASLT_VERSION} REQUIRED CONFIG PATHS ${hipblaslt_path} ${ROCM_PATH})
+  message(STATUS "FOUND hipBLASLt, INCLUDE_DIR: ${HIPBLASLT_INCLUDE_DIR}")
 endif()
 
 function(list_replace list old new)

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
@@ -45,8 +45,6 @@ option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
 option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
 set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
-set(MXDATAGENERATOR_GIT_TAG "31407efa7938fd70ea9b28e08a4d53e398415f8b" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
-set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
@@ -83,6 +81,7 @@ if(NOT fmt_FOUND)
             GIT_TAG 11.1.3
         )
         FetchContent_MakeAvailable(fmt)
+        set_property(DIRECTORY ${fmt_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find fmt")
     endif()
@@ -97,6 +96,7 @@ if(NOT spdlog_FOUND)
             GIT_TAG v1.x
         )
         FetchContent_MakeAvailable(spdlog)
+        set_property(DIRECTORY ${spdlog_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find spdlog")
     endif()
@@ -111,6 +111,7 @@ if(ROCROLLER_ENABLE_FETCH)
         GIT_TAG master
     )
     FetchContent_MakeAvailable(libdivide)
+    set_property(DIRECTORY ${libdivide_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find libdivide")
     endif()
@@ -123,28 +124,7 @@ if(msgpack-cxx_FOUND)
 else()
     find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
     message(STATUS "Found msgpack (<=5.x)")
-    set(msgpack_libs msgpackc)
-endif()
-
-find_package(Boost 1.74.0 QUIET)
-if(NOT Boost_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            boost
-            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-        )
-        set(boost_temp_testing ${BUILD_TESTING})
-        set(BUILD_TESTING OFF)
-        set(BUILD_SHARED_LIBS OFF)
-        set(boost_temp_shared ${BUILD_SHARED_LIBS})
-        set(Boost_USE_STATIC_LIBS ON)
-        set(BOOST_INCLUDE_LIBRARIES multi_index)
-        FetchContent_MakeAvailable(boost)
-        set(BUILD_TESTING ${boost_temp_testing})
-        set(BUILD_SHARED_LIBS ${boost_temp_shared})
-    else()
-        message(FATAL_ERROR "Failed to find boost")
-    endif()
+    set(msgpack_libs msgpackc-cxx)
 endif()
 
 find_package(hip REQUIRED)
@@ -195,15 +175,10 @@ if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
-if(ROCROLLER_BUILD_SHARED_LIBS)
-    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
-else()
-    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
-endif()
+target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
@@ -219,6 +194,7 @@ if(ROCROLLER_ENABLE_YAML_CPP)
                 GIT_TAG 0.8.0
             )
             FetchContent_MakeAvailable(yaml_cpp)
+            set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
         else()
             message(FATAL_ERROR "Failed to find yaml-cpp")
         endif()
@@ -242,7 +218,6 @@ target_link_libraries(rocroller
     PUBLIC
        hip::host
     PRIVATE
-        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )
@@ -319,7 +294,6 @@ rocm_export_targets(
     NAMESPACE roc::
     EXPORT rocroller-targets
     DEPENDS PACKAGE yaml-cpp
-    DEPENDS PACKAGE Boost
     DEPENDS PACKAGE fmt
     DEPENDS PACKAGE hip
 )

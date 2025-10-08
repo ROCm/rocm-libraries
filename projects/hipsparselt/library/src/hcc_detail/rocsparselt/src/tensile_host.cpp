@@ -605,10 +605,13 @@ namespace
 #endif // ifndef HIPSPARSELT_STATIC_LIB
 
                 // Find the location of the libraries
-                if(TestPath(path + "/../Tensile/library"))
+                // The first path below is for new build system where `hipblaslt` is added as a subdirectory
+                if(TestPath(path + "/../hipblaslt/Tensile/library"))
+                    path += "/../hipblaslt/Tensile/library";
+                else if(TestPath(path + "/../Tensile/library"))
                     path += "/../Tensile/library";
                 else if(TestPath(path + "../hipsparselt/library"))
-                    path += "../hipsparselt/library";
+                    path += "/../hipsparselt/library";
                 else
                     path += "/hipsparselt/library";
 

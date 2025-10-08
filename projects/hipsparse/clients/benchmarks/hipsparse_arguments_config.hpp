@@ -30,28 +30,30 @@ struct hipsparse_arguments_config : Arguments
 {
 
 public:
-    char precision{};
-    char indextype{};
-    int  device_id{};
+    char        precision{};
+    char        indextype{};
+    int         device_id{};
+    std::string function_name{};
 
 private:
-    char b_transA{};
-    char b_transB{};
-    int  b_baseA{};
-    int  b_baseB{};
-    int  b_baseC{};
-    int  b_baseD{};
-    int  b_action{};
-    int  b_part{};
-    int  b_dir{};
-    int  b_orderA{};
-    int  b_orderB{};
-    int  b_orderC{};
-    int  b_formatA{};
-    int  b_formatB{};
-    char b_diag{};
-    char b_uplo{};
-    char b_spol{};
+    std::string b_filename{};
+    char        b_transA{};
+    char        b_transB{};
+    int         b_baseA{};
+    int         b_baseB{};
+    int         b_baseC{};
+    int         b_baseD{};
+    int         b_action{};
+    int         b_part{};
+    int         b_dir{};
+    int         b_orderA{};
+    int         b_orderB{};
+    int         b_orderC{};
+    int         b_formatA{};
+    int         b_formatB{};
+    char        b_diag{};
+    char        b_uplo{};
+    char        b_spol{};
 
 public:
     hipsparse_arguments_config();

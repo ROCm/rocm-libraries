@@ -31,10 +31,14 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <rocRoller/Utilities/LazySingleton.hpp>
 
 namespace rocRoller
 {
@@ -159,31 +163,6 @@ namespace rocRoller
         template <Component Comp>
         bool RegisterComponentImpl();
 
-#define RegisterComponentBaseCustom(base, name) const std::string base::Basename = #name
-
-#define RegisterComponentBase(base) RegisterComponentBaseCustom(base, #base)
-
-#define VAR_CAT2(a, b) a##b
-#define VAR_CAT(a, b) VAR_CAT2(a, b)
-#define RegisterComponentCustom(component, name)                        \
-    const std::string component::Name = name;                           \
-    namespace                                                           \
-    {                                                                   \
-        auto VAR_CAT(_component_, __LINE__)                             \
-            = rocRoller::Component::RegisterComponentImpl<component>(); \
-    }
-
-#define RegisterComponent(component) RegisterComponentCustom(component, #component)
-
-#define RegisterComponentTemplateSpec(component, types...)                     \
-    template <>                                                                \
-    const std::string component<types>::Name = #component "<" #types ">";      \
-    namespace                                                                  \
-    {                                                                          \
-        auto VAR_CAT(_component_, __LINE__)                                    \
-            = rocRoller::Component::RegisterComponentImpl<component<types>>(); \
-    }
-
         class ComponentFactoryBase
         {
         public:
@@ -198,7 +177,7 @@ namespace rocRoller
         };
 
         template <ComponentBase Base>
-        class ComponentFactory : public ComponentFactoryBase
+        class ComponentFactory : public ComponentFactoryBase, LazySingleton<ComponentFactory<Base>>
         {
         public:
             using Argument = typename Base::Argument;
@@ -209,6 +188,8 @@ namespace rocRoller
                 Matcher<Base> matcher;
                 Builder<Base> builder;
             };
+
+            ComponentFactory();
 
             static ComponentFactory& Instance();
 
@@ -227,13 +208,19 @@ namespace rocRoller
                                    Matcher<Base>      matcher,
                                    Builder<Base>      builder);
 
+            void registerImplementations();
+
             template <typename T>
             void emptyCache(T&& arg);
 
             virtual void emptyCache() override;
 
         private:
-            std::vector<Entry> m_entries;
+            using ReaderLock = std::shared_lock<std::shared_mutex>;
+            using WriterLock = std::unique_lock<std::shared_mutex>;
+
+            mutable std::shared_mutex m_entriesLock;
+            std::vector<Entry>        m_entries;
 
             /**
              * Finds an entry among the registered entries (classes).  This is the fallback for if there
@@ -242,7 +229,9 @@ namespace rocRoller
             template <typename T, bool Debug = false>
             Entry const& findEntry(T&& arg) const;
 
+            mutable std::shared_mutex                                   m_entryCacheLock;
             mutable std::unordered_map<Argument, Entry>                 m_entryCache;
+            mutable std::shared_mutex                                   m_instanceCacheLock;
             mutable std::unordered_map<Argument, std::shared_ptr<Base>> m_instanceCache;
         };
 

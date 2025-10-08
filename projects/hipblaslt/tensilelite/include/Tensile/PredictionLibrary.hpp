@@ -188,7 +188,6 @@ namespace TensileLite
                 miDataType,
                 0,   // mx_block_size -> MX Data types come from rocroller.
                 0.8, // L2 hit-rate (not used anymore -- should be removed)
-                debug,
                 false,
                 defaultWGM);
             for(const auto& tile : selected_tiles)
@@ -200,7 +199,9 @@ namespace TensileLite
                                                               std::get<5>(tile),
                                                               std::get<6>(tile),
                                                               std::get<7>(tile),
-                                                              std::get<8>(tile)
+                                                              std::get<8>(tile),
+                                                              std::get<9>(tile),
+                                                              std::get<10>(tile)
                                                             ));
                 auto smapiter = solutionmap.find(mapiter->second);
                 if(mapiter != tile_map.end() && smapiter != solutionmap.end())

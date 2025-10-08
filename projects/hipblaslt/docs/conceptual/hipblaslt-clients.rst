@@ -91,6 +91,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --transA <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --transB <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --swizzleA                         Enable tensor swizzling for A
+   --swizzleB                         Enable tensor swizzling for B
    --batch_count <value>              Number of matrices. Only applicable to batched and strided_batched routines         (Default value is: 1)
    --HMM                              Parameter requesting the use of HipManagedMemory
    --verify |-v                       Validate GPU results with CPU?
