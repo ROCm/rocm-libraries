@@ -35,6 +35,10 @@
 #include "na.hpp"
 #include "perf_helper.hpp"
 
+// NOTE: This variable is used to enable/disable performance tests of HIP w.r.t OpenCL
+// implementation. Currently, we don't have OpenCL implementation anymore, so we are disabling the
+// performance tests. We could reuse this variable in future if we want to enable performance tests
+// of HIP w.r.t any other implementations.
 #define PERF_ENABLE 0
 
 #ifndef warpSize
