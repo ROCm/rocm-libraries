@@ -30,6 +30,7 @@
 #include <miopen/binary_cache.hpp>
 #include <miopen/env.hpp>
 #include <miopen/errors.hpp>
+#include <miopen/export_internals.h>
 #include <miopen/handle_lock.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/kernel_cache.hpp>
@@ -144,7 +145,7 @@ void default_deallocator(void*, void* mem)
 
 } // namespace
 
-int get_device_id() // Get random device
+MIOPEN_INTERNALS_EXPORT int get_device_id() // Get random device
 {
     int device;
     auto status = hipGetDevice(&device);
@@ -153,7 +154,7 @@ int get_device_id() // Get random device
     return device;
 }
 
-void set_device(int id)
+MIOPEN_INTERNALS_EXPORT void set_device(int id)
 {
     auto status = hipSetDevice(id);
     if(status != hipSuccess)
