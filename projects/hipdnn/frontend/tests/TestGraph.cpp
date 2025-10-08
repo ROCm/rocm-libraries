@@ -331,7 +331,6 @@ static void validateTensor(const TensorAttributes& tensor,
     EXPECT_EQ(tensor.get_stride(), serializedTensor.strides);
 }
 
-// NOLINTBEGIN
 TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -372,8 +371,8 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -457,8 +456,8 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedBatchnormGraph");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -564,8 +563,8 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedBatchnormAndPointwiseGraph");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -656,8 +655,8 @@ TEST_F(TestGraph, BuildAndSerializePointwiseGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -732,8 +731,8 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -824,8 +823,8 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -902,8 +901,8 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionFwdGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedConvolutionGraph");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -974,8 +973,8 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedConvolutionDgradGraph");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -1059,8 +1058,8 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
     std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
     expectGraphSerializedToBackendDescriptor(deserializedGraph);
 
-    auto build_result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
     EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
@@ -1165,7 +1164,7 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
     Graph graph;
     auto tensorAttributes = createBasicBatchnormGraph(graph);
 
-    hipdnnBackendDescriptor_t graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
     EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
         .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
             *descriptor = graphDesc;
@@ -1204,14 +1203,15 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
     const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
-    std::vector<hipdnnBackendHeurMode_t> backend_modes;
+    std::vector<hipdnnBackendHeurMode_t> backendModes;
+    backendModes.reserve(heurModes.size());
     for(const auto& mode : heurModes)
     {
-        backend_modes.push_back(toBackendType(mode));
+        backendModes.push_back(toBackendType(mode));
     }
     auto tensorAttributes = createBasicBatchnormGraph(graph);
 
-    hipdnnBackendDescriptor_t graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
     EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
         .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
             *descriptor = graphDesc;
@@ -1219,7 +1219,7 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
         });
     graph.build_operation_graph(_handle);
 
-    hipdnnBackendDescriptor_t heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
         .WillOnce(
             [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
@@ -1243,16 +1243,16 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
-        .WillOnce([&backend_modes](hipdnnBackendDescriptor_t,
-                                   hipdnnBackendAttributeName_t,
-                                   hipdnnBackendAttributeType_t,
-                                   int64_t count,
-                                   const void* arrayOfElements) {
-            EXPECT_EQ(count, static_cast<int64_t>(backend_modes.size()));
-            auto modes_ptr = static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
-            for(size_t i = 0; i < backend_modes.size(); ++i)
+        .WillOnce([&backendModes](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t count,
+                                  const void* arrayOfElements) {
+            EXPECT_EQ(count, static_cast<int64_t>(backendModes.size()));
+            auto modesPtr = static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+            for(size_t i = 0; i < backendModes.size(); ++i)
             {
-                EXPECT_EQ(modes_ptr[i], backend_modes[i]);
+                EXPECT_EQ(modesPtr[i], backendModes[i]);
             }
             return HIPDNN_STATUS_SUCCESS;
         });
@@ -1278,8 +1278,7 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    hipdnnBackendDescriptor_t engineConfigDesc
-        = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
         .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
                                       hipdnnBackendDescriptor_t* descriptor) {
@@ -1299,14 +1298,13 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
                      hipdnnBackendAttributeName_t,
                      hipdnnBackendAttributeType_t,
                      int64_t,
-                     int64_t* retrieved_count,
+                     int64_t* retrievedCount,
                      void*) {
-            *retrieved_count = 1;
+            *retrievedCount = 1;
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    hipdnnBackendDescriptor_t executionPlanDesc
-        = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
@@ -1314,8 +1312,8 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto exec_plan_result = graph.create_execution_plans(heurModes);
-    EXPECT_TRUE(exec_plan_result.is_good());
+    auto execPlanResult = graph.create_execution_plans(heurModes);
+    EXPECT_TRUE(execPlanResult.is_good());
 }
 
 TEST_F(TestGraph, CheckSupportFailsIfNoExecutionPlanCreated)
@@ -1379,8 +1377,7 @@ TEST_F(TestGraph, EngineConfigAndExecutionPlanAreFinalizedAfterBuildPlans)
     auto result = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result.is_good());
 
-    hipdnnBackendDescriptor_t engineConfigDesc
-        = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
         .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
                                       hipdnnBackendDescriptor_t* descriptor) {
@@ -1388,8 +1385,7 @@ TEST_F(TestGraph, EngineConfigAndExecutionPlanAreFinalizedAfterBuildPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    hipdnnBackendDescriptor_t executionPlanDesc
-        = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
@@ -1451,8 +1447,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
 
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    hipdnnBackendDescriptor_t executionPlanDesc
-        = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
@@ -1476,7 +1471,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
 
     graph.create_execution_plans(heurModes);
 
-    int64_t workspace_size = 123454;
+    int64_t workspaceSize = 123454;
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(executionPlanDesc,
                                     HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
@@ -1484,13 +1479,13 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
                                     1,
                                     nullptr,
                                     _))
-        .WillOnce([workspace_size](hipdnnBackendDescriptor_t,
-                                   hipdnnBackendAttributeName_t,
-                                   hipdnnBackendAttributeType_t,
-                                   int64_t,
-                                   int64_t*,
-                                   void* arrayOfElements) {
-            *static_cast<int64_t*>(arrayOfElements) = workspace_size;
+        .WillOnce([workspaceSize](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = workspaceSize;
             return HIPDNN_STATUS_SUCCESS;
         });
 
@@ -1498,7 +1493,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
     auto result = graph.get_workspace_size(workspaceSizeResult);
 
     EXPECT_TRUE(result.is_good());
-    EXPECT_EQ(workspaceSizeResult, workspace_size);
+    EXPECT_EQ(workspaceSizeResult, workspaceSize);
 }
 
 TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
@@ -1520,10 +1515,10 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_name("PointwiseNode");
     pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
-    auto out_tensor = graph.pointwise(tensor, pointwiseAttributes);
+    auto outTensor = graph.pointwise(tensor, pointwiseAttributes);
 
     // build_operation_graph mocks
-    hipdnnBackendDescriptor_t graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1000);
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1000);
     EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
         .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* desc, const uint8_t*, size_t) {
             *desc = graphDesc;
@@ -1536,9 +1531,9 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // create_execution_plans mocks
-    hipdnnBackendDescriptor_t heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2000);
-    hipdnnBackendDescriptor_t engineCfgDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3000);
-    hipdnnBackendDescriptor_t execPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4000);
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2000);
+    auto engineCfgDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3000);
+    auto execPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4000);
 
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
         .WillOnce([&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
@@ -1657,7 +1652,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
 
     void* workspace = reinterpret_cast<void*>(0xCAFEBABE);
 
-    hipdnnBackendDescriptor_t variantPackDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5000);
+    auto variantPackDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5000);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
         .WillOnce(
             [&variantPackDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
@@ -1910,7 +1905,6 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     auto result = graph.validate();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
-    //auto& sortedNodes = graph.getPrivateGraphSubnodes();
     ASSERT_EQ(subNodes.size(), sortedSubnodesDueToGraphConstructionOrderCopy.size());
     EXPECT_EQ(subNodes[0], sortedSubnodesDueToGraphConstructionOrderCopy[0]);
 
@@ -1932,4 +1926,38 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     EXPECT_EQ(subNodes[5], sortedSubnodesDueToGraphConstructionOrderCopy[5]);
 }
 
-// NOLINTEND
+TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
+{
+    GraphTestUtils graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    //validate graph is good.
+    auto result = graph.validate();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    //introduce duplicate uids
+    mean->set_uid(1);
+    invVariance->set_uid(1);
+    scale->set_uid(1);
+    bias->set_uid(2);
+    y1->set_uid(2);
+    y2->set_uid(3);
+
+    result = graph.validate();
+    EXPECT_FALSE(result.is_good()) << result.get_message();
+}
