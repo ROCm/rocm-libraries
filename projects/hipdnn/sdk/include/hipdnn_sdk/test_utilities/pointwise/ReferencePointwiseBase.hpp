@@ -45,15 +45,15 @@ public:
     }
 
     // Unary operations
-    template <typename InputType>
+    template <typename InputType, typename ComputeType = float>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<InputType>& input)
     {
-        executeUnaryOperation(operation, output, input);
+        executeUnaryOperation<InputType, ComputeType>(operation, output, input);
     }
 
-    template <typename InputType, typename ParamType>
+    template <typename InputType, typename ParamType, typename ComputeType = float>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<InputType>& input,
@@ -63,22 +63,26 @@ public:
     {
         static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedUnaryOperation(
+        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
             operation, output, input, lowerClip, upperClip, lowerSlope);
     }
 
     // Binary operations
-    template <typename Input1Type, typename Input2Type>
+    template <typename Input1Type, typename Input2Type, typename ComputeType = float>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<Input1Type>& input1,
                                  const TensorBase<Input2Type>& input2)
     {
-        executeBinaryOperation(operation, output, input1, input2);
+        executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
+            operation, output, input1, input2);
     }
 
     // Parameterized binary operations
-    template <typename Input1Type, typename Input2Type, typename ParamType>
+    template <typename Input1Type,
+              typename Input2Type,
+              typename ParamType,
+              typename ComputeType = float>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<Input1Type>& input1,
@@ -89,12 +93,12 @@ public:
     {
         static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedBinaryOperation(
+        executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
             operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
     }
 
 private:
-    template <typename InputType>
+    template <typename InputType, typename ComputeType>
     static void executeUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
                                       TensorBase<OutputType>& output,
                                       const TensorBase<InputType>& input)
@@ -104,13 +108,13 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            policy.executeUnary(input, output, pointwise::ReluForward{});
+            policy.executeUnary(input, output, pointwise::ReluForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-            policy.executeUnary(input, output, pointwise::SigmoidForward{});
+            policy.executeUnary(input, output, pointwise::SigmoidForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
-            policy.executeUnary(input, output, pointwise::TanhForward{});
+            policy.executeUnary(input, output, pointwise::TanhForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::ABS:
             policy.executeUnary(input, output, pointwise::AbsoluteValue{});
@@ -126,7 +130,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename InputType, typename ParamType>
+    template <typename InputType, typename ParamType, typename ComputeType>
     static void
         executeParameterizedUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
                                            TensorBase<OutputType>& output,
@@ -141,7 +145,11 @@ private:
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(
-                input, output, pointwise::ReluForward{lowerClip, upperClip, lowerSlope});
+                input,
+                output,
+                pointwise::ReluForward<ComputeType>{static_cast<ComputeType>(lowerClip),
+                                                    static_cast<ComputeType>(upperClip),
+                                                    static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
@@ -151,7 +159,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename Input1Type, typename Input2Type>
+    template <typename Input1Type, typename Input2Type, typename ComputeType>
     static void executeBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
                                        TensorBase<OutputType>& output,
                                        const TensorBase<Input1Type>& input1,
@@ -168,13 +176,16 @@ private:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::ReluBackward{});
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::ReluBackward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::SigmoidBackward{});
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SigmoidBackward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
-            policy.executeBinaryBroadcast(input1, input2, output, pointwise::TanhBackward{});
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::TanhBackward<ComputeType>{});
             break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
@@ -184,7 +195,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename Input1Type, typename Input2Type, typename ParamType>
+    template <typename Input1Type, typename Input2Type, typename ParamType, typename ComputeType>
     static void
         executeParameterizedBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
                                             TensorBase<OutputType>& output,
@@ -199,11 +210,13 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeBinaryBroadcast(
-                input1,
-                input2,
-                output,
-                pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
+            policy.executeBinaryBroadcast(input1,
+                                          input2,
+                                          output,
+                                          pointwise::ParameterizedReluBackward<ComputeType>{
+                                              static_cast<ComputeType>(lowerClip),
+                                              static_cast<ComputeType>(upperClip),
+                                              static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
