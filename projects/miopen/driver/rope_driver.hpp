@@ -47,7 +47,8 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               Tgpu* x,
                               Tgpu* cos,
                               Tgpu* sin,
-                              Tcheck* yhost)
+                              Tcheck* yhost,
+                              bool parallel)
 {
     auto x_dims   = miopen::deref(xDesc).GetLengths();
     auto cos_dims = miopen::deref(cosDesc).GetLengths();
@@ -58,54 +59,39 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 
     int32_t ret = 0;
 
-    for(size_t o = 0; o < input_numel; o++)
+    if(parallel)
     {
-        size_t freq_idx = o % rotary_numel;
-        Tcheck input    = static_cast<Tcheck>(x[o]);
-        Tcheck input_rotate_half =
-            (o % 2 == 0) ? static_cast<Tcheck>(-x[o + 1]) : static_cast<Tcheck>(x[o - 1]);
+        par_for(input_numel, [&](std::size_t o) {
+            size_t freq_idx = o % rotary_numel;
+            Tcheck input    = static_cast<Tcheck>(x[o]);
+            Tcheck input_rotate_half =
+                (o % 2 == 0) ? static_cast<Tcheck>(-x[o + 1]) : static_cast<Tcheck>(x[o - 1]);
 
-        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
-        Tcheck sin_val = static_cast<Tcheck>(sin[freq_idx]);
+            Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+            Tcheck sin_val = static_cast<Tcheck>(sin[freq_idx]);
 
-        Tcheck val = (input * cos_val) + (input_rotate_half * sin_val);
+            Tcheck val = (input * cos_val) + (input_rotate_half * sin_val);
 
-        yhost[o] = val;
+            yhost[o] = val;
+        });
     }
+    else
+    {
+        for(size_t o = 0; o < input_numel; o++)
+        {
+            size_t freq_idx = o % rotary_numel;
+            Tcheck input    = static_cast<Tcheck>(x[o]);
+            Tcheck input_rotate_half =
+                (o % 2 == 0) ? static_cast<Tcheck>(-x[o + 1]) : static_cast<Tcheck>(x[o - 1]);
 
-    return ret;
-}
+            Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+            Tcheck sin_val = static_cast<Tcheck>(sin[freq_idx]);
 
-template <typename Tgpu, typename Tcheck>
-int32_t mloRoPEForwardRunHostPar(miopenTensorDescriptor_t xDesc,
-                              miopenTensorDescriptor_t cosDesc,
-                              Tgpu* x,
-                              Tgpu* cos,
-                              Tgpu* sin,
-                              Tcheck* yhost)
-{
-    auto x_dims   = miopen::deref(xDesc).GetLengths();
-    auto cos_dims = miopen::deref(cosDesc).GetLengths();
-    auto input_numel =
-        std::accumulate(x_dims.begin(), x_dims.end(), 1LL, std::multiplies<int64_t>());
-    auto rotary_numel =
-        std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
+            Tcheck val = (input * cos_val) + (input_rotate_half * sin_val);
 
-    int32_t ret = 0;
-
-    par_for(input_numel, [&](std::size_t o) {
-        size_t freq_idx = o % rotary_numel;
-        Tcheck input    = static_cast<Tcheck>(x[o]);
-        Tcheck input_rotate_half =
-            (o % 2 == 0) ? static_cast<Tcheck>(-x[o + 1]) : static_cast<Tcheck>(x[o - 1]);
-
-        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
-        Tcheck sin_val = static_cast<Tcheck>(sin[freq_idx]);
-
-        Tcheck val = (input * cos_val) + (input_rotate_half * sin_val);
-
-        yhost[o] = val;
-    });
+            yhost[o] = val;
+        }
+    }
 
     return ret;
 }
@@ -116,7 +102,8 @@ int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                Tgpu* dy,
                                Tgpu* cos,
                                Tgpu* sin,
-                               Tcheck* dxhost)
+                               Tcheck* dxhost,
+                               bool parallel)
 {
     auto dy_dims = miopen::deref(dyDesc).GetLengths();
     auto input_numel =
@@ -127,58 +114,43 @@ int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 
     int32_t ret = 0;
 
-    for(size_t o = 0; o < input_numel; o++)
+    if(parallel)
     {
-        size_t freq_idx = o % rotary_numel;
+        par_for(input_numel, [&](std::size_t o) {
+            size_t freq_idx = o % rotary_numel;
 
-        Tcheck output_grad = static_cast<Tcheck>(dy[o]);
-        Tcheck output_grad_rotate_half =
-            (o % 2 == 0) ? static_cast<Tcheck>(dy[o + 1]) : static_cast<Tcheck>(-dy[o - 1]);
+            Tcheck output_grad = static_cast<Tcheck>(dy[o]);
+            Tcheck output_grad_rotate_half =
+                (o % 2 == 0) ? static_cast<Tcheck>(dy[o + 1]) : static_cast<Tcheck>(-dy[o - 1]);
 
-        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
-        Tcheck sin_val = (freq_idx % 2 == 0) ? static_cast<Tcheck>(sin[freq_idx + 1])
-                                             : static_cast<Tcheck>(sin[freq_idx - 1]);
+            Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+            Tcheck sin_val = (freq_idx % 2 == 0) ? static_cast<Tcheck>(sin[freq_idx + 1])
+                                                 : static_cast<Tcheck>(sin[freq_idx - 1]);
 
-        Tcheck val = (output_grad * cos_val) + (output_grad_rotate_half * sin_val);
+            Tcheck val = (output_grad * cos_val) + (output_grad_rotate_half * sin_val);
 
-        dxhost[o] = val;
+            dxhost[o] = val;
+        });
     }
+    else
+    {
+        for(size_t o = 0; o < input_numel; o++)
+        {
+            size_t freq_idx = o % rotary_numel;
 
-    return ret;
-}
+            Tcheck output_grad = static_cast<Tcheck>(dy[o]);
+            Tcheck output_grad_rotate_half =
+                (o % 2 == 0) ? static_cast<Tcheck>(dy[o + 1]) : static_cast<Tcheck>(-dy[o - 1]);
 
-template <typename Tgpu, typename Tcheck>
-int32_t mloRoPEBackwardRunHostPar(miopenTensorDescriptor_t dyDesc,
-                               miopenTensorDescriptor_t cosDesc,
-                               Tgpu* dy,
-                               Tgpu* cos,
-                               Tgpu* sin,
-                               Tcheck* dxhost)
-{
-    auto dy_dims = miopen::deref(dyDesc).GetLengths();
-    auto input_numel =
-        std::accumulate(dy_dims.begin(), dy_dims.end(), 1LL, std::multiplies<int64_t>());
-    auto cos_dims = miopen::deref(cosDesc).GetLengths();
-    auto rotary_numel =
-        std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
+            Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+            Tcheck sin_val = (freq_idx % 2 == 0) ? static_cast<Tcheck>(sin[freq_idx + 1])
+                                                 : static_cast<Tcheck>(sin[freq_idx - 1]);
 
-    int32_t ret = 0;
+            Tcheck val = (output_grad * cos_val) + (output_grad_rotate_half * sin_val);
 
-    par_for(input_numel, [&](std::size_t o) {
-        size_t freq_idx = o % rotary_numel;
-
-        Tcheck output_grad = static_cast<Tcheck>(dy[o]);
-        Tcheck output_grad_rotate_half =
-            (o % 2 == 0) ? static_cast<Tcheck>(dy[o + 1]) : static_cast<Tcheck>(-dy[o - 1]);
-
-        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
-        Tcheck sin_val = (freq_idx % 2 == 0) ? static_cast<Tcheck>(sin[freq_idx + 1])
-                                             : static_cast<Tcheck>(sin[freq_idx - 1]);
-
-        Tcheck val = (output_grad * cos_val) + (output_grad_rotate_half * sin_val);
-
-        dxhost[o] = val;
-    });
+            dxhost[o] = val;
+        }
+    }
 
     return ret;
 }
@@ -226,6 +198,7 @@ public:
 
 private:
     InputFlags inflags;
+    bool multithreaded;
 
     miopenTensorDescriptor_t x_dyDesc;
     miopenTensorDescriptor_t cosDesc;
@@ -254,6 +227,8 @@ int RoPEDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    multithreaded = static_cast<bool>(inflags.GetValueInt("multithreaded"));
     return miopenStatusSuccess;
 }
 
@@ -291,6 +266,7 @@ int RoPEDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("multithreaded", 'm', "0", "Run CPU RoPE in parallel (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -314,11 +290,11 @@ int RoPEDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     sin_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, sin_sz, sizeof(Tgpu)));
     y_dx_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, y_dx_sz, sizeof(Tgpu)));
 
-    x_dy     = std::vector<Tgpu>(x_dy_sz, Tgpu0val);
-    cos      = std::vector<Tgpu>(cos_sz, Tgpu0val);
-    sin      = std::vector<Tgpu>(sin_sz, Tgpu0val);
-    y_dx     = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
-    y_dxhost = std::vector<Tref>(y_dx_sz, Tref0ref);
+    x_dy         = std::vector<Tgpu>(x_dy_sz, Tgpu0val);
+    cos          = std::vector<Tgpu>(cos_sz, Tgpu0val);
+    sin          = std::vector<Tgpu>(sin_sz, Tgpu0val);
+    y_dx         = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
+    y_dxhost     = std::vector<Tref>(y_dx_sz, Tref0ref);
     y_dxhost_par = std::vector<Tref>(y_dx_sz, Tref0ref);
 
     for(int i = 0; i < x_dy_sz; ++i)
@@ -396,20 +372,7 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunForwardCPU()
 {
     mloRoPEForwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
-    mloRoPEForwardRunHostPar<Tgpu, Tref>(
-        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost_par.data());
-
-    auto error = miopen::rms_range(y_dxhost, y_dxhost_par);
-    const double tolerance = GetTolerance();
-    if(!std::isfinite(error) || error > tolerance)
-    {
-        std::cout << std::string("Forward RoPE FAILED: ") << error << std::endl;
-    }
-    else
-    {
-        printf("Forward RoPE Verifies serial and parallel (err=%f)\n", error);
-    }
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data(), multithreaded);
 
     return miopenStatusSuccess;
 }
@@ -467,20 +430,7 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunBackwardCPU()
 {
     mloRoPEBackwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
-    mloRoPEBackwardRunHostPar<Tgpu, Tref>(
-        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost_par.data());
-
-    auto error = miopen::rms_range(y_dxhost, y_dxhost_par);
-    const double tolerance = GetTolerance();
-    if(!std::isfinite(error) || error > tolerance)
-    {
-        std::cout << std::string("Backward RoPE FAILED: ") << error << std::endl;
-    }
-    else
-    {
-        printf("Backward RoPE Verifies serial and parallel (err=%f)\n", error);
-    }
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data(), multithreaded);
 
     return miopenStatusSuccess;
 }
