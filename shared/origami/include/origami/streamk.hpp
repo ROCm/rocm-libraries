@@ -46,6 +46,8 @@ namespace origami
             const hardware_t& analytical_hardware,
             int dynamic_grid_version);
 
+        const char* rtype_to_string(streamk::reduction_type r);
+
         size_t select_grid(size_t x,
                         size_t y,
                         size_t z,
