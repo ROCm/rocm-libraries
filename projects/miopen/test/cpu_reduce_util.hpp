@@ -206,9 +206,9 @@ static inline compType ReduceOpZeroVal(miopenReduceTensorOp_t op_)
                              ": using undefined Reduction operation is not permitted");
 };
 
-template <typename compType>
+template <typename compType, typename reduceOpT>
 static inline void binop_with_nan_check(miopenNanPropagation_t nanOpt,
-                                        std::function<void(compType&, compType)> opReduce,
+                                        reduceOpT&& opReduce,
                                         compType& accuVal,
                                         compType currVal)
 {
@@ -227,9 +227,9 @@ static inline void binop_with_nan_check(miopenNanPropagation_t nanOpt,
     };
 };
 
-template <typename compType>
+template <typename compType, typename reduceOpT>
 static inline void binop_with_nan_check2(miopenNanPropagation_t nanOpt,
-                                         std::function<void(compType&, compType, bool&)> opReduce,
+                                         reduceOpT&& opReduce,
                                          compType& accuVal,
                                          compType currVal,
                                          int& accuIndex,
@@ -268,46 +268,29 @@ static inline void binop_with_nan_check2(miopenNanPropagation_t nanOpt,
 }; // end of namespace reduce
 
 template <typename T>
-static void
-get_all_indexes(const std::vector<T>& dimLengths, int dim, std::vector<std::vector<T>>& indexes)
+static std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
 {
-    if(dim < dimLengths.size())
+    const std::size_t D = lens.size();
+    assert(D > 0);
+
+    std::size_t N = 1;
+    for(const auto L : lens) N *= static_cast<std::size_t>(L);
+
+    std::vector<std::vector<T>> out;
+    out.resize(N);
+    for(auto& row : out) row.resize(D);
+
+    std::vector<std::size_t> stride(D, 1);
+    for(std::size_t d = D; d-- > 1;) stride[d - 1] = stride[d] * static_cast<std::size_t>(lens[d]);
+
+    for(std::size_t r = 0; r < N; ++r)
     {
-        std::vector<std::vector<T>> updated_indexes;
+        for(std::size_t d = 0; d < D; ++d)
+            out[r][d] = static_cast<T>((r / stride[d]) % static_cast<std::size_t>(lens[d]));
+    }
 
-        if(dim == 0)
-        {
-            assert(indexes.empty());
-            assert(dimLengths[dim] > 0);
-            for(T i = 0; i < dimLengths[dim]; i++)
-            {
-                std::vector<T> index = {i};
-
-                updated_indexes.push_back(index);
-            };
-        }
-        else
-        {
-            // go through all the current indexes
-            for(const auto& index : indexes)
-            {
-                for(T i = 0; i < dimLengths[dim]; i++)
-                {
-                    auto index_new = index;
-                    index_new.push_back(i);
-
-                    updated_indexes.push_back(index_new);
-                };
-            }
-        };
-
-        // update to the indexes (output)
-        indexes = updated_indexes;
-
-        // further to construct the indexes from the updated status
-        get_all_indexes(dimLengths, dim + 1, indexes);
-    };
-};
+    return out;
+}
 
 template <typename T>
 static T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& index)
