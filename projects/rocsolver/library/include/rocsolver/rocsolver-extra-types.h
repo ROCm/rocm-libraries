@@ -42,11 +42,6 @@ typedef enum rocblas_layer_mode_ex_
     rocblas_layer_mode_ex_log_kernel = 0x10, /**< Enable logging for kernel calls. */
 } rocblas_layer_mode_ex;
 
-typedef enum rocsolver_layer_mode_
-{
-    rocsolver_layer_mode_log_event_caching = 0x20,
-} rocsolver_layer_mode_cache;
-
 /*! \brief Used to specify the order in which multiple Householder matrices or plane rotations are
  *applied together (see the documentation of the specific routines for more details).
  ********************************************************************************/
