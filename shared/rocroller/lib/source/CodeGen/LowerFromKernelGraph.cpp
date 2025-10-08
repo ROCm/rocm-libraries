@@ -837,7 +837,9 @@ namespace rocRoller
                                   numElements,
                                   numBytes);
 
-                        const auto byteIndex = index * Expression::literal(numBytes);
+                        const auto byteIndex = index * Expression::literal(numBytes)
+                                               / Expression::literal(numElements);
+
                         Log::info("Offset expression: {}", toString(byteIndex));
 
                         for(uint wg = 0; wg < 1; ++wg)
