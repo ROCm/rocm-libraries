@@ -309,7 +309,7 @@ namespace TensileLite
         static float computeGranularity(float x);
 
         Granularities computeGranularities(
-            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
+            Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const;
 
         StaticPerformanceModel staticPerformanceModel(double M,
                                                       double N,
@@ -322,7 +322,7 @@ namespace TensileLite
                                                       int    globalSplitU) const;
 
         TAMetricProblemScore computeProblemScore(
-            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
+            Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const;
 
         double computeTileAwareMetric(TAMetricProblemScore pp,
                                       TAMetricProblemScore ppReference) const;
@@ -410,14 +410,16 @@ namespace TensileLite
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
-                        int32_t                             defaultWGM) const;
+                        int32_t                             defaultWGM,
+                        uint32_t                            autoGsuVal) const;
 
         template <typename KA>
         inline void calculateSingleCallWorkGroupItems(std::vector<Problem> const& problems,
                                                       const TensileLite::dim3&    workGroupSize,
                                                       TensileLite::dim3&          numWorkGroups,
                                                       TensileLite::dim3&          numWorkItems,
-                                                      KA&                         h_args) const;
+                                                      KA&                         h_args,
+                                                      uint32_t                    autoGsuVal) const;
 
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
@@ -447,7 +449,8 @@ namespace TensileLite
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
-                                      StreamKSettings const&   sk) const;
+                                      StreamKSettings const&   sk,
+                                      uint32_t                 autoGsuVal) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -461,7 +464,8 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
-                                                      StreamKSettings const&   sk) const;
+                                                      StreamKSettings const&   sk,
+                                                      uint32_t                 autoGsuVal) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation
@@ -584,8 +588,7 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        void             calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
-        mutable uint32_t autoGSU = 0;
+        uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 
     template <typename TAct>

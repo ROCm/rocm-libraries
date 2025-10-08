@@ -338,5 +338,5 @@ public:
     }
 };
 
-typedef ConvolutionDgradNode ConvDgradNode;
+typedef ConvolutionDgradNode DgradNode;
 }

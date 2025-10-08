@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
@@ -45,8 +45,6 @@ option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
 option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
 set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
-set(MXDATAGENERATOR_GIT_TAG "31407efa7938fd70ea9b28e08a4d53e398415f8b" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
-set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
