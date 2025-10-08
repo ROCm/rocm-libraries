@@ -508,7 +508,7 @@ namespace origami
         // Number of CUs that might share the same K-tiles, adjusted for K-splitting.
         // This affects contention on the L2 cache partitions (XCDs).
         const size_t effective_cus = safe_ceil_div(concurrent_workgroups, splittingFactor);
-        const size_t cu_per_xcd    = std::max(safe_ceil_div(effective_cus, hardware.NUM_XCD), 1UL);
+        const size_t cu_per_xcd    = std::max(safe_ceil_div(effective_cus, hardware.NUM_XCD), static_cast<size_t>(1));
 
         // Initial guess for the L2 tile dimensions (a tile of workgroups).
         size_t l2_tile_n = std::min(static_cast<size_t>(WGM), workgroups_n);
@@ -523,8 +523,8 @@ namespace origami
         }
 
         // Clamp initial tile dimensions to the actual grid size.
-        l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), 1UL);
-        l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), 1UL);
+        l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), static_cast<size_t>(1));
+        l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), static_cast<size_t>(1));
 
         // Calculate memory footprint in bytes.
         const size_t element_bytes       = safe_ceil_div(element_size, 8);
@@ -615,8 +615,8 @@ namespace origami
         }
 
         // Clamp initial tile dimensions to the actual grid size.
-        mall_tile_m = std::max(std::min(workgroups_m, mall_tile_m), 1UL);
-        mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), 1UL);
+        mall_tile_m = std::max(std::min(workgroups_m, mall_tile_m), static_cast<size_t>(1));
+        mall_tile_n = std::max(std::min(workgroups_n, mall_tile_n), static_cast<size_t>(1));
 
         // --- CRITICAL: Shrink tile to fit into MALL Capacity ---
         const size_t element_bytes       = safe_ceil_div(element_size, 8);
@@ -846,8 +846,8 @@ namespace origami
             mall_m = grid_m;
         }
         // Clamp tile dimensions
-        mall_m = std::max(std::min(grid_m, mall_m), 1UL);
-        mall_n = std::max(std::min(grid_n, mall_n), 1UL);
+        mall_m = std::max(std::min(grid_m, mall_m), static_cast<size_t>(1));
+        mall_n = std::max(std::min(grid_n, mall_n), static_cast<size_t>(1));
         // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
         double min_load
             = static_cast<double>((mall_m * MT_M * MT_K * safe_ceil_div(element_size_A, 8))
