@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include <miopen/export_internals.h>
 #include <string>
 
 namespace miopen {
 namespace sysinfo {
 
 /// Retrieves the system hostname for logging and identification purposes
-std::string GetSystemHostname();
+MIOPEN_INTERNALS_EXPORT std::string GetSystemHostname();
 
 } // namespace sysinfo
 } // namespace miopen
