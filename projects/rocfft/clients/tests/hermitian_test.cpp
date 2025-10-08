@@ -423,6 +423,7 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
                     cpu_symm_hostbuf[i].alloc(p.ibuffer_sizes()[i]);
                 }
 
+                // This test relies on the (deterministic) host and device input generators producing the same data
                 p.igen = fft_input_generator_device;
                 p.compute_input(gpu_symm_gpubuf);
 
@@ -476,6 +477,6 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
         }
     }
 #else
-    GTEST_SKIP();
+    GTEST_SKIP() << "this test currently requires hipRAND to be used";
 #endif
 }
