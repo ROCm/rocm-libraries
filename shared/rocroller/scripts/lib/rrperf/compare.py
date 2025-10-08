@@ -334,7 +334,6 @@ def markdown_summary(md, perf_runs, detail=False):
         print("\n</details>", file=md)
 
 
-
 def html_overview_table(html_file, summary, problems):
     """Create HTML table with summary statistics."""
 
