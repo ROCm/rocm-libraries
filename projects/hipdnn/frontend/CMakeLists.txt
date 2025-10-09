@@ -35,6 +35,7 @@ export(
 install( 
     TARGETS hipdnn_frontend
     EXPORT hipdnn_frontend_targets
+    COMPONENT Development
 )
 
 install(
