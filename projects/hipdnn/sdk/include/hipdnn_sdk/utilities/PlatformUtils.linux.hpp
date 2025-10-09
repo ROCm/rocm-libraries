@@ -4,7 +4,10 @@
 #pragma once
 
 #if defined(__linux__)
+#include <array>
 #include <filesystem>
+#include <limits.h>
+#include <unistd.h>
 namespace hipdnn_sdk
 {
 namespace utilities
@@ -46,6 +49,16 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
     return a.native() == b.native();
 }
 
+}
+
+namespace detail
+{
+inline std::filesystem::path getExecutablePath()
+{
+    std::array<char, PATH_MAX + 1> buffer{}; // +1 for null termination
+    readlink("/proc/self/exe", buffer.data(), PATH_MAX);
+    return buffer.data();
+}
 }
 }
 

@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -66,10 +67,10 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
     EXPECT_EQ(graphAndTensors.deviceBuffers().size(), 6);
 
     std::visit(
-        Visitor{[&](auto const& tensorMap) {
+        Visitor{[&](auto& tensorMap) {
                     using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
 
-                    const Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
+                    Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
 
                     Tensor<DataType> cpuOutput(referenceOutput.dims(), referenceOutput.strides());
 
@@ -87,13 +88,14 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
                         = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<DataType>(tolerance);
                     EXPECT_TRUE(validator.allClose(cpuOutput.memory(), referenceOutput.memory()));
                 },
-                [&](hipdnn_sdk::json::TensorMap<int> const&) { FAIL(); }},
+                [&](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }},
         graphAndTensors.tensorMap);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuFpReferenceBatchnormFwdInference,
-                         testing::ValuesIn(jsonFilesInDirectory("../lib/test_graphs/")));
+                         testing::ValuesIn(jsonFilesInDirectory(
+                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {

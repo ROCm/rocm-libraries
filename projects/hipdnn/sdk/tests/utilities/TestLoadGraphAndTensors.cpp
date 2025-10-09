@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_sdk/test_utilities/ExecuteOnLeavingScope.hpp>
 #include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
 using namespace hipdnn_sdk::json;
@@ -11,7 +13,7 @@ using namespace hipdnn_sdk::json;
 namespace hipdnn_sdk::json
 {
 
-TEST(FillTensorFromFile, InvalidPath)
+TEST(TestFillTensorFromFile, InvalidPath)
 {
     hipdnn_sdk::utilities::Tensor<float> tensor({1});
     std::filesystem::path filepath = "./ea0w399059.txt";
@@ -19,7 +21,7 @@ TEST(FillTensorFromFile, InvalidPath)
     EXPECT_THROW(detail::fillTensorFromFile(tensor, filepath), std::runtime_error);
 }
 
-TEST(FillTensorFromFile, PathToDirectory)
+TEST(TestFillTensorFromFile, PathToDirectory)
 {
     hipdnn_sdk::utilities::Tensor<float> tensor({1});
     hipdnn_sdk::test_utilities::TempDirectory dir("oijaweorij33");
@@ -69,9 +71,8 @@ void writeVectorToFile(std::filesystem::path const& filename, std::vector<T> con
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    ASSERT_FALSE(std::filesystem::exists(filename));
-    auto deleter = [filename](void*) { std::filesystem::remove(filename); };
-    std::unique_ptr<void, decltype(deleter)> fileDeleter(nullptr, deleter);
+    test_utilities::ExecuteOnLeavingScope fileDeleter(
+        [filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
@@ -88,7 +89,8 @@ TEST(TestFillTensorFromFile, Valid)
 
 TEST(TestLoadGraphAndTensors, Valid)
 {
-    std::filesystem::path filepath = "../lib/test_graphs/BatchnormForwardInference.json";
+    std::filesystem::path filepath
+        = utilities::getBinaryDir() / "../lib/reference_data/BatchnormForwardInference.json";
 
     auto res = loadGraphAndTensors(filepath);
 

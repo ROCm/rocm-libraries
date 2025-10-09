@@ -39,8 +39,7 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(const IMigratableMemory<T>& reference,
-                  const IMigratableMemory<T>& implementation) override
+    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
     {
         if(reference.count() != implementation.count())
         {

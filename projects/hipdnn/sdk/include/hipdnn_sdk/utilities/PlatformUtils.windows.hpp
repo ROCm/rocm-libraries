@@ -60,6 +60,14 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
     std::transform(B.begin(), B.end(), B.begin(), ::towlower);
     return A == B;
 }
+
+namespace detail
+{
+std::filesystem::path getExecutablePath()
+{
+    throw std : runtime_error("Implement this later");
+}
+}
 }
 
 #else

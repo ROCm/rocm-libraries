@@ -53,6 +53,11 @@ set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_EN
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/lib/test_plugins" CACHE INTERNAL "Build directory for test plugins")
 set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
 
+set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/reference_data" CACHE INTERNAL "Directory for test reference data")
+set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/reference_data" CACHE INTERNAL "Install directory for test reference data")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/reference_data/" DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}) # Copies only on calls to cmake
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/reference_data" DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR})
+
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
