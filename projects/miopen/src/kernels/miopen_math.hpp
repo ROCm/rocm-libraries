@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <hip/hip_bfloat16.h>
+
 namespace miopen {
 
 //=============================================================================
@@ -74,49 +76,86 @@ __forceinline__ __device__ _Float16 tanh(_Float16 x)
     return __ocml_fabs_f16(x) > 4.5f ? one : ret;
 }
 
-__forceinline__ __device__ __half exp(__half x)
+//=============================================================================
+// BFloat16 overloads
+//=============================================================================
+
+__forceinline__ __device__ ushort exp(ushort x)
 {
-    return static_cast<__half>(exp(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hexp(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half log(__half x)
+__forceinline__ __device__ ushort log(ushort x)
 {
-    return static_cast<__half>(log(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hlog(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half sqrt(__half x)
+__forceinline__ __device__ ushort sqrt(ushort x)
 {
-    return static_cast<__half>(sqrt(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hsqrt(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half rsqrt(__half x)
+__forceinline__ __device__ ushort rsqrt(ushort x)
 {
-    return static_cast<__half>(rsqrt(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hrsqrt(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half sin(__half x)
+__forceinline__ __device__ ushort sin(ushort x)
 {
-    return static_cast<__half>(sin(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hsin(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half cos(__half x)
+__forceinline__ __device__ ushort cos(ushort x)
 {
-    return static_cast<__half>(cos(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(hcos(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half fabs(__half x)
+__forceinline__ __device__ ushort fabs(ushort x)
 {
-    return static_cast<__half>(fabs(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(__habs(__ushort_as_bfloat16(x)));
 }
-__forceinline__ __device__ __half fmin(__half x)
+__forceinline__ __device__ ushort fmax(ushort x, ushort y)
 {
-    return static_cast<__half>(fmin(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(__float2bfloat16(fmax(__bfloat162float(__ushort_as_bfloat16(x)),
+                                                      __bfloat162float(__ushort_as_bfloat16(y)))));
 }
-__forceinline__ __device__ __half fmax(__half x)
+__forceinline__ __device__ ushort fmin(ushort x, ushort y)
 {
-    return static_cast<__half>(fmax(static_cast<_Float16>(x)));
+    return __bfloat16_as_ushort(__float2bfloat16(fmin(__bfloat162float(__ushort_as_bfloat16(x)),
+                                                      __bfloat162float(__ushort_as_bfloat16(y)))));
 }
-__forceinline__ __device__ __half pow(__half x)
+
+__forceinline__ __device__ ushort pow(ushort x, ushort y)
 {
-    return static_cast<__half>(pow(static_cast<_Float16>(x)));
+    __hip_bfloat16 bf_x = __ushort_as_bfloat16(x);
+    __hip_bfloat16 bf_y = __ushort_as_bfloat16(y);
+    return __bfloat16_as_ushort(hexp(__hmul(bf_y, hlog(bf_x))));
 }
-__forceinline__ __device__ __half tanh(__half x)
+__forceinline__ __device__ ushort tan(ushort x)
 {
-    return static_cast<__half>(tanh(static_cast<_Float16>(x)));
+    __hip_bfloat16 bf_x = __ushort_as_bfloat16(x);
+    return __bfloat16_as_ushort(__hdiv(hsin(bf_x), hcos(bf_x)));
 }
+__forceinline__ __device__ ushort tanh(ushort x)
+{
+    __hip_bfloat16 bf_x        = __ushort_as_bfloat16(x);
+    __hip_bfloat16 two         = __float2bfloat16(2.0f);
+    __hip_bfloat16 one         = __float2bfloat16(1.0f);
+    __hip_bfloat16 exp2x       = hexp(__hmul(two, bf_x));
+    __hip_bfloat16 numerator   = __hsub(exp2x, one);
+    __hip_bfloat16 denominator = __hadd(exp2x, one);
+    return __bfloat16_as_ushort(__hdiv(numerator, denominator));
+}
+
+//=============================================================================
+// Double precision overloads
+//=============================================================================
+
+__forceinline__ __device__ double exp(double x) { return ::exp(x); }
+__forceinline__ __device__ double log(double x) { return ::log(x); }
+__forceinline__ __device__ double sqrt(double x) { return ::sqrt(x); }
+__forceinline__ __device__ double rsqrt(double x) { return ::rsqrt(x); }
+__forceinline__ __device__ double sin(double x) { return ::sin(x); }
+__forceinline__ __device__ double cos(double x) { return ::cos(x); }
+__forceinline__ __device__ double tan(double x) { return ::tan(x); }
+__forceinline__ __device__ double tanh(double x) { return ::tanh(x); }
+__forceinline__ __device__ double pow(double x, double y) { return ::pow(x, y); }
+__forceinline__ __device__ double fabs(double x) { return ::fabs(x); }
+__forceinline__ __device__ double fmax(double x, double y) { return ::fmax(x, y); }
+__forceinline__ __device__ double fmin(double x, double y) { return ::fmin(x, y); }
 
 } // namespace miopen
