@@ -113,6 +113,8 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnSelfMove)
     {
         thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
         int* raw_p = p.get_raw();
+        THRUST_DIAG_PUSH
+        THRUST_DIAG_SUPPRESS_CLANG("-Wself-move")
         p = std::move(p);
         ASSERT_EQ(p.get_raw(), raw_p);
     }
