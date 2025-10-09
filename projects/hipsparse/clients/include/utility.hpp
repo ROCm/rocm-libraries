@@ -761,13 +761,13 @@ static void sort(std::vector<I>& perm, std::vector<I>& unsorted_row, std::vector
 template <typename I>
 inline void scan(const char* line, I* nrow, I* ncol, int64_t* nnz)
 {
-    sscanf(line, "%d %d %ld", nrow, ncol, nnz);
+    sscanf(line, "%d %d %lld", nrow, ncol, nnz);
 }
 
 template <>
 inline void scan<int64_t>(const char* line, int64_t* nrow, int64_t* ncol, int64_t* nnz)
 {
-    sscanf(line, "%ld %ld %ld", nrow, ncol, nnz);
+    sscanf(line, "%lld %lld %lld", nrow, ncol, nnz);
 }
 
 template <typename I, typename T>
