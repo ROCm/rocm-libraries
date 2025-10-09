@@ -199,6 +199,20 @@ private:
 
   using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
 
+  // Next section implements SFINAE constraints for the unique_ptr constructors
+  // using a pattern that mirrors the implementation in libc++.
+  //
+  // The `dependent_type` helper makes the type aliases below (e.g., LValRefType)
+  // dependent on a dummy template parameter from the constructor itself. This
+  // forces the compiler to defer constraint checking until function overload
+  // resolution, rather than at class instantiation time.
+  //
+  // NOTE: A simpler SFINAE pattern using a `static constexpr bool` evaluated at
+  // class-instantiation time also works correctly. However, we intentionally
+  // follow the more complex libc++ pattern for consistency with a proven
+  // implementation, aiming to inherit its robustness against
+  // potential compiler-specific edge cases.
+
   template <bool Dummy>
   using LValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::lval_ref_type;
 
