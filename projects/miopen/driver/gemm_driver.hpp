@@ -49,69 +49,6 @@
 #define GEMM_DRIVER_DEBUG 0
 
 template <typename T>
-void callCpuGemmStridedBatched(bool isColMajor,
-                               bool transA,
-                               bool transB,
-                               int m,
-                               int n,
-                               int k,
-                               T alpha,
-                               const void* A,
-                               int a_offset,
-                               int lda,
-                               long long int strideA,
-                               const void* B,
-                               int b_offset,
-                               int ldb,
-                               long long int strideB,
-                               T beta,
-                               void* C,
-                               int c_offset,
-                               int ldc,
-                               long long int strideC,
-                               int batch_count)
-{
-    const T* a_ptr = static_cast<const T*>(A);
-    const T* b_ptr = static_cast<const T*>(B);
-    T* c_ptr       = static_cast<T*>(C);
-
-    // our cpu GEMM logic is row-major
-    if(isColMajor)
-    {
-        isColMajor = false;
-        std::swap(a_ptr, b_ptr);
-        std::swap(a_offset, b_offset);
-        std::swap(transA, transB);
-        std::swap(m, n);
-        std::swap(lda, ldb);
-        std::swap(strideA, strideB);
-    }
-
-    for(int bi = 0; bi < batch_count; ++bi)
-    {
-        for(int mi = 0; mi < m; ++mi)
-        {
-            for(int ni = 0; ni < n; ++ni)
-            {
-                double y = 0;
-                for(int ki = 0; ki < k; ++ki)
-                {
-                    int aindex = transA ? a_offset + strideA * bi + lda * ki + mi
-                                        : a_offset + strideA * bi + lda * mi + ki;
-                    int bindex = transB ? b_offset + strideB * bi + ldb * ni + ki
-                                        : b_offset + strideB * bi + ldb * ki + ni;
-                    y += static_cast<double>(a_ptr[aindex]) * static_cast<double>(b_ptr[bindex]);
-                }
-                int cindex = c_offset + strideC * bi + ldc * mi + ni;
-                c_ptr[cindex] =
-                    static_cast<T>(static_cast<double>(alpha) * y +
-                                   static_cast<double>(beta) * static_cast<double>(c_ptr[cindex]));
-            }
-        }
-    }
-}
-
-template <typename T>
 void callCpuGemmStridedBatchedPar(bool isColMajor,
                                bool transA,
                                bool transB,
@@ -132,7 +69,8 @@ void callCpuGemmStridedBatchedPar(bool isColMajor,
                                int c_offset,
                                int ldc,
                                long long int strideC,
-                               int batch_count)
+                               int batch_count,
+                               bool parallel)
 {
     const T* a_ptr = static_cast<const T*>(A);
     const T* b_ptr = static_cast<const T*>(B);
@@ -172,7 +110,7 @@ void callCpuGemmStridedBatchedPar(bool isColMajor,
         }
     };
 
-    if(m * n * k * batch_count > 1<<18) {
+    if(parallel) {
         par_ford(m)(work);
     } else {
         for(int mi = 0; mi < m; mi++) {
@@ -219,6 +157,7 @@ private:
     std::vector<T> chost;
 
     T alpha, beta;
+    bool multithreaded;
 
     miopen::GemmDescriptor gemm_desc = {
         false, false, false, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.0f, 0.0f, miopenFloat, false};
@@ -241,6 +180,7 @@ int GemmDriver<T>::AddCmdLineArgs()
     inflags.AddInputFlag("iter", 'i', "10", "Number of Iterations (Default=10)", "int");
     inflags.AddInputFlag("verify", 'V', "1", "Verify Each Layer (Default=1)", "int");
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
+    inflags.AddInputFlag("multithreaded", 'm', "0", "Run CPU part in parallel (Default=0)", "int");
 
     return 0;
 }
@@ -254,6 +194,9 @@ int GemmDriver<T>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    multithreaded = static_cast<bool>(inflags.GetValueInt("multithreaded"));
+
     return 0;
 }
 
@@ -464,7 +407,8 @@ int GemmDriver<T>::RunForwardCPU()
                                  0,
                                  gemm_desc.ldc,
                                  gemm_desc.strideC,
-                                 gemm_desc.batch_count);
+                                 gemm_desc.batch_count,
+                                 multithreaded);
 
     return 0;
 }
