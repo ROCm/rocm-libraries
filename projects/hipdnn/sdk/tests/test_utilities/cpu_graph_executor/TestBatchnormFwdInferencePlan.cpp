@@ -51,56 +51,68 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     BatchnormFwdTensorBundle directTensorBundle(
         graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
+    const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+    const auto& attributes
+        = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+
     BatchnormFwdInferenceParams params;
     initTensorValues(params.xTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[1]->dims(),
-                     planTensorBundle.tensors[1]->strides(),
-                     1);
+                     planTensorBundle.tensors[attributes.x_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.x_tensor_uid()]->strides(),
+                     attributes.x_tensor_uid());
     initTensorValues(params.scaleTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[2]->dims(),
-                     planTensorBundle.tensors[2]->strides(),
-                     2);
+                     planTensorBundle.tensors[attributes.scale_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.scale_tensor_uid()]->strides(),
+                     attributes.scale_tensor_uid());
     initTensorValues(params.biasTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[3]->dims(),
-                     planTensorBundle.tensors[3]->strides(),
-                     3);
+                     planTensorBundle.tensors[attributes.bias_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.bias_tensor_uid()]->strides(),
+                     attributes.bias_tensor_uid());
     initTensorValues(params.meanTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[4]->dims(),
-                     planTensorBundle.tensors[4]->strides(),
-                     4);
+                     planTensorBundle.tensors[attributes.mean_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.mean_tensor_uid()]->strides(),
+                     attributes.mean_tensor_uid());
     initTensorValues(params.invVarianceTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[5]->dims(),
-                     planTensorBundle.tensors[5]->strides(),
-                     5);
+                     planTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->strides(),
+                     attributes.inv_variance_tensor_uid());
     initTensorValues(params.yTensor,
                      DataType::FLOAT,
-                     planTensorBundle.tensors[6]->dims(),
-                     planTensorBundle.tensors[6]->strides(),
-                     6);
+                     planTensorBundle.tensors[attributes.y_tensor_uid()]->dims(),
+                     planTensorBundle.tensors[attributes.y_tensor_uid()]->strides(),
+                     attributes.y_tensor_uid());
     params.epsilon = epsilon;
 
     BatchnormFwdPlan<float, float, float> patient(std::move(params));
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
 
     CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[1].get()),
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[2].get()),
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[3].get()),
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[4].get()),
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[5].get()),
-        *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[6].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.x_tensor_uid()].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.scale_tensor_uid()].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.bias_tensor_uid()].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.mean_tensor_uid()].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.inv_variance_tensor_uid()].get()),
+        *dynamic_cast<TensorBase<float>*>(
+            directTensorBundle.tensors[attributes.y_tensor_uid()].get()),
         epsilon);
 
     patient.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
-    auto& yDirect = *dynamic_cast<TensorBase<float>*>(directTensorBundle.tensors[6].get());
-    auto& yPlanTensor = *dynamic_cast<TensorBase<float>*>(planTensorBundle.tensors[6].get());
+    auto& yDirect = *dynamic_cast<TensorBase<float>*>(
+        directTensorBundle.tensors[attributes.y_tensor_uid()].get());
+    auto& yPlanTensor = *dynamic_cast<TensorBase<float>*>(
+        planTensorBundle.tensors[attributes.y_tensor_uid()].get());
     EXPECT_TRUE(cpuRefOutputValidation.allClose(yDirect.memory(), yPlanTensor.memory()));
 }
 
