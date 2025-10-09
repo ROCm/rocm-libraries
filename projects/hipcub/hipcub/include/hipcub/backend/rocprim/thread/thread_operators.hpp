@@ -256,30 +256,6 @@ struct ReduceByKeyOp
     }
 };
 
-template <typename BinaryOpT>
-struct BinaryFlip
-{
-    BinaryOpT binary_op;
-
-    HIPCUB_HOST_DEVICE
-    explicit BinaryFlip(BinaryOpT binary_op) : binary_op(binary_op)
-    {
-    }
-
-    template<typename T, typename U>
-    HIPCUB_DEVICE auto operator()(T&& t, U&& u) -> decltype(auto)
-    {
-        return binary_op(std::forward<U>(u), std::forward<T>(t));
-    }
-};
-
-template <typename BinaryOpT>
-HIPCUB_HOST_DEVICE
-BinaryFlip<BinaryOpT> MakeBinaryFlip(BinaryOpT binary_op)
-{
-    return BinaryFlip<BinaryOpT>(binary_op);
-}
-
 namespace internal
 {
 
