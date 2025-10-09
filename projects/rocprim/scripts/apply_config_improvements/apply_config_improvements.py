@@ -154,10 +154,19 @@ def add_new_contenders(
 
             old_best_instance = contenders[key].instance
 
-            row["old_family_index"] = old_best_instance["family_index"]
-            row["old_bps"] = f"{old_best_instance['bytes_per_second']:.2e}"
+            row["old_family_index"] = old_best_instance.get("family_index", "-")
+            row["old_bps"] = (
+                f"{old_best_instance['bytes_per_second']:.2e}"
+                if old_best_instance
+                else "-"
+            )
 
-            best_instance = config_get_best([old_best_instance, new_best_instance])
+            best_instance = (
+                config_get_best([old_best_instance, new_best_instance])
+                if old_best_instance
+                else new_best_instance
+            )
+
             # If there was no improvement, skip this contender.
             if best_instance != new_best_instance:
                 slower_rejected_count += 1
@@ -276,6 +285,8 @@ def get_old_contenders(
 
     contenders: Dict[Tuple[Any, str], Contender] = {}
 
+    old_config.setdefault("specializations", {})
+
     for arch, old_arch_specializations in old_config["specializations"].items():
         # Always keep every old specialization, even if missing in old_alg_data
         if arch not in old_alg_data and (
@@ -290,20 +301,19 @@ def get_old_contenders(
 
         for instance_key, old_instance_data in old_arch_specializations.items():
             if instance_key not in old_arch_data:
-                # If missing, still keep the specialization, but use an empty list
-                warnings.append(
-                    f"{colors.WARN}The old JSON data is missing the {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
-                )
+                # If old_arch_data is falsy, then a warning was already printed
+                if old_arch_data:
+                    warnings.append(
+                        f"{colors.WARN}The old JSON data is missing the {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
+                    )
                 old_instances = []
             else:
                 old_instances = old_arch_data[instance_key]
 
             add_base_args(old_instance_data["base_args"], old_instances)
+
             # If old_instances is empty, just use the config string as-is
-            if old_instances:
-                old_best_instance = config_get_best(old_instances)
-            else:
-                old_best_instance = {}
+            old_best_instance = config_get_best(old_instances) if old_instances else {}
 
             key = (instance_key, arch)
             contenders[key] = Contender(
@@ -390,27 +400,13 @@ def generate_improved_configs(
 ) -> None:
     improved_configs_dir.mkdir(exist_ok=True)
     for algorithm_name, new_config in new_configs.items():
-        if algorithm_name not in old_configs:
-            sys.exit(
-                f"{colors.FAIL}No corresponding old config found for the new config '{algorithm_name}'{colors.END_COLOR}"
-            )
-        old_config = old_configs[algorithm_name]
-
-        if algorithm_name not in old_data:
-            sys.exit(
-                f"{colors.FAIL}No corresponding old JSON found for the new config '{algorithm_name}'{colors.END_COLOR}"
-            )
-        old_alg_data = old_data[algorithm_name]
-
-        if algorithm_name not in new_data:
-            sys.exit(
-                f"{colors.FAIL}No corresponding new JSON found for the new config '{algorithm_name}'{colors.END_COLOR}"
-            )
-        new_alg_data = new_data[algorithm_name]
+        old_config = old_configs.get(algorithm_name)
+        old_alg_data = old_data.get(algorithm_name)
+        new_alg_data = new_data.get(algorithm_name, {})
 
         config_get_best = get_config_get_best(algorithm_name)
         contenders = get_old_contenders(
-            algorithm_name, old_config, old_alg_data, config_get_best
+            algorithm_name, old_config or {}, old_alg_data or {}, config_get_best
         )
         improved = add_new_contenders(
             algorithm_name,
@@ -425,11 +421,19 @@ def generate_improved_configs(
 
         improved_config_path = improved_configs_dir / new_config["full_name"]
         with improved_config_path.open("w", encoding="utf-8") as f:
-            f.write(old_config["start_of_config"])
+            f.write(
+                old_config["start_of_config"]
+                if old_config
+                else new_config["start_of_config"]
+            )
             for contender in contenders.values():
                 f.write(contender.string)
             # Remove leading newlines from end_of_config to avoid triple newlines
-            end = old_config["end_of_config"].lstrip("\n")
+            end = (
+                old_config["end_of_config"]
+                if old_config
+                else new_config["end_of_config"]
+            ).lstrip("\n")
             if not end.endswith("\n"):
                 end += "\n"
             f.write(end)
