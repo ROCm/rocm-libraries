@@ -31,9 +31,12 @@ from typing import Any, Callable, Dict, List, NamedTuple, Tuple
 
 EMPTY_TYPENAME = "empty_type"
 warnings = []
+total_specializations = 0
 improvement_count = 0
 new_specialization_count = 0
-rejected_count = 0
+noisy_rejected_count = 0
+slower_rejected_count = 0
+marginal_improvements_rejected_count = 0
 
 
 class colors:
@@ -46,6 +49,25 @@ class colors:
 class Contender(NamedTuple):
     instance: Dict[str, Any]
     string: str
+
+
+def print_results():
+    parts = []
+
+    if improvement_count:
+        parts.append(f"{improvement_count} improved")
+    if new_specialization_count:
+        parts.append(f"{new_specialization_count} new")
+    if noisy_rejected_count:
+        parts.append(f"{noisy_rejected_count} noisy rejected")
+    if slower_rejected_count:
+        parts.append(f"{slower_rejected_count} slower rejected")
+    if marginal_improvements_rejected_count:
+        parts.append(
+            f"{marginal_improvements_rejected_count} marginal improvements rejected"
+        )
+
+    print(f"{total_specializations} specializations: {', '.join(parts)}")
 
 
 def strip_ansi(s: str) -> str:
@@ -71,7 +93,7 @@ def add_new_contenders(
     contenders: Dict[Tuple[Any, str], Contender],
     improvement_threshold_percentage: float,
 ) -> bool:
-    global warnings, improvement_count, new_specialization_count, rejected_count
+    global warnings, total_specializations, improvement_count, new_specialization_count, noisy_rejected_count, slower_rejected_count, marginal_improvements_rejected_count
 
     improved = False
     rows = []
@@ -97,6 +119,8 @@ def add_new_contenders(
             new_instances = new_arch_data[instance_key]
             add_base_args(new_instance_data["base_args"], new_instances)
             new_best_instance = config_get_best(new_instances)
+
+            total_specializations += 1
 
             row = {}
             row["algo"] = algorithm_name
@@ -135,6 +159,7 @@ def add_new_contenders(
             best_instance = config_get_best([old_best_instance, new_best_instance])
             # If there was no improvement, skip this contender.
             if best_instance != new_best_instance:
+                slower_rejected_count += 1
                 continue
 
             new_ips = new_best_instance.get("items_per_second", 0.0)
@@ -145,6 +170,7 @@ def add_new_contenders(
 
             # If improvement is below CLI threshold, skip (no coloring)
             if improvement < improvement_threshold_percentage:
+                marginal_improvements_rejected_count += 1
                 continue
 
             # Adaptive z-score threshold.
@@ -158,7 +184,7 @@ def add_new_contenders(
 
             # If improvement is below adaptive threshold, print noise values in red and skip
             if improvement < eff_threshold:
-                rejected_count += 1
+                noisy_rejected_count += 1
                 status = f"Rejected: {improvement:.1f}% < {eff_threshold:.1f}%"
                 colored_status = f"{colors.FAIL}{status}{colors.END_COLOR}"
                 row["status"] = colored_status
@@ -717,9 +743,7 @@ def main() -> None:
         print("\n".join(warnings))
         print("")
 
-    print(
-        f"Specializations: {improvement_count} improved, {new_specialization_count} new, {rejected_count} rejected"
-    )
+    print_results()
 
 
 if __name__ == "__main__":
