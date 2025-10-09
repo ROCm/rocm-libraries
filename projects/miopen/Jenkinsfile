@@ -2,7 +2,7 @@ def repoName = scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().repla
 
 def repoDir = "./"
 if (repoName == "rocm-libraries") {
-    repoDir = "/projects/miopen"
+    repoDir = "projects/miopen"
 }
 
 def rocmnode(name) {
@@ -41,10 +41,7 @@ def utils
 
 def withWorkingDir(Closure body) {
     checkout scm
-    def workDir = env.REPO_DIR.startsWith("/") ? 
-        "${env.WORKSPACE}${env.REPO_DIR}" : 
-        "${env.WORKSPACE}/${env.REPO_DIR}"
-    dir(workDir) {
+    dir("${env.WORKSPACE}/${env.REPO_DIR}") {
         body()
     }
 }
