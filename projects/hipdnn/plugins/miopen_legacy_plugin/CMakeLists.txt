@@ -14,18 +14,26 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
         message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
     endif()
-    
-    if(NOT WIN32)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
     project(
         hipDNN
         VERSION ${MIOPEN_LEGACY_PLUGIN}
         LANGUAGES CXX)
-        
+
+    include(GNUInstallDirs)
+
+    if(NOT WIN32)
+        # Only set if not already specified by user
+        if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+            set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+        endif()
+        message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+    endif()
+
     set(CMAKE_CXX_STANDARD 17)
+    
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
     
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -36,10 +44,6 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     # Enable testing for standalone build
     option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
     
-    if(NOT HIP_DNN_SKIP_TESTS)
-        enable_testing()
-    endif()
-
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS
         -Werror                                  # Treat all warnings as errors
         -Wall                                    # Enable most common warnings
@@ -73,8 +77,9 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hip REQUIRED)
     find_package(hipdnn_sdk CONFIG REQUIRED)
     
-    # Setup testing dependencies for standalone build
+    # Setup testing dependencies & tests for standalone build
     include(Dependencies)
+    include(Tests)
     
 else()
     message(STATUS "Building miopen legacy plugin as a dependency")
@@ -145,6 +150,11 @@ set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACH
 if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
+
+    # For standalone builds we need to install the ctest files
+    if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+        install_miopen_legacy_plugin_ctest_files()
+    endif()
 endif()
 
 install(
