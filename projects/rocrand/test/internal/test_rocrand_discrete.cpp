@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <algorithm>
 #include <numeric>
 #include <random>
 
@@ -64,6 +65,53 @@ struct GlobalSizes
     static constexpr size_t grid_size        = 1234;
     static constexpr size_t size             = grid_size * items_per_block;
 };
+
+// class to represent a Emperical Distribution Function (EDF) of some distribution
+class EDF{
+    private:
+        std::vector<double> dis;
+        double n;
+
+    public:
+        EDF(const std::vector<double> & x){
+            dis = x;
+            std::sort(dis.begin(), dis.end());
+            n = static_cast<double>(dis.size());
+        }
+
+        double operator()(double x) const{
+            auto it = std::upper_bound(dis.begin(), dis.end(), x);
+            double pos = static_cast<double>(it - dis.begin());
+            return pos / n;
+        }
+};
+
+// Perform Two-Sample Kolmogorov-Smirnov Test
+bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual){
+    EDF aEDF(expected);
+    EDF eEDF(actual);
+
+    double n = static_cast<double>(expected.size());
+    double m = static_cast<double>(actual.size());
+
+    double iter = 1.0 / (static_cast<double>(actual.size()) * 2);
+
+
+    // Calculate the statistical value: the maximum difference between the two EDF functions.
+    // Since the original distributions are discrete, we can split [0, 1.0] into n points
+    // and check at those points. We double the points here just for extra coverage, but
+    // its not really needed.
+    double d = -1;
+    for(double x = 0; x <= 1.0; x += iter)
+        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
+
+    double c_alpha = 1.224; // c(0.10) = 1.224 -- 0.10 is the signigficance level
+
+    // calculating the critical value
+    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
+ 
+    return d <= cv; // <= because we reject if d > cv
+}
 
 using DiscreteDataType = ::testing::Types<double, unsigned int, unsigned long, unsigned long long int>;
 
@@ -157,12 +205,7 @@ void run_internal_discrete_tests()
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size);
 
-        // If the original probability is bigger than 5% then expected should be within 5% difference.
-        // Otherwise it should be within 0.05
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
 
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
@@ -307,13 +350,7 @@ void run_external_discrete_tests(
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(size);
 
-        // If the original probability is bigger than 5% then expected should be within 5% difference.
-        // Otherwise it should be within 0.05
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
-
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
 
@@ -677,12 +714,7 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size * 4);
 
-        // If the original probability is bigger than 5% then expected should be within 5% difference.
-        // Otherwise it should be within 0.05
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
 
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
@@ -768,13 +800,7 @@ void run_internal_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 10% difference.
-        // Otherwise it should be within 0.05
-        for(size_t i = 0; i < expected_prob.size(); i++)
-        {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.1 : 0.05;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
     }
 }
 
@@ -916,13 +942,8 @@ void run_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 10% difference.
-        // Otherwise it should be within 0.05
-        for(size_t i = 0; i < expected_prob.size(); i++)
-        {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.1 : 0.05;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+
     }
 }
 
