@@ -25,8 +25,8 @@ add_library(hipdnn_backend_private
     plugin/PluginCore.cpp
     plugin/SharedLibrary.cpp
     LastErrorManager.cpp
-    $<$<BOOL:WIN32>:PlatformUtils.windows.cpp>
-    $<$<BOOL:LINUX>:PlatformUtils.linux.cpp>
+    $<$<BOOL:${WIN32}>:PlatformUtils.windows.cpp>
+    $<$<BOOL:${UNIX}>:PlatformUtils.linux.cpp>
 )
 
 target_include_directories(hipdnn_backend_private 
@@ -38,9 +38,7 @@ target_include_directories(hipdnn_backend_private
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_sdk)
-if(NOT WIN32)
-target_link_libraries(hipdnn_backend_private PRIVATE dl)
-endif()
+target_link_libraries(hipdnn_backend_private PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(hipdnn_backend_private PRIVATE HIPDNN_BACKEND_COMPILATION)
 
 clang_tidy_check(hipdnn_backend_private)
@@ -79,11 +77,18 @@ generate_export_header( hipdnn_backend
 install( 
     TARGETS hipdnn_backend
     EXPORT hipdnn_backend_targets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT Runtime
+        NAMELINK_COMPONENT Development
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT Development
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT Runtime
 )
 
 export(
     TARGETS hipdnn_backend
-    FILE  ${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake
+    FILE  ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake
 )
 
 install(

@@ -6,14 +6,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
-    
-    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
-    
-    if(EXISTS ${ROCM_PATH}/llvm/bin)
-        set(CMAKE_CXX_COMPILER ${ROCM_PATH}/llvm/bin/clang++)
-        set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
-        message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
-    endif()
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
     project(
@@ -39,7 +32,13 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
     
-    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    list(
+        APPEND
+        CMAKE_MODULE_PATH
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+        ${ROCM_PATH}/lib/cmake/hip
+        ${HIP_DIR}/cmake
+    )
     
     # Enable testing for standalone build
     option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
@@ -62,6 +61,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         -Winit-self                              # Warn about variables initialized with itself
         -Wunreachable-code                       # Warn about unreachable code
         -Wno-error=unused-command-line-argument  # Disable error for unused command line arguments
+        -Wswitch-default                         # Warn if a switch statement does not have a default case
     )
     
     # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files; remove when fixed.
@@ -116,9 +116,6 @@ target_include_directories(miopen_legacy_plugin_private
 )
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_legacy_plugin_private PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_private)

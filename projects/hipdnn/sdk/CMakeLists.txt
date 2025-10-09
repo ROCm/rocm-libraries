@@ -145,7 +145,7 @@ target_compile_definitions(hipdnn_sdk INTERFACE __HIPCC__)
 export(
     TARGETS hipdnn_sdk
     ${_hipdnn_sdk_local_export_targets}
-    FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
+    FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
 )
 
 install(
@@ -175,21 +175,21 @@ if(_hipdnn_sdk_local_export_includes)
     )
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_local.cmake.in"
-        "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
         PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_INSTALL_PLUGIN_ENGINE_DIR
     )
 else()
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_imported.cmake.in"
-        "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
         PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_INSTALL_PLUGIN_ENGINE_DIR
     )
 endif()
 
 install(
-    FILES "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
+    FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
 )
 

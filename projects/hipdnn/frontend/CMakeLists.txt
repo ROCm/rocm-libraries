@@ -23,13 +23,13 @@ target_include_directories(hipdnn_frontend INTERFACE
 # Generate the config file from template
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_frontendConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend # Install is scheduled
 )
 
 export(
     TARGETS hipdnn_frontend
-    FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
+    FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}lib/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
 )
 
 install( 
