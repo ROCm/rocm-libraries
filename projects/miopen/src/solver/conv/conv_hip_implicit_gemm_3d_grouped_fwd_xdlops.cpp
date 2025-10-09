@@ -364,6 +364,7 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 }
 } // namespace
 
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
     const ::miopen::conv::ProblemDescription& problem)
@@ -403,6 +404,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::CheckCKApplicability(
     default: return IsCKApplicable<DeviceOpGFwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)

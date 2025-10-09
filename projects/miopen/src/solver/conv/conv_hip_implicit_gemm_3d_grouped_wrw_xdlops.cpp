@@ -328,6 +328,7 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 }
 } // namespace
 
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(
     const ::miopen::conv::ProblemDescription& problem)
@@ -370,6 +371,8 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::CheckCKApplicability(
         return IsCKApplicable<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
+#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
 {
