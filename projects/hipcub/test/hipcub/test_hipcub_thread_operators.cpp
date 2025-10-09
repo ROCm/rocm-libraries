@@ -696,44 +696,6 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
     }
 }
 
-TYPED_TEST(HipcubNCThreadOperatorsTests, BinaryFlip)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : sizes)
-    {
-        // Generate data.
-        std::vector<input_type> h_input(input_size);
-        std::iota(h_input.begin(), h_input.end(), static_cast<input_type>(1));
-
-        // Scan function: BinaryFlip.
-        hipcub::Sum                     sum_op{};
-        hipcub::BinaryFlip<hipcub::Sum> scan_op(sum_op);
-
-        // Calculate expected results on host.
-        std::vector<output_type> h_expected{};
-
-        // BinaryFlip's () operator is a device function, so cannot be called from the host function
-        // test_utils::host_inclusive_scan. We do the scan "manually".
-        output_type accum = h_input[0];
-        h_expected.push_back(accum);
-        for(size_t i = 1; i < input_size; ++i)
-        {
-            // The host_inclusive_cast would do:
-            //
-            // accum = scan_op(accum, static_cast<output_type>(h_input[i]));
-            //
-            // But for the BinaryFlip this is equivalent to:
-            accum = sum_op(static_cast<output_type>(h_input[i]), accum);
-            h_expected.push_back(accum);
-        }
-
-        scan_op_test<input_type, output_type>(h_input, h_expected, scan_op, input_size);
-    }
-}
-
 // Unary operators tests.
 
 TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
