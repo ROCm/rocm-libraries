@@ -99,7 +99,7 @@ public:
         {
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
-            hipblaslt_cerr << "Insufficient memory to  allocate (" << (m_size >> 30) << " GB) in device , available device memory " << (free_device_mem >> 30) << " GB "
+            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
