@@ -204,7 +204,7 @@ END_HIPCUB_NAMESPACE
     #define HIPCUB_IF_CONSTEXPR constexpr
 #else
     #if defined(_MSC_VER) && !defined(__clang__)
-        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr (even in C++14 mode),
+        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr,
         // moreover it triggers warning C4127 (conditional expression is constant) when not using it. nvcc will
         // be calling cl.exe for host-side codegen.
         #define HIPCUB_IF_CONSTEXPR constexpr
