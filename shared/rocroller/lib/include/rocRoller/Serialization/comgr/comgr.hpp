@@ -148,7 +148,7 @@ namespace rocRoller
                 return false;
             }
 
-private:
+        private:
             template <typename T>
             void comgrNodeInputHelper(amd_comgr_metadata_node_t& n, T& obj)
             {
@@ -158,38 +158,8 @@ private:
                 {
                     std::string str(size - 1, '\0');
                     amd_comgr_get_metadata_string(n, &size, str.data());
-                    
-                    // Parse the string based on type
-                    if constexpr (std::is_integral_v<T>)
-                    {
-                        if constexpr (std::is_signed_v<T>)
-                        {
-                            obj = static_cast<T>(std::strtoll(str.c_str(), nullptr, 10));
-                        }
-                        else
-                        {
-                            obj = static_cast<T>(std::strtoull(str.c_str(), nullptr, 10));
-                        }
-                    }
-                    else if constexpr (std::is_floating_point_v<T>)
-                    {
-                        if constexpr (std::is_same_v<T, float>)
-                        {
-                            obj = std::strtof(str.c_str(), nullptr);
-                        }
-                        else if constexpr (std::is_same_v<T, double>)
-                        {
-                            obj = std::strtod(str.c_str(), nullptr);
-                        }
-                        else
-                        {
-                            obj = static_cast<T>(std::strtold(str.c_str(), nullptr));
-                        }
-                    }
-                    else if constexpr (std::is_same_v<T, bool>)
-                    {
-                        obj = (str == "true" || str == "1" || str == "True" || str == "TRUE");
-                    }
+                    std::stringstream ss(str);
+                    ss >> obj;
                 }
                 else
                 {

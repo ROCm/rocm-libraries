@@ -25,8 +25,8 @@
  *******************************************************************************/
 
 #include <rocRoller/Utilities/Error.hpp>
-#include </home/ibucking/rocm-libraries/shared/rocroller/lib/include/rocRoller/Serialization/comgr/comgr.hpp>
-#include </home/ibucking/rocm-libraries/shared/rocroller/lib/include/rocRoller/Serialization/ELF.hpp>
+#include <rocRoller/Serialization/comgr/comgr.hpp>
+#include <rocRoller/Serialization/ELF.hpp>
 #include <amd_comgr/amd_comgr.h>
 
 using namespace rocRoller;
@@ -35,7 +35,7 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
 {
     std::string yaml;
 
-    
+    fromElf(fileName)
     
     return yaml;
 }

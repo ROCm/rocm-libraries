@@ -37,7 +37,7 @@ namespace rocRoller
         T fromELF(std::string const& elf)
         {
             T rv;
-            amd_comgr_metadata_node_t comgrNode;
+            amd_comgr_metadata_node_t comgrNode = elf;
             Serialization::ComgrNodeInput comgrNodeInput(comgrNode, nullptr);
             comgrNodeInput.input(comgrNode, rv);
             return rv;
