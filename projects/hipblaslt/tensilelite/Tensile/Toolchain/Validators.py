@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import List, NamedTuple, Union
 
-from Tensile.Common.Utilities import isRhel8
+from Tensile.Common.Utilities import isRhel8, print1
 
 DEFAULT_ROCM_BIN_PATH_POSIX = Path("/opt/rocm/bin")
 DEFAULT_ROCM_LLVM_BIN_PATH_POSIX = Path("/opt/rocm/lib/llvm/bin")
