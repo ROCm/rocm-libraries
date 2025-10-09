@@ -17,7 +17,7 @@ add_executable(miopen_plugin_integration_test
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_compile_definitions(miopen_plugin_integration_test PRIVATE
-    PLUGIN_PATH="${MIOPEN_LEGACY_PLUGIN_PATH}"
+    PLUGIN_PATH="../lib/${MIOPEN_LEGACY_PLUGIN_PATH}"
 )
 
 target_link_libraries(miopen_plugin_integration_test PUBLIC 
