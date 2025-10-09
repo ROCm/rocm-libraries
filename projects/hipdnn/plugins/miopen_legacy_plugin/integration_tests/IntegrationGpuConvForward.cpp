@@ -34,14 +34,14 @@ class ConvForward : public ::testing::TestWithParam<ConvTestCase>
     {
         ConvTensorBundle(const ConvTestCase& testCase,
                          const TensorLayout& layout = TensorLayout::NCHW)
-            : xTensor(testCase._xDims, layout)
-            , wTensor(testCase._wDims, layout)
-            , yTensor(testCase._yDims, layout)
+            : xTensor(testCase.xDims, layout)
+            , wTensor(testCase.wDims, layout)
+            , yTensor(testCase.yDims, layout)
         {
             xTensor.fillWithRandomValues(
-                static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+                static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
             wTensor.fillWithRandomValues(
-                static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+                static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
             yTensor.fillWithValue(static_cast<DataType>(0.0));
         }
 
@@ -116,10 +116,10 @@ protected:
 
         graph::ConvFpropAttributes convAttrs;
         convAttrs.set_name("convolution_forward");
-        convAttrs.set_pre_padding(testCase._convPrePadding);
-        convAttrs.set_post_padding(testCase._convPostPadding);
-        convAttrs.set_stride(testCase._convStride);
-        convAttrs.set_dilation(testCase._convDilation);
+        convAttrs.set_pre_padding(testCase.convPrePadding);
+        convAttrs.set_post_padding(testCase.convPostPadding);
+        convAttrs.set_stride(testCase.convStride);
+        convAttrs.set_dilation(testCase.convDilation);
 
         auto yTensorAttr = graphObj->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
@@ -163,16 +163,16 @@ protected:
         CpuFpReferenceConvolutionImpl<DataType, float>::convFwdInference(cpuTensorBundle.xTensor,
                                                                          cpuTensorBundle.wTensor,
                                                                          cpuTensorBundle.yTensor,
-                                                                         testCase._convStride,
-                                                                         testCase._convDilation,
-                                                                         testCase._convPrePadding);
+                                                                         testCase.convStride,
+                                                                         testCase.convDilation,
+                                                                         testCase.convPrePadding);
     }
 
     void runConvTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         const ConvTestCase& testCase = GetParam();
 
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase._seed);
+        HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
 
         ConvTensorBundle graphTensorBundle(testCase, layout);
         ConvTensorBundle cpuTensorBundle(testCase, layout);

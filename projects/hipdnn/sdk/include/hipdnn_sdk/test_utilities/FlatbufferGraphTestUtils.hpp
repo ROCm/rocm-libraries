@@ -203,7 +203,7 @@ inline flatbuffers::FlatBufferBuilder createBatchnormGraph()
                               "scale",
                               "bias",
                               "epsilon",
-                              "peer_stats",
+                              "peerStats",
                               "prev_running_mean",
                               "momentum",
                               "y",
