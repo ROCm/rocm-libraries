@@ -37,13 +37,12 @@ public:
         unsigned int seed = std::random_device{}();
         std::vector<int64_t> dims = {1, 3, 14, 14};
         auto graph = buildBatchnormFwdInferenceGraph(
-            inputDataType, scaleBiasDataType, meanVarianceDataType, dims, TensorLayout::NCHW);
+            inputDataType, scaleBiasDataType, meanVarianceDataType, dims, TensorLayout::NCHW, true);
 
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-
         GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
         BatchnormFwdTensorBundle tensorBundle(

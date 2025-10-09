@@ -158,7 +158,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType,
                                     std::vector<int64_t>& dims,
-                                    const TensorLayout& layout)
+                                    const TensorLayout& layout,
+                                    bool isOutputVirtual = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceTest");
@@ -215,7 +216,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
     yTensorAttr->set_dim(dims);
     yTensorAttr->set_stride(strides);
-    yTensorAttr->set_is_virtual(false);
+    yTensorAttr->set_is_virtual(isOutputVirtual);
 
     return graph;
 }
