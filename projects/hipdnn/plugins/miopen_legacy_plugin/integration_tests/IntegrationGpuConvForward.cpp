@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <filesystem>
 #include <random>
 
 #include <gtest/gtest.h>
@@ -13,6 +14,7 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -60,7 +62,10 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        const std::array<const char*, 1> paths = {PLUGIN_PATH};
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
