@@ -1344,7 +1344,7 @@ def fp4_16x16x128_scale_options():
 
 
 def fp4_32x32x64_scale_options():
-    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
 
 

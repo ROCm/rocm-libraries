@@ -1,7 +1,7 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
 - gfx950
-- [Device 0049, Device 0050]
+- [Device 75a0]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationType: hipblaslt_all
@@ -108,7 +108,7 @@
     InterleaveAlpha: 0
     InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_HHS_Bias_HAS_SAV_MT32x32x32_MI16x16x16x1_SN_MIWT1_1
+    KernelNameMin: Cijk_Alik_Bjlk_HHS_BiasSH_HAS_SAV_MT32x32x32_MI16x16x16x1_SN_MIWT1_1
     LSCA: 32
     LSCB: 32
     LSPA: 8
@@ -188,7 +188,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bjlk_HHS_Bias_HAS_SAV_MT32x32x32_MI16x16x16x1_SN_MIWT1_1
+    SolutionNameMin: Cijk_Alik_Bjlk_HHS_BiasSH_HAS_SAV_MT32x32x32_MI16x16x16x1_SN_MIWT1_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
