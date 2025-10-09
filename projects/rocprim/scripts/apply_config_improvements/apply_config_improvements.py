@@ -220,11 +220,11 @@ def add_new_contenders(
 
     columns = [
         ("status", f"Status for {algorithm_name}"),
-        ("noise", "Noise(old/new)"),
-        ("bps", "Bytes/sec(old/new)"),
+        ("noise", "Noise (old/new)"),
+        ("bps", "Bytes/sec (old/new)"),
         ("arch", "Arch"),
         ("key", "Specialization"),
-        ("family_index", "Family index(old/new)"),
+        ("family_index", "Family index (old/new)"),
     ]
 
     # Prepare compact row values
