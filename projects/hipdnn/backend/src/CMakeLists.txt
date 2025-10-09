@@ -54,7 +54,7 @@ target_include_directories(hipdnn_backend
         $<BUILD_INTERFACE:${HIP_DNN_BACKEND_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}>
-    )
+)
 
 target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # This definition is used to enable logging in the backend.  It is #ifdef'ed in the backend code.
@@ -62,17 +62,18 @@ target_compile_options(hipdnn_backend PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 # logger name. Frontend/plugin code will need to init the logger themselves so they have a different name.
 target_compile_definitions(hipdnn_backend PRIVATE HIPDNN_BACKEND_COMPILATION)
 target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
-target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL" ) # HIDE symbols from linked static libs
+target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL") # HIDE symbols from linked static libs
 set_target_properties(hipdnn_backend PROPERTIES 
     CXX_VISIBILITY_PRESET hidden
 )
 
 clang_tidy_check(hipdnn_backend)
 
-include( GenerateExportHeader )
-generate_export_header( hipdnn_backend 
-                        EXPORT_FILE_NAME 
-                        ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}/hipdnn_backend_export.h )
+include(GenerateExportHeader)
+generate_export_header(hipdnn_backend 
+    EXPORT_FILE_NAME 
+    ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}/hipdnn_backend_export.h
+)
 
 install( 
     TARGETS hipdnn_backend
@@ -88,21 +89,25 @@ install(
 
 export(
     TARGETS hipdnn_backend
-    FILE  ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake
+    FILE ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfig.cmake
 )
 
 install(
     DIRECTORY ${HIP_DNN_BACKEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR}
+    COMPONENT Development
+    FILES_MATCHING PATTERN "*.h"
 )
 
 install(
     FILES ${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}/hipdnn_backend_export.h
     DESTINATION ${HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR}
+    COMPONENT Development
 )
 
 install(
     EXPORT hipdnn_backend_targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend
     FILE hipdnn_backendConfig.cmake
+    COMPONENT Development
 )
