@@ -75,6 +75,14 @@ def parse_args():
     parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
                         help='Verbose build (optional, default: False)')
 
+    # Path to rocprim
+    parser.add_argument('--rocprim-path', dest='rocprim_path', required=False, default="",
+                        help='Path to rocprim')
+
+    # Path to directory containing matrices
+    parser.add_argument('--matrices-dir', dest='matrices_dir', required=False, default="",
+                        help='Path to directory containing matrices')
+
     # rocsparse
     parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
                         help='Build only clients with a pre-built library')
@@ -183,6 +191,36 @@ def config_cmd():
 
     create_dir( os.path.join(build_path, "clients") )
     os.chdir( build_path )
+
+    if args.rocprim_path != "":
+        cmake_options.append(f'-Drocprim_DIR=\"{args.rocprim_path}\"')
+
+    if args.matrices_dir == "":
+        fatal("Missing argument from command line parameter --matrices-dir; aborting")
+    else:
+        if os.getenv("CXX"):
+            cxx_compiler = os.getenv("CXX")
+        else:
+            cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+        
+        program_list = [
+        cmake_executable,
+            f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
+            f'-DPROJECT_BINARY_DIR={args.matrices_dir}',
+            f'-DCMAKE_MATRICES_DIR={args.matrices_dir}',
+            f'-DROCM_PATH={rocm_path}',
+            '-DCMAKE_INSTALL_LIBDIR=lib',
+            '-P',
+            './cmake/ClientMatrices.cmake'
+        ]
+        proc = subprocess.run(
+            program_list,
+            cwd=cwd_path,
+            check=True,
+            stderr=subprocess.STDOUT,
+            shell=False)
+
+        cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{args.matrices_dir}\"')
 
     if args.build_with_rocblas:
         cmake_options.append(f"-DBUILD_WITH_ROCBLAS=ON")

@@ -181,7 +181,7 @@ if(BUILD_CLIENTS_TESTS)
   # default to old behaviour
   set(rpath_sep ",")
   endif()
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe RESULT_VARIABLE STATUS)
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} ${CONVERT_SOURCE} -O3 -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe RESULT_VARIABLE STATUS)
   if(STATUS AND NOT STATUS EQUAL 0)
     message(FATAL_ERROR "mtx2csr.exe failed to build, aborting.")
   endif()
