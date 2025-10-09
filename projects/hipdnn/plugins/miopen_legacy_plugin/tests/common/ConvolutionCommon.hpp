@@ -23,20 +23,20 @@ struct ConvTestCase
     std::vector<int64_t> convDilation;
     unsigned seed;
 
-    ConvTestCase(std::vector<int64_t>&& xDims,
-                 std::vector<int64_t>&& wDims,
-                 std::vector<int64_t>&& convPrePadding,
-                 std::vector<int64_t>&& convPostPadding,
-                 std::vector<int64_t>&& convStride,
-                 std::vector<int64_t>&& convDilation,
-                 unsigned seed)
-        : xDims(std::move(xDims))
-        , wDims(std::move(wDims))
-        , convPrePadding(std::move(convPrePadding))
-        , convPostPadding(std::move(convPostPadding))
-        , convStride(std::move(convStride))
-        , convDilation(std::move(convDilation))
-        , seed(seed)
+    ConvTestCase(std::vector<int64_t>&& xDimsLocal,
+                 std::vector<int64_t>&& wDimsLocal,
+                 std::vector<int64_t>&& convPrePaddingLocal,
+                 std::vector<int64_t>&& convPostPaddingLocal,
+                 std::vector<int64_t>&& convStrideLocal,
+                 std::vector<int64_t>&& convDilationLocal,
+                 unsigned seedLocal)
+        : xDims(std::move(xDimsLocal))
+        , wDims(std::move(wDimsLocal))
+        , convPrePadding(std::move(convPrePaddingLocal))
+        , convPostPadding(std::move(convPostPaddingLocal))
+        , convStride(std::move(convStrideLocal))
+        , convDilation(std::move(convDilationLocal))
+        , seed(seedLocal)
     {
         // Indices for dimensions
         // N - Batch size, always at index 0
