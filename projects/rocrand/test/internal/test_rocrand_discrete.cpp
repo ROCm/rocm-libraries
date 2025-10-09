@@ -105,9 +105,9 @@ bool ks_test_2(const std::vector<double> & expected, const std::vector<double> &
     for(double x = 0; x <= 1.0; x += iter)
         d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
 
-    double c_alpha = 1.224; // c(0.10) = 1.224 -- 0.10 is the signigficance level
-
     // calculating the critical value
+    double alpha = 0.1; // the signigficance level
+    double c_alpha = std::sqrt(std::log(alpha / 2) * 0.5);
     double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
  
     return d <= cv; // <= because we reject if d > cv
