@@ -117,6 +117,7 @@ def add_new_contenders(
                     f"{colors.FAIL}The new JSON data is missing the {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
                 )
             new_instances = new_arch_data[instance_key]
+
             add_base_args(new_instance_data["base_args"], new_instances)
             new_best_instance = config_get_best(new_instances)
 
@@ -395,7 +396,16 @@ def generate_improved_configs(
             )
         old_config = old_configs[algorithm_name]
 
+        if algorithm_name not in old_data:
+            sys.exit(
+                f"{colors.FAIL}No corresponding old JSON found for the new config '{algorithm_name}'{colors.END_COLOR}"
+            )
         old_alg_data = old_data[algorithm_name]
+
+        if algorithm_name not in new_data:
+            sys.exit(
+                f"{colors.FAIL}No corresponding new JSON found for the new config '{algorithm_name}'{colors.END_COLOR}"
+            )
         new_alg_data = new_data[algorithm_name]
 
         config_get_best = get_config_get_best(algorithm_name)
@@ -732,7 +742,10 @@ def main() -> None:
     new_data = read_data(args.new_json_dir, selectors)
 
     old_configs = read_configs(args.old_configs_dir)
+
     new_configs = read_configs(args.new_configs_dir)
+    if len(new_configs) == 0:
+        sys.exit(f"{colors.FAIL}No new configs{colors.END_COLOR}")
 
     generate_improved_configs(
         args.improvement_threshold_percentage,
