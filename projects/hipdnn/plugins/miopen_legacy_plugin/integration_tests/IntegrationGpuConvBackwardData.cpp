@@ -128,6 +128,8 @@ protected:
         {
             dxTensorAttr->set_uid(uid++);
         }
+        dxTensorAttr->set_dim(graphTensorBundle.dxTensor.dims());
+        dxTensorAttr->set_stride(graphTensorBundle.dxTensor.strides());
         dxTensorAttr->set_output(true);
         dxTensorAttr->set_data_type(dataType);
 
@@ -223,57 +225,57 @@ TEST_P(IntegrationGpuConvBwdDataNchwFp32, Correctness)
 
 TEST_P(IntegrationGpuConvBwdDataNcdhwFp32, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<float>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNchwBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCHW);
+    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNcdhwBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNchwFp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<half>(), TensorLayout::NCHW);
+    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNcdhwFp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<half>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNhwcFp32, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<float>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNdhwcFp32, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<float>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNhwcBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNdhwcBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNhwcFp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<half>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNdhwcFp16, Correctness)
 {
-    runConvTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

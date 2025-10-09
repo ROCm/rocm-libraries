@@ -244,8 +244,8 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
     std::vector<int64_t> dxStrides = {1, 1, 1, 1};
     std::vector<int64_t> wDims = {1, 1, 1, 1};
     std::vector<int64_t> wStrides = {1, 1, 1, 1};
-    std::vector<int64_t> dyDims = {1, 1, 1}; // Invalid w tensor dims
-    std::vector<int64_t> dyStrides = {1, 1, 1};
+    std::vector<int64_t> dyDims = {1, 1, 4, 4}; // dy too big
+    std::vector<int64_t> dyStrides = {1, 1, 4, 16};
     std::vector<int64_t> convPrePadding = {0, 0};
     std::vector<int64_t> convPostPadding = {0, 0};
     std::vector<int64_t> convStrides = {1, 1};
