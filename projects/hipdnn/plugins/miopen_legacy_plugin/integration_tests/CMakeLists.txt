@@ -16,8 +16,10 @@ add_executable(miopen_plugin_integration_test
 )
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
+# To use the build tree plugin, we use the path relative to the test binary instead of the installed libhipdnn_backend.so
 target_compile_definitions(miopen_plugin_integration_test PRIVATE
-    PLUGIN_PATH="../lib/${MIOPEN_LEGACY_PLUGIN_PATH}"
+    PLUGIN_PATH="../lib/hipdnn_plugins/engines/miopen_legacy_plugin"
 )
 
 target_link_libraries(miopen_plugin_integration_test PUBLIC 

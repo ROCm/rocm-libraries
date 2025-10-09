@@ -126,8 +126,8 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        auto testBinaryDir = hipdnn_sdk::utilities::getCurrentExecutableDirectory();
-        auto pluginPath = std::filesystem::weakly_canonical(testBinaryDir / PLUGIN_PATH);
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
