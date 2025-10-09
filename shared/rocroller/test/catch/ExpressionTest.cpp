@@ -2550,6 +2550,7 @@ namespace ExpressionTest
 
         auto raw32One    = literal(rocRoller::Raw32(1u));
         auto unsignedOne = literal(uint32_t(1u));
+        auto unsignedTwo = literal(uint32_t(2u));
         auto floatOne    = literal(1.0f);
 
         CHECK_THROWS_AS(unsignedOne << raw32One, FatalError);
@@ -2612,6 +2613,61 @@ namespace ExpressionTest
             auto expr = std::make_shared<Expression::Expression>(
                 Expression::Convert{raw32One, "", rocRoller::DataType::UInt32});
             CHECK_NOTHROW(evaluate(expr + unsignedOne));
+        }
+
+        SECTION("multiplyHigh")
+        {
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, unsignedOne), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(unsignedOne, raw32One), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, raw32Two), FatalError);
+            CHECK_NOTHROW(Expression::multiplyHigh(unsignedOne, unsignedTwo));
+        }
+
+        SECTION("multiplyAdd")
+        {
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, unsignedOne, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, raw32One, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, unsignedTwo, raw32One),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, raw32Two, unsignedOne), FatalError);
+            CHECK_NOTHROW(Expression::multiplyAdd(unsignedOne, unsignedTwo, unsignedOne));
+        }
+
+        SECTION("addShiftL")
+        {
+            CHECK_THROWS_AS(Expression::addShiftL(raw32One, unsignedOne, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(Expression::addShiftL(unsignedOne, unsignedTwo, unsignedOne));
+        }
+
+        SECTION("shiftLAdd")
+        {
+            // First operand can be Raw32 (it's shifted, not the shift amount)
+            CHECK_NOTHROW(Expression::shiftLAdd(raw32One, unsignedOne, unsignedTwo));
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(Expression::shiftLAdd(unsignedOne, unsignedTwo, unsignedOne));
+        }
+
+        SECTION("magicMultiple")
+        {
+            CHECK_THROWS_AS(Expression::magicMultiple(raw32One), FatalError);
+            CHECK_NOTHROW(Expression::magicMultiple(unsignedOne));
+        }
+
+        SECTION("magicShifts")
+        {
+            CHECK_THROWS_AS(Expression::magicShifts(raw32One), FatalError);
+            CHECK_NOTHROW(Expression::magicShifts(unsignedOne));
+        }
+
+        SECTION("magicShiftAndSign")
+        {
+            CHECK_THROWS_AS(Expression::magicShiftAndSign(raw32One), FatalError);
+            CHECK_NOTHROW(Expression::magicShiftAndSign(unsignedOne));
         }
     }
 
