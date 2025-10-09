@@ -50,7 +50,7 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
         Gpu supported_gpus = Gpu::gfx908 | Gpu::gfx90A;
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+        auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.Tunable(5);
         p.SetConvAttrFp16Alt(0);
         p.SetTolerance(Gpu::gfx90A, miopenFloat, 2.0f);
