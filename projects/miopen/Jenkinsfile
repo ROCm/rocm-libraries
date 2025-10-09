@@ -41,7 +41,10 @@ def utils
 
 def withWorkingDir(Closure body) {
     checkout scm
-    dir("${env.WORKSPACE}/${env.REPO_DIR}") {
+    def workDir = env.REPO_DIR.startsWith("/") ? 
+        "${env.WORKSPACE}${env.REPO_DIR}" : 
+        "${env.WORKSPACE}/${env.REPO_DIR}"
+    dir(workDir) {
         body()
     }
 }
