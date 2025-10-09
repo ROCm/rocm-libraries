@@ -66,10 +66,9 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
-                    task.solution.calculateAutoGSU(task.problem, &task.hardware);
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
-                                     : task.solution.autoGSU;
+                                     : task.solution.calculateAutoGSU(task.problem, &task.hardware);
 
                     size_t gsuMultiplier = gsu > 1 ? gsu : 0;
 
@@ -88,10 +87,9 @@ namespace TensileLite
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
-                    task.solution.calculateAutoGSU(task.problem, &task.hardware);
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
-                                     : task.solution.autoGSU;
+                                     : task.solution.calculateAutoGSU(task.problem, &task.hardware);
 
                     size_t gsuMultiplier = gsu > 1 ? gsu : 0;
 
