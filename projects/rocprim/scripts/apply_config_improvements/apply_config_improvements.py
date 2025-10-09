@@ -598,7 +598,34 @@ def get_selectors() -> Dict[str, List[str]]:
         return json.load(f)
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
+class SingleUseAction(argparse.Action):
+    """Custom action that forbids setting an argument multiple times."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"argument {option_string} specified multiple times")
+        setattr(namespace, self.dest, values)
+
+
+class StrictArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that automatically uses SingleUseAction for all args."""
+
+    def add_argument(self, *args, **kwargs):
+        # Don't override actions like 'store_true', 'append', etc.
+        if "action" not in kwargs or kwargs["action"] == "store":
+            kwargs["action"] = SingleUseAction
+        return super().add_argument(*args, **kwargs)
+
+
+def existing_path(path_str):
+    """Validate that a path exists (file or directory) and return it as a Path."""
+    p = Path(path_str)
+    if not p.exists():
+        raise argparse.ArgumentTypeError(f"{path_str!r} does not exist")
+    return p
+
+
+def add_arguments(parser: StrictArgumentParser) -> None:
     parser.add_argument(
         "--improvement_threshold_percentage",
         help="Minimum improvement percentage required for acceptance (acts as a floor for adaptive threshold)",
@@ -609,31 +636,31 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--old_json_dir",
         help="The input directory of old JSON files running the benchmarks produced",
         required=True,
-        type=Path,
+        type=existing_path,
     )
     parser.add_argument(
         "--new_json_dir",
         help="The input directory of new JSON files running the benchmarks produced",
         required=True,
-        type=Path,
+        type=existing_path,
     )
     parser.add_argument(
         "--old_configs_dir",
         help="The input directory of old config files",
         required=True,
-        type=Path,
+        type=existing_path,
     )
     parser.add_argument(
         "--new_configs_dir",
         help="The input directory of new config files",
         required=True,
-        type=Path,
+        type=existing_path,
     )
     parser.add_argument(
         "--improved_configs_dir",
         help="The output directory of improved config files",
         required=True,
-        type=Path,
+        type=Path,  # Not using existing_path, since the dir is created.
     )
 
 
@@ -665,7 +692,7 @@ class TestExtractTemplateArguments(unittest.TestCase):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = StrictArgumentParser()
     add_arguments(parser)
     args = parser.parse_args()
 
