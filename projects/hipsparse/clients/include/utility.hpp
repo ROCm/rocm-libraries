@@ -30,6 +30,7 @@
 #include <complex>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
+#include <inttypes.h>
 #include <math.h>
 #include <sstream>
 #include <stdio.h>
@@ -54,8 +55,8 @@ std::string hipsparse_exepath();
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 #define CHECK_HIP_ERROR(error)                \
     if(error != hipSuccess)                   \
@@ -69,7 +70,7 @@ std::string hipsparse_exepath();
         exit(EXIT_FAILURE);                   \
     }
 
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
+#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 
 #define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
     case token_:                             \
@@ -761,13 +762,13 @@ static void sort(std::vector<I>& perm, std::vector<I>& unsorted_row, std::vector
 template <typename I>
 inline void scan(const char* line, I* nrow, I* ncol, int64_t* nnz)
 {
-    sscanf(line, "%d %d %lld", nrow, ncol, nnz);
+    sscanf(line, "%d %d %" PRId64, nrow, ncol, nnz);
 }
 
 template <>
 inline void scan<int64_t>(const char* line, int64_t* nrow, int64_t* ncol, int64_t* nnz)
 {
-    sscanf(line, "%lld %lld %lld", nrow, ncol, nnz);
+    sscanf(line, "%" PRId64 " %" PRId64 " %" PRId64, nrow, ncol, nnz);
 }
 
 template <typename I, typename T>

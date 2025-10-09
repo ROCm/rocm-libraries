@@ -208,9 +208,6 @@ set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 add_dependencies(hipsparse-test hipsparse-common)
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
-
-
-
 if (WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32
   file( GLOB third_party_dlls
