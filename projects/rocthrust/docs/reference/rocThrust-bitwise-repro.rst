@@ -1,12 +1,12 @@
 .. meta::
   :description: rocThrust documentation and API reference
-  :keywords: rocThrust, ROCm, API, reference, data type, support
+  :keywords: rocThrust, ROCm, API, reference
 
 .. _bitwise-repro:
 
-***********************
-Bitwise reproducibility
-***********************
+************************************
+rocThrust bitwise reproducibility
+************************************
 
 The default device execution policy, ``thrust::device`` (``thrust::hip::par``) does not guarantee run-to-run bitwise reproducibility: that is, given identical inputs and device, the function will return the exact same results in repeated invocations. In practise, all rocThrust API functions are bitwise reproducible, with exception of the following:
 
@@ -15,15 +15,16 @@ The default device execution policy, ``thrust::device`` (``thrust::hip::par``) d
 * reduce_by_key
 * transform_scan
 
-In particular, the above operations are only bitwise reprodicible for **associative scan and reduce operators**. Notably, this does not include the pseudo-associative floating point operators.
+In particular, the above operations are only bitwise reproducible for **associative scan and reduce operators**. Notably, this does not include the pseudo-associative floating point operators.
 
-An alternative version of the above operations that *is* bitwise reproducible with non-associative operators may be selected by using the *deterministic parallel* execution policy, ``thrust::hip::par_det``. Note that this implies a performance overhead, required to ensure that the results are run-to-run reproducible. There is no automatic detection for operator and input type pairs for which the default execution policy, that is ``thrust::hip::par``, is already bitwise reproducible. It is advised to only use ``thrust::hip::par_det`` for non-associative operators. ``thrust::hip::par_det`` may also be used with any of the other rocThrust API functions which are already bitwise reprodicible. In this case the behavior is the same as ``thrust::hip::par``.
+An alternative version of the above operations that *is* bitwise reproducible with non-associative operators may be selected by using the *deterministic parallel* execution policy, ``thrust::hip::par_det``. Note that this implies a performance overhead, required to ensure that the results are run-to-run reproducible. There is no automatic detection for operator and input type pairs for which the default execution policy, that is ``thrust::hip::par``, is already bitwise reproducible. It is advised to only use ``thrust::hip::par_det`` for non-associative operators. ``thrust::hip::par_det`` may also be used with any of the other rocThrust API functions which are already bitwise reproducible. In this case the behavior is the same as ``thrust::hip::par``.
 
 =====
 Tests
 =====
-To run the bitwise reproduciblity tests, you'll need to build the reproducibility.hip target.
-This target provides bitwise reproduciblity test coverage in two forms:
+
+To run the bitwise reproducibility tests, you'll need to build the reproducibility.hip target.
+This target provides bitwise reproducibility test coverage in two forms:
 
 1. The first form runs tests by issuing multiple calls to the bitwise-reproducible versions of the algorithms mentioned in the section above using the deterministic parallel execution policy.
 A special scan operator that inserts a random amount of delay into calculations is used to create variation in the internal timing of operations within the algorithm.
@@ -61,3 +62,4 @@ If one or more of the three factors changes - suppose we now want to run on gfx1
 After that we can test in the same manner as before:
 
 ``ROCTHRUST_BWR_PATH=/path/to/repro.db reproducibility.hip``
+
