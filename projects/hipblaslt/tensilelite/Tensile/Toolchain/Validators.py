@@ -220,6 +220,7 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
     Returns:
         The validated executable with an absolute path.
     """
+    print1(f"Validating {file}/{Path(file)}...")
     if not any((
         supportedCxxCompiler(file),
         supportedCCompiler(file),
