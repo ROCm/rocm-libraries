@@ -12,6 +12,7 @@ The following improvements span across all hipDNN components and represent found
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
+- **Build Platform Integration**: Ongoing integration into [https://github.com/ROCm/TheRock](https://github.com/ROCm/TheRock) build platform
 - **Version Management**: Implementing consistent version numbering support across SDK and Backend components
 
 ### Future Roadmap
