@@ -10,7 +10,7 @@ The HIPSTDPAR header files contain overloads of the C++ Standard Library paralle
 
 .. note::
 
-    HIPSTDPAR is installed with rocThrust and can only be installed through rocThrust.
+  HIPSTDPAR is installed with rocThrust and can only be installed through rocThrust.
 
 To use the HIPSTDPAR headers, compile your code with the ``--hipstdpar`` flag. For more information about the effects of compiling with ``--hipstdpar``, see `C++ Standard Parallelism Offload Support: Compiler And Runtime <https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/clang/html/HIPSupport.html#c-standard-parallelism-offload-support-compiler-and-runtime>`_.
 
