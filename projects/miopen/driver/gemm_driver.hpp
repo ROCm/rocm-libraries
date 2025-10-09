@@ -26,7 +26,6 @@
 #ifndef GUARD_MIOPEN_GEMM_DRIVER_HPP
 #define GUARD_MIOPEN_GEMM_DRIVER_HPP
 
-#include "timer.hpp"
 #include <miopen/config.h>
 
 #if MIOPEN_USE_GEMM
@@ -49,7 +48,7 @@
 #define GEMM_DRIVER_DEBUG 0
 
 template <typename T>
-void callCpuGemmStridedBatchedPar(bool isColMajor,
+void callCpuGemmStridedBatched(bool isColMajor,
                                bool transA,
                                bool transB,
                                int m,
@@ -142,7 +141,7 @@ public:
 
     int VerifyBackward() override;
     int VerifyForward() override;
-    ~GemmDriver() override {}
+    ~GemmDriver() override = default;
 
 private:
     InputFlags inflags;
@@ -270,9 +269,9 @@ int GemmDriver<T>::AllocateBuffersAndCopy()
 #if MIOPEN_BACKEND_OPENCL
     clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
 #endif
-    a_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, a_sz, sizeof(T)));
-    b_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, b_sz, sizeof(T)));
-    c_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, c_sz, sizeof(T)));
+    a_dev = std::make_unique<GPUMem>(ctx, a_sz, sizeof(T));
+    b_dev = std::make_unique<GPUMem>(ctx, b_sz, sizeof(T));
+    c_dev = std::make_unique<GPUMem>(ctx, c_sz, sizeof(T));
 
     a = std::vector<T>(a_sz);
     b = std::vector<T>(b_sz);
