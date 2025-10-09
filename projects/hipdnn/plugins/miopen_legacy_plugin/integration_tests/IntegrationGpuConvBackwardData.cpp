@@ -235,7 +235,10 @@ TEST_P(IntegrationGpuConvBwdDataNchwBfp16, Correctness)
 
 TEST_P(IntegrationGpuConvBwdDataNcdhwBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NCDHW);
+    // Note: MIOpen seems to have some accuracy issues with 16-bit fp in some cases (like iGemm),
+    //       so we relax the tolerance a bit here.
+    //       See: ConvDriver<Tgpu, Tref>::VerifyBackward()
+    runConvTest(conv::getToleranceBwd<hip_bfloat16>() * 2.0_bf, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNchwFp16, Correctness)
@@ -245,7 +248,10 @@ TEST_P(IntegrationGpuConvBwdDataNchwFp16, Correctness)
 
 TEST_P(IntegrationGpuConvBwdDataNcdhwFp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NCDHW);
+    // Note: MIOpen seems to have some accuracy issues with 16-bit fp in some cases (like iGemm),
+    //       so we relax the tolerance a bit here.
+    //       See: ConvDriver<Tgpu, Tref>::VerifyBackward()
+    runConvTest(conv::getToleranceBwd<half>() * 2.0_h, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvBwdDataNhwcFp32, Correctness)
