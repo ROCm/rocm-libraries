@@ -1,4 +1,4 @@
-cle/*******************************************************************************
+/*******************************************************************************
  *
  * MIT License
  *
@@ -28,6 +28,7 @@ cle/****************************************************************************
 
 #include <istream>
 #include <string>
+#include <amd_comgr/amd_comgr.h>
 
 namespace rocRoller
 {
@@ -39,28 +40,10 @@ namespace rocRoller
          */
 
         /**
-         * Returns T converted to ELF as a string.
-         */
-        template <typename T>
-        std::string toELF(T obj);
-
-        /**
          * Parses ELF as a string into a T.
          */
         template <typename T>
         T fromELF(std::string const& elf);
-
-        /**
-         * Writes T to stream as ELF
-         */
-        template <typename T>
-        void writeELF(std::ostream& stream, T obj);
-
-        /**
-         * Reads the file `filename` and returns a T parsed from the ELF data it contains.
-         */
-        template <typename T>
-        T readELFFile(std::string const& filename);
 
     }
 }

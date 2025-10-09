@@ -26,8 +26,10 @@
 
 #pragma once
 
+#include <string>
 #include <rocRoller/Serialization/ELF.hpp>
 #include <rocRoller/Serialization/comgr/comgr.hpp>
+#include <amd_comgr/amd_comgr.h>
 
 namespace rocRoller
 {
@@ -37,9 +39,25 @@ namespace rocRoller
         T fromELF(std::string const& elf)
         {
             T rv;
-            amd_comgr_metadata_node_t comgrNode = elf;
-            Serialization::ComgrNodeInput comgrNodeInput(comgrNode, nullptr);
-            comgrNodeInput.input(comgrNode, rv);
+            
+            amd_comgr_data_t elfData;
+            amd_comgr_metadata_node_t metadataNode;
+            
+            auto status = amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &elfData);
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to create COMGR data object");
+            
+            status = amd_comgr_set_data(elfData, elf.size(), elf.data());
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data");
+            
+            status = amd_comgr_get_data_metadata(elfData, &metadataNode);
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to extract metadata from ELF");
+            
+            Serialization::ComgrNodeInput comgrNodeInput(metadataNode, nullptr);
+            comgrNodeInput.input(metadataNode, rv);
+            
+            amd_comgr_destroy_metadata(metadataNode);
+            amd_comgr_release_data(elfData);
+            
             return rv;
         }
     } // namespace Serialization

@@ -35,7 +35,7 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
 {
     std::string yaml;
 
-    fromElf(fileName)
+    Serialization::fromELF<typename T>(fileName);
     
     return yaml;
 }
