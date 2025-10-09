@@ -172,7 +172,11 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                               {"VECTOR_SIZE", vector_size},
                               {"NUM_BATCH", num_batch},
                               {"BATCH_SIZE", batch_size},
-                              {"U_BATCH_SIZE", u_batch_size}};
+                              {"U_BATCH_SIZE", u_batch_size},
+                              {"IS_INPUT_PACKED", problem.GetXDesc().IsPacked()},
+                              {"IS_OUTPUT_PACKED", problem.GetYDesc().IsPacked()},
+                              {"IS_DINPUT_PACKED", problem.GetdXDesc().IsPacked()},
+                              {"IS_DOUTPUT_PACKED", problem.GetdYDesc().IsPacked()}};
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

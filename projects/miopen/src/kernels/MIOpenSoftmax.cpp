@@ -143,17 +143,24 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 // Iterate over all the channels one thread is supposed to loop over
                 // and compute max
                 loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
-                    auto x_idx = x_offset + n * N_STRIDE;
-                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    auto x_idx = x_offset;
+                    if constexpr(IS_INPUT_PACKED)
                     {
-                        auto i0 = i / (H * W);
-                        auto i1 = (i % (H * W)) / W;
-                        auto i2 = (i % (H * W)) % W;
-                        x_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                        x_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
                     }
                     else
                     {
-                        x_idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                        if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                        {
+                            auto i0 = i / (H * W);
+                            auto i1 = (i % (H * W)) / W;
+                            auto i2 = (i % (H * W)) % W;
+                            x_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                        }
+                        else
+                        {
+                            x_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                        }
                     }
                     tmp = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
                 });
@@ -175,17 +182,24 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
             // Subtract channel_max from each value
             loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
-                auto x_idx = x_offset + n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto x_idx = x_offset;
+                if constexpr(IS_INPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    x_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    x_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
                 }
                 else
                 {
-                    x_idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        x_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        x_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
                 }
                 FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]);
 
@@ -211,20 +225,47 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
             // Normalize each value in the channel by the channel_sum
             loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
-                auto idx = n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto x_idx = x_offset;
+                if constexpr(IS_INPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    x_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
                 }
                 else
                 {
-                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        x_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        x_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
                 }
 
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[idx + x_offset]);
+                auto y_idx = y_offset;
+                if constexpr(IS_OUTPUT_PACKED)
+                {
+                    y_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
+                }
+                else
+                {
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        y_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        y_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
+                }
+
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]);
 
                 // Subtracting max again because we do not write the output of
                 // value-max to DRAM above. Doing a subtraction again is much
@@ -247,9 +288,8 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                     value /= channel_sum;
                 }
 
-                value = value * FLOAT_ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(y[idx + y_offset]) * FLOAT_ACCUM(beta);
-                y[idx + y_offset] = CVT_ACCUM2FLOAT(value);
+                value = value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
+                y[y_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
     }
@@ -294,20 +334,27 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
         loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
-                auto idx = x_offset + batch_n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto x_idx = x_offset;
+                if constexpr(IS_INPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    x_idx += (batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s;
                 }
                 else
                 {
-                    idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        x_idx += batch_n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        x_idx += batch_n * N_STRIDE + i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    }
                 }
 
-                values[index] = CVT_FLOAT2ACCUM(x[idx]);
+                values[index] = CVT_FLOAT2ACCUM(x[x_idx]);
                 if constexpr(!USE_SOFTMAX_FAST)
                 {
                     tmp = max(values[index], tmp);
@@ -370,17 +417,24 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
         loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
-                auto y_idx = y_offset + batch_n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto y_idx = y_offset;
+                if(IS_OUTPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    y_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    y_idx += (batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s;
                 }
                 else
                 {
-                    y_idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        y_idx += batch_n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        y_idx += batch_n * N_STRIDE + i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    }
                 }
 
                 auto v_idx = index;
@@ -433,23 +487,50 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
             // and compute dot-product
             FLOAT_ACCUM channel_dot = static_cast<FLOAT_ACCUM>(0);
             loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
-                auto idx = n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto dy_idx = dy_offset;
+                if(IS_DOUTPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    dy_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
                 }
                 else
                 {
-                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        dy_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        dy_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
                 }
 
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
+                auto y_idx = 0;
+                if(IS_OUTPUT_PACKED)
+                {
+                    y_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
+                }
+                else
+                {
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        y_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        y_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
+                }
+
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
-                    value *= CVT_FLOAT2ACCUM(y[idx + y_offset]);
+                    value *= CVT_FLOAT2ACCUM(y[y_idx]);
                 }
                 channel_dot += value;
             });
@@ -460,31 +541,76 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
 
             // Subtract and element-wise multiplication
             loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
-                auto idx = n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto dy_idx = dy_offset;
+                if constexpr(IS_DOUTPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    dy_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
                 }
                 else
                 {
-                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        dy_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        dy_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
+                }
+                auto y_idx = y_offset;
+                if constexpr(IS_OUTPUT_PACKED)
+                {
+                    y_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
+                }
+                else
+                {
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        y_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        y_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
+                }
+                auto dx_idx = dx_offset;
+                if constexpr(IS_DINPUT_PACKED)
+                {
+                    dx_idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
+                }
+                else
+                {
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        dx_idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        dx_idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
                 }
 
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
                 if constexpr(USE_SOFTMAX_LOG)
                 {
-                    value -= channel_dot * exp(CVT_FLOAT2ACCUM(y[idx + y_offset]));
+                    value -= channel_dot * exp(CVT_FLOAT2ACCUM(y[y_idx]));
                 }
                 else
                 {
-                    value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[idx + y_offset]);
+                    value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[y_idx]);
                 }
-                value = value * FLOAT_ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(dx[idx + dx_offset]) * FLOAT_ACCUM(beta);
-                dx[idx + dx_offset] = CVT_ACCUM2FLOAT(value);
+                value =
+                    value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(dx[dx_idx]) * FLOAT_ACCUM(beta);
+                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
     }
@@ -515,21 +641,48 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
         loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
-                auto idx = batch_n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto y_idx = y_offset;
+                if constexpr(IS_OUTPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    y_idx += (batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s;
                 }
                 else
                 {
-                    idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        y_idx += batch_n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        y_idx += batch_n * N_STRIDE + i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    }
+                }
+                auto dy_idx = dy_offset;
+                if constexpr(IS_DOUTPUT_PACKED)
+                {
+                    dy_idx += (batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s;
+                }
+                else
+                {
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        dy_idx += batch_n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        dy_idx +=
+                            batch_n * N_STRIDE + i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    }
                 }
 
-                y_values[index]  = CVT_FLOAT2ACCUM(y[idx + y_offset]);
-                dy_values[index] = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
+                y_values[index]  = CVT_FLOAT2ACCUM(y[y_idx]);
+                dy_values[index] = CVT_FLOAT2ACCUM(dy[dy_idx]);
                 auto value       = dy_values[index];
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
@@ -549,17 +702,25 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
         loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
-                auto dx_idx = dx_offset + batch_n * N_STRIDE;
-                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                auto dx_idx = dx_offset;
+                if constexpr(IS_DINPUT_PACKED)
                 {
-                    auto i0 = i / (H * W);
-                    auto i1 = (i % (H * W)) / W;
-                    auto i2 = (i % (H * W)) % W;
-                    dx_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    dx_idx += (batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s;
                 }
                 else
                 {
-                    dx_idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        dx_idx += batch_n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        dx_idx +=
+                            batch_n * N_STRIDE + i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                    }
                 }
 
                 if constexpr(USE_SOFTMAX_LOG)
