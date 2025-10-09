@@ -20,27 +20,42 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseMode get_mode() const
     {
-        return _mode;
+        return mode;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip() const
     {
-        return _reluLowerClip;
+        return relu_lower_clip;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_upper_clip() const
     {
-        return _reluUpperClip;
+        return relu_upper_clip;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    std::optional<float> get_relu_lower_slope() const
+    std::optional<float> get_relu_lower_clip_slope() const
     {
-        return _reluLowerSlope;
+        return relu_lower_clip_slope;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_swish_beta() const
+    {
+        return swish_beta;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_elu_alpha() const
+    {
+        return elu_alpha;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::optional<float> get_softplus_beta() const
+    {
+        return softplus_beta;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<int64_t> get_axis() const
     {
-        return _axis;
+        return axis;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_input_0() const
@@ -64,33 +79,51 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_mode(PointwiseMode mode)
+    PointwiseAttributes& set_mode(PointwiseMode value)
     {
-        _mode = mode;
+        mode = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip(float reluLowerClip)
+    PointwiseAttributes& set_relu_lower_clip(float value)
     {
-        _reluLowerClip = reluLowerClip;
+        relu_lower_clip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_upper_clip(float reluUpperClip)
+    PointwiseAttributes& set_relu_upper_clip(float value)
     {
-        _reluUpperClip = reluUpperClip;
+        relu_upper_clip = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_relu_lower_clip_slope(float reluLowerSlope)
+    PointwiseAttributes& set_relu_lower_clip_slope(float value)
     {
-        _reluLowerSlope = reluLowerSlope;
+        relu_lower_clip_slope = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    PointwiseAttributes& set_axis(std::optional<int64_t> axis)
+    PointwiseAttributes& set_swish_beta(float value)
     {
-        _axis = axis;
+        swish_beta = value;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    PointwiseAttributes& set_elu_alpha(float value)
+    {
+        elu_alpha = value;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    PointwiseAttributes& set_softplus_beta(float value)
+    {
+        softplus_beta = value;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    PointwiseAttributes& set_axis(int64_t value)
+    {
+        axis = value;
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -159,6 +192,15 @@ public:
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
+    PointwiseMode mode = PointwiseMode::NOT_SET;
+    std::optional<float> relu_lower_clip = std::nullopt;
+    std::optional<float> relu_upper_clip = std::nullopt;
+    std::optional<float> relu_lower_clip_slope = std::nullopt;
+    std::optional<int64_t> axis = std::nullopt;
+    std::optional<float> swish_beta = std::nullopt;
+    std::optional<float> elu_alpha = std::nullopt;
+    std::optional<float> softplus_beta = std::nullopt;
+
     flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
@@ -169,15 +211,18 @@ public:
 
         return hipdnn_sdk::data_objects::CreatePointwiseAttributes(
             builder,
-            toSdkType(_mode),
-            _reluLowerClip,
-            _reluUpperClip,
-            _reluLowerSlope,
-            _axis,
+            toSdkType(mode),
+            relu_lower_clip,
+            relu_upper_clip,
+            relu_lower_clip_slope,
+            axis,
             in0->get_uid(),
             in1 ? flatbuffers::Optional<int64_t>(in1->get_uid()) : flatbuffers::nullopt,
             in2 ? flatbuffers::Optional<int64_t>(in2->get_uid()) : flatbuffers::nullopt,
-            ot0->get_uid());
+            ot0->get_uid(),
+            swish_beta,
+            elu_alpha,
+            softplus_beta);
     }
 
 private:
@@ -199,11 +244,6 @@ private:
         }
         return nullptr;
     }
-    PointwiseMode _mode = PointwiseMode::NOT_SET;
-    std::optional<float> _reluLowerClip = std::nullopt;
-    std::optional<float> _reluUpperClip = std::nullopt;
-    std::optional<float> _reluLowerSlope = std::nullopt;
-    std::optional<int64_t> _axis = std::nullopt;
 };
 typedef PointwiseAttributes Pointwise_attributes;
 }

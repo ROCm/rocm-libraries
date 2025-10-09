@@ -116,8 +116,8 @@ struct Arguments
     int timing;
     int iters;
 
-    std::string filename;
-    std::string function_name;
+    char filename[256]; // nos2.bin, bmwcra_1.bin, etc
+    char function[64]; // axpby, spmv_csr, etc
 
     Arguments()
     {
@@ -192,8 +192,8 @@ struct Arguments
         this->timing     = 0;
         this->iters      = 10;
 
-        this->filename      = "";
-        this->function_name = "";
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
     }
 
     template <typename T>
@@ -218,5 +218,11 @@ struct Arguments
     T get_percentage() const
     {
         return percentage;
+    }
+
+    void set_filename(const std::string& bin_file)
+    {
+        strncpy(this->filename, bin_file.c_str(), bin_file.length());
+        this->filename[bin_file.length()] = '\0';
     }
 };

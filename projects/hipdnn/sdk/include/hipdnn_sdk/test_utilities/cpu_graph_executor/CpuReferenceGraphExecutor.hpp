@@ -4,18 +4,17 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 class CpuReferenceGraphExecutor
 {
 public:
     CpuReferenceGraphExecutor() = default;
-    ~CpuReferenceGraphExecutor() = default;
 
     void execute(void* graphBuffer,
                  size_t size,
@@ -51,68 +50,43 @@ private:
         buildPlanForNode(const hipdnn_plugin::IGraph& graph,
                          const hipdnn_sdk::data_objects::Node& node)
     {
-        auto key = buildSignatureKey(node, graph.getTensorMap());
+        // TODO: Switch this to the node's compute_type
+        auto key = buildSignatureKey(node, graph.getTensorMap(), graph.getGraph().compute_type());
 
-        auto planBuilder = _planRegistry.getPlanBuilder(key);
-        if(planBuilder == nullptr)
-        {
-            throw std::runtime_error("No plan builder found for given node signature");
-        }
-
-        if(!planBuilder->isApplicable(node, graph.getTensorMap()))
+        const auto& planBuilder = _planRegistry.getPlanBuilder(key);
+        if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             throw std::runtime_error("Plan builder is not applicable for the given node");
         }
 
-        return planBuilder->buildNodePlan(graph, node);
+        return planBuilder.buildNodePlan(graph, node);
     }
 
-    static Key buildSignatureKey(
+    static PlanRegistrySignatureKey buildSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
+            tensorMap,
+        const hipdnn_sdk::data_objects::DataType computeType)
     {
         switch(node.attributes_type())
         {
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-            return createBatchnormFwdInferenceSignatureKey(node, tensorMap);
-            break;
+            return BatchnormFwdInferenceSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            return BatchnormBwdSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+            return BatchnormTrainSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+            return ConvolutionFwdSignatureKey(node, tensorMap, computeType);
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+            return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }
     }
 
-    static Key createBatchnormFwdInferenceSignatureKey(
-        const hipdnn_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
-    {
-        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
-        if(nodeAttributes == nullptr)
-        {
-            throw std::runtime_error(
-                "Node attributes could not be cast to BatchnormInferenceAttributes");
-        }
-
-        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
-        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
-        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
-
-        if(xTensorAttr == nullptr || scaleTensorAttr == nullptr || meanTensorAttr == nullptr)
-        {
-            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
-                                     "failed to construct key");
-        }
-
-        return BatchnormFwdInferenceSignatureKey(
-            xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
-    }
-
     PlanBuilderRegistry _planRegistry;
 };
-}
+
 }

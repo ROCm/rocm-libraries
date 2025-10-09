@@ -111,17 +111,19 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormBwdGraph(const std::vector<int64_t>& strides = {1, 3, 224, 224},
-                                 const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                 bool hasOptionalAttributes = true,
-                                 hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT)
+inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
+    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& dims = {1, 3, 224, 224},
+    bool hasOptionalAttributes = true,
+    hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT,
+    hipdnn_sdk::data_objects::DataType scaleBiasDataType = DataType::FLOAT,
+    hipdnn_sdk::data_objects::DataType meanVarianceDataType = DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
     std::vector<int64_t> derivedDims = getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
@@ -133,46 +135,21 @@ inline flatbuffers::FlatBufferBuilder
         builder, 3, "dx", inputDataType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "scale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        builder, 4, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        5,
-        "dscale",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        builder, 5, "dscale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        6,
-        "dbias",
-        hipdnn_sdk::data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+        builder, 6, "dbias", scaleBiasDataType, &derivedStrides, &derivedDims));
 
     if(hasOptionalAttributes)
     {
         tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            7,
-            "mean",
-            hipdnn_sdk::data_objects::DataType::FLOAT,
-            &derivedStrides,
-            &derivedDims));
+            builder, 7, "mean", meanVarianceDataType, &derivedStrides, &derivedDims));
 
         tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            8,
-            "inv_variance",
-            hipdnn_sdk::data_objects::DataType::FLOAT,
-            &derivedStrides,
-            &derivedDims));
+            builder, 8, "inv_variance", meanVarianceDataType, &derivedStrides, &derivedDims));
     }
 
     auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
@@ -316,8 +293,20 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
     flatbuffers::FlatBufferBuilder builder;
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    auto pointwiseNode
-        = CreatePointwiseAttributes(builder, PointwiseMode::DIV, 1.f, 2.f, 3.f, 0, 1, 2, 3, 4);
+    auto pointwiseNode = CreatePointwiseAttributes(builder,
+                                                   PointwiseMode::DIV, // operation
+                                                   1.f, // relu_lower_clip
+                                                   2.f, // relu_upper_clip
+                                                   3.f, // relu_lower_clip_slope
+                                                   0, // axis_tensor_uid
+                                                   1, // in_0_tensor_uid
+                                                   2, // in_1_tensor_uid
+                                                   3, // in_2_tensor_uid
+                                                   4, // out_0_tensor_uid
+                                                   4.f, // swish_beta
+                                                   5.f, // elu_alpha
+                                                   6.f); // softplus_beta
+
     nodes.push_back(CreateNodeDirect(
         builder, "Node", NodeAttributes::PointwiseAttributes, pointwiseNode.Union()));
 

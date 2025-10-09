@@ -12,6 +12,11 @@
 namespace hipdnn_plugin
 {
 
+/*
+ * The IGraph interface expects that any implementations have the graph sorted in topological order.
+ * The graph must also have no cycles and be fully connected(no orphan nodes).  We also expect
+ * that the all tensors in the graph have unique uids.
+*/
 class IGraph
 {
 public:
