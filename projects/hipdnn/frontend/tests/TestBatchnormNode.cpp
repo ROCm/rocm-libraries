@@ -344,7 +344,7 @@ TEST(TestBatchnormNode, PopulateHipdnnTensorIds)
 
     std::vector<std::shared_ptr<TensorAttributes>> tensors;
     tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size()
-                    + node.attributes.peerStats.size());
+                    + node.attributes.peer_stats.size());
 
     for(const auto& inputPair : node.attributes.inputs)
     {
@@ -356,7 +356,7 @@ TEST(TestBatchnormNode, PopulateHipdnnTensorIds)
         tensors.emplace_back(outputPair.second);
     }
 
-    for(const auto& peerStat : node.attributes.peerStats)
+    for(const auto& peerStat : node.attributes.peer_stats)
     {
         tensors.emplace_back(peerStat);
     }

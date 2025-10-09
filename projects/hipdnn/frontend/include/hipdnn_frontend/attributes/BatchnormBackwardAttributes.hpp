@@ -35,7 +35,8 @@ public:
 
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
-    std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::vector<std::shared_ptr<TensorAttributes>> peer_stats;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_dy() const
@@ -80,7 +81,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     const std::vector<std::shared_ptr<TensorAttributes>>& get_peer_stats() const
     {
-        return peerStats;
+        return peer_stats;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -166,13 +167,13 @@ public:
     BatchnormBackwardAttributes&
         set_peer_stats(const std::vector<std::shared_ptr<TensorAttributes>>& value) // NOLINT
     {
-        peerStats = value;
+        peer_stats = value;
         return *this;
     }
     BatchnormBackwardAttributes&
         set_peer_stats(std::vector<std::shared_ptr<TensorAttributes>>&& value) // NOLINT
     {
-        peerStats = std::move(value);
+        peer_stats = std::move(value);
         return *this;
     }
 
@@ -193,7 +194,7 @@ public:
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
-        for(const auto& peerStat : peerStats)
+        for(const auto& peerStat : peer_stats)
         {
             if(peerStat)
             {

@@ -129,7 +129,7 @@ public:
     {
         BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensor_ids(usedIds, duplicateIds);
 
-        for(auto& tensor : attributes.peerStats)
+        for(auto& tensor : attributes.peer_stats)
         {
             processTensorUid(tensor, usedIds, duplicateIds);
         }
@@ -143,7 +143,7 @@ public:
         BaseNode<BatchnormBackwardNode>::populate_hipdnn_tensor_ids(
             tensorLookup, currentTensorId, usedIds);
 
-        for(auto& tensor : attributes.peerStats)
+        for(auto& tensor : attributes.peer_stats)
         {
             if(tensor && !tensor->has_uid())
             {

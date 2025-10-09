@@ -217,10 +217,10 @@ TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)
     auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
     EXPECT_EQ(error.code, ErrorCode::OK);
 
-    // Collect all tensor attributes from input map, output map, and peerStats vector
+    // Collect all tensor attributes from input map, output map, and peer_stats vector
     std::vector<std::shared_ptr<TensorAttributes>> tensors;
     tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size()
-                    + node.attributes.peerStats.size());
+                    + node.attributes.peer_stats.size());
 
     // Add tensors from input map
     for(const auto& inputPair : node.attributes.inputs)
@@ -234,8 +234,8 @@ TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)
         tensors.emplace_back(outputPair.second);
     }
 
-    // Add tensors from peerStats vector
-    for(const auto& peerStat : node.attributes.peerStats)
+    // Add tensors from peer_stats vector
+    for(const auto& peerStat : node.attributes.peer_stats)
     {
         tensors.emplace_back(peerStat);
     }
