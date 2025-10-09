@@ -50,8 +50,6 @@ namespace miopen {
 namespace solver {
 namespace conv {
 
-using ProblemDescription = miopen::conv::ProblemDescription;
-
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 using InLayout                             = ck::tensor_layout::convolution::NDHWGC;
@@ -129,7 +127,7 @@ namespace {
 template <typename DataType>
 struct CKArgs
 {
-    CKArgs(const ProblemDescription& problem)
+    CKArgs(const miopen::conv::ProblemDescription& problem)
     {
         G  = ProblemInterpreter::GetGroupCountG(problem);
         N  = ProblemInterpreter::GetBatchN(problem);
@@ -351,7 +349,7 @@ struct CKArgs
 };
 
 template <typename DataType>
-std::vector<std::string> FillValidKernelsByAlphaBeta(const ProblemDescription& problem)
+std::vector<std::string> FillValidKernelsByAlphaBeta(const miopen::conv::ProblemDescription& problem)
 {
     switch(problem.GetAlphaBetaCase())
     {
@@ -366,7 +364,7 @@ std::vector<std::string> FillValidKernelsByAlphaBeta(const ProblemDescription& p
 } // namespace
 
 template <typename DataType>
-void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::Init(const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::Init(const miopen::conv::ProblemDescription& problem)
 {
     valid_kernels = FillValidKernelsByAlphaBeta<DataType>(problem);
     index         = 0;
@@ -375,7 +373,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::Init(const ProblemDescrip
 
 template <typename DataType>
 bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::CheckIsSupportCKArgs(
-    const ProblemDescription& problem) const
+    const miopen::conv::ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
     {
@@ -393,7 +391,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::CheckIsSupportCKArgs(
 
 template <typename DataType>
 bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
-    const ProblemDescription& problem) const
+    const miopen::conv::ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
     {
@@ -405,7 +403,7 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
 }
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
-    const ProblemDescription& problem)
+    const miopen::conv::ProblemDescription& problem)
 {
     switch(problem.GetInDataType())
     {
@@ -419,7 +417,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
-    const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
+    const miopen::ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "None";
@@ -499,7 +497,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
-    const ProblemDescription& problem)
+    const miopen::conv::ProblemDescription& problem)
 {
     if(valid_kernels.empty())
     {
@@ -524,7 +522,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    [[maybe_unused]] const miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
@@ -551,7 +549,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::operator==(
 
 PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
 ConvHipImplicitGemm3DGroupBwdXdlops::GetDefaultPerformanceConfig(
-    const ExecutionContext& ctx, const ProblemDescription& problem) const
+    const ExecutionContext& ctx, const miopen::conv::ProblemDescription& problem) const
 {
     PerformanceConfigHipImplicitGemm3DGroupBwdXdlops pp;
     pp.HeuristicInit(ctx, problem);
@@ -560,7 +558,7 @@ ConvHipImplicitGemm3DGroupBwdXdlops::GetDefaultPerformanceConfig(
 
 bool ConvHipImplicitGemm3DGroupBwdXdlops::IsValidPerformanceConfig(
     const ExecutionContext&,
-    const ProblemDescription& problem,
+    const miopen::conv::ProblemDescription& problem,
     const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& config) const
 {
     return config.IsValid(problem);
@@ -568,14 +566,14 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsValidPerformanceConfig(
 
 size_t
 ConvHipImplicitGemm3DGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
-                                                      const ProblemDescription& problem) const
+                                                      const miopen::conv::ProblemDescription& problem) const
 {
     return GetWorkspaceSizeLayoutTransformConv(problem);
 }
 
 PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
 ConvHipImplicitGemm3DGroupBwdXdlops::Search(const ExecutionContext& ctx,
-                                            const ProblemDescription& problem,
+                                            const miopen::conv::ProblemDescription& problem,
                                             const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
@@ -583,7 +581,7 @@ ConvHipImplicitGemm3DGroupBwdXdlops::Search(const ExecutionContext& ctx,
 
 bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem) const
+    [[maybe_unused]] const miopen::conv::ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))
@@ -623,7 +621,7 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(
 
 ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem,
+    [[maybe_unused]] const miopen::conv::ProblemDescription& problem,
     [[maybe_unused]] const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
