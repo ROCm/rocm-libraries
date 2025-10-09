@@ -5,9 +5,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <limits>
+#include <type_traits>
 
 namespace hipdnn_sdk
 {
@@ -35,18 +37,40 @@ struct ReluForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        auto xCompute = static_cast<ComputeType>(x);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            if(xVal <= lowerClip)
+            {
+                ComputeType result = (lowerSlope * (xVal - lowerClip)) + lowerClip;
+                return result;
+            }
+            if(xVal >= upperClip)
+            {
+                return upperClip;
+            }
+            return xVal;
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
 
-        if(xCompute <= lowerClip)
-        {
-            ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
-            return static_cast<X>(result);
+            if(xCompute <= lowerClip)
+            {
+                ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
+                X output = safeConvert<X>(result);
+                return output;
+            }
+            if(xCompute >= upperClip)
+            {
+                X output = safeConvert<X>(upperClip);
+                return output;
+            }
+            X output = safeConvert<X>(xCompute);
+            return output;
         }
-        if(xCompute >= upperClip)
-        {
-            return static_cast<X>(upperClip);
-        }
-        return static_cast<X>(xCompute);
     }
 };
 
@@ -56,9 +80,20 @@ struct SigmoidForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
-        return static_cast<X>(result);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            return ComputeType{1} / (ComputeType{1} + std::exp(-xVal));
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 
@@ -68,9 +103,20 @@ struct TanhForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = std::tanh(xCompute);
-        return static_cast<X>(result);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            return std::tanh(xVal);
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            ComputeType result = std::tanh(xCompute);
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 

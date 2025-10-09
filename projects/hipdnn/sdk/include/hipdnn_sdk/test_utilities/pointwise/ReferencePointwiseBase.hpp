@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/PointwiseOperationFunctors.hpp>
+#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <stdexcept>
 #include <tuple>
@@ -45,7 +46,7 @@ public:
     }
 
     // Unary operations
-    template <typename InputType, typename ComputeType = float>
+    template <typename InputType, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<InputType>& input)
@@ -53,7 +54,7 @@ public:
         executeUnaryOperation<InputType, ComputeType>(operation, output, input);
     }
 
-    template <typename InputType, typename ParamType, typename ComputeType = float>
+    template <typename InputType, typename ParamType, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<InputType>& input,
@@ -68,7 +69,7 @@ public:
     }
 
     // Binary operations
-    template <typename Input1Type, typename Input2Type, typename ComputeType = float>
+    template <typename Input1Type, typename Input2Type, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<Input1Type>& input1,
@@ -82,7 +83,7 @@ public:
     template <typename Input1Type,
               typename Input2Type,
               typename ParamType,
-              typename ComputeType = float>
+              typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
                                  const TensorBase<Input1Type>& input1,
@@ -265,31 +266,21 @@ private:
         }
 
         PointwiseMode operation = attrs->operation();
-        switch(operation)
+
+        if(hipdnn_sdk::utilities::isImplementedUnaryPointwiseMode(operation))
         {
-        // Unary operations (only those with implemented functors)
-        case PointwiseMode::RELU_FWD:
-        case PointwiseMode::SIGMOID_FWD:
-        case PointwiseMode::TANH_FWD:
-        case PointwiseMode::ABS:
-        case PointwiseMode::NEG:
             return canExecuteUnaryOperation(attrs);
-
-        // Binary operations (only those with implemented functors)
-        case PointwiseMode::ADD:
-        case PointwiseMode::SUB:
-        case PointwiseMode::RELU_BWD:
-        case PointwiseMode::SIGMOID_BWD:
-        case PointwiseMode::TANH_BWD:
-            return canExecuteBinaryOperation(attrs);
-
-            // Ternary operations (none implemented yet)
-            // case PointwiseMode::BINARY_SELECT:
-            //     return canExecuteTernaryOperation(attrs);
-
-        default:
-            return false;
         }
+        if(hipdnn_sdk::utilities::isImplementedBinaryPointwiseMode(operation))
+        {
+            return canExecuteBinaryOperation(attrs);
+        }
+        if(hipdnn_sdk::utilities::isImplementedTernaryPointwiseMode(operation))
+        {
+            return canExecuteTernaryOperation(attrs);
+        }
+
+        return false;
     }
 };
 

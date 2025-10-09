@@ -5,8 +5,10 @@
 
 #include <cmath>
 #include <cstdint>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <type_traits>
 
 namespace hipdnn_sdk
 {
@@ -42,12 +44,24 @@ struct ReluBackward
     template <typename X, typename Dy>
     auto operator()(const X& x, const Dy& dy) const -> X
     {
-        // dx = dy * (x > 0 ? 1 : 0)
-        auto xCompute = static_cast<ComputeType>(x);
-        auto dyCompute = static_cast<ComputeType>(dy);
-
-        auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
-        return static_cast<X>(dyCompute * localGradient);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            auto dyVal = dy;
+            auto localGradient = (xVal > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
+            return dyVal * localGradient;
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            auto dyCompute = static_cast<ComputeType>(dy);
+            auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
+            ComputeType result = dyCompute * localGradient;
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 
@@ -68,24 +82,52 @@ struct ParameterizedReluBackward
     template <typename X, typename Dy>
     auto operator()(const X& x, const Dy& dy) const -> X
     {
-        auto xCompute = static_cast<ComputeType>(x);
-        auto dyCompute = static_cast<ComputeType>(dy);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            auto dyVal = dy;
 
-        ComputeType localGradient;
-        if(xCompute < lowerClip)
-        {
-            localGradient = lowerSlope;
-        }
-        else if(xCompute > upperClip)
-        {
-            localGradient = ComputeType{0};
+            ComputeType localGradient;
+            if(xVal < lowerClip)
+            {
+                localGradient = lowerSlope;
+            }
+            else if(xVal > upperClip)
+            {
+                localGradient = ComputeType{0};
+            }
+            else
+            {
+                localGradient = ComputeType{1};
+            }
+
+            return dyVal * localGradient;
         }
         else
         {
-            localGradient = ComputeType{1};
-        }
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            auto dyCompute = static_cast<ComputeType>(dy);
 
-        return static_cast<X>(dyCompute * localGradient);
+            ComputeType localGradient;
+            if(xCompute < lowerClip)
+            {
+                localGradient = lowerSlope;
+            }
+            else if(xCompute > upperClip)
+            {
+                localGradient = ComputeType{0};
+            }
+            else
+            {
+                localGradient = ComputeType{1};
+            }
+
+            ComputeType result = dyCompute * localGradient;
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 
@@ -95,13 +137,28 @@ struct SigmoidBackward
     template <typename X, typename Dy>
     auto operator()(const X& x, const Dy& dy) const -> X
     {
-        // dx = dy * sigmoid(x) * (1 - sigmoid(x))
-        auto xCompute = static_cast<ComputeType>(x);
-        auto dyCompute = static_cast<ComputeType>(dy);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            auto dyVal = dy;
 
-        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
-        auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
-        return static_cast<X>(dyCompute * localGradient);
+            ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xVal));
+            auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
+            return dyVal * localGradient;
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            auto dyCompute = static_cast<ComputeType>(dy);
+
+            ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
+            auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
+            ComputeType result = dyCompute * localGradient;
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 
@@ -111,13 +168,28 @@ struct TanhBackward
     template <typename X, typename Dy>
     auto operator()(const X& x, const Dy& dy) const -> X
     {
-        // dx = dy * (1 - tanh(x)^2)
-        auto xCompute = static_cast<ComputeType>(x);
-        auto dyCompute = static_cast<ComputeType>(dy);
+        if constexpr(std::is_same_v<ComputeType, X>)
+        {
+            // Same precision: compute directly in target type
+            auto xVal = x;
+            auto dyVal = dy;
 
-        ComputeType tanhVal = std::tanh(xCompute);
-        auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
-        return static_cast<X>(dyCompute * localGradient);
+            ComputeType tanhVal = std::tanh(xVal);
+            auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
+            return dyVal * localGradient;
+        }
+        else
+        {
+            // Mixed precision: explicit casting with clear intent
+            auto xCompute = static_cast<ComputeType>(x);
+            auto dyCompute = static_cast<ComputeType>(dy);
+
+            ComputeType tanhVal = std::tanh(xCompute);
+            auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
+            ComputeType result = dyCompute * localGradient;
+            X output = safeConvert<X>(result);
+            return output;
+        }
     }
 };
 

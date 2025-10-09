@@ -1208,7 +1208,7 @@ protected:
 // TODO: Add double support once compute type propagation is implemented
 // Currently double precision tests fail because ComputeType defaults to float
 // in ReferencePointwiseBase, causing precision mismatches in test validation
-using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
+using TestTypes = ::testing::Types<float, half, hip_bfloat16, double>;
 // Empty third argument required for C++17 compatibility with TYPED_TEST_SUITE macro
 TYPED_TEST_SUITE(CpuReferencePointwiseFixture, TestTypes, );
 
