@@ -120,24 +120,26 @@ namespace KernelGraphTest
         // Now apply SetWorkitemCount and try again
         kgraph = kgraph.transform(std::make_shared<SetWorkitemCount>(m_context));
 
-        CommandArgumentPtr tensorAsizeX;
+        CommandArgumentPtr tensorDsizeX;
         {
             auto arguments = command->getArguments();
             for(auto argument : arguments)
             {
-                if(argument->name() == "Tensor_0_size_0")
-                    tensorAsizeX = argument;
+                if(argument->name() == "Tensor_4_size_0")
+                    tensorDsizeX = argument;
             }
         }
-        ASSERT_NE(tensorAsizeX, nullptr) << "A size not found";
+        ASSERT_NE(tensorDsizeX, nullptr) << "D size not found";
 
         workitemCount = m_context->kernel()->workitemCount();
 
         auto one            = Expression::literal(1u);
         auto workgroupSizeX = Expression::literal(128u);
 
-        auto expected
-            = (((tensorAsizeX->expression() + workgroupSizeX) - one) / workgroupSizeX) * one;
+        auto expected = Expression::convert(DataType::UInt32,
+                                            ((tensorDsizeX->expression() + workgroupSizeX) - one)
+                                                / workgroupSizeX)
+                        * one;
 
         EXPECT_TRUE(Expression::identical(expected, workitemCount[0]))
             << expected << "\n"

@@ -56,6 +56,7 @@ namespace rocRoller
                     auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
                     if(sizes[tileNum.dim] == nullptr && tileNum.size != nullptr)
                     {
+                        //sizes[tileNum.dim] = tileNum.size;
                         sizes[tileNum.dim] = convert(DataType::Int32, tileNum.size);
                     }
                 }
@@ -113,6 +114,8 @@ namespace rocRoller
 
                 auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
                 auto size      = workgroup.size;
+                // Skip workgroups that do not have size (e.g., these could come from
+                // AddStreamK)
                 if(size == nullptr)
                 {
                     Log::info("XCC a workgroup {} has nullptr!!!!!!!!!!!!!", workgroupTag);
