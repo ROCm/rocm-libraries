@@ -3423,8 +3423,7 @@ namespace
         }
         // always add the manually-provided test, if matching target test's precision
         if(!manual_token.empty()
-           && manual_token.find(prec == fft_precision_single ? "single" : "double")
-                  != std::string::npos)
+           && manual_token.find(hipfftw_trait<prec>::prec_label) != std::string::npos)
         {
             insert_into_unique_sorted_params(
                 ret, hipfftw_functional_validation_params<prec>(manual_token));

@@ -50,16 +50,18 @@ struct hipfftw_trait;
 template <>
 struct hipfftw_trait<fft_precision_single>
 {
-    using plan_t    = fftwf_plan;
-    using complex_t = fftwf_complex;
-    using real_t    = float;
+    using plan_t                                 = fftwf_plan;
+    using complex_t                              = fftwf_complex;
+    using real_t                                 = float;
+    static constexpr std::string_view prec_label = R"(single)";
 };
 template <>
 struct hipfftw_trait<fft_precision_double>
 {
-    using plan_t    = fftw_plan;
-    using complex_t = fftw_complex;
-    using real_t    = double;
+    using plan_t                                 = fftw_plan;
+    using complex_t                              = fftw_complex;
+    using real_t                                 = double;
+    static constexpr std::string_view prec_label = R"(double)";
 };
 
 template <fft_precision prec>
@@ -583,7 +585,7 @@ public:
         }
         else if(plan)
         {
-            std::cerr << "WARNING: A " << (prec == fft_precision_single ? "single" : "double")
+            std::cerr << "WARNING: A " << hipfftw_trait<prec>::prec_label
                       << "-precision plan was seemingly created but its destructor cannot be used "
                       << std::endl;
         }
@@ -1103,7 +1105,9 @@ private:
         // cannot generate sensible "dims" from empty lengths and/or with invalid rank
         if(lengths.empty() || !rank_is_valid_for_hipfftw(rank))
             return nullptr;
-        if(lengths.size() != rank || istrides.size() != rank || ostrides.size() != rank)
+        if(lengths.size() != static_cast<size_t>(rank)
+           || istrides.size() != static_cast<size_t>(rank)
+           || ostrides.size() != static_cast<size_t>(rank))
             throw std::logic_error("hipfftw_helper::get_guru_dims(): size mismatch between "
                                    "lengths, istrides, and/or ostrides.");
         if constexpr(std::is_same_v<iodim, fftw_iodim>)
@@ -1132,7 +1136,9 @@ private:
         // cannot generate sensible "howmany_dims" from empty batches and/or with invalid batch_rank
         if(batches.empty() || !rank_is_valid_for_hipfftw(batch_rank))
             return nullptr;
-        if(batches.size() != batch_rank || idist.size() != batch_rank || odist.size() != batch_rank)
+        if(batches.size() != static_cast<size_t>(batch_rank)
+           || idist.size() != static_cast<size_t>(batch_rank)
+           || odist.size() != static_cast<size_t>(batch_rank))
             throw std::logic_error("hipfftw_helper::get_guru_dims(): size mismatch between "
                                    "batches, idist, and/or odist.");
         if constexpr(std::is_same_v<iodim, fftw_iodim>)
@@ -1380,6 +1386,22 @@ private:
                       || ifact * idist[batch_dim] == ofact * odist[batch_dim];
         }
         return ret;
+    }
+
+    static void create_temp_plan_from_token(const std::string& token)
+    {
+        hipfftw_helper<prec> temp;
+        temp.from_token(token);
+        hostbuf input;
+        input.alloc(temp.get_data_byte_size(fft_io::fft_io_in));
+        if(temp.plan_placement == fft_placement_inplace)
+            temp.create_plan(input.data(), input.data());
+        else
+        {
+            hostbuf output;
+            output.alloc(temp.get_data_byte_size(fft_io::fft_io_out));
+            temp.create_plan(input.data(), output.data());
+        }
     }
 
 public:
@@ -1846,10 +1868,7 @@ public:
         if(!rank_is_valid_for_hipfftw(rank) || lengths.empty())
             ret << "_rank" << (rank < 0 ? "_negative_" : "_") << std::abs(rank);
         append_vec("len", lengths);
-        if constexpr(prec == fft_precision_single)
-            ret << "_single";
-        else
-            ret << "_double";
+        ret << "_" << hipfftw_trait<prec>::prec_label;
         ret << (plan_placement == fft_placement_inplace ? "_ip" : "_op");
         if(batch_rank != 1)
             ret << "_batch_rank" << (batch_rank < 0 ? "_negative_" : "_") << std::abs(batch_rank);
@@ -1885,9 +1904,12 @@ public:
     {
         fft_params tmp;
         tmp.from_token(token);
+        if(tmp.precision != prec)
+            throw std::invalid_argument("hipfftw_helper::from_token: precision mismatch between "
+                                        "token and (specialization of) hipfftw_helper object");
         if(tmp.istride.size() != tmp.ostride.size() || tmp.istride.size() != tmp.length.size())
-            throw std::runtime_error("hipfftw_helper::from_token: unexpected mismatch of vector "
-                                     "sizes in hipfftw_helper::from_token");
+            throw std::runtime_error(
+                "unexpected mismatch of vector sizes in hipfftw_helper::from_token");
         dft_kind   = tmp.transform_type;
         rank       = tmp.length.size();
         batch_rank = 1;
@@ -2099,6 +2121,18 @@ public:
     {
         using std::runtime_error::runtime_error;
     };
+    friend void create_hipfftw_plan_from_token_using_temp_io(const std::string&, bool);
 };
+
+// trigger a plan creation via hipfftw, without user-defined I/O
+static void create_hipfftw_plan_from_token_using_temp_io(const std::string& token, bool verbose)
+{
+    if(token.find(hipfftw_trait<fft_precision_single>::prec_label) != std::string::npos)
+        hipfftw_helper<fft_precision_single>::create_temp_plan_from_token(token);
+    else if(token.find(hipfftw_trait<fft_precision_double>::prec_label) != std::string::npos)
+        hipfftw_helper<fft_precision_double>::create_temp_plan_from_token(token);
+    else if(verbose)
+        std::cout << "Unknown/unexpected precision from " << token << std::endl;
+}
 
 #endif
