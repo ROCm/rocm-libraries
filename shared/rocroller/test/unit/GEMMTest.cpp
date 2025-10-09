@@ -1313,9 +1313,9 @@ namespace GEMMDriverTest
         {
             for(auto workgroupMappingValue : {1, 2, 6})
             {
-                //for(auto workgroupRemapXCC : {true, false})
+                for(auto workgroupRemapXCC : {true, false})
                 //for(auto workgroupRemapXCC : {true})
-                for(auto workgroupRemapXCC : {false})
+                //for(auto workgroupRemapXCC : {false})
                 {
                     for(auto streamKMode :
                         {StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst})

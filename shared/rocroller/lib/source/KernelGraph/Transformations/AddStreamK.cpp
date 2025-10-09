@@ -317,8 +317,6 @@ namespace rocRoller
                 auto [nMacX, iMacX, iMacY] = addStore1DMacroTileCT(
                     graph, storeConnections, macTileTag, storeSubDimensions);
 
-                Log::info("AddStreamK, Store1D nMaxC = {}", nMacX);
-
                 addStoreThreadTileCT(graph,
                                      storeConnections,
                                      jammedStoreScratchTileTag,
@@ -361,8 +359,6 @@ namespace rocRoller
                 auto [nMacX, iMacX, iMacY]
                     = addLoad1DMacroTileCT(graph, loadConnections, macTileTag, loadSubDimensions);
 
-                Log::info("AddStreamK, Load1D nMaxC = {}", nMacX);
-
                 addLoadThreadTileCT(graph,
                                     loadConnections,
                                     jammedLoadScratchTileTag,
@@ -400,7 +396,6 @@ namespace rocRoller
             auto tileNumTag = graph.coordinates.addElement(
                 *graph.coordinates.get<MacroTileNumber>(nextTileNumTag)); // Copy existing
 
-            Log::info("AddStreamK, loadScratchTileTag MTN = {}", tileNumTag);
             graph.coordinates.addElement(Split(), {nextTileNumTag}, {tileNumTag, plusOneTag});
 
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
@@ -438,6 +433,7 @@ namespace rocRoller
             };
 
             auto workgroup = graph.coordinates.addElement(Workgroup(0));
+            Log::info("SK adds a workgroup = {}", workgroup);
             graph.coordinates.addElement(PassThrough(), {workgroup}, {flagsScratchTag});
 
             // Store tile
@@ -546,7 +542,7 @@ namespace rocRoller
             auto zero = Expression::literal(0u);
 
             auto workgroup = graph.coordinates.addElement(Workgroup(0));
-
+            Log::info("2 SK adds a workgroup = {}", workgroup);
             // Read tile
             auto receiveTileTag
                 = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
@@ -766,14 +762,12 @@ namespace rocRoller
             std::vector<int> tileNumbers;
             for(auto d : loopInfo.dimensionIndices)
             {
-                // Skip if a dimension has no dangling MacroTileNumber
+                // Skip if no dangling MacroTileNumber at this dimension
                 if(accumInfo.tileNumberCoords.at(d).empty())
                     continue;
 
                 auto tileNumber = graph.coordinates.addElement(
                     MacroTileNumber(d, argInfo.numTiles[d], nullptr));
-
-                Log::info("AddStreamK , new MTN = {}", tileNumber);
 
                 for(auto tileNumTag : accumInfo.tileNumberCoords.at(d))
                 {
@@ -787,7 +781,6 @@ namespace rocRoller
 
                 tileNumbers.push_back(tileNumber);
             }
-            Log::info("SK flatten space tileNumbers = {}", tileNumbers);
 
             // Create forward/reverse accumulator tile-numbers
             //
@@ -815,7 +808,7 @@ namespace rocRoller
 
             auto WGs       = graph.coordinates.addElement(Linear(argInfo.numWGs, nullptr));
             auto workgroup = graph.coordinates.addElement(Workgroup());
-
+            Log::info("SK adds a workgroup => {}", workgroup);
             auto localTileSpaceSK
                 = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, nullptr));
             auto localTileSpaceDP
@@ -898,14 +891,12 @@ namespace rocRoller
                     return false;
                 };
 
-                // NOTE: a dimension might not have any dangling
-                //       MacroTileNumber when RemapOutputTiles
-                //       gets applied as M & N dimensions get flattened.
+                // NOTE: a dimension might not have any dangling MacroTileNumber.
+                //       This happens when workgroupMapping (RemapOutputTiles)
+                //       applied as M & N dimensions get flattened int a new MTN.
                 accumInfo.tileNumberCoords[dimension]
                     = graph.coordinates.findElements(danglingTileNumberPredicate)
                           .to<std::unordered_set>();
-
-                //Log::info("SK dangling dim = {}, MTNs = {}", dimension, accumInfo.tileNumberCoords[dimension]);
             }
 
             return accumInfo;
@@ -1314,16 +1305,12 @@ namespace rocRoller
             // Fill number-of-tiles using MacroTileNumber sizes
             // from load operations (store operations are missing
             // that info).
-            Log::info("1");
-            Log::info("loopInfo.dimensionIndices = {}", loopInfo.dimensionIndices);
             for(auto dimension : loopInfo.dimensionIndices)
             {
-                Log::info("dimension = {}", dimension);
                 for(auto tileNumberTag : accumInfo.tileNumberCoords.at(dimension))
                 {
                     if(!argInfo.numTileArgExprs[dimension])
                     {
-                        Log::info("has dim = {}", dimension);
                         auto macTileNumber = graph.coordinates.get<MacroTileNumber>(tileNumberTag);
                         if(macTileNumber->size)
                             argInfo.numTileArgExprs[dimension]
@@ -1338,9 +1325,6 @@ namespace rocRoller
 
                 for(auto tileNumberTag : accumInfo.tileNumberCoords.at(dimension))
                 {
-                    Log::info("Check dim = {}, expr = {}",
-                              dimension,
-                              toString(argInfo.numTileArgExprs[dimension]));
                     AssertFatal(argInfo.numTileArgExprs[dimension]);
                     Log::debug("  dimension: {} coord: {} size: {}",
                                dimension,
@@ -1367,16 +1351,15 @@ namespace rocRoller
             //
             for(auto d : loopInfo.dimensionIndices)
             {
-                if(argInfo.numTileArgExprs[d] != nullptr)
-                {
+                if(argInfo.numTileArgExprs[d] == nullptr)
+                    continue;
 
-                    argInfo.numTiles.push_back(k->addArgument({concatenate("numTiles", d),
-                                                               numTilesDT,
-                                                               DataDirection::ReadOnly,
-                                                               argInfo.numTileArgExprs[d]}));
-                    if(d > 0)
-                        enableDivideBy(argInfo.numTiles.back(), context);
-                }
+                argInfo.numTiles.push_back(k->addArgument({concatenate("numTiles", d),
+                                                           numTilesDT,
+                                                           DataDirection::ReadOnly,
+                                                           argInfo.numTileArgExprs[d]}));
+                if(d > 0)
+                    enableDivideBy(argInfo.numTiles.back(), context);
             }
 
             argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",
@@ -1391,10 +1374,11 @@ namespace rocRoller
                 ExpressionPtr numNonAccTiles = nullptr;
                 for(auto d : loopInfo.dimensionIndices)
                 {
-                    if(argInfo.numTileArgExprs[d])
-                        numNonAccTiles = numNonAccTiles
-                                             ? numNonAccTiles * argInfo.numTileArgExprs[d]
-                                             : argInfo.numTileArgExprs[d];
+                    if(argInfo.numTileArgExprs[d] == nullptr)
+                        continue;
+
+                    numNonAccTiles = numNonAccTiles ? numNonAccTiles * argInfo.numTileArgExprs[d]
+                                                    : argInfo.numTileArgExprs[d];
                 }
 
                 if(params->streamK.isTwoTileMode())
@@ -1511,11 +1495,9 @@ namespace rocRoller
             auto graph     = original;
             auto accumInfo = stage(graph, loopInfo);
 
-            Log::info("=================setup arguments start ==================");
             auto argInfo
                 = setupArguments(m_context, m_params, m_numWGs, graph, loopInfo, accumInfo);
 
-            Log::info("=================commit start ==================");
             commit(m_context, m_params, graph, loopInfo, accumInfo, argInfo);
 
             return graph;

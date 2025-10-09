@@ -41,40 +41,22 @@ namespace rocRoller
 
         namespace ConnectWorkgroupsDetail
         {
-            rocRoller::Graph::Direction danglingDirection(KernelGraph const& kgraph, int const tag)
-            {
-                bool const upstreamDangling
-                    = std::empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tag));
-                bool const downstreamDangling
-                    = std::empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tag));
-
-                if(upstreamDangling == downstreamDangling)
-                    return rocRoller::Graph::Direction::Count;
-
-                return upstreamDangling ? rocRoller::Graph::Direction::Upstream
-                                        : rocRoller::Graph::Direction::Downstream;
-            }
-
             std::map<std::pair<int, rocRoller::Graph::Direction>, int>
                 connectWorkgroups(KernelGraph& kgraph)
             {
+                // Some MacroTileNumber do not have `size`. So, gather sizes of
+                // dimensions first that can be used for later workgroup creation.
                 std::array<Expression::ExpressionPtr, 3> sizes = {nullptr};
                 auto tileNumTags = kgraph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
                 for(auto const& tag : tileNumTags)
                 {
-                    auto const dir = danglingDirection(kgraph, tag);
+                    if(danglingDirection(kgraph, tag) == GD::Count)
+                        continue;
 
-                    if(dir != GD::Count)
+                    auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
+                    if(sizes[tileNum.dim] == nullptr && tileNum.size != nullptr)
                     {
-                        auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
-                        if(sizes[tileNum.dim] == nullptr && tileNum.size != nullptr)
-                        {
-                            Log::info("Dangling dim = {}, size = {} , tag = {}",
-                                      tileNum.dim,
-                                      toString(tileNum.size),
-                                      tag);
-                            sizes[tileNum.dim] = convert(DataType::Int32, tileNum.size);
-                        }
+                        sizes[tileNum.dim] = convert(DataType::Int32, tileNum.size);
                     }
                 }
 
@@ -83,13 +65,6 @@ namespace rocRoller
                 for(auto const& tileNumTag : tileNumTags)
                 {
                     auto const dir = danglingDirection(kgraph, tileNumTag);
-
-                    //if(dir == GD::Count)
-                    //{
-                    //    Log::info("Count !!!!!!!!!!!!!! = {}", tileNumTag)
-                    //}
-
-                    //if(std::empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                     if(dir == GD::Downstream)
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
@@ -107,7 +82,6 @@ namespace rocRoller
                         rv[{tileNum.dim, GD::Upstream}] = workgroupTag;
                     }
 
-                    //if(std::empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                     if(dir == GD::Upstream)
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
@@ -133,112 +107,28 @@ namespace rocRoller
                                   int                                  workgroupTag,
                                   uint                                 numXCC)
             {
-
-                using ExpressionPtr     = Expression::ExpressionPtr;
-                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
-                using ExpressionPtrVectorPair
-                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
+                auto const direction = danglingDirection(graph, workgroupTag);
+                if(direction == Graph::Direction::Count)
+                    return -1;
 
                 auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
                 auto size      = workgroup.size;
-
-                // Need to check if size is nullptr (AddStreamK adds some workgroups).
-                // Otherwise, test A123 will fail
-                if(workgroup.size == nullptr)
+                if(size == nullptr)
                 {
-                    Log::info("remapWorkgroupXCC: workgroup {} size is nullptr", workgroupTag);
+                    Log::info("XCC a workgroup {} has nullptr!!!!!!!!!!!!!", workgroupTag);
                     return -1;
                 }
-
-                if(workgroup.dim != 0)
-                {
-                    // Throw an exception. Run tests to see which fail
-                    AssertFatal(false, "workgroup dim is not 0 = ", workgroup.dim);
-                }
-
-                // Skip the workgroup if it is not dangling
-                bool const emptyUpstream
-                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream));
-                bool const emptyDownstream
-                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Downstream));
-                bool const isDangling = (emptyUpstream != emptyDownstream);
-                if(not isDangling)
-                {
-                    Log::info("remapWorkgroupXCC: workgroup {} is NOT dangling", workgroupTag);
-                    return -1;
-                }
-
-                Log::info("RemapXCC gets a workgroup = {}", workgroupTag);
-
-                // Upstream: newWorkgroupTag is added above workgroupTag
-                auto direction = emptyUpstream ? GD::Upstream : GD::Downstream;
-
-                auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
-
-                auto one           = Expression::literal(1u);
-                auto numXCCLiteral = Expression::literal(numXCC);
-
-                auto ceilDiv = [&](ExpressionPtr a, ExpressionPtr b) { return (a + b - one) / b; };
-
-                auto xcc = graph.coordinates.addElement(Linear(numXCCLiteral, nullptr));
-                auto cu
-                    = graph.coordinates.addElement(Linear(ceilDiv(size, numXCCLiteral), nullptr));
-
-                // 0 argument is XCC, 1 argument is CU
-                auto condition
-                    = Expression::positionalArgument(0, Register::Type::Scalar, DataType::UInt32)
-                      <= (size % numXCCLiteral);
-
-                ExpressionPtrVectorPair strides{{ceilDiv(size, numXCCLiteral), one},
-                                                {size / numXCCLiteral, one}};
-                ExpressionPtrPair       initialValues{nullptr, size % numXCCLiteral};
-
-                if(direction == GD::Upstream)
-                {
-                    graph.coordinates.addElement(Tile(), {newWorkgroupTag}, {cu, xcc});
-                    graph.coordinates.addElement(
-                        PiecewiseAffineJoin(condition, strides, initialValues),
-                        {xcc, cu},
-                        {workgroupTag});
-
-                    Log::info("RemapXCC connects new workgroup {} ->  workgroup {}",
-                              newWorkgroupTag,
-                              workgroupTag);
-                }
-                else
-                {
-                    graph.coordinates.addElement(
-                        PiecewiseAffineJoin(condition, strides, initialValues),
-                        {workgroupTag},
-                        {xcc, cu});
-                    graph.coordinates.addElement(Flatten(), {cu, xcc}, {newWorkgroupTag});
-
-                    Log::info("RemapXCC connects workgroup {} ->  new workgroup {}",
-                              workgroupTag,
-                              newWorkgroupTag);
-                }
-
-                return newWorkgroupTag;
-            }
-
-            int remapWorkgroupXCC_3(rocRoller::KernelGraph::KernelGraph& graph,
-                                    int                                  workgroupTag,
-                                    uint                                 numXCC,
-                                    GD const                             direction)
-            {
-                using ExpressionPtr     = Expression::ExpressionPtr;
-                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
-                using ExpressionPtrVectorPair
-                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
-
-                auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
-                auto size      = workgroup.size;
 
                 Log::info("RemapXCC gets a workgroup = {}, dim = {}, size = {}",
                           workgroupTag,
                           workgroup.dim,
                           toString(workgroup.size));
 
+                using ExpressionPtr     = Expression::ExpressionPtr;
+                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
+                using ExpressionPtrVectorPair
+                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
+
                 auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
 
                 auto one           = Expression::literal(1u);
@@ -261,8 +151,6 @@ namespace rocRoller
 
                 if(direction == GD::Upstream)
                 {
-                    AssertFatal(danglingDirection(graph, workgroupTag) == GD::Upstream);
-
                     // cu = CD(size / xcc)
                     // strides = { CD(size / xcc),         1}
                     // initial = {              0,    size % xcc}
@@ -282,8 +170,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    AssertFatal(danglingDirection(graph, workgroupTag) == GD::Downstream);
-
                     graph.coordinates.addElement(
                         PiecewiseAffineJoin(condition, strides, initialValues),
                         {workgroupTag},
@@ -298,182 +184,13 @@ namespace rocRoller
                 return newWorkgroupTag;
             }
 
-            void remapWorkgroupXCC_2(rocRoller::KernelGraph::KernelGraph& kgraph, uint numXCC)
+            void remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& kgraph, uint numXCC)
             {
-                std::vector<int> upstream;
-                std::vector<int> downstream;
+                connectWorkgroups(kgraph);
 
-                std::array<Expression::ExpressionPtr, 3> sizes = {nullptr};
-                auto tileNumTags = kgraph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
-                for(auto const& tag : tileNumTags)
-                {
-                    auto const dir = danglingDirection(kgraph, tag);
-
-                    if(dir != GD::Count)
-                    {
-                        auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
-                        if(sizes[tileNum.dim] == nullptr && tileNum.size != nullptr)
-                        {
-                            Log::info("Dangling dim = {}, size = {} , tag = {}",
-                                      tileNum.dim,
-                                      toString(tileNum.size),
-                                      tag);
-                            sizes[tileNum.dim] = convert(DataType::Int32, tileNum.size);
-                        }
-
-                        if(tileNum.size == nullptr)
-                            Log::info("MTN tag = {} , dim = {}, size is null", tag, tileNum.dim);
-                        else
-                            Log::info("MTN tag = {} , dim = {}, size is {}",
-                                      tag,
-                                      tileNum.dim,
-                                      toString(tileNum.size));
-
-                        if(dir == GD::Upstream)
-                            upstream.push_back(tag);
-                        else
-                            downstream.push_back(tag);
-                    }
-                }
-
-                auto attachWorkgroupToDanglingMTN = [&](std::vector<int>& tags, GD const dir) {
-                    for(auto& tag : tags)
-                    {
-                        auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tag);
-                        auto workgroupTag = kgraph.coordinates.addElement(
-                            Workgroup(tileNum.dim, sizes[tileNum.dim]));
-                        if(dir == GD::Upstream)
-                        {
-                            kgraph.coordinates.addElement(PassThrough(), {workgroupTag}, {tag});
-                            Log::info("PassThrough {} -> {}", workgroupTag, tag);
-                        }
-                        else
-                        {
-                            kgraph.coordinates.addElement(PassThrough(), {tag}, {workgroupTag});
-                            Log::info("PassThrough {} -> {}", tag, workgroupTag);
-                        }
-
-                        // Replace the MTN with the workgroup
-                        tag = workgroupTag;
-                    }
-                };
-
-                attachWorkgroupToDanglingMTN(upstream, GD::Upstream);
-                attachWorkgroupToDanglingMTN(downstream, GD::Downstream);
-
-                // Upstream dangling MacroTileNumbers do not set size
-                //for(auto& tag: upstream)
-                //{
-                //    auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
-                //    auto workgroupTag = kgraph.coordinates.addElement(Workgroup(tileNum.dim, sizes[tileNum.dim]));
-                //    kgraph.coordinates.addElement(PassThrough(), {workgroupTag}, {tag});
-                //    Log::info("PassThrough {} -> {}", workgroupTag, tag);
-                //    tag = workgroupTag;
-                //}
-
-                //for(auto& tag: downstream)
-                //{
-                //    auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
-                //    auto workgroupTag = kgraph.coordinates.addElement(Workgroup(tileNum.dim, sizes[tileNum.dim]));
-                //    kgraph.coordinates.addElement(PassThrough(), {tag}, {workgroupTag});
-                //    Log::info("PassThrough {} -> {}", tag, workgroupTag);
-                //    tag = workgroupTag;
-                //}
-                //exit(0);
-
-                Log::info("Dangling Upstream = {}", upstream);
-                Log::info("Dangling Downstream = {}", downstream);
-
-                auto flattenIntoWorkgroup = [&](std::vector<int>& tags, GD const dir) -> int {
-                    if(tags.empty())
-                        return -1;
-
-                    Expression::ExpressionPtr total = nullptr;
-
-                    for(auto& size : sizes)
-                    {
-                        if(size != nullptr)
-                            total = (total == nullptr) ? size : total * size;
-                    }
-
-                    auto workgroupTag = kgraph.coordinates.addElement(Workgroup(0, total));
-                    Log::info("RemapXCC -> {} -> flattened workgroup = {}, size = {}",
-                              tags,
-                              workgroupTag,
-                              toString(total));
-
-                    // Flatten dangling workgroups into a workgroup
-                    if(dir == GD::Upstream)
-                    {
-                        Log::info("RemapXCC, upstream workgroup {} to MTNs {}", workgroupTag, tags);
-                        if(tags.size() > 1)
-                            kgraph.coordinates.addElement(
-                                Tile(), std::vector<int>{workgroupTag}, tags);
-                        else
-                            kgraph.coordinates.addElement(
-                                PassThrough(), std::vector<int>{workgroupTag}, tags);
-                    }
-                    else
-                    {
-                        Log::info(
-                            "RemapXCC, downstream MTNs {} to workgroup {}", tags, workgroupTag);
-                        if(tags.size() > 1)
-                            kgraph.coordinates.addElement(
-                                Flatten(), tags, std::vector<int>{workgroupTag});
-                        else
-                            kgraph.coordinates.addElement(
-                                PassThrough(), tags, std::vector<int>{workgroupTag});
-                    }
-
-                    return workgroupTag;
-                };
-
-                auto workgroups = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
-                for(auto wg : workgroups)
-                {
-                    auto dir = danglingDirection(kgraph, wg);
-                    if(dir != GD::Count)
-                    {
-                        remapWorkgroupXCC_3(kgraph, wg, numXCC, dir);
-                    }
-                }
-
-                //for(auto tag: upstream)
-                //{
-                //    remapWorkgroupXCC_3(kgraph, tag, numXCC, GD::Upstream);
-                //}
-                //for(auto tag: downstream)
-                //{
-                //    remapWorkgroupXCC_3(kgraph, tag, numXCC, GD::Downstream);
-                //}
-                return;
-
-                Log::info("Flatten into workgroup upstream => {}", upstream);
-                auto workgroupTag = flattenIntoWorkgroup(upstream, GD::Upstream);
-                //AssertFatal(workgroupTag > 0);
-                if(workgroupTag != -1)
-                {
-                    remapWorkgroupXCC_3(kgraph, workgroupTag, numXCC, GD::Upstream);
-                }
-
-                Log::info("Flatten into workgroup downstream => {}", downstream);
-                //std::vector<int> v0 = {50, 111};
-                //std::vector<int> v1 = {170,171};
-                //std::vector<int> v0 = {435, 437};
-                //std::vector<int> v1 = {439, 441};
-                //workgroupTag = flattenIntoWorkgroup(v0, GD::Downstream);
-                workgroupTag = flattenIntoWorkgroup(downstream, GD::Downstream);
-                //AssertFatal(workgroupTag > 0);
-                if(workgroupTag != -1)
-                {
-                    remapWorkgroupXCC_3(kgraph, workgroupTag, numXCC, GD::Downstream);
-                }
-
-                //workgroupTag = flattenIntoWorkgroup(v1, GD::Downstream);
-                //if(workgroupTag != -1)
-                //{
-                //    remapWorkgroupXCC_3(kgraph, workgroupTag, numXCC, GD::Downstream);
-                //}
+                auto const workgroups = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
+                for(auto tag : workgroups)
+                    remapWorkgroupXCC(kgraph, tag, numXCC);
             }
         }
 
@@ -485,49 +202,22 @@ namespace rocRoller
 
             if(m_workgroupRemapXCC.has_value())
             {
-                {
-                    std::ofstream ofs("xcc.dot");
-                    ofs << kgraph.coordinates.toDOT();
-                }
-
-                Log::info("XCC value  = {}", m_workgroupRemapXCC.value());
-
                 Log::info("================RemapXCC=================");
                 auto const& arch = m_context->targetArchitecture();
                 AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
                             "XCC-aware workgroup remapping not available on: ",
                             arch.target().toString());
 
-                remapWorkgroupXCC_2(kgraph, m_workgroupRemapXCC.value());
-
-                //auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
-                //for(auto workgroupTag : workgroupTags)
-                //{
-                //    remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
-                //}
+                Log::info("XCC value  = {}", m_workgroupRemapXCC.value());
+                remapWorkgroupXCC(kgraph, m_workgroupRemapXCC.value());
                 Log::info("================RemapXCC Done=================");
             }
-
-            Log::info("================ConnectWorkgroups=================");
-            // If a MacroTileNumber is dangling, attach a workgroup to it.
-            connectWorkgroups(kgraph);
-            Log::info("================ConnectWorkgroups Done=================");
-
-            //if(m_workgroupRemapXCC.has_value())
-            //{
-            //    Log::info("================RemapXCC=================");
-            //    auto const& arch = m_context->targetArchitecture();
-            //    AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
-            //                "XCC-aware workgroup remapping not available on: ",
-            //                arch.target().toString());
-
-            //    auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
-            //    for(auto workgroupTag : workgroupTags)
-            //    {
-            //        remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
-            //    }
-            //    Log::info("================RemapXCC Done=================");
-            //}
+            else
+            {
+                Log::info("================ConnectWorkgroups=================");
+                connectWorkgroups(kgraph);
+                Log::info("================ConnectWorkgroups Done=================");
+            }
 
             return kgraph;
         }
