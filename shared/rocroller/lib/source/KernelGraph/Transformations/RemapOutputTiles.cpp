@@ -177,7 +177,22 @@ namespace rocRoller
                 AssertFatal(workgroupDimensions(info) == 2);
 
                 auto totalSize = totalNumberOfWorkgroups(info);
-                auto workgroup = graph.coordinates.addElement(Linear(totalSize, nullptr));
+
+                //Expression::ExpressionPtr newSize = nullptr;
+                //for(int i = 0; i < 3; ++i)
+                //    if(info.sizes[i] != nullptr)
+                //    {
+                //  auto& expr = std::get<Expression::Convert>(*info.sizes[i]);
+                //  if(newSize == nullptr)
+                //      newSize = expr.arg;
+                //  else
+                //      newSize = newSize * expr.arg;
+                //    }
+
+                //auto workgroup = graph.coordinates.addElement(Linear(totalSize, nullptr));
+                auto workgroup
+                    = graph.coordinates.addElement(MacroTileNumber(0, totalSize, nullptr));
+                Log::info("RemapOutputTiles total workgroup tag = {}", workgroup);
 
                 // workgroupRemapXCC=true or false will fail if we use Linear instead of Workgroup
                 //auto workgroup = graph.coordinates.addElement(Workgroup(0, totalSize));
@@ -259,31 +274,31 @@ namespace rocRoller
                     graph.coordinates.addElement(
                         Flatten(), {mainBlockNumber, mainBlockIndex}, {workgroup});
 
-                    // Add dangling MacroTileNumbers for StreamK
-                    auto dim0 = graph.coordinates.addElement(
-                        MacroTileNumber(dimension, parallelSize, nullptr));
-                    auto dim1 = graph.coordinates.addElement(
-                        MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                    //// Add dangling MacroTileNumbers for StreamK
+                    //auto dim0 = graph.coordinates.addElement(
+                    //    MacroTileNumber(dimension, parallelSize, nullptr));
+                    //auto dim1 = graph.coordinates.addElement(
+                    //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
 
-                    if(dimension == 0)
-                        graph.coordinates.addElement(Tile(), {workgroup}, {dim0, dim1});
-                    else
-                        graph.coordinates.addElement(Tile(), {workgroup}, {dim1, dim0});
+                    //if(dimension == 0)
+                    //    graph.coordinates.addElement(Tile(), {workgroup}, {dim0, dim1});
+                    //else
+                    //    graph.coordinates.addElement(Tile(), {workgroup}, {dim1, dim0});
                 }
                 else
                 {
                     graph.coordinates.addElement(
                         Tile(), {workgroup}, {mainBlockNumber, mainBlockIndex});
 
-                    // Add dangling MacroTileNumbers for StreamK
-                    auto dim0 = graph.coordinates.addElement(
-                        MacroTileNumber(dimension, parallelSize, nullptr));
-                    auto dim1 = graph.coordinates.addElement(
-                        MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
-                    if(dimension == 0)
-                        graph.coordinates.addElement(Flatten(), {dim0, dim1}, {workgroup});
-                    else
-                        graph.coordinates.addElement(Flatten(), {dim1, dim0}, {workgroup});
+                    //// Add dangling MacroTileNumbers for StreamK
+                    //auto dim0 = graph.coordinates.addElement(
+                    //    MacroTileNumber(dimension, parallelSize, nullptr));
+                    //auto dim1 = graph.coordinates.addElement(
+                    //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                    //if(dimension == 0)
+                    //    graph.coordinates.addElement(Flatten(), {dim0, dim1}, {workgroup});
+                    //else
+                    //    graph.coordinates.addElement(Flatten(), {dim1, dim0}, {workgroup});
 
                     graph.coordinates.addElement(Tile(), {workgroup}, {groupNumber, groupIndex});
                     graph.coordinates.addElement(Tile(), {groupNumber}, {blockNumber, blockIndex});
@@ -329,6 +344,8 @@ namespace rocRoller
 
                 connectWorkgroupsWithMapping(
                     info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
+
+                Log::info("=================RemapOutputTiles Done========================");
             }
 
             return kgraph;

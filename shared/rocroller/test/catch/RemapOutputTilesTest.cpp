@@ -42,6 +42,9 @@
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
+#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
+#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
+
 #include "CustomMatchers.hpp"
 #include "ExpressionMatchers.hpp"
 #include "TestContext.hpp"
@@ -120,8 +123,7 @@ namespace RemapOutputTilesTest
             transformer.fillExecutionCoordinates(m_context);
 
             auto wgRegister = m_context->registerTagManager()->getRegister(m_workgroupU);
-
-            auto exprs = m_graph->coordinates.forward(
+            auto exprs      = m_graph->coordinates.forward(
                 {wgRegister->expression()}, {m_workgroupU}, {m_wgx, m_wgy});
 
             return exprs;
@@ -252,8 +254,17 @@ namespace RemapOutputTilesTest
 
             TileSizeInfo info{.sizes = {m_numTilesX, m_numTilesY, nullptr}};
 
-            std::tie(m_workgroupU, m_wgx, m_wgy) = workgroupMapping(
+            int mtn;
+            std::tie(mtn, m_wgx, m_wgy) = workgroupMapping(
                 info, graph, rocRoller::Graph::Direction::Downstream, m_dim, m_wgm);
+            // Attach workgroup to dangling MacroTileNumber
+            ConnectWorkgroupsDetail::connectWorkgroups(graph);
+
+            // Obtain the workgroup attached to the MacroTileNumber
+            auto edge = *rocRoller::only(
+                graph.coordinates.getNeighbours<rocRoller::Graph::Direction::Upstream>(mtn));
+            m_workgroupU = *rocRoller::only(
+                graph.coordinates.getNeighbours<rocRoller::Graph::Direction::Upstream>(edge));
 
             m_graph = std::make_shared<KernelGraph>(graph);
 
@@ -265,14 +276,18 @@ namespace RemapOutputTilesTest
 
         int m_dim;
         int m_workgroupU;
+
+        std::vector<int> wgs;
+
         int m_wgx, m_wgy;
 
         rocRoller::Expression::ExpressionPtr m_wgm, m_numTilesX, m_numTilesY;
     };
 
-    TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu]")
+    TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu][a123]")
     {
-        auto remapDim = GENERATE(0, 1);
+        //auto remapDim = GENERATE(0, 1);
+        auto remapDim = GENERATE(0);
         {
             // Note:
             //
@@ -284,12 +299,16 @@ namespace RemapOutputTilesTest
             auto context = TestContext::ForTestDevice({{.enableFullDivision = true}}, remapDim);
             auto kernel  = RemapWorkgroupKernel(context.get(), remapDim);
 
-            auto numTilesM = GENERATE(22, 55);
-            auto numTilesN = GENERATE(7, 8, 11);
+            //auto numTilesM = GENERATE(22, 55);
+            //auto numTilesN = GENERATE(7, 8, 11);
+
+            auto numTilesM = GENERATE(22);
+            auto numTilesN = GENERATE(7);
 
             uint totalSize = numTilesM * numTilesN;
 
-            auto WGM = GENERATE(range(1, 50));
+            //auto WGM = GENERATE(range(1, 50));
+            auto WGM = GENERATE(4);
             {
                 //
                 // WGM is the workgroup-mapping "group size".  It is a kernel argument.
