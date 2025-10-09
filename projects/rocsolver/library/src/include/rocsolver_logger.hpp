@@ -286,13 +286,13 @@ public:
     // check environment variable, checking if it is cached already
     static bool check_env_variable_cached()
     {
-        if (rocsolver_logger::_instance != nullptr)
+        if(rocsolver_logger::_instance != nullptr)
             return true;
         bool update = false;
         auto lock = acquire_lock();
-        if (rocsolver_logger::env_var_status == -1)
+        if(rocsolver_logger::env_var_status == -1)
         {
-            if (check_env_variable())
+            if(check_env_variable())
             {
                 rocsolver_logger::env_var_status = 1;
                 update = true;
@@ -302,7 +302,7 @@ public:
         }
         lock.unlock();
 
-        if (update)
+        if(update)
             rocsolver_log_begin();
 
         return rocsolver_logger::env_var_status;
