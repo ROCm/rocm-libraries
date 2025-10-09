@@ -328,7 +328,6 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 }
 } // namespace
 
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(
     const ::miopen::conv::ProblemDescription& problem)
@@ -371,7 +370,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::CheckCKApplicability(
         return IsCKApplicable<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
-#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
@@ -385,8 +383,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
     default: break; // Unsupported data types - valid_kernels remains empty
     }
 }
-#endif
 
+#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
 {
@@ -718,14 +716,6 @@ ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
     return {};
 #endif
 }
-
-#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
-void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
-    const ::miopen::conv::ProblemDescription&)
-{
-    // No-op stub for non-CK builds
-}
-#endif
 
 } // namespace conv
 } // namespace solver

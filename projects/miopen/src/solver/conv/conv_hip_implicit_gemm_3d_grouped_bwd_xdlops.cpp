@@ -365,7 +365,6 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 }
 } // namespace
 
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::Init(
     const ::miopen::conv::ProblemDescription& problem)
@@ -405,7 +404,6 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
     default: return IsCKApplicable<DeviceOpGBwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
-#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     const ::miopen::conv::ProblemDescription& problem)
@@ -419,7 +417,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     default: break; // Unsupported data types - valid_kernels remains empty
     }
 }
-#endif
+#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
