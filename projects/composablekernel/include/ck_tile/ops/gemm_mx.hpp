@@ -13,6 +13,7 @@
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves_policy.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/wp_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/wp_pipeline_agmem_bgmem_creg_v1_policy.hpp"
+#include "ck_tile/ops/common/determine_warp_prec_type.hpp"
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
 #include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/common/streamk_common.hpp"

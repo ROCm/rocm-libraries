@@ -98,6 +98,7 @@
 #include "ck_tile/ops/gemm/warp/warp_gemm_smfmac_impl.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm_gfx11_utils.hpp"
+#include "ck_tile/ops/common/determine_warp_prec_type.hpp"
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
 #include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/common/streamk_common.hpp"

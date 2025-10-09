@@ -6,6 +6,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/permute_pk_int4.hpp"
+#include "ck_tile/ops/common/determine_warp_prec_type.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
@@ -233,9 +234,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::max(get_k_warp_tile<ADataType, M_Warp_Tile, PipelineType>(),
                      get_k_warp_tile<BDataType, N_Warp_Tile, PipelineType>());
 
-    using AComputeDataType = ADataType;
-    using BComputeDataType =
-        std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_int4_t>, ADataType, BDataType>;
+    using AComputeDataType = ck_tile::DetermineWarpPrecType<ADataType, BDataType>::a_prec_type;
+    using BComputeDataType = ck_tile::DetermineWarpPrecType<ADataType, BDataType>::b_prec_type;
 
     using DsLayout   = ck_tile::tuple<>;
     using DsDataType = ck_tile::tuple<>;
