@@ -245,7 +245,11 @@ def add_new_contenders(
         col_widths[key] = max_content
 
     # Print header
-    print("  ".join(f"{title:<{col_widths[key]}}" for key, title in columns))
+    header_line = "  ".join(f"{title:<{col_widths[key]}}" for key, title in columns)
+    print(header_line)
+
+    # Print horizontal line made of dashes under the header
+    print("-" * len(header_line))
 
     # Print rows, using colored text but padding based on uncolored width
     for row in rows:
