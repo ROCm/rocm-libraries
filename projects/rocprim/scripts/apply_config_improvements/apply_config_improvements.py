@@ -124,7 +124,6 @@ def add_new_contenders(
             total_specializations += 1
 
             row = {}
-            row["algo"] = algorithm_name
             row["arch"] = str(arch)
             row["key"] = stringify_instance_key(instance_key)
             row["new_family_index"] = new_best_instance["family_index"]
@@ -220,10 +219,9 @@ def add_new_contenders(
             )
 
     columns = [
-        ("status", "Status"),
+        ("status", f"Status for {algorithm_name}"),
         ("noise", "Noise(old/new)"),
         ("bps", "Bytes/sec(old/new)"),
-        ("algo", "Algorithm"),
         ("arch", "Arch"),
         ("key", "Specialization"),
         ("family_index", "Family index(old/new)"),
