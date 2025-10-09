@@ -163,11 +163,11 @@ if(CODE_COVERAGE)
     findAndCheckLlvmTools()
     
     if(HIP_DNN_BUILD_PLUGINS)
-        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object ./bin/miopen_legacy_plugin_tests)
+        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests)
     endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/test_utilities.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)")
-    set(CODE_COVERAGE_OBJECTS -object ./lib/libhipdnn_backend.so -object ./bin/hipdnn_backend_tests -object ./bin/hipdnn_frontend_tests -object ./bin/public_hipdnn_backend_tests -object ./bin/hipdnn_sdk_tests ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT})
+    set(CODE_COVERAGE_OBJECTS -object ./${CMAKE_INSTALL_LIBDIR}/libhipdnn_backend.so -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests -object ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT})
 
     add_custom_target(
         code_coverage
