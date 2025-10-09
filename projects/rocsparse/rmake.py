@@ -172,8 +172,6 @@ def config_cmd():
     if os.getenv('CMAKE_CXX_COMPILER_LAUNCHER'):
         cmake_options.append( f"-DCMAKE_CXX_COMPILER_LAUNCHER={os.getenv('CMAKE_CXX_COMPILER_LAUNCHER')}" )
 
-    print( cmake_options )
-
     # build type
     cmake_config = ""
     build_dir = os.path.abspath(args.build_dir)
@@ -193,21 +191,25 @@ def config_cmd():
     os.chdir( build_path )
 
     if args.rocprim_path != "":
-        cmake_options.append(f'-Drocprim_DIR=\"{args.rocprim_path}\"')
-
-    if args.matrices_dir == "":
-        fatal("Missing argument from command line parameter --matrices-dir; aborting")
-    else:
+        rocprim_path = cmake_path(os.path.abspath(args.rocprim_path))
+        cmake_options.append(f'-Drocprim_DIR=\"{rocprim_path}\"')
+    
+    if args.matrices_dir != "":
+        matrices_dir = cmake_path(os.path.abspath(args.matrices_dir))
+    
         if os.getenv("CXX"):
             cxx_compiler = os.getenv("CXX")
         else:
-            cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
+            if os.name == "nt":
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "clang++"))
+            else:
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "amdclang++"))
         
         program_list = [
         cmake_executable,
             f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
-            f'-DPROJECT_BINARY_DIR={args.matrices_dir}',
-            f'-DCMAKE_MATRICES_DIR={args.matrices_dir}',
+            f'-DPROJECT_BINARY_DIR={matrices_dir}',
+            f'-DCMAKE_MATRICES_DIR={matrices_dir}',
             f'-DROCM_PATH={rocm_path}',
             '-DCMAKE_INSTALL_LIBDIR=lib',
             '-P',
@@ -215,12 +217,12 @@ def config_cmd():
         ]
         proc = subprocess.run(
             program_list,
-            cwd=cwd_path,
+            cwd=src_path,
             check=True,
             stderr=subprocess.STDOUT,
             shell=False)
 
-        cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{args.matrices_dir}\"')
+        cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{matrices_dir}\"')
 
     if args.build_with_rocblas:
         cmake_options.append(f"-DBUILD_WITH_ROCBLAS=ON")
