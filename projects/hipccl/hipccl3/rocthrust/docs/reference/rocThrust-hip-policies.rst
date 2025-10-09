@@ -7,7 +7,7 @@
 .. _hip-execution-policies:
 
 ******************************************
-Execution Policies
+rocThrust and policies
 ******************************************
 
 In addition to the standard Thrust execution policies (eg. ``thrust::host``, ``thrust::device``, ``thrust::seq``),
@@ -22,7 +22,7 @@ rocThrust's HIP backend provides the following:
   are running on the device. If you use this policy, you must synchronize before accessing results
   on the host side.
 
-The example below illustrates the behaviour of these two policies.
+The example below illustrates the behavior of these two policies.
 
 .. code-block:: cpp
 
