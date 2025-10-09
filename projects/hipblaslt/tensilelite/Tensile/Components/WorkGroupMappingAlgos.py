@@ -33,7 +33,7 @@ from rocisa.instruction import SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, SBa
     VReadfirstlaneB32, VReadlaneB32, VWritelaneB32, VCvtBF16toFP32, VCvtU32toF32, VCvtU32toF64, VRcpIFlagF32, \
     VRcpF64, VCvtF32toU32, VCvtF64toU32, VMulU32U24, VMulLOU32, VSubU32, VCmpXGeU32, VCmpXGtU32, VCmpXEqU32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
-    vectorStaticMultiply, BranchIfNotZero, scalarUInt32DivideAndRemainder, \
+    vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, \
     vectorUInt32CeilDivideAndRemainder
 
 from Tensile.Common import roundUp, log2, ceilDivide
@@ -88,44 +88,6 @@ def scalarUInt24DivideAndRemainderPair(qReg, dReg, divReg, rReg, tmpVgprRes, wav
 
     module.addComment0("End of pair-wise integer division. [s%s / s%s, s%s / s%s]"%(str(dReg[0]), str(divReg[0]), str(dReg[1]), str(divReg[1])))
     return module
-
-def scalarUInt24DivideAndRemainder(qReg, dReg, divReg, rReg, tmpVgprRes, wavewidth, doRemainder=True, doQuotient=True):
-
-    module = Module()
-    tmpVgpr = tmpVgprRes.idx
-    tmpVgpr1 = tmpVgprRes.idx+2
-
-    module.add(VCvtU32toF64(dst=vgpr(tmpVgpr,2), src=sgpr(divReg)))
-    module.add(VRcpF64(dst=vgpr(tmpVgpr,2), src=vgpr(tmpVgpr,2)))
-    module.add(VCvtU32toF64(dst=vgpr(tmpVgpr1,2), src=sgpr(dReg)))
-    module.add(VMulF64(dst=vgpr(tmpVgpr,2), src0=vgpr(tmpVgpr,2), src1=vgpr(tmpVgpr1,2)))
-    module.add(VCvtF64toU32(dst=vgpr(tmpVgpr), src=vgpr(tmpVgpr,2)))
-
-    module.add(VMulLOU32(dst=vgpr(tmpVgprRes.idx+1), src0=vgpr(tmpVgpr), src1=sgpr(divReg), comment=""))
-    module.add(VSubU32(dst=vgpr(tmpVgpr1), src0=sgpr(dReg), src1=vgpr(tmpVgprRes.idx+1)))
-    module.add(VCmpXGeU32(EXEC(), vgpr(tmpVgpr1), sgpr(divReg)))
-    module.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=1))
-
-    if wavewidth == 64:
-        module.add(SMovB64(dst=EXEC(), src=-1, comment="reset mask"))
-    else:
-        module.add(SMovB32(dst=EXEC(), src=-1, comment="reset mask"))
-
-    if doRemainder:
-        module.add(VMulLOU32(dst=vgpr(tmpVgprRes.idx+1), src0=vgpr(tmpVgpr), src1=sgpr(divReg), comment=""))
-        module.add(VSubU32(dst=vgpr(tmpVgpr1), src0=sgpr(dReg), src1=vgpr(tmpVgprRes.idx+1)))
-
-    if doQuotient:
-        module.add(VReadfirstlaneB32(dst=sgpr(qReg), src=vgpr(tmpVgpr), comment=""))
-    else:
-        module.add(SNop(waitState=0, comment=""))
-
-    if doRemainder:
-        module.add(VReadfirstlaneB32(dst=sgpr(rReg), src=vgpr(tmpVgpr1), comment=""))
-
-
-    return module
-
 
 def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     module = Module("WGMXCC")
@@ -279,77 +241,10 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     return module
 
-
-# Remap XCC
-def wgmXCC1(writer, kernel, sgprWGID, sgprNumTilesM, sgprNumTilesN):
-
-    # TODO: Query arch specific values instead of hard code
-    numTotalCU = 256
-    numXCC = 8
-
-    module = Module()
-    tmpSgpr = []
-    numTmpSgpr = 3 + 2 + 1 + 2
-    for i in range(0, numTmpSgpr):
-        tmpSgpr.append(writer.sgprPool.checkOut(1))
-
-    sgprXcc = writer.sgprPool.checkOut(1)
-
-    module.addComment0("Remap 1D based on XCC")
-    numWG = tmpSgpr[0] # alias
-    module.add(SMulI32(dst=sgpr(numWG), src0=sgpr(sgprNumTilesM), src1=sgpr(sgprNumTilesN)))
-    module.add(SAddU32(dst=sgpr(tmpSgpr[1]), src0=sgpr(numWG), src1=(numTotalCU - 1)))
-    numRd = tmpSgpr[1] # alias, number of rounds
-    curRd = tmpSgpr[2] # alias, current round
-    # Need to use this for non power of 2 total CUs
-    #module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr.idx, dReg="WorkGroup0", divReg=tmpSgpr.idx, rReg=tmpSgpr.idx+1,\
-        #                                     tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
-    module.add(SLShiftRightB32(dst=sgpr(numRd), src=sgpr(numRd), shiftHex=log2(numTotalCU), comment="Calc number rounds"))
-    module.add(SLShiftRightB32(dst=sgpr(curRd), src=sgpr(sgprWGID), shiftHex=log2(numTotalCU), comment="Calc current rounds"))
-    module.addComment0("")
-      # tmp sgpr 3, 4, 5
-    module.add(SMinU32(dst=sgpr(tmpSgpr[3]), src0=sgpr(numWG), src1=numTotalCU, comment="min(numwg, %u)"%(numTotalCU) ))
-    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr[4]), src=sgpr(curRd), shiftHex=log2(numTotalCU), comment=" current round * %u"%(numTotalCU)))
-    module.add(SSubU32(dst=sgpr(tmpSgpr[4]), src0=sgpr(numWG), src1=sgpr(tmpSgpr[4]), comment="numwg - cr * %u"%(numTotalCU)))
-    module.addComment0("nwg = cr < nr - 1 ? std::min<int>(%u, nwg) : nwg - (cr) * %u"%(numTotalCU, numTotalCU))
-    module.add(SSubU32(dst=sgpr(tmpSgpr[5]), src0=sgpr(numRd), src1=1, comment="num rounds - 1"))
-    module.add(SCmpLtU32(sgpr(curRd), sgpr(tmpSgpr[5]), comment="current round < num rounds - 1"))
-    module.add(SCSelectB32(dst=sgpr(numWG), src0=sgpr(tmpSgpr[3]), src1=sgpr(tmpSgpr[4])))
-    module.addComment0("")
-    # tmp sgpr 3, 4, 5
-    module.add(SAndB32(dst=sgpr(sgprWGID), src0=sgpr(sgprWGID), src1=(numTotalCU - 1)))
-    module.add(SLShiftRightB32(dst=sgpr(tmpSgpr[3]), src=sgpr(numWG), shiftHex=log2(numXCC), comment="num wg per xcc"))
-    module.add(SAndB32(dst=sgpr(tmpSgpr[4]), src0=sgpr(numWG), src1=(numXCC - 1), comment="num xcc with extra wg"))
-    module.addComment0("")
-    module.add(SAndB32(dst=sgpr(tmpSgpr[5]), src0=sgpr(sgprWGID), src1=(numXCC - 1), comment="logical xcc id"))
-    numWGPerXCC = tmpSgpr[3] # alias
-    numXCCExtraWG = tmpSgpr[4] # alias
-    logicalXCCID = tmpSgpr[5] # alias
-    # tmp sgpr 0, 1, 6, 7 numWG, numRd not needed anymore
-    module.add(SMinU32(dst=sgpr(tmpSgpr[1]), src0=sgpr(logicalXCCID), src1=sgpr(numXCCExtraWG), comment="min(cutoff, xccid)" ))
-    module.add(SSubU32(dst=sgpr(tmpSgpr[6]), src0=sgpr(logicalXCCID), src1=sgpr(tmpSgpr[1]), comment="xccid - min(cutoff, xccid)"))
-    module.addComment0("")
-    module.add(SMulI32(dst=sgpr(tmpSgpr[7]), src0=sgpr(tmpSgpr[6]), src1=sgpr(numWGPerXCC)))
-    module.add(SAddU32(dst=sgpr(numWGPerXCC), src0=sgpr(numWGPerXCC), src1=1))
-    module.add(SMulI32(dst=sgpr(tmpSgpr[0]), src0=sgpr(tmpSgpr[1]), src1=sgpr(numWGPerXCC)))
-    module.add(SAddU32(dst=sgpr(tmpSgpr[0]), src0=sgpr(tmpSgpr[0]), src1=sgpr(tmpSgpr[7])))
-    module.addComment0("")
-    module.add(SLShiftRightB32(dst=sgpr(numWGPerXCC), src=sgpr(sgprWGID), shiftHex=log2(numXCC), comment=""))
-    module.add(SAddU32(dst=sgpr(sgprWGID), src0=sgpr(tmpSgpr[0]), src1=sgpr(numWGPerXCC)))
-
-    module.add(SLShiftLeftB32(dst=sgpr(curRd), src=sgpr(curRd), shiftHex=log2(numTotalCU), comment=""))
-    module.add(SAddU32(dst=sgpr(sgprWGID), src0=sgpr(sgprWGID), src1=sgpr(curRd)))
-    for i in range(0, numTmpSgpr):
-        writer.sgprPool.checkIn(tmpSgpr[i])
-    writer.sgprPool.checkIn(sgprXcc)
-    return module
-
-
-# Remap XCC
+# Remap 1D workgroup ID
 def chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN):
 
     numXCC = 8
-
     module = Module()
 
     sgprXCC = writer.sgprPool.checkOut(1)
@@ -364,8 +259,15 @@ def chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN):
     tmpVgprRes = ContinuousRegister(tmpVgpr, 6)
 
     module.add(SMovB32(dst=sgpr(sgprNumXCC), src=numXCC, comment=""))
-    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprNumTilesM), src1=sgpr(sgprNumTilesN), comment=""))
+    module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr(sgprNumTilesM), src1=sgpr(sgprNumTilesN), comment="Compute total number of tiles"))
 
+    # POSINXCC = Index // NumXCC
+    # - ID in XCC
+    # XCC = Index % NumXCC
+    # - XCC ID
+    #
+    # MinPerXCC = TotalNumTiles // NumXCC
+    # ExtraWG = TotalNumTiles % NumXCC
     module.add(scalarUInt24DivideAndRemainderPair(qReg=[sgprPOSINXCC,sgprMinPerXCC], dReg=[sgprIndex,sgprTmp], \
                                                   divReg=[sgprNumXCC,sgprNumXCC], rReg=[sgprXCC,sgprExtraWG], tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"]))
 
@@ -455,7 +357,6 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     # Apply a permtutation of all sgprIndex values. This will overwrite sgprIndex.
     useXCCRemap = len(kernel["SpaceFillingAlgo"])
     if useXCCRemap:
-      #module.add(wgmXCC1(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN))
       module.add(chiplet_transform(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN))
 
 
