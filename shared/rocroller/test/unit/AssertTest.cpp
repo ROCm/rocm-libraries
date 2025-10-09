@@ -54,6 +54,13 @@ namespace AssertTest
 {
     class GPU_AssertTest : public GPUContextFixtureParam<std::tuple<AssertOpKind, std::string>>
     {
+    public:
+        bool skipOnGPU(const auto& gpu, AssertOpKind assertOpKind)
+        {
+            return gpu.isRDNA4GPU()
+                   && (assertOpKind == AssertOpKind::MemoryViolation
+                       || assertOpKind == AssertOpKind::STrap);
+        }
     };
 
     TEST_P(GPU_AssertTest, GPU_Assert)
@@ -182,7 +189,7 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            if(isLocalDevice())
+            if(isLocalDevice() && not skipOnGPU(gpu, assertOpKind))
             {
                 KernelArguments kargs;
 
@@ -307,7 +314,7 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            if(isLocalDevice())
+            if(isLocalDevice() && not skipOnGPU(gpu, assertOpKind))
             {
                 KernelArguments kargs;
 

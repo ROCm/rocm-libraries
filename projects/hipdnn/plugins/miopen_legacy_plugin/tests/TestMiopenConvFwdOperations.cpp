@@ -7,6 +7,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -52,7 +53,7 @@ protected:
 
     void runConvFwdGraph(const ConvTestCase& testCase,
                          hipdnn_sdk::data_objects::DataType dataType,
-                         DataType epsilon)
+                         DataType tolerance)
     {
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
@@ -127,7 +128,7 @@ protected:
                                                                          testCase._convDilation,
                                                                          testCase._convPrePadding);
 
-        CpuFpReferenceValidation<DataType> cpuRefValidationInput(epsilon, epsilon);
+        CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
         EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu.memory(), yTensor.memory()));
     }
@@ -158,7 +159,8 @@ public:
 TEST_P(TestGpuMiopenConvFwdExecuteGraphNchwFp32, Correctness)
 {
     const ConvTestCase& testCase = GetParam();
-    runConvFwdGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, 4e-6f);
+    runConvFwdGraph(
+        testCase, hipdnn_sdk::data_objects::DataType::FLOAT, conv::getToleranceFwd<float>());
 }
 
 INSTANTIATE_TEST_SUITE_P(,
