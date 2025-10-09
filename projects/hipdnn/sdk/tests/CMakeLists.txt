@@ -57,6 +57,7 @@ add_executable(hipdnn_sdk_tests
     test_utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
     test_utilities/cpu_graph_executor/TestConvolutionBwdSignatureKey.cpp
     test_utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp
+    test_utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
 )
 
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
