@@ -200,7 +200,7 @@ private:
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
             // Threshold for "huge" allocations — skip 20% extra allocation
-            static const size_t big_thresh = total_device_mem / 4;
+            const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
 
             // remove the (largest) buffer that was too small
