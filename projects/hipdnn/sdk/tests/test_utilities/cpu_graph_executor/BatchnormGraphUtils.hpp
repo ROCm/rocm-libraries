@@ -215,6 +215,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
     yTensorAttr->set_dim(dims);
     yTensorAttr->set_stride(strides);
+    yTensorAttr->set_is_virtual(false);
 
     return graph;
 }
