@@ -249,7 +249,7 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob(make_targets: "check_format")
+                                utils.buildHipClangJob(make_targets: "check_format", needs_gpu:false)
                             }
                         }
                     }
