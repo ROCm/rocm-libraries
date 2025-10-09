@@ -125,6 +125,14 @@ size_t getWorkspaceSize([[maybe_unused]] hipdnnEnginePluginHandle_t handle,
     return 4096;
 }
 
+size_t getWorkspaceSize([[maybe_unused]] hipdnnEnginePluginHandle_t handle,
+                        [[maybe_unused]] hipdnnEnginePluginExecutionContext_t executionContext)
+{
+    // TODO Implement actual logic
+    // For now, we just return a fixed workspace size.
+    return 2048;
+}
+
 hipdnnEnginePluginExecutionContext_t
     createExecutionContext([[maybe_unused]] hipdnnEnginePluginHandle_t handle,
                            [[maybe_unused]] const hipdnnPluginConstData_t* engineConfig,
