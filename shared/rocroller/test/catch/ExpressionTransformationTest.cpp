@@ -854,9 +854,15 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     using namespace rocRoller;
     auto context = TestContext::ForDefaultTarget();
 
-    auto zero64 = Expression::literal(0, DataType::UInt64);
-    auto zero32 = Expression::literal(0, DataType::UInt32);
-    auto two32  = Expression::literal(2, DataType::UInt32);
+    auto zero64  = Expression::literal(0, DataType::UInt64);
+    auto zero32  = Expression::literal(0, DataType::UInt32);
+    auto zero128 = std::make_shared<Expression::Expression>(Expression::Concatenate{
+        {std::vector<Expression::ExpressionPtr>{zero32, zero32, zero32, zero32}},
+        {DataType::UInt32, PointerType::Buffer}});
+
+    auto ones64 = Expression::literal(0xffffffffffffffffull, DataType::UInt64);
+    auto ones32 = Expression::literal(0xfffffffful, DataType::UInt32);
+
     auto r
         = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::UInt32, 1);
     r->allocateNow();
@@ -864,8 +870,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into first dword of 64bit and fold to constant")
     {
-        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 16, 8});
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, zero64, "", 0, 16, 8});
 
         auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{
             {std::vector<Expression::ExpressionPtr>{
@@ -877,8 +883,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into second dword of 64bit and fold to constant")
     {
-        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 48, 8});
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, zero64, "", 0, 48, 8});
 
         auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{
             {std::vector<Expression::ExpressionPtr>{
@@ -890,8 +896,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into middle of first and second dword of 64bit and fold to constant")
     {
-        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 24, 16});
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, zero64, "", 0, 24, 16});
 
         auto expected = std::make_shared<Expression::Expression>(
             Expression::Concatenate{{std::vector<Expression::ExpressionPtr>{
@@ -947,8 +953,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     {
         auto bfc = std::make_shared<Expression::Expression>(
             Expression::BitfieldCombine{reg32, zero64, "", 0, 16, 8});
-        auto bfc2 = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), bfc, "", 0, 48, 8});
+        auto bfc2 = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, bfc, "", 0, 48, 8});
 
         auto expect_1 = std::make_shared<Expression::Expression>(
             Expression::BitfieldCombine{reg32, zero32, "", 0, 16, 8});
@@ -965,13 +971,13 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     {
         auto bfc = std::make_shared<Expression::Expression>(
             Expression::BitfieldCombine{reg32, zero64, "", 0, 16, 8});
-        auto bfc2 = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), bfc, "", 0, 24, 16});
+        auto bfc2 = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, bfc, "", 0, 24, 16});
 
         auto expect_1 = std::make_shared<Expression::Expression>(
             Expression::BitfieldCombine{reg32, zero32, "", 0, 16, 8});
-        auto expect_2 = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), expect_1, "", 0, 24, 8});
+        auto expect_2 = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, expect_1, "", 0, 24, 8});
         auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{
             {std::vector<Expression::ExpressionPtr>{
                 expect_2, Expression::literal(0x000000fful, DataType::UInt32)}},
@@ -983,10 +989,10 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Chain two BitfieldCombines into 64bit and fold to constant")
     {
-        auto bfc  = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), zero64, "", 0, 16, 8});
-        auto bfc2 = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
-            Expression::literal(0xfffffffful, DataType::UInt32), bfc, "", 0, 40, 8});
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, zero64, "", 0, 16, 8});
+        auto bfc2 = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, bfc, "", 0, 40, 8});
 
         auto expected = std::make_shared<Expression::Expression>(
             Expression::Concatenate{{std::vector<Expression::ExpressionPtr>{
@@ -997,6 +1003,19 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         auto res = splitBitfieldCombine(bfc2);
 
         CHECK_THAT(res, IdenticalTo(expected));
+    }
+
+    SECTION("Combine into first dword of 128bit and fold to constant")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{ones32, zero128, "", 0, 16, 8});
+
+        auto expected = std::make_shared<Expression::Expression>(Expression::Concatenate{
+            {std::vector<Expression::ExpressionPtr>{
+                Expression::literal(0x00ff0000ul, DataType::UInt32), zero32, zero32, zero32}},
+            {DataType::UInt32, PointerType::Buffer}});
+
+        CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     // SECTION("Lowering Bitfield Chain")
