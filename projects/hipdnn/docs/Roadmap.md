@@ -38,6 +38,7 @@ The Frontend provides the user-facing C++ API for hipDNN, focusing on ease of us
 - **Dynamic Loading**: Supporting runtime loading of hipDNN backend libraries
 - **Filtering engines**: Adding API to control filtering of engines based off behavorial notes
 - **Configurable engines**: Adding API to configure tunable settings provided by engines
+- **Specify compute type**: Allow users to specify the accumulator compute types for plugins to use
 
 ## Backend
 
@@ -66,9 +67,7 @@ The SDK provides shared utilities and interfaces that ensure compatibility betwe
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Reference Implementations**:
-  - Adding golden data support for verifying reference implementations
-- **Fusion Support**: Adding reference fusion support for Pointwise operations
+- **Fusion Support**: Validating the reference fusion support for Pointwise operations
 
 ### Future Roadmap
 *The following items are longer-term goals that are not yet scheduled:*
@@ -117,7 +116,7 @@ This section covers testing infrastructure improvements and performance benchmar
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Golden Reference Data**: Leverage our golden reference data in unit testing at plugin level & to verify reference implementations
+- **Golden Reference Data**: Leverage our golden reference data exhaustively in unit testing at plugin level & to verify reference implementations
 - **CI Platform**: Swap to leverage TheRock for CI
 - **ASAN Integration**: Add ASAN as an automatic step to CI
 - **Samples**: Run [samples](../samples/README.md) in CI to validate the installation.
