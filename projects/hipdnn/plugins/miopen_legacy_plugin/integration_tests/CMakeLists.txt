@@ -1,7 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-include(GoogleTest)
 find_package(Threads REQUIRED)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
