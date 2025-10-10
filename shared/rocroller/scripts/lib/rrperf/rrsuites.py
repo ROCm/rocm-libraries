@@ -1190,6 +1190,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
