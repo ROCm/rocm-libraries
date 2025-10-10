@@ -9,6 +9,7 @@ import fnmatch
 import json
 import logging
 import subprocess
+from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, project_map
 import time
@@ -18,6 +19,7 @@ from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
 
 logging.basicConfig(level=logging.INFO)
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def set_github_output(d: Mapping[str, str]):
@@ -85,7 +87,8 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 
 
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
-    config = load_repo_config("./repos-config.json")
+    repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
+    config = load_repo_config(str(repo_config_path))
     print(config)
     valid_prefixes = get_valid_prefixes(config)
     print(valid_prefixes)
