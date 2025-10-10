@@ -7,6 +7,7 @@ subtree_to_project_map = {
     "projects/hipblaslt": "blas",
     "projects/hipcub": "prim",
     "projects/hiprand": "rand",
+    "projects/miopen": "miopen",
     "projects/rocblas": "blas",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
@@ -29,5 +30,9 @@ project_map = {
     "blas": {
         "cmake_options": "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "hipblaslt, rocblas, hipblas",
+    },
+    "miopen": {
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "miopen",
     }
 }
