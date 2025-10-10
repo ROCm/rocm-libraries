@@ -6,6 +6,7 @@
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <type_traits>
 
 namespace hipdnn_sdk

@@ -55,35 +55,14 @@ public:
 
     virtual void* rawHostData() = 0;
 
+    virtual size_t elementCount() const = 0;
+    //virtual int64_t indexFromFlattened(size_t flattenedIndex) const = 0;
+    virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
+
     virtual void fillTensorWithValue(float value) = 0;
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
-};
-
-template <typename T>
-class TensorBase : public ITensor
-{
-public:
-    void* rawHostData() override
-    {
-        return memory().hostData();
-    }
-
-    void fillTensorWithValue(float value) override
-    {
-        fillWithValue(static_cast<T>(value));
-    }
-
-    void fillTensorWithRandomValues(float min,
-                                    float max,
-                                    unsigned int seed = std::random_device{}()) override
-    {
-        fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
-    }
-
-    virtual IMigratableMemory<T>& memory() = 0;
-    virtual const IMigratableMemory<T>& memory() const = 0;
 
     template <typename... Args>
     int64_t getIndex(Args... indices) const
@@ -111,6 +90,56 @@ public:
         return throwIfOutOfBounds(
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
+
+protected:
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    int64_t throwIfOutOfBounds(int64_t index) const
+    {
+#ifndef NDEBUG
+        if(static_cast<size_t>(index) >= elementCount())
+        {
+            throw std::out_of_range("Index " + std::to_string(index)
+                                    + " is out of range for tensor with "
+                                    + std::to_string(elementCount()) + " elements");
+        }
+#endif
+        return index;
+    }
+};
+
+template <typename T>
+class TensorBase : public ITensor
+{
+public:
+    void* rawHostData() override
+    {
+        return memory().hostData();
+    }
+
+    size_t elementCount() const override
+    {
+        return memory().count();
+    }
+
+    const void* hostDataOffsetFromIndex(int64_t index) const override
+    {
+        return memory().hostData() + index;
+    }
+
+    void fillTensorWithValue(float value) override
+    {
+        fillWithValue(static_cast<T>(value));
+    }
+
+    void fillTensorWithRandomValues(float min,
+                                    float max,
+                                    unsigned int seed = std::random_device{}()) override
+    {
+        fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
+    }
+
+    virtual IMigratableMemory<T>& memory() = 0;
+    virtual const IMigratableMemory<T>& memory() const = 0;
 
     template <typename... Args>
     T getHostValue(Args... indices) const
@@ -175,19 +204,6 @@ protected:
 
         return static_cast<size_t>(
             std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
-    }
-
-    int64_t throwIfOutOfBounds(int64_t index) const
-    {
-#ifndef NDEBUG
-        if(static_cast<size_t>(index) >= memory().count())
-        {
-            throw std::out_of_range("Index " + std::to_string(index)
-                                    + " is out of range for tensor with "
-                                    + std::to_string(memory().count()) + " elements");
-        }
-#endif
-        return index;
     }
 };
 

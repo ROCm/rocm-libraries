@@ -109,11 +109,13 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     patient.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
-    auto& yDirect = *dynamic_cast<TensorBase<float>*>(
-        directTensorBundle.tensors[attributes.y_tensor_uid()].get());
-    auto& yPlanTensor = *dynamic_cast<TensorBase<float>*>(
-        planTensorBundle.tensors[attributes.y_tensor_uid()].get());
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(yDirect.memory(), yPlanTensor.memory()));
+    // auto& yDirect = *dynamic_cast<TensorBase<float>*>(
+    //     directTensorBundle.tensors[attributes.y_tensor_uid()].get());
+    // auto& yPlanTensor = *dynamic_cast<TensorBase<float>*>(
+    //     planTensorBundle.tensors[attributes.y_tensor_uid()].get());
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
+        *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
 }
 
 TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
