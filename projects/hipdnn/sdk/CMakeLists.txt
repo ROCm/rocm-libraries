@@ -183,14 +183,14 @@ if(_hipdnn_sdk_local_export_includes)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_local.cmake.in"
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-        PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_INSTALL_PLUGIN_ENGINE_DIR
+        PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     )
 else()
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig_imported.cmake.in"
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-        PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_INSTALL_PLUGIN_ENGINE_DIR
+        PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     )
 endif()
 

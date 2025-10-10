@@ -6,6 +6,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
@@ -157,5 +159,5 @@ endif()
 install(
     TARGETS miopen_legacy_plugin
     EXPORT miopen-legacy-plugin
-    LIBRARY DESTINATION ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}
+    LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
