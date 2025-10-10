@@ -1029,9 +1029,9 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        //gemm.workgroupMappingDim   = 0;
-        //gemm.workgroupMappingValue = 6;
-        gemm.workgroupRemapXCC = true;
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 6;
+        gemm.workgroupRemapXCC     = true;
         basicGEMM<float>(gemm);
     }
 

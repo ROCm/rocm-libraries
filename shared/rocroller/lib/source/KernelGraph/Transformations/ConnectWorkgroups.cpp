@@ -50,7 +50,7 @@ namespace rocRoller
                 auto tileNumTags = kgraph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
                 for(auto const& tag : tileNumTags)
                 {
-                    if(danglingDirection(kgraph, tag) == GD::Count)
+                    if(not danglingDirection(kgraph, tag).has_value())
                         continue;
 
                     auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
@@ -66,7 +66,10 @@ namespace rocRoller
                 for(auto const& tileNumTag : tileNumTags)
                 {
                     auto const dir = danglingDirection(kgraph, tileNumTag);
-                    if(dir == GD::Downstream)
+                    if(not dir.has_value())
+                        continue;
+
+                    if(dir.value() == GD::Downstream)
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
                         auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
@@ -83,7 +86,7 @@ namespace rocRoller
                         rv[{tileNum.dim, GD::Upstream}] = workgroupTag;
                     }
 
-                    if(dir == GD::Upstream)
+                    if(dir.value() == GD::Upstream)
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
                         auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
@@ -109,7 +112,7 @@ namespace rocRoller
                                   uint                                 numXCC)
             {
                 auto const direction = danglingDirection(graph, workgroupTag);
-                if(direction == Graph::Direction::Count)
+                if(not direction.has_value())
                     return -1;
 
                 auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
@@ -118,7 +121,7 @@ namespace rocRoller
                 // AddStreamK)
                 if(size == nullptr)
                 {
-                    Log::info("XCC a workgroup {} has nullptr!!!!!!!!!!!!!", workgroupTag);
+                    Log::debug("remapWorkgroupXCC: workgroup {} has no size", workgroupTag);
                     return -1;
                 }
 

@@ -711,9 +711,9 @@ namespace rocRoller
 
         /**
          * Give a tag in coordinate graph, this function returns which direction it is
-         * dangling. If the node is not dangling, it returns Direction::Count.
+         * dangling. If the node is not dangling, it returns std::nullopt.
          */
-        Graph::Direction danglingDirection(KernelGraph const& graph, int tag);
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag);
     }
 }
 

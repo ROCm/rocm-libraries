@@ -178,24 +178,10 @@ namespace rocRoller
 
                 auto totalSize = totalNumberOfWorkgroups(info);
 
-                //Expression::ExpressionPtr newSize = nullptr;
-                //for(int i = 0; i < 3; ++i)
-                //    if(info.sizes[i] != nullptr)
-                //    {
-                //  auto& expr = std::get<Expression::Convert>(*info.sizes[i]);
-                //  if(newSize == nullptr)
-                //      newSize = expr.arg;
-                //  else
-                //      newSize = newSize * expr.arg;
-                //    }
-
                 //auto workgroup = graph.coordinates.addElement(Linear(totalSize, nullptr));
                 auto workgroup
                     = graph.coordinates.addElement(MacroTileNumber(0, totalSize, nullptr));
                 Log::info("RemapOutputTiles total workgroup tag = {}", workgroup);
-
-                // workgroupRemapXCC=true or false will fail if we use Linear instead of Workgroup
-                //auto workgroup = graph.coordinates.addElement(Workgroup(0, totalSize));
 
                 // Downstream: Starting at workgroup looking down (forward transform)
                 // Upstream:   Starting at workgroup looking up (reverse transform)
@@ -230,14 +216,14 @@ namespace rocRoller
                 auto tailBlockNumber = graph.coordinates.addElement(Linear());
                 auto tailBlockIndex  = graph.coordinates.addElement(Linear(tailBlockSize, nullptr));
 
-                //auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
-                //auto perpendicular
-                //    = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
+                auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
+                auto perpendicular
+                    = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
-                auto parallel = graph.coordinates.addElement(
-                    MacroTileNumber(dimension, parallelSize, nullptr));
-                auto perpendicular = graph.coordinates.addElement(
-                    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                //auto parallel = graph.coordinates.addElement(
+                //    MacroTileNumber(dimension, parallelSize, nullptr));
+                //auto perpendicular = graph.coordinates.addElement(
+                //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
 
                 // 0 argument is mainBlockNumber
                 auto condition
@@ -273,32 +259,11 @@ namespace rocRoller
                     graph.coordinates.addElement(Flatten(), {groupNumber, groupIndex}, {workgroup});
                     graph.coordinates.addElement(
                         Flatten(), {mainBlockNumber, mainBlockIndex}, {workgroup});
-
-                    //// Add dangling MacroTileNumbers for StreamK
-                    //auto dim0 = graph.coordinates.addElement(
-                    //    MacroTileNumber(dimension, parallelSize, nullptr));
-                    //auto dim1 = graph.coordinates.addElement(
-                    //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
-
-                    //if(dimension == 0)
-                    //    graph.coordinates.addElement(Tile(), {workgroup}, {dim0, dim1});
-                    //else
-                    //    graph.coordinates.addElement(Tile(), {workgroup}, {dim1, dim0});
                 }
                 else
                 {
                     graph.coordinates.addElement(
                         Tile(), {workgroup}, {mainBlockNumber, mainBlockIndex});
-
-                    //// Add dangling MacroTileNumbers for StreamK
-                    //auto dim0 = graph.coordinates.addElement(
-                    //    MacroTileNumber(dimension, parallelSize, nullptr));
-                    //auto dim1 = graph.coordinates.addElement(
-                    //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
-                    //if(dimension == 0)
-                    //    graph.coordinates.addElement(Flatten(), {dim0, dim1}, {workgroup});
-                    //else
-                    //    graph.coordinates.addElement(Flatten(), {dim1, dim0}, {workgroup});
 
                     graph.coordinates.addElement(Tile(), {workgroup}, {groupNumber, groupIndex});
                     graph.coordinates.addElement(Tile(), {groupNumber}, {blockNumber, blockIndex});
