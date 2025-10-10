@@ -28,23 +28,14 @@ std::string getNodeName(const hipdnn_sdk::data_objects::Node& node)
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionFwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionFwdAttributes for node: "
-                + getNodeName(node));
-    }
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
 
     // Check tensor attributes
-
     const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrX = miopen_utils::findTensorAttributes(tensorMap, attr->x_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr->w_tensor_uid());
-    const auto& tensorAttrY = miopen_utils::findTensorAttributes(tensorMap, attr->y_tensor_uid());
+    const auto& tensorAttrX = miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid());
+    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
+    const auto& tensorAttrY = miopen_utils::findTensorAttributes(tensorMap, attr.y_tensor_uid());
 
     if(tensorAttrX.virtual_() || tensorAttrW.virtual_() || tensorAttrY.virtual_())
     {
@@ -72,7 +63,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     MiopenConvDescriptor convDesc;
     try
     {
-        convDesc = MiopenConvDescriptor(spatialDimCount, *attr);
+        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
@@ -96,23 +87,14 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
 
 bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionBwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionBwdAttributes for node: "
-                + getNodeName(node));
-    }
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
 
     // Check tensor attributes
-
     const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrDX = miopen_utils::findTensorAttributes(tensorMap, attr->dx_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr->w_tensor_uid());
-    const auto& tensorAttrDY = miopen_utils::findTensorAttributes(tensorMap, attr->dy_tensor_uid());
+    const auto& tensorAttrDX = miopen_utils::findTensorAttributes(tensorMap, attr.dx_tensor_uid());
+    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
+    const auto& tensorAttrDY = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
 
     if(tensorAttrDX.virtual_() || tensorAttrW.virtual_() || tensorAttrDY.virtual_())
     {
@@ -140,7 +122,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     MiopenConvDescriptor convDesc;
     try
     {
-        convDesc = MiopenConvDescriptor(spatialDimCount, *attr);
+        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
@@ -167,18 +149,9 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
 size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_plugin::IGraph& opGraph)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionFwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionFwdAttributes for node: "
-                + getNodeName(node));
-    }
-
-    ConvFwdParams params(*attr, opGraph.getTensorMap());
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+    ConvFwdParams params(attr, opGraph.getTensorMap());
     size_t workSpaceSize;
     THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
                                                                      params.w().tensorDescriptor(),
@@ -193,18 +166,9 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_plugin::IGraph& opGraph)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionBwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionBwdAttributes for node: "
-                + getNodeName(node));
-    }
-
-    ConvBwdParams params(*attr, opGraph.getTensorMap());
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
+    ConvBwdParams params(attr, opGraph.getTensorMap());
     size_t workSpaceSize;
 
     THROW_ON_MIOPEN_FAILURE(
@@ -222,18 +186,9 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionFwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionFwdAttributes for node: "
-                + getNodeName(node));
-    }
-
-    ConvFwdParams params(*attr, opGraph.getTensorMap());
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+    ConvFwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
@@ -242,18 +197,9 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
-    const auto& node = opGraph.getNode(0);
-
-    const auto* attr = node.attributes_as_ConvolutionBwdAttributes();
-    if(attr == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert node attributes to ConvolutionBwdAttributes for node: "
-                + getNodeName(node));
-    }
-
-    ConvBwdParams params(*attr, opGraph.getTensorMap());
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
+    ConvBwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
