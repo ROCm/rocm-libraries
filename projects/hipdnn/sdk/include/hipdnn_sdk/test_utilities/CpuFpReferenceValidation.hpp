@@ -47,25 +47,28 @@ public:
                 return;
             }
 
-            auto idx = reference.getIndex(indices);
-            T refValue = *static_cast<const T*>(reference.hostDataOffsetFromIndex(idx));
-            T implValue = *static_cast<const T*>(implementation.hostDataOffsetFromIndex(idx));
+            auto refIdx = reference.getIndex(indices);
+            auto implIdx = implementation.getIndex(indices);
+            T refValue = *static_cast<const T*>(reference.hostDataOffsetFromIndex(refIdx));
+            T implValue = *static_cast<const T*>(implementation.hostDataOffsetFromIndex(implIdx));
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
 
             if(absDiff > threshold)
             {
-                HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {} (atol={}, rtol={})",
-                                 idx,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
+                HIPDNN_LOG_ERROR(
+                    "Validation failed at ref index {}, impl index {}: reference value = {}, "
+                    "implementation value = {}, "
+                    "absolute difference = {}, threshold = {} (atol={}, rtol={})",
+                    refIdx,
+                    implIdx,
+                    refValue,
+                    implValue,
+                    absDiff,
+                    threshold,
+                    _absoluteTolerance,
+                    _relativeTolerance);
                 result = false;
             }
         });

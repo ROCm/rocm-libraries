@@ -56,6 +56,7 @@ public:
     virtual void* rawHostData() = 0;
 
     virtual size_t elementCount() const = 0;
+    virtual size_t elementSpace() const = 0;
     //virtual int64_t indexFromFlattened(size_t flattenedIndex) const = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
@@ -91,16 +92,18 @@ public:
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
+    virtual bool isPacked() const = 0;
+
 protected:
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     int64_t throwIfOutOfBounds(int64_t index) const
     {
 #ifndef NDEBUG
-        if(static_cast<size_t>(index) >= elementCount())
+        if(static_cast<size_t>(index) >= elementSpace())
         {
             throw std::out_of_range("Index " + std::to_string(index)
                                     + " is out of range for tensor with "
-                                    + std::to_string(elementCount()) + " elements");
+                                    + std::to_string(elementSpace()) + " elements");
         }
 #endif
         return index;
@@ -114,11 +117,6 @@ public:
     void* rawHostData() override
     {
         return memory().hostData();
-    }
-
-    size_t elementCount() const override
-    {
-        return memory().count();
     }
 
     const void* hostDataOffsetFromIndex(int64_t index) const override
@@ -177,7 +175,8 @@ public:
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
 
 protected:
-    bool isPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) const
+    bool computeIsPacked(const std::vector<int64_t>& dims,
+                         const std::vector<int64_t>& strides) const
     {
         // Item count = largest stride * item count in that dimension
         return (calculateItemCount(dims) == calculateElementSpace(dims, strides));
@@ -208,20 +207,17 @@ protected:
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
-
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
 class Tensor : public TensorBase<T>
 {
 public:
     Tensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
-        : _memory(TensorBase<T>::calculateItemCount(dims))
+        : _memory(TensorBase<T>::calculateElementSpace(dims, strides))
         , _dims(dims)
         , _strides(strides)
+        , _elementCount(TensorBase<T>::calculateItemCount(dims))
+        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
-        if(!TensorBase<T>::isPacked(dims, strides))
-        {
-            throw std::invalid_argument("Tensor must be packed");
-        }
     }
 
     Tensor(const std::vector<int64_t>& dims, const TensorLayout& layout)
@@ -250,6 +246,16 @@ public:
         return _strides;
     }
 
+    size_t elementCount() const override
+    {
+        return _elementCount;
+    }
+
+    size_t elementSpace() const override
+    {
+        return _memory.count();
+    }
+
     const IMigratableMemory<T>& memory() const override
     {
         return _memory;
@@ -262,8 +268,9 @@ public:
 
     void fillWithValue(T value) override
     {
-        T* data = _memory.hostData();
-        std::fill(data, data + _memory.count(), value);
+        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+            this->setHostValue(value, indices);
+        });
     }
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
@@ -272,17 +279,22 @@ public:
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
 
-        auto* data = _memory.hostData();
-        for(size_t i = 0; i < _memory.count(); ++i)
-        {
-            data[i] = static_cast<T>(distribution(generator));
-        }
+        iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
+            this->setHostValue(static_cast<T>(distribution(generator)), indices);
+        });
+    }
+
+    bool isPacked() const override
+    {
+        return _packed;
     }
 
 private:
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
+    size_t _elementCount;
+    bool _packed;
 };
 
 template <typename T>

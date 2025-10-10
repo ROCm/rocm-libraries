@@ -28,7 +28,7 @@ public:
         , _dims(dims)
         , _strides(strides)
     {
-        if(!TensorBase<T>::isPacked(dims, strides))
+        if(!TensorBase<T>::computeIsPacked(dims, strides))
         {
             throw std::invalid_argument("Tensor must be packed");
         }
@@ -48,6 +48,21 @@ public:
     const std::vector<int64_t>& strides() const override
     {
         return _strides;
+    }
+
+    bool isPacked() const override
+    {
+        return true;
+    }
+
+    size_t elementCount() const override
+    {
+        return _memory.count();
+    }
+
+    size_t elementSpace() const override
+    {
+        return _memory.count();
     }
 
     const IMigratableMemory<T>& memory() const override

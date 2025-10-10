@@ -317,3 +317,119 @@ TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
 
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
+
+TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
+{
+    CpuFpReferenceValidation<float> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor1(dims, strides);
+    Tensor<float> tensor2(dims, strides);
+
+    // Fill tensor1
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        auto value = static_cast<float>((indices[0] * 1000) + (indices[1] * 100) + (indices[2] * 10)
+                                        + indices[3]);
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value, indices);
+    });
+
+    // Change one element in tensor2
+    std::vector<int64_t> indices = {1, 1, 1, 1};
+    tensor2.setHostValue(9999.0f, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidation, StridedTensorAllZeros)
+{
+    CpuFpReferenceValidation<float> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor1(dims, strides);
+    Tensor<float> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(0.0f);
+    tensor2.fillTensorWithValue(0.0f);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
+{
+    CpuFpReferenceValidation<float> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides1 = {2, 4, 8, 16};
+    std::vector<int64_t> strides2 = {8, 4, 2, 1}; // Different stride order
+
+    Tensor<float> tensor1(dims, strides1);
+    Tensor<float> tensor2(dims, strides2);
+
+    // Set same logical values despite different memory layouts
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        auto value = static_cast<float>(indices[0] + indices[1] + indices[2] + indices[3]);
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value, indices);
+    });
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidation, StridedTensorWithTolerance)
+{
+    float customTolerance = 1e-5f;
+    CpuFpReferenceValidation<float> refValidation(customTolerance, customTolerance);
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor1(dims, strides);
+    Tensor<float> tensor2(dims, strides);
+
+    iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
+        float value = 1.0f;
+        tensor1.setHostValue(value, indices);
+        tensor2.setHostValue(value + 5e-6f, indices); // Within tolerance
+    });
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidation, StridedTensorFirstElementDiffers)
+{
+    CpuFpReferenceValidation<float> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor1(dims, strides);
+    Tensor<float> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    // Change first element
+    std::vector<int64_t> indices = {0, 0, 0, 0};
+    tensor2.setHostValue(2.0f, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidation, StridedTensorLastElementDiffers)
+{
+    CpuFpReferenceValidation<float> refValidation;
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor1(dims, strides);
+    Tensor<float> tensor2(dims, strides);
+
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    // Change last element
+    std::vector<int64_t> indices = {1, 1, 1, 1};
+    tensor2.setHostValue(2.0f, indices);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
