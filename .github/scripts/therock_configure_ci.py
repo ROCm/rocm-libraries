@@ -90,10 +90,7 @@ def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
     config = load_repo_config(str(repo_config_path))
     valid_prefixes = get_valid_prefixes(config)
-    print(valid_prefixes)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
-    print(matched_subtrees)
-    print(paths)
     return matched_subtrees
 
 
