@@ -856,9 +856,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     auto zero64  = Expression::literal(0, DataType::UInt64);
     auto zero32  = Expression::literal(0, DataType::UInt32);
-    auto zero128 = std::make_shared<Expression::Expression>(Expression::Concatenate{
-        {std::vector<Expression::ExpressionPtr>{zero32, zero32, zero32, zero32}},
-        {DataType::UInt32, PointerType::Buffer}});
+    auto zero128 = Expression::literal(Buffer{0, 0, 0, 0});
 
     auto ones64 = Expression::literal(0xffffffffffffffffull, DataType::UInt64);
     auto ones32 = Expression::literal(0xfffffffful, DataType::UInt32);
