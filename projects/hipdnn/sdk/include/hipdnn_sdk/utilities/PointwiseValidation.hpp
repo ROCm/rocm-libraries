@@ -120,6 +120,7 @@ inline const PointwiseModeBitset& getBinaryModesBitset()
     return s_binaryModes;
 }
 
+// Get all ternary operations (for frontend compatibility)
 inline const PointwiseModeBitset& getTernaryModesBitset()
 {
     static const PointwiseModeBitset s_ternaryModes = []() {
@@ -129,6 +130,7 @@ inline const PointwiseModeBitset& getTernaryModesBitset()
     }();
     return s_ternaryModes;
 }
+
 
 inline bool isUnaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)
 {
@@ -147,6 +149,7 @@ inline bool isTernaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)
     auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
 }
+
 
 // Check if operations have implemented functors (for ReferencePointwiseBase usage)
 inline bool isImplementedUnaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)

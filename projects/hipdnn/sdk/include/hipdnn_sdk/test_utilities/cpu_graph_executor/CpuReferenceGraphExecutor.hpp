@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -73,6 +74,7 @@ private:
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return BatchnormFwdInferenceSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+            return PointwiseSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
             return BatchnormBwdSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
