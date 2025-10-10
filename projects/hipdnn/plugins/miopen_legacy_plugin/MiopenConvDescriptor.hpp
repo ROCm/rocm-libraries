@@ -31,6 +31,13 @@ public:
 
 private:
     miopenConvolutionDescriptor_t _descriptor = nullptr;
+
+    void createDescriptorInternal(size_t spatialDimCount,
+                                  const flatbuffers::Vector<int64_t>* attrPrePadding,
+                                  const flatbuffers::Vector<int64_t>* attrPostPadding,
+                                  const flatbuffers::Vector<int64_t>* attrStride,
+                                  const flatbuffers::Vector<int64_t>* attrDilation,
+                                  hipdnn_sdk::data_objects::ConvMode convMode);
 };
 
 }
