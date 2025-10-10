@@ -37,6 +37,5 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/cpp_version_check.h>
 #include <thrust/system/cuda/detail/async/exclusive_scan.h>
 #include <thrust/system/cuda/detail/async/inclusive_scan.h>

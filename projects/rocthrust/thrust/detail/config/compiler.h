@@ -91,20 +91,17 @@
 
 // Macros to suppress deprecation compiler warnings, from "deprecated.h"
 // Check for deprecation opt-outs
-#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT) || defined(CCCL_IGNORE_DEPRECATED_CPP_DIALECT) \
-    || defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT)
 #    if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
 #      define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
 #    endif
 #  endif // suppress all dialect deprecation warnings
-#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(CCCL_IGNORE_DEPRECATED_CPP_14) \
-    || defined(CUB_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
 #    if !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
 #      define THRUST_IGNORE_DEPRECATED_CPP_14
 #    endif
 #  endif // suppress all c++14 dialect deprecation warnings
-#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(CCCL_IGNORE_DEPRECATED_CPP_11)  \
-    || defined(CUB_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
+#  if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
     || defined(THRUST_IGNORE_DEPRECATED_CPP_14)
 #    if !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
 #      define THRUST_IGNORE_DEPRECATED_CPP_11

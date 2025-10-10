@@ -19,9 +19,7 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/cpp_version_check.h>
-
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/future.h>
 
@@ -81,4 +79,4 @@ THRUST_HOST auto test_future_value_retrieval(Future&& f, std::string const& file
 
 } // namespace unittest
 
-#endif // THRUST_CPP_DIALECT >= 2017
+#endif // THRUST_CPP_DIALECT >= 2014
