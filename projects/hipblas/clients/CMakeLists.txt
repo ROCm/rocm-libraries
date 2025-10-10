@@ -61,10 +61,12 @@ function( get_cblas cblas_libs cblas_inc cblas_defs )
       # get CBLAS from the same source as BLAS
       get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
       find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
-      list( PREPEND libs ${CBLAS_LIBRARIES} )
-      # defines to set cblas.h to 64-bit indices
-      set ( defs "WeirdNEC" "LAPACK_ILP64" "USE64BITINT")
+      if(CBLAS_LIBRARIES)
+        list( PREPEND libs ${CBLAS_LIBRARIES} )
+      endif()
     endif()
+    # defines to set cblas.h to 64-bit indices
+    set ( defs "WeirdNEC" "LAPACK_ILP64" "USE64BITINT" "OPENBLAS_USE64BITINT")
   endif()
   set( ${cblas_libs} ${libs} PARENT_SCOPE )
   set( ${cblas_defs} ${defs} PARENT_SCOPE )
