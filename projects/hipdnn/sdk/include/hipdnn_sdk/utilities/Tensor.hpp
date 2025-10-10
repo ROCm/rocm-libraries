@@ -212,12 +212,42 @@ class Tensor : public TensorBase<T>
 {
 public:
     Tensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
-        : _memory(TensorBase<T>::calculateElementSpace(dims, strides))
-        , _dims(dims)
+        : _dims(dims)
         , _strides(strides)
         , _elementCount(TensorBase<T>::calculateItemCount(dims))
         , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
+        // Validation 1: Same number of dimensions
+        if(dims.size() != strides.size())
+        {
+            throw std::invalid_argument("Number of dimensions (" + std::to_string(dims.size())
+                                        + ") must match number of strides ("
+                                        + std::to_string(strides.size()) + ")");
+        }
+
+        // Validation 2: All dimensions must be positive
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(dims[i] <= 0)
+            {
+                throw std::invalid_argument("All dimensions must be positive. Dimension "
+                                            + std::to_string(i) + " is " + std::to_string(dims[i]));
+            }
+        }
+
+        // Validation 3: All strides must be positive (non-zero)
+        for(size_t i = 0; i < strides.size(); ++i)
+        {
+            if(strides[i] <= 0)
+            {
+                throw std::invalid_argument("All strides must be positive. Stride "
+                                            + std::to_string(i) + " is "
+                                            + std::to_string(strides[i]));
+            }
+        }
+
+        _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(
+            TensorBase<T>::calculateElementSpace(dims, strides));
     }
 
     Tensor(const std::vector<int64_t>& dims, const TensorLayout& layout)
