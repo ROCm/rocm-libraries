@@ -36,7 +36,7 @@ function( get_lapack lapack_lib lapack_inc )
   enable_language( Fortran )
 endfunction( )
 
-function( get_cblas cblas_libs cblas_inc )
+function( get_cblas cblas_libs cblas_inc cblas_defs )
   if(LINK_BLIS)
     if(EXISTS    "${BUILD_DIR}/deps/blis/lib/libblis.a")
         set( libs ${BUILD_DIR}/deps/blis/lib/libblis.a )
@@ -53,12 +53,21 @@ function( get_cblas cblas_libs cblas_inc )
       set( inc "${BUILD_DIR}/deps/deps-install/include" )
       set( ${cblas_inc} ${inc} PARENT_SCOPE )
     else()
+      # get BLAS
       set(BLA_SIZEOF_INTEGER 8)
       find_package( BLAS REQUIRED )
       set( libs ${BLAS_LIBRARIES} )
+
+      # get CBLAS from the same source as BLAS
+      get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
+      find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+      list( PREPEND libs ${CBLAS_LIBRARIES} )
+      # defines to set cblas.h to 64-bit indices
+      set ( defs "WeirdNEC" "LAPACK_ILP64" "USE64BITINT")
     endif()
   endif()
   set( ${cblas_libs} ${libs} PARENT_SCOPE )
+  set( ${cblas_defs} ${defs} PARENT_SCOPE )
 endfunction( )
 
 function( apply_omp_settings lib_target_ )
@@ -183,10 +192,6 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     list( APPEND COMMON_DEFINES "HIPBLAS_FORTRAN_CLIENTS" )
   endif()
 
-  message(STATUS "CLIENT COMMON_DEFINES: ${COMMON_DEFINES}")
-  message(STATUS "CLIENT COMMON CXX_OPTIONS: ${COMMON_CXX_OPTIONS}")
-  message(STATUS "CLIENT COMMON LINK: ${COMMON_LINK_LIBS}")
-
   if( NOT WIN32 )
     if (LINK_BLIS)
       if(EXISTS          "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libflame.a" AND EXISTS "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a") # 4.0 and 4.1.0
@@ -208,14 +213,16 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       else()
         # fallbacks include earlier blis
         get_lapack( LAPACK_LIB LAPACK_INCLUDE_DIR )
-        get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR )
+        get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR BLAS_DEFINES )
         list( PREPEND BLAS_LIBRARY ${LAPACK_LIB} )
+        list( APPEND COMMON_DEFINES ${BLAS_DEFINES} )
       endif()
     else()
       # Linking lapack library requires fortran flags
       get_lapack( LAPACK_LIB LAPACK_INCLUDE_DIR )
-      get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR )
+      get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR BLAS_DEFINES )
       list( PREPEND BLAS_LIBRARY ${LAPACK_LIB} )
+      list( APPEND COMMON_DEFINES ${BLAS_DEFINES} )
     endif()
   else() # WIN32
     file(TO_CMAKE_PATH "C:/Program\ Files/AMD/AOCL-Windows" AOCL_ROOT)
@@ -237,6 +244,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       endif()
     endif()
   endif()
+
+  message(STATUS "CLIENT COMMON_DEFINES: ${COMMON_DEFINES}")
+  message(STATUS "CLIENT COMMON CXX_OPTIONS: ${COMMON_CXX_OPTIONS}")
+  message(STATUS "CLIENT COMMON LINK: ${COMMON_LINK_LIBS}")
 
   if ( DEFINED BLIS_INCLUDE_DIR )
     set( BLIS_CPP ../common/blis_interface.cpp )
