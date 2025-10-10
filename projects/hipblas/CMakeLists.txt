@@ -120,6 +120,9 @@ endif()
 
 include( clients/cmake/build-options.cmake )
 
+# Build clients with BLIS
+option(LINK_BLIS "Build clients with BLIS" ON)
+
 # Build clients of the library
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   if(NOT CLIENTS_OS)
