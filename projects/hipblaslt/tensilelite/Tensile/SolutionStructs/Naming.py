@@ -105,7 +105,6 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
-
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
   if ignoreInternalArgs:
