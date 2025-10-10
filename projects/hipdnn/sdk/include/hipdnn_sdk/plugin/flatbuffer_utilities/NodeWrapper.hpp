@@ -40,7 +40,7 @@ public:
                                                        "Node attributes are null");
         }
 
-        return *static_cast<const T*>(attr); //need to do null check on attr.
+        return *static_cast<const T*>(attr);
     }
 };
 
