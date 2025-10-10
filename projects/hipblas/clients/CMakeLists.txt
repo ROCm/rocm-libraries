@@ -28,10 +28,7 @@ function( get_lapack lapack_lib lapack_inc )
     set( inc "${BUILD_DIR}/deps/deps-install/include" )
     set( ${lapack_inc} ${inc} PARENT_SCOPE )
   else()
-<<<<<<< Updated upstream
-=======
     set(BLA_SIZEOF_INTEGER 8)
->>>>>>> Stashed changes
     find_package( LAPACK REQUIRED )
     set( lib "${LAPACK_LIBRARIES}" )
   endif()
