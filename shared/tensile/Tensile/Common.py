@@ -2459,7 +2459,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
   # read current gfx version
   returncode = detectGlobalCurrentISA()
   if globalParameters["CurrentISA"] == (0,0,0):
-    printWarning("Did not detect SupportedISA: %s; cannot benchmark assembly kernels." % globalParameters["SupportedISA"])
+    printWarning("Did not detect SupportedISA: %s; cannot benchmark assembly kernels. This is OKAY for TensileCreateLibrary" % globalParameters["SupportedISA"])
   if returncode:
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)

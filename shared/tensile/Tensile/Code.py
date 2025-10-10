@@ -301,9 +301,8 @@ class WaitCnt (Module):
     main_args = []
     wait_store = False
     if self.lgkmcnt != -1:
-      currentIsa    = globalParameters["CurrentISA"]
-      maxLgkmcnt    = globalParameters["AsmCaps"][currentIsa]["MaxLgkmcnt"]
-      seperateVscnt = globalParameters["ArchCaps"][currentIsa]["SeparateVscnt"]
+      maxLgkmcnt    = globalParameters["AsmCaps"][self.version]["MaxLgkmcnt"]
+      seperateVscnt = globalParameters["ArchCaps"][self.version]["SeparateVscnt"]
       wait_store    = True
       main_args += ["lgkmcnt(%u)" % (min(self.lgkmcnt,maxLgkmcnt))]
 
@@ -359,7 +358,7 @@ class  MFMAInst (Inst):
   """
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = globalParameters["CurrentISA"]
+       self.version = kernel["ISA"]
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
@@ -411,7 +410,7 @@ class  MacInst (Inst):
 
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = globalParameters["CurrentISA"]
+       self.version = kernel["ISA"]
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
