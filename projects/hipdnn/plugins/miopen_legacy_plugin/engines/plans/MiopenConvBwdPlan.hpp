@@ -56,6 +56,8 @@ public:
     ConvBwdPlan(ConvBwdPlan&& other) noexcept;
     ConvBwdPlan& operator=(ConvBwdPlan&& other) noexcept;
 
+    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
@@ -64,6 +66,7 @@ public:
 private:
     ConvBwdParams _params;
     hipdnn_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
+    size_t _workspaceSize = 0;
 };
 
 } // namespace miopen_legacy_plugin

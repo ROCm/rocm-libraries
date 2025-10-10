@@ -85,12 +85,17 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle, ConvFwdParams&&
         throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                    "miopenFindSolutions returned no solutions");
     }
+
+    // Get workspace size
+    THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
 }
 
 ConvFwdPlan::ConvFwdPlan(ConvFwdPlan&& other) noexcept
     : _params(std::move(other._params))
     , _solution(std::move(other._solution))
+    , _workspaceSize(other._workspaceSize)
 {
+    other._workspaceSize = 0;
 }
 
 ConvFwdPlan& ConvFwdPlan::operator=(ConvFwdPlan&& other) noexcept
@@ -99,8 +104,15 @@ ConvFwdPlan& ConvFwdPlan::operator=(ConvFwdPlan&& other) noexcept
     {
         _params = std::move(other._params);
         _solution = std::move(other._solution);
+        _workspaceSize = other._workspaceSize;
+        other._workspaceSize = 0;
     }
     return *this;
+}
+
+size_t ConvFwdPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+{
+    return _workspaceSize;
 }
 
 void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
@@ -128,7 +140,7 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(workspace != nullptr)
     {
         // Assume the provided workspace is large enough
-        THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &workspaceSize));
+        workspaceSize = _workspaceSize;
     }
 
     THROW_ON_MIOPEN_FAILURE(miopenRunSolution(handle.miopenHandle,
