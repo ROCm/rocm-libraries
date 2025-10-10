@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
 

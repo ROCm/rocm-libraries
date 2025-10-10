@@ -12,8 +12,8 @@
 #include <utility>
 
 #include "plugin/PluginCore.hpp"
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 using namespace hipdnn_backend;

@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_sdk/test_utilities/ExecuteOnLeavingScope.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <filesystem>
+#include <vector>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -39,31 +41,16 @@ public:
     }
 };
 
-class RAIIFileDeleter
+inline std::vector<std::filesystem::path> filesInDirectoryWithExt(std::filesystem::path const& path,
+                                                                  std::string const& ext)
 {
-    std::filesystem::path _path;
+    std::vector<std::filesystem::path> paths;
+    std::copy_if(std::filesystem::directory_iterator(path),
+                 std::filesystem::directory_iterator(),
+                 std::back_inserter(paths),
+                 [ext](std::filesystem::path const& p) { return p.extension() == ext; });
 
-public:
-    RAIIFileDeleter(std::filesystem::path path)
-        : _path(std::move(path))
-    {
-    }
-    const std::filesystem::path& path() const
-    {
-        return _path;
-    }
-
-    RAIIFileDeleter(const RAIIFileDeleter&) = delete;
-    RAIIFileDeleter& operator=(const RAIIFileDeleter&) = delete;
-    RAIIFileDeleter(RAIIFileDeleter&&) = default;
-    RAIIFileDeleter& operator=(RAIIFileDeleter&&) = default;
-    ~RAIIFileDeleter()
-    {
-        if(!_path.empty())
-        {
-            std::filesystem::remove(_path);
-        }
-    }
-};
+    return paths;
+}
 
 }

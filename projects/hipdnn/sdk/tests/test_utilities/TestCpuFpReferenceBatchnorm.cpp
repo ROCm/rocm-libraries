@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
@@ -35,17 +36,6 @@ protected:
         graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
     }
 };
-
-inline std::vector<fs::path> jsonFilesInDirectory(fs::path const& path)
-{
-    std::vector<fs::path> paths;
-    std::copy_if(fs::directory_iterator(path),
-                 fs::directory_iterator(),
-                 std::back_inserter(paths),
-                 [](fs::path const& p) { return p.extension() == ".json"; });
-
-    return paths;
-}
 
 TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
 {
@@ -94,8 +84,9 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuFpReferenceBatchnormFwdInference,
-                         testing::ValuesIn(jsonFilesInDirectory(
-                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/")));
+                         testing::ValuesIn(filesInDirectoryWithExt(
+                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
+                             ".json")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {

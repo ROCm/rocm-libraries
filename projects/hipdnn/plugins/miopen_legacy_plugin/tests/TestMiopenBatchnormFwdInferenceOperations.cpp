@@ -7,11 +7,14 @@
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 
@@ -23,6 +26,82 @@
 using namespace hipdnn_sdk::test_utilities;
 using namespace test_bn_common;
 using namespace test_helpers;
+
+class TestBatchnormFwdInferenceExecuteGraphGoldenReference
+    : public testing::TestWithParam<std::filesystem::path>
+{
+protected:
+    hipdnn_sdk::json::GraphAndTensorMap _graphAndTensors;
+    hipdnnEnginePluginHandle_t _handle;
+    flatbuffers::DetachedBuffer _engineConfigBuffer;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        auto const& path = GetParam();
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreate(&_handle);
+        ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+        _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
+
+        _graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
+    }
+
+    template <class T>
+    void goldenReferenceTestSuite()
+    {
+        hipdnnPluginConstData_t opGraph
+            = {_graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size()};
+
+        hipdnnPluginConstData_t engineConfig
+            = {_engineConfigBuffer.data(), _engineConfigBuffer.size()};
+
+        hipdnnPluginStatus_t status;
+        hipdnnEnginePluginExecutionContext_t executionContext;
+        status = hipdnnEnginePluginCreateExecutionContext(
+            _handle, &engineConfig, &opGraph, &executionContext);
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+        auto deviceBuffers = _graphAndTensors.deviceBuffers();
+
+        auto batchnormInferenceNode = _graphAndTensors.graph()
+                                          .nodes()
+                                          ->begin()
+                                          ->attributes_as_BatchnormInferenceAttributes();
+        int64_t yIndex = batchnormInferenceNode->y_tensor_uid();
+
+        ASSERT_TRUE(
+            std::holds_alternative<hipdnn_sdk::json::TensorMap<T>>(_graphAndTensors.tensorMap));
+
+        auto& tensorMap = std::get<hipdnn_sdk::json::TensorMap<T>>(_graphAndTensors.tensorMap);
+
+        auto referenceOutput = tensorMap.at(yIndex)->copy();
+
+        status = hipdnnEnginePluginExecuteOpGraph(_handle,
+                                                  executionContext,
+                                                  nullptr,
+                                                  deviceBuffers.data(),
+                                                  static_cast<uint32_t>(deviceBuffers.size()));
+
+        EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+        CpuFpReferenceValidation<T> cpuRefValidation;
+        EXPECT_TRUE(
+            cpuRefValidation.allClose(referenceOutput.memory(), tensorMap.at(yIndex)->memory()));
+    }
+};
+
+TEST_P(TestBatchnormFwdInferenceExecuteGraphGoldenReference, Correctness)
+{
+    goldenReferenceTestSuite<float>();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestBatchnormFwdInferenceExecuteGraphGoldenReference,
+                         testing::ValuesIn(filesInDirectoryWithExt(
+                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
+                             ".json")));
 
 template <typename InputType, typename IntermediateType>
 class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<Batchnorm2dTestCase>

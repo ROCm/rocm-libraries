@@ -11,8 +11,8 @@
 #include <hipdnn_backend.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApi.h>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginEngineIdMap.hpp>

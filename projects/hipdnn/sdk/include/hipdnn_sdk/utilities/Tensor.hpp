@@ -247,10 +247,29 @@ public:
         }
     }
 
+    Tensor copy()
+    {
+        return Tensor(_memory.copy(), _dims, _strides);
+    }
+
 private:
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
+
+    // Constructor for copy
+    Tensor(MigratableMemory<T>&& memory,
+           const std::vector<int64_t>& dims,
+           const std::vector<int64_t>& strides)
+        : _memory(std::move(memory))
+        , _dims(dims)
+        , _strides(strides)
+    {
+        if(!TensorBase<T>::isPacked(dims, strides))
+        {
+            throw std::invalid_argument("Tensor must be packed");
+        }
+    }
 };
 
 template <typename T>

@@ -227,6 +227,13 @@ public:
         _deviceValid = false;
     }
 
+    MigratableMemory copy()
+    {
+        MigratableMemory ret(_count, _stream);
+        std::memcpy(ret.hostData(), hostData(), _totalSize);
+        return ret;
+    }
+
 private:
     static void throwOnError(hipError_t err, const char* msg)
     {
