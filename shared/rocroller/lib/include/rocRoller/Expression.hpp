@@ -685,6 +685,8 @@ namespace rocRoller
                           unsigned      dstOffset,
                           unsigned      width);
 
+        ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v);
+
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
 
