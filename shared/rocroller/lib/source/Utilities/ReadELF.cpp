@@ -27,122 +27,13 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Serialization/comgr/comgr.hpp>
 #include <rocRoller/Serialization/ELF.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
 #include <amd_comgr/amd_comgr.h>
 #include <fstream>
 #include <vector>
 #include <iostream>
 #include <iomanip>
-#include <stdlib.h>
-#include <stdarg.h>
 
 using namespace rocRoller;
-
-void fail(const char *format, ...) {
-  va_list ap;
-  va_start(ap, format);
-
-  printf("FAILED: ");
-  vprintf(format, ap);
-  printf("\n");
-
-  va_end(ap);
-
-  exit(1);
-}
-
-void checkStatus(amd_comgr_status_t status, amd_comgr_status_t expected,
-                 const char *str) {
-  if (status != expected) {
-    const char *statusStr;
-    printf("FAILED: %s\n", str);
-    status = amd_comgr_status_string(status, &statusStr);
-    if (status == AMD_COMGR_STATUS_SUCCESS)
-      printf(" REASON: %s\n", statusStr);
-    exit(1);
-  }
-}
-
-void checkError(amd_comgr_status_t status, const char *str) {
-  checkStatus(status, AMD_COMGR_STATUS_SUCCESS, str);
-}
-
-amd_comgr_status_t printEntry(amd_comgr_metadata_node_t key,
-                              amd_comgr_metadata_node_t value, void *data) {
-  amd_comgr_metadata_kind_t kind;
-  amd_comgr_metadata_node_t son;
-  amd_comgr_status_t status;
-  size_t size;
-  char *keybuf;
-  char *valbuf;
-  int *indent = (int *)data;
-
-  // assume key to be string in this test function
-  status = amd_comgr_get_metadata_kind(key, &kind);
-  checkError(status, "amd_comgr_get_metadata_kind");
-  if (kind != AMD_COMGR_METADATA_KIND_STRING)
-    return AMD_COMGR_STATUS_ERROR;
-  status = amd_comgr_get_metadata_string(key, &size, NULL);
-  checkError(status, "amd_comgr_get_metadata_string");
-  keybuf = (char *)calloc(size, sizeof(char));
-  if (!keybuf)
-    fail("calloc");
-  status = amd_comgr_get_metadata_string(key, &size, keybuf);
-  checkError(status, "amd_comgr_get_metadata_string");
-
-  status = amd_comgr_get_metadata_kind(value, &kind);
-  checkError(status, "amd_comgr_get_metadata_kind");
-  for (int i = 0; i < *indent; i++)
-    printf("  ");
-
-  switch (kind) {
-  case AMD_COMGR_METADATA_KIND_STRING: {
-    printf("%s  :  ", size ? keybuf : "");
-    status = amd_comgr_get_metadata_string(value, &size, NULL);
-    checkError(status, "amd_comgr_get_metadata_string");
-    valbuf = (char *)calloc(size, sizeof(char));
-    if (!valbuf)
-      fail("calloc");
-    status = amd_comgr_get_metadata_string(value, &size, valbuf);
-    checkError(status, "amd_comgr_get_metadata_string");
-    printf(" %s\n", valbuf);
-    free(valbuf);
-    break;
-  }
-  case AMD_COMGR_METADATA_KIND_LIST: {
-    *indent += 1;
-    status = amd_comgr_get_metadata_list_size(value, &size);
-    checkError(status, "amd_comgr_get_metadata_list_size");
-    printf("LIST %s %zd entries = \n", keybuf, size);
-    for (size_t i = 0; i < size; i++) {
-      status = amd_comgr_index_list_metadata(value, i, &son);
-      checkError(status, "amd_comgr_index_list_metadata");
-      status = printEntry(key, son, data);
-      checkError(status, "printEntry");
-      status = amd_comgr_destroy_metadata(son);
-      checkError(status, "amd_comgr_destroy_metadata");
-    }
-    *indent = *indent > 0 ? *indent - 1 : 0;
-    break;
-  }
-  case AMD_COMGR_METADATA_KIND_MAP: {
-    *indent += 1;
-    status = amd_comgr_get_metadata_map_size(value, &size);
-    checkError(status, "amd_comgr_get_metadata_map_size");
-    printf("MAP %zd entries = \n", size);
-    status = amd_comgr_iterate_map_metadata(value, printEntry, data);
-    checkError(status, "amd_comgr_iterate_map_metadata");
-    *indent = *indent > 0 ? *indent - 1 : 0;
-    break;
-  }
-  default:
-    free(keybuf);
-    return AMD_COMGR_STATUS_ERROR;
-  } // switch
-
-  free(keybuf);
-  return AMD_COMGR_STATUS_SUCCESS;
-}
 
 const unsigned char ELF_MAGIC[] = {0x7f, 'E', 'L', 'F'};
 const unsigned char ELF_CLASS_64 = 2;      // 64-bit
@@ -260,21 +151,6 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
     amd_comgr_destroy_metadata(metadataNode);
     amd_comgr_release_data(elfData);
     */
-
-    status = amd_comgr_set_data(elfData, buffer.size(), buffer.data());
-    AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data");
-
-    // Extract metadata node from ELF data
-    amd_comgr_metadata_node_t metadataNode;
-    status = amd_comgr_get_data_metadata(elfData, &metadataNode);
-    AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to extract metadata from ELF");
-
-    int Indent = 0;
-    status = amd_comgr_iterate_map_metadata(metadataNode, printEntry, (void *)&Indent);
-    AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "iterate_map_metadata");
-
-    status = amd_comgr_destroy_metadata(metadataNode);
-    AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "destroy_metadata");
-
+    yaml = Serialization::toYAML(buffer);
     return yaml;
 }
