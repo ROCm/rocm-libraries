@@ -15,7 +15,7 @@ from therock_matrix import subtree_to_project_map, project_map
 import time
 from typing import Mapping, Optional, Iterable
 import os
-from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees, output_subtrees
+from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
 
 logging.basicConfig(level=logging.INFO)
@@ -89,16 +89,16 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
     config = load_repo_config(str(repo_config_path))
-    print(config)
     valid_prefixes = get_valid_prefixes(config)
     print(valid_prefixes)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
     print(matched_subtrees)
+    print(paths)
     return matched_subtrees
 
 
 def retrieve_projects(args):
-    # We only test projects where the paths were updated for pushes and pull requests
+    # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
     subtrees = get_changed_path_projects(modified_paths)
