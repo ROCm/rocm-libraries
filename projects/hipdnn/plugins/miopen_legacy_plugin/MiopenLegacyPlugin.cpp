@@ -399,9 +399,10 @@ hipdnnPluginStatus_t
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                                                            hipdnnEnginePluginExecutionContext_t executionContext,
-                                                                            size_t* workspaceSize)
+hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    size_t* workspaceSize)
 {
     LOG_API_ENTRY("handle={:p}, executionContext={:p}, workspaceSize={:p}",
                   static_cast<void*>(handle),

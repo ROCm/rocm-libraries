@@ -140,10 +140,10 @@ extern "C" hipdnnPluginStatus_t
     });
 }
 
-extern "C" hipdnnPluginStatus_t
-    hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                                           hipdnnEnginePluginExecutionContext_t executionContext,
-                                                           size_t* workspaceSize)
+extern "C" hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    size_t* workspaceSize)
 {
     return hipdnn_plugin::tryCatch([&]() {
         checkHandleValidity(handle);

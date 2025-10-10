@@ -58,7 +58,8 @@ BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams
 {
 }
 
-size_t BatchnormFwdInferencePlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t BatchnormFwdInferencePlan::getWorkspaceSize(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
 {
     // No workspace needed for batchnorm inference
     return 0;

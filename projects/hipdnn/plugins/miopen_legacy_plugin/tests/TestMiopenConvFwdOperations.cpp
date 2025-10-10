@@ -96,8 +96,8 @@ protected:
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         size_t workspaceSize;
-        status
-            = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(_handle, executionContext, &workspaceSize);
+        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+            _handle, executionContext, &workspaceSize);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 

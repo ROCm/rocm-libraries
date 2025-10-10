@@ -215,9 +215,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
-    hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                                           hipdnnEnginePluginExecutionContext_t execution_context,
-                                                           size_t* workspace_size);
+    hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        size_t* workspace_size);
 
 /**
  * @brief Executes an operation graph using a specified execution context.

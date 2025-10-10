@@ -69,9 +69,11 @@ void EnginePlugin::resolveSymbols()
     _funcDestroyExecutionContext
         = _lib.getSymbol<decltype(_funcDestroyExecutionContext)>(funcNameDestroyExecutionContext);
 
-    const auto funcNameGetWorkspaceSizeFromExecutionContext = "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext";
+    const auto funcNameGetWorkspaceSizeFromExecutionContext
+        = "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext";
     _funcGetWorkspaceSizeFromExecutionContext
-        = _lib.getSymbol<decltype(_funcGetWorkspaceSizeFromExecutionContext)>(funcNameGetWorkspaceSizeFromExecutionContext);
+        = _lib.getSymbol<decltype(_funcGetWorkspaceSizeFromExecutionContext)>(
+            funcNameGetWorkspaceSizeFromExecutionContext);
 
     const auto funcNameExecuteOpGraph = "hipdnnEnginePluginExecuteOpGraph";
     _funcExecuteOpGraph = _lib.getSymbol<decltype(_funcExecuteOpGraph)>(funcNameExecuteOpGraph);
@@ -224,8 +226,11 @@ size_t EnginePlugin::getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
 {
     assert(_initialized);
     size_t workspaceSize = 0;
-    invokePluginFunction(
-        "get workspace size from execution context", _funcGetWorkspaceSizeFromExecutionContext, handle, executionContext, &workspaceSize);
+    invokePluginFunction("get workspace size from execution context",
+                         _funcGetWorkspaceSizeFromExecutionContext,
+                         handle,
+                         executionContext,
+                         &workspaceSize);
     return workspaceSize;
 }
 

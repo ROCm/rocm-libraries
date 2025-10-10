@@ -101,9 +101,8 @@ private:
                                                         hipdnnEnginePluginExecutionContext_t*);
     hipdnnPluginStatus_t (*_funcDestroyExecutionContext)(hipdnnEnginePluginHandle_t,
                                                          hipdnnEnginePluginExecutionContext_t);
-    hipdnnPluginStatus_t (*_funcGetWorkspaceSizeFromExecutionContext)(hipdnnEnginePluginHandle_t,
-                                                                      hipdnnEnginePluginExecutionContext_t,
-                                                                      size_t*);
+    hipdnnPluginStatus_t (*_funcGetWorkspaceSizeFromExecutionContext)(
+        hipdnnEnginePluginHandle_t, hipdnnEnginePluginExecutionContext_t, size_t*);
     hipdnnPluginStatus_t (*_funcExecuteOpGraph)(hipdnnEnginePluginHandle_t,
                                                 hipdnnEnginePluginExecutionContext_t,
                                                 void*,

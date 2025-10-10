@@ -37,9 +37,9 @@ void ExecutionPlanDescriptor::finalize()
         pluginResourceManager->getWorkspaceSize(engineId, _executionContext->get()));
 
     THROW_IF_LT(_workspaceSize,
-                  0,
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "ExecutionPlanDescriptor::finalize() failed: Invalid workspace size.");
+                0,
+                HIPDNN_STATUS_INTERNAL_ERROR,
+                "ExecutionPlanDescriptor::finalize() failed: Invalid workspace size.");
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }

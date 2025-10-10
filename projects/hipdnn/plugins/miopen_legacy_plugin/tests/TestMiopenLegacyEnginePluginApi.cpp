@@ -191,16 +191,19 @@ TEST(TestMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextNull)
     size_t workspaceSize = 123;
 
     // Null handle
-    EXPECT_EQ(hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(nullptr, executionContext, &workspaceSize),
+    EXPECT_EQ(hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+                  nullptr, executionContext, &workspaceSize),
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 
     // Null executionContext
-    EXPECT_EQ(hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(handle, nullptr, &workspaceSize),
-              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(
+        hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(handle, nullptr, &workspaceSize),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 
     // Null workspaceSize
-    EXPECT_EQ(hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(handle, executionContext, nullptr),
-              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(
+        hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(handle, executionContext, nullptr),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestGpuMiopenLegacyEnginePluginApi, CreateAlsoCreatesMIOpenHandleOnSuccess)
@@ -408,7 +411,8 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextVal
     ASSERT_NE(executionContext, nullptr);
 
     size_t workspaceSize = 0;
-    status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(handle, executionContext, &workspaceSize);
+    status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+        handle, executionContext, &workspaceSize);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(workspaceSize, 0u); // batchnorm workspace size is always 0

@@ -351,10 +351,11 @@ std::shared_ptr<const EngineExecutionContextWrapper>
     return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, engineConfig, graphDesc);
 }
 
-size_t EnginePluginResourceManager::getWorkspaceSize(int64_t engineId,
-                                                     hipdnnEnginePluginExecutionContext_t executionContext) const
+size_t EnginePluginResourceManager::getWorkspaceSize(
+    int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
 {
-    THROW_IF_NULL(executionContext, HIPDNN_STATUS_INTERNAL_ERROR, "Execution context cannot be null");
+    THROW_IF_NULL(
+        executionContext, HIPDNN_STATUS_INTERNAL_ERROR, "Execution context cannot be null");
 
     auto it = _engineIdToHandle.find(engineId);
     if(it == _engineIdToHandle.end())
