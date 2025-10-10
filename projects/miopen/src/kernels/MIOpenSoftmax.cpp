@@ -65,6 +65,9 @@ __device__ void reduce(FLOAT_ACCUM array[ARRAY_SIZE],
     }
 }
 
+// This is valid C++20 code. It compiles and runs fine. The current version of Cppcheck, 2.12.1,
+// doesn't support it. The most recent release of Cppcheck, 2.18.0, does support it.
+// cppcheck-suppress syntaxError
 constexpr static auto reduce_sum = []<int ARRAY_SIZE>(FLOAT_ACCUM array[LOCAL_SIZE],
                                                       const unsigned int lid,
                                                       int i) { array[lid] += array[lid + i]; };
