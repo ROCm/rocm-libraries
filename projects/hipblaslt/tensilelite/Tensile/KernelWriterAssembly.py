@@ -948,6 +948,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
     # module.addComment0("max SGPR=%u"%self.sgprPool.size())
 
+    if kernel["StreamK"] == 2 or kernel["StreamK"] == 3:
+      module.addSpaceLine()
+      module.addComment0("StreamK Parallel Reduction Assignments")
+      module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+      
     module.addSpaceLine()
     module.addComment0("Size Assignments")
     problemType = kernel["ProblemType"]
@@ -6615,6 +6621,10 @@ class KernelWriterAssembly(KernelWriter):
             if (vgprPerInput < 4 and is_mfma) or is_wmma_v2:
               shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg_first), comment="get distance between size and k index"))
               shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numMIInput, comment="set partial 0 if distance less than input per thread"))
+            TailLoop_SkipZeroOutMask = Label((self.labels.getUniqueNamePrefix("TailLoop_SkipZeroOutMask")), comment="")
+            shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr("SizeL"), src1=8-1, comment="if summation is multiple of 8, skip masking"))
+            shiftK.add(SCmpEQU32(src0=sgpr(tmpSgprX1), src1=0))
+            shiftK.add(SCBranchSCC1(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="skip mask"))
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numMIInput-1, comment="get inputs for edge thread"))
             shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numMIInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
             shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
@@ -6674,7 +6684,6 @@ class KernelWriterAssembly(KernelWriter):
                     aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
                     shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
                 else: # mfma
-
                   if kernel["ProblemType"]["Sparse"]:
                     if vgprPerInput == 2:
                       aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
@@ -6748,7 +6757,6 @@ class KernelWriterAssembly(KernelWriter):
                     bStr = vgpr(self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
                     shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
                 else: # mfma
-
                   if kernel["ProblemType"]["Sparse"]:
                     if vgprPerInput == 2:
                       aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
@@ -6776,7 +6784,7 @@ class KernelWriterAssembly(KernelWriter):
                         shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
                       shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
                     shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
-
+            shiftK.add(TailLoop_SkipZeroOutMask)
             if vgprPerInput == 4 and is_wmma_v2:
               if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
         if kernel["LocalSplitU"] > 1:
@@ -13894,6 +13902,9 @@ class KernelWriterAssembly(KernelWriter):
 
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
+    # Wait for all LR in pre-loop to complete before we start main loop
+    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
+
     if numCodePath == 1:
       module.add(TextBlock("MAINLOOP 0\n"))
       module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
@@ -13909,9 +13920,10 @@ class KernelWriterAssembly(KernelWriter):
     loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
 
     tmpSgpr = self.sgprPool.checkOut(1)
-    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, 1)"))
+    numbits = 1 if numCodePath == 2 else 2
+    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, %u)"%numbits))
 
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all PGR to complete"))
+
     tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2)
     sgprPC = ContinuousRegister(tmpSgpr1, 3)
     for l in range(numCodePath):

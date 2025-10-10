@@ -7,8 +7,6 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
-        type: string
 
 
 permissions:
@@ -40,39 +38,33 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 80198e080271a2013073fc1d3dd03672a3214779 # 2025-09-22 commit
+          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
 
-      - name: Runner Health Settings
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      # safe.directory must be set before Runner health status
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
             --config-preset "github-oss-presubmit" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
-          df -h
-          echo "ccache version: $(ccache --version)"
-          echo "ccache config:"
-          echo "---"
-          cat "$CCACHE_CONFIGPATH"
-          echo "---"
-          ccache -z
-          ccache -s -v
-          cmake --version
-          echo "Installed Python versions:"
-          ls -d /opt/python
-          echo "python: $(which python), python3: $(which python3)"
-          echo "Git version: $(git --version)"
-          git config --global --add safe.directory $PWD
-          git config fetch.parallel 10
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
-
-      - name: Install python deps
-        run: |
-          pip install -r TheRock/requirements.txt
-          pip freeze
 
       - name: Patch rocm-libraries
         run: |
@@ -82,7 +74,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py

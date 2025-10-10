@@ -50,7 +50,7 @@ extern "C" {
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginGetName(const char** name);
 
 /**
@@ -60,7 +60,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginGetVersion(const char** version);
 
 /**
@@ -70,7 +70,7 @@ HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginGetType(hipdnnPluginType_t* type);
 
 /**
@@ -103,7 +103,7 @@ HIPDNN_PLUGIN_EXPORT void hipdnnPluginGetLastErrorString(const char** error_str)
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback);
 
 /** @} */ // End of PluginFunctions group

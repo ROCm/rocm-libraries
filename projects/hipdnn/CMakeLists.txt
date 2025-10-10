@@ -3,15 +3,26 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
+# hipDNN dependency versions to use
+set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
+set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
+set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
+set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
 
 set(HIPDNN_VERSION "0.0.1")
 
-if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
+project(
+    hipDNN
+    VERSION ${HIPDNN_VERSION}
+    LANGUAGES CXX)
+
+include(GNUInstallDirs)
 
 if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
@@ -21,10 +32,13 @@ if(NOT WIN32)
     endif()
 endif()
 
-project(
-    hipDNN
-    VERSION ${HIPDNN_VERSION}
-    LANGUAGES CXX)
+if(NOT WIN32)
+    # Only set if not already specified by user
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    endif()
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -34,25 +48,29 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for official hipDNN engine plugins")
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE PATH "Build directory for official hipDNN engine plugins")
-set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for official hipDNN engine plugins (relative to CMAKE_INSTALL_PREFIX)")
+set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for official hipDNN engine plugins (relative to CMAKE_INSTALL_PREFIX)")
 
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/lib/test_plugins" CACHE INTERNAL "Build directory for test plugins")
+set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
 
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
-option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
+option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema during build" ON)
+option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 list(
     APPEND
     CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
     ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
     ${HIP_DIR}/cmake
 )
 
@@ -64,9 +82,6 @@ list(
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip 
 )
 
 include(cmake/Dependencies.cmake)
@@ -163,4 +178,8 @@ if(CODE_COVERAGE)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
     )
+endif()
+
+if(NOT HIP_DNN_SKIP_TESTS)
+    install_hipdnn_ctest_files()
 endif()

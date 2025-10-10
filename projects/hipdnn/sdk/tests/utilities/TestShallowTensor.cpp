@@ -57,3 +57,13 @@ TEST(TestShallowTensor, DeviceAccessThrows)
     EXPECT_THROW(mem.deviceData(), std::runtime_error);
     EXPECT_THROW(mem.deviceDataAsync(), std::runtime_error);
 }
+
+#ifndef NDEBUG
+TEST(TestShallowTensor, OutOfBoundsAccessThrows)
+{
+    std::array<int, 6> backing = {1, 2, 3, 4, 5, 6};
+    ShallowTensor<int> tensor(backing.data(), {1, 1, 2, 3}, {6, 6, 3, 1});
+    EXPECT_THROW(tensor.getHostValue(20), std::out_of_range);
+    EXPECT_THROW(tensor.setHostValue(25, 28), std::out_of_range);
+}
+#endif

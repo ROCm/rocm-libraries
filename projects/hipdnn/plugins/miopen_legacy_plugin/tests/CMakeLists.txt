@@ -1,17 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(GTest CONFIG REQUIRED)
-endif()
-
 include(GoogleTest)
-
-
-if(HIP_DNN_SKIP_TESTS)
-    message(STATUS "Skipping MIOpen Legacy Plugin tests")
-    return()
-endif()
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
@@ -60,11 +50,15 @@ target_include_directories(miopen_legacy_plugin_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_tests)
     
     add_target_to_check_targets(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
+else()
+    # For standalone build, set RPATH to find the plugin
+    set_target_properties(miopen_legacy_plugin_tests PROPERTIES
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/hipdnn_plugins/engines"
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/lib/hipdnn_plugins/engines"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
 endif()
-
-MakeExecutableRelocatable(miopen_legacy_plugin_tests "$ORIGIN/../lib/hipdnn_plugins/engines")

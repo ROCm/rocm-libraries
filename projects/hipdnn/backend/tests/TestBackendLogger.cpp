@@ -17,13 +17,14 @@
 
 class TestBackendLogger : public ::testing::Test
 {
-public:
+protected:
     std::string _logFile;
     std::array<int, 2> _stderrPipe;
     int _oldStderr;
     std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
     std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
 
+public:
     void SetUp() override
     {
         _logLevelGuard

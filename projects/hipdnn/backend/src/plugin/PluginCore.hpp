@@ -271,7 +271,7 @@ private:
 
                 actionAfterAdding(*_plugins.back());
             },
-            fmt::format("Error loading plugin from [{}]: ", filePath.string()).c_str());
+            fmt::format("Error loading plugin from [{}]: ", filePath.string()));
     }
 
     std::vector<std::shared_ptr<Plugin>> _plugins;

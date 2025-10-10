@@ -185,7 +185,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                                const PerformanceConfigBnFwdTraining& config) const
 {
     const auto& handle = context.GetStream();
-
+    // Only one can be true
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
     bool bfp16parm    = false;
@@ -299,7 +299,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        auto kernel = KernelInfo{};
+        auto use_hip = variant == 1;
+        auto kernel  = KernelInfo{};
 
         auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
@@ -324,6 +325,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
+            {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},
@@ -339,11 +341,20 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             build_params.Define("MIO_BN_NCHW", in_nchw);
         }
 
-        kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cl";
+        kernel.kernel_file =
+            use_hip ? "MIOpenBatchNormFwdTrainSpatialHIP.cpp" : "MIOpenBatchNormFwdTrainSpatial.cl";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";
-        kernel.kernel_name      = kernel_name;
+        if(use_hip)
+        {
+            kernel_name += "HIP";
+            kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+        }
+        else
+        {
+            kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        }
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.kernel_name = kernel_name;
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

@@ -161,6 +161,27 @@ inline hipdnn_sdk::data_objects::DataType toSdkType(const DataType& type)
     }
 }
 
+inline hipdnn_frontend::DataType fromSdkType(const hipdnn_sdk::data_objects::DataType& type)
+{
+    switch(type)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return hipdnn_frontend::DataType::FLOAT;
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return hipdnn_frontend::DataType::HALF;
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return hipdnn_frontend::DataType::BFLOAT16;
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return hipdnn_frontend::DataType::DOUBLE;
+    case hipdnn_sdk::data_objects::DataType::UINT8:
+        return hipdnn_frontend::DataType::UINT8;
+    case hipdnn_sdk::data_objects::DataType::INT32:
+        return hipdnn_frontend::DataType::INT32;
+    default:
+        return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
 inline hipdnn_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMode& type)
 {
     switch(type)
@@ -315,7 +336,7 @@ constexpr size_t toBitPosition(PointwiseMode mode)
 
 inline const PointwiseModeBitset& getUnaryModesBitset()
 {
-    static const PointwiseModeBitset unaryModes = []() {
+    static const PointwiseModeBitset s_unaryModes = []() {
         PointwiseModeBitset bitset;
         bitset.set(toBitPosition(PointwiseMode::ABS));
         bitset.set(toBitPosition(PointwiseMode::CEIL));
@@ -342,12 +363,12 @@ inline const PointwiseModeBitset& getUnaryModesBitset()
         bitset.set(toBitPosition(PointwiseMode::TANH_FWD));
         return bitset;
     }();
-    return unaryModes;
+    return s_unaryModes;
 }
 
 inline const PointwiseModeBitset& getBinaryModesBitset()
 {
-    static const PointwiseModeBitset binaryModes = []() {
+    static const PointwiseModeBitset s_binaryModes = []() {
         PointwiseModeBitset bitset;
         bitset.set(toBitPosition(PointwiseMode::ADD));
         bitset.set(toBitPosition(PointwiseMode::ADD_SQUARE));
@@ -374,17 +395,17 @@ inline const PointwiseModeBitset& getBinaryModesBitset()
         bitset.set(toBitPosition(PointwiseMode::TANH_BWD));
         return bitset;
     }();
-    return binaryModes;
+    return s_binaryModes;
 }
 
 inline const PointwiseModeBitset& getTernaryModesBitset()
 {
-    static const PointwiseModeBitset ternaryModes = []() {
+    static const PointwiseModeBitset s_ternaryModes = []() {
         PointwiseModeBitset bitset;
         bitset.set(toBitPosition(PointwiseMode::BINARY_SELECT));
         return bitset;
     }();
-    return ternaryModes;
+    return s_ternaryModes;
 }
 
 inline bool isUnaryPointwiseMode(PointwiseMode mode)

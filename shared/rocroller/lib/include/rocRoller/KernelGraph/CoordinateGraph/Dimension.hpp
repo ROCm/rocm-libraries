@@ -358,6 +358,11 @@ namespace rocRoller
             std::vector<int> miTileSizes;
 
             /**
+             * Size of swizzle tile.
+             */
+            std::vector<int> swizzleTileSizes;
+
+            /**
              * Number of bytes padding each dimension.
              *
              * For example, a MxN Macrotile padded with [[x y]] requires
@@ -394,9 +399,10 @@ namespace rocRoller
              */
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
-                      std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE,
-                      std::vector<int> const& miTileSizes  = {});
+                      std::vector<int> const& subTileSizes     = {},
+                      MemoryType const        memoryType       = MemoryType::WAVE,
+                      std::vector<int> const& miTileSizes      = {},
+                      std::vector<int> const& swizzleTileSizes = {64, 64, 4, 1});
 
             /**
              * Construct MacroTile dimension that is padded.
