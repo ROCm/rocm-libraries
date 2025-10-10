@@ -38,10 +38,8 @@
 #endif // no system header
 
 #ifndef __HIP_DEVICE_COMPILE__
-#  define __THRUST_HAS_HIPRT__        1
 #  define THRUST_HIP_RUNTIME_FUNCTION THRUST_HOST_DEVICE
 #else
-#  define __THRUST_HAS_HIPRT__        0
 #  define THRUST_HIP_RUNTIME_FUNCTION THRUST_HOST
 #endif
 
