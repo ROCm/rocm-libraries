@@ -87,7 +87,7 @@ namespace rocRoller
                 // TODO: Remove this when RemoveSetCoordinate transformation is enabled
                 //       as RemoveSetCoordinate will build all transformers.
                 //
-                if(m_graph->getAllTransformers().empty())
+                if(!m_context->kernelOptions()->removeSetCoordinate)
                     m_graph->buildAllTransformers();
 
                 //
@@ -627,56 +627,70 @@ namespace rocRoller
                     concatenate("Assign dim(", dimTag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
-                scope->addRegister(dimTag);
 
-                auto deferred = expressionHasNoneDT(assign.expression)
-                                && !m_context->registerTagManager()->hasRegister(dimTag);
-
-                Register::ValuePtr dest;
-                if(!deferred)
+                if(assign.strideExpressionAttributes)
                 {
-                    auto valueCount = assign.valueCount;
-                    if(valueCount == 0)
-                    {
-                        auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
-                        valueCount = tmp->valueCount();
-                    }
-
-                    auto varType = resultVariableType(assign.expression);
-                    if(assign.variableType)
-                    {
-                        varType = assign.variableType.value();
-                        // For non-packed types, the denominator is 1.
-                        valueCount /= DataTypeInfo::Get(varType).packing;
-                    }
-
-                    Log::debug("  immediate: count {}", assign.valueCount);
-                    if(assign.regType == Register::Type::Accumulator
-                       || assign.regType == Register::Type::Vector)
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag,
-                            assign.regType,
-                            varType,
-                            valueCount,
-                            Register::AllocationOptions{.contiguousChunkWidth
-                                                        = static_cast<int>(valueCount)});
-                    }
-                    else
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag, assign.regType, varType, valueCount);
-                    }
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    co_yield Instruction::Comment("Assign stride expression");
+                    m_context->registerTagManager()->addExpression(
+                        dimTag,
+                        m_fastArith(assign.expression),
+                        assign.strideExpressionAttributes.value());
+                    scope->addRegister(dimTag);
                 }
-                co_yield Expression::generate(dest, assign.expression, m_context);
-
-                if(deferred)
+                else
                 {
-                    m_context->registerTagManager()->addRegister(dimTag, dest);
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    scope->addRegister(dimTag);
+
+                    auto deferred = expressionHasNoneDT(assign.expression)
+                                    && !m_context->registerTagManager()->hasRegister(dimTag);
+
+                    Register::ValuePtr dest;
+                    if(!deferred)
+                    {
+                        auto valueCount = assign.valueCount;
+                        if(valueCount == 0)
+                        {
+                            auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                            valueCount = tmp->valueCount();
+                        }
+
+                        auto varType = resultVariableType(assign.expression);
+                        if(assign.variableType)
+                        {
+                            varType = assign.variableType.value();
+                            // For non-packed types, the denominator is 1.
+                            valueCount /= DataTypeInfo::Get(varType).packing;
+                        }
+
+                        Log::debug("  immediate: count {}", assign.valueCount);
+                        if(assign.regType == Register::Type::Accumulator
+                           || assign.regType == Register::Type::Vector)
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag,
+                                assign.regType,
+                                varType,
+                                valueCount,
+                                Register::AllocationOptions{.contiguousChunkWidth
+                                                            = static_cast<int>(valueCount)});
+                        }
+                        else
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag, assign.regType, varType, valueCount);
+                        }
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
+
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+
+                    if(deferred)
+                    {
+                        m_context->registerTagManager()->addRegister(dimTag, dest);
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
                 }
             }
 
@@ -1102,6 +1116,7 @@ namespace rocRoller
                 auto [macTileTag, macTile]     = m_graph->getDimension<MacroTile>(tag);
                 auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);
                 auto [simdBlockTag, simdBlock] = m_graph->getDimension<Adhoc>(tag, 0);
+                auto oMacTileTag               = m_graph->mapper.get(tag, NaryArgument::DEST);
 
                 const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
@@ -1172,8 +1187,19 @@ namespace rocRoller
                 if(packedVariableType && !m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
-                    auto temp         = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, exchange.varType, numVgpr, allocOptions);
+                    Register::ValuePtr temp;
+                    if(m_context->registerTagManager()->hasRegister(oMacTileTag))
+                    {
+                        temp = m_context->registerTagManager()->getRegister(oMacTileTag);
+                    }
+                    else
+                    {
+                        temp = Register::Value::Placeholder(m_context,
+                                                            Register::Type::Vector,
+                                                            exchange.varType,
+                                                            numVgpr,
+                                                            allocOptions);
+                    }
                     for(auto index = 0; index < numVgpr; index++)
                         co_yield generateOp<Expression::BitFieldExtract>(
                             temp->element({index}),
@@ -1183,8 +1209,6 @@ namespace rocRoller
                     vgpr = temp;
                 }
 
-                auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
-
                 if(m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag),
@@ -1192,11 +1216,12 @@ namespace rocRoller
                 }
                 else
                 {
-                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag),
-                                ShowValue(oMacTileTag));
                     AssertFatal(vgpr->registerCount() == numVgpr);
 
-                    m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                    if(!m_context->registerTagManager()->hasRegister(oMacTileTag))
+                    {
+                        m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                    }
 
                     if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
                     {

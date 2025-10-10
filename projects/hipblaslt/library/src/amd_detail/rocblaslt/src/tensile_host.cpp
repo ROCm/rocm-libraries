@@ -737,6 +737,8 @@ namespace
             problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
             problem.useScaleCD() ? "--scaleC" : "",
             problem.useScaleCD() ? "--scaleD" : "",
+            problem.swizzleTensorA() ? "--swizzleA" : "",
+            problem.swizzleTensorB() ? "--swizzleB" : "",
             problem.useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
             problem.useGradient() ? "--gradient" : "",
             problem.useE() ? "--use_e" : "",
@@ -775,6 +777,7 @@ namespace
             "--activation_type",
             tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
             flush ? "--flush" : "",
+            "--any_stride",
             "--rotating",
             rotatingBufferSize,
             "--cold_iters",
@@ -841,8 +844,14 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
-                    problem.useScaleCD() ? "--scaleC" : "",
-                    problem.useScaleCD() ? "--scaleD" : "",
+                    "scaleC",
+                    problem.useScaleCD() ? 1 : 0,
+                    "scaleD",
+                    problem.useScaleCD() ? 1 : 0,
+                    "swizzleA",
+                    problem.swizzleTensorA() ? "true" : "false",
+                    "swizzleB",
+                    problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -877,6 +886,8 @@ namespace
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
                     flush ? "true" : "false",
+                    "any_stride",
+                    "true",
                     "rotating",
                     rotatingBufferSize,
                     "cold_iters",
@@ -934,8 +945,14 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
-                    problem.useScaleCD() ? "--scaleC" : "",
-                    problem.useScaleCD() ? "--scaleD" : "",
+                    "scaleC",
+                    problem.useScaleCD() ? 1 : 0,
+                    "scaleD",
+                    problem.useScaleCD() ? 1 : 0,
+                    "swizzleA",
+                    problem.swizzleTensorA() ? "true" : "false",
+                    "swizzleB",
+                    problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -970,6 +987,8 @@ namespace
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
                     flush ? "true" : "false",
+                    "any_stride",
+                    "true",
                     "rotating",
                     rotatingBufferSize,
                     "cold_iters",
@@ -1055,6 +1074,8 @@ namespace
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
             problem.gemms[0].useScaleCD() ? "--scaleC" : "",
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
+            problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
+            problem.gemms[0].swizzleTensorB() ? "--swizzleB" : "",
             problem.gemms[0].useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
             problem.gemms[0].useGradient() ? "--gradient" : "",
             problem.gemms[0].useE() ? "--use_e" : "",
@@ -1098,6 +1119,7 @@ namespace
             "--activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             flush ? "--flush" : "",
+            "--any_stride",
             "--rotating",
             rotatingBufferSize,
             "--cold_iters",
@@ -1208,8 +1230,14 @@ namespace
             problem.gemms[0].useScaleAB().empty()
                 ? 0
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
-            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
-            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
+            "scaleC",
+            problem.gemms[0].useScaleCD() ? 1 : 0,
+            "scaleD",
+            problem.gemms[0].useScaleCD() ? 1 : 0,
+            "swizzleA",
+            problem.gemms[0].swizzleTensorA() ? "true" : "false",
+            "swizzleB",
+            problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
             problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
             "gradient",
@@ -1246,6 +1274,8 @@ namespace
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
             flush ? "true" : "false",
+            "any_stride",
+            "true",
             "rotating",
             rotatingBufferSize,
             "cold_iters",
@@ -1253,17 +1283,17 @@ namespace
             "iters",
             hotIterations);
     }
-    inline void
-        logExtendedProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
-                                              const TensileLite::ContractionGroupedInputs&      inputs,
-                                              const int&         solutionIndex,
-                                              const std::string& kernelName,
-                                              const std::string& solutionName,
-                                              bool               flush,
-                                              const int32_t&     rotatingBufferSize,
-                                              const int32_t&     coldIterations,
-                                              const int32_t&     hotIterations,
-                                              bool               isCpp)
+    inline void logExtendedProfileFromTensileDataGemm(
+        const TensileLite::ContractionProblemGroupedGemm& problem,
+        const TensileLite::ContractionGroupedInputs&      inputs,
+        const int&                                        solutionIndex,
+        const std::string&                                kernelName,
+        const std::string&                                solutionName,
+        bool                                              flush,
+        const int32_t&                                    rotatingBufferSize,
+        const int32_t&                                    coldIterations,
+        const int32_t&                                    hotIterations,
+        bool                                              isCpp)
     {
         size_t            gemmCount = problem.gemms.size();
         std::stringstream grouped_gemm_profile_string;
@@ -1345,8 +1375,14 @@ namespace
             problem.gemms[0].useScaleAB().empty()
                 ? 0
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
-            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
-            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
+            "scaleC",
+            problem.gemms[0].useScaleCD() ? 1 : 0,
+            "scaleD",
+            problem.gemms[0].useScaleCD() ? 1 : 0,
+            "swizzleA",
+            problem.gemms[0].swizzleTensorA() ? "true" : "false",
+            "swizzleB",
+            problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
             problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
             "gradient",
@@ -1383,6 +1419,8 @@ namespace
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
             flush ? "true" : "false",
+            "any_stride",
+            "true",
             "rotating",
             rotatingBufferSize,
             "cold_iters",
@@ -2585,12 +2623,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
         {
+            auto autoGsuVal = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(
                 *hardware,
                 data->problem.c().sizes()[0],
                 data->problem.c().sizes()[1],
                 data->problem.a().sizes()[data->problem.boundIndices()[0].a],
-                data->problem.batchSize(0));
+                data->problem.batchSize(0),
+                autoGsuVal);
 
             hipblasltClientPerformanceArgs::totalGranularity = Granularity.totalGranularity;
             hipblasltClientPerformanceArgs::tilesPerCu       = Granularity.tilesPerCu;
@@ -2858,6 +2898,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               const rocblaslt_matmul_algo& algo,
                               const Tuning*                tuning,
                               void*                        workspace,
+                              size_t                       workspaceSizeInBytes,
                               bool                         useUserArgs,
                               hipStream_t                  stream,
                               std::shared_ptr<void>        gemmData)
@@ -2922,6 +2963,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->inputs.ws = workspace;
 
+            // set workspace size from argument
+            data->inputs.workspaceSize = workspaceSizeInBytes;
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -2982,6 +3027,19 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->inputs.grouped[i].ws = workspace;
             }
             data->inputs.ws = workspace;
+
+            // set workspace size from argument
+            data->problem.setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+            for(int i = 0; i < data->inputs.grouped.size(); i++)
+            {
+                data->inputs.grouped[i].workspaceSize = workspaceSizeInBytes;
+            }
+            for(size_t i = 0; i < data->problem.gemms.size(); i++)
+            {
+                data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+                data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
+            }
 
             data->useUserArgs = useUserArgs;
             if(useUserArgs)
@@ -3102,8 +3160,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             }
 
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-                || rocblaslt::Debug::Instance().printLogAsMarker()
-                || rocblaslt::Debug::Instance().benchPrintCommand())
+               || rocblaslt::Debug::Instance().printLogAsMarker()
+               || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -3117,26 +3175,26 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
             {
                 logProfileFromTensileDataGemm(data->problem,
-                                          data->inputs,
-                                          flush,
-                                          rotatingBufferSize,
-                                          coldIterations,
-                                          hotIterations,
-                                          false);
+                                              data->inputs,
+                                              flush,
+                                              rotatingBufferSize,
+                                              coldIterations,
+                                              hotIterations,
+                                              false);
             }
-            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
-                                                    data->inputs,
-                                                    data->algoIndex,
-                                                    solution->kernelName,
-                                                    solution->solutionName,
-                                                    flush,
-                                                    rotatingBufferSize,
-                                                    coldIterations,
-                                                    hotIterations,
-                                                    false);
+                                                      data->inputs,
+                                                      data->algoIndex,
+                                                      solution->kernelName,
+                                                      solution->solutionName,
+                                                      flush,
+                                                      rotatingBufferSize,
+                                                      coldIterations,
+                                                      hotIterations,
+                                                      false);
             }
 
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
@@ -3262,8 +3320,8 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-                || rocblaslt::Debug::Instance().printLogAsMarker()
-                || rocblaslt::Debug::Instance().benchPrintCommand())
+               || rocblaslt::Debug::Instance().printLogAsMarker()
+               || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -3277,31 +3335,31 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
             {
                 logProfileFromTensileDataGemm(data->problem,
-                                          data->inputs,
-                                          flush,
-                                          rotatingBufferSize,
-                                          coldIterations,
-                                          hotIterations,
-                                          false);
+                                              data->inputs,
+                                              flush,
+                                              rotatingBufferSize,
+                                              coldIterations,
+                                              hotIterations,
+                                              false);
             }
-            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
-                                                    data->inputs,
-                                                    data->algoIndex,
-                                                    solution->kernelName,
-                                                    solution->solutionName,
-                                                    flush,
-                                                    rotatingBufferSize,
-                                                    coldIterations,
-                                                    hotIterations,
-                                                    false);
+                                                      data->inputs,
+                                                      data->algoIndex,
+                                                      solution->kernelName,
+                                                      solution->solutionName,
+                                                      flush,
+                                                      rotatingBufferSize,
+                                                      coldIterations,
+                                                      hotIterations,
+                                                      false);
             }
 
             for(auto& it : data->kernels)
             {
-                uint8_t* arg      = it.args.rawdata();
+                uint8_t* arg = it.args.rawdata();
                 if(solution->internalArgsSupport.useUniversalArgs)
                 {
                     if(deviceUserArgs != nullptr)
@@ -4273,6 +4331,7 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
                                                    const rocblaslt_matmul_algo& algo,                          \
                                                    const Tuning*                tuning,                        \
                                                    void*                        workspace,                     \
+                                                   size_t                       workspaceSizeInBytes,          \
                                                    bool                         useUserArgs,                   \
                                                    hipStream_t                  stream,                        \
                                                    std::shared_ptr<void>        gemmData);                     \

@@ -3,7 +3,20 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## (Unreleased) rocBLAS 5.0.0
+## rocBLAS 5.1.0 for ROCm 7.1
+
+### Added
+* Sample for clients using OpenMP threads calling rocBLAS functions.
+* gfx1103, gfx1150, and gfx1151 enabled.
+
+### Changed
+* By default, the Tensile build is no longer based on `tensile_tag.txt` but uses the same commit from shared/tensile in the rocm-libraries repository. The rmake or install `-t` option can build from another local path with a different commit.
+
+### Optimized
+
+* Improved the performance of Level 2 gemv transposed (`TransA != N`) for the problem sizes where `m` is small and `n` is large on gfx90a and gfx942.
+
+## rocBLAS 5.0.0 for ROCm 7.0
 
 ### Added
 

@@ -34,7 +34,6 @@
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
-#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
@@ -260,6 +259,23 @@ namespace rocRoller
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
             constexpr static inline int                 Complexity = 1;
+        };
+
+        struct BitfieldCombine : Binary
+        {
+            unsigned srcOffset = 0u;
+            unsigned dstOffset = 0u;
+            unsigned width     = 0u;
+
+            // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
+            std::optional<bool> srcIsZero = std::nullopt;
+            // if dstIsZero sets to true, that means bits [dstOffset:dstOffset+width-1] are 0
+            std::optional<bool> dstIsZero = std::nullopt;
+
+            constexpr static inline auto                Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes     EvalTimes{};
+            constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 4;
         };
 
         /*
@@ -541,6 +557,50 @@ namespace rocRoller
             DataType outputDataType = DataType::None;
             int      offset         = 0;
             int      width          = 0;
+        };
+
+        struct Nary
+        {
+            std::vector<ExpressionPtr> operands;
+            std::string                comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Nary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
+        };
+
+        template <typename T>
+        concept CNary = requires
+        {
+            requires std::derived_from<T, Nary>;
+        };
+
+        /**
+         * @brief Perform bitwise concatenation among all operands.
+         *
+         * Each operand must be dword aligned and the total number of operands'
+         * registers must be equal to the number of registers for
+         * 'destinationType'.
+         *
+         * All operands should have register type of literal, scalar or
+         * vector.
+         */
+        struct Concatenate : Nary
+        {
+            constexpr static inline auto            Type       = Category::Value;
+            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int             Complexity = 1;
+
+            VariableType destinationType;
+
+            inline Concatenate& copyParams(const Concatenate& other)
+            {
+                destinationType = other.destinationType;
+                return Nary::copyParams(other);
+            }
         };
 
         /**

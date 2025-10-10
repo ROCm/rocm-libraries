@@ -84,14 +84,17 @@ namespace TensileLite
                             lib.solutionmap.insert(std::make_pair(index, solution));
 
                             auto solution_tuple = std::make_tuple(
-                                solution->sizeMapping.macroTile.x, // MT_M
-                                solution->sizeMapping.macroTile.y, // MT_N
-                                solution->sizeMapping.depthU, // MT_K
+                                solution->sizeMapping.macroTile.x,          // MT_M
+                                solution->sizeMapping.macroTile.y,          // MT_N
+                                solution->sizeMapping.depthU,               // MT_K
                                 solution->sizeMapping.matrixInstruction[0], // MI_M
                                 solution->sizeMapping.matrixInstruction[1], // MI_N
                                 solution->sizeMapping.matrixInstruction[2], // MI_K
-                                solution->sizeMapping.CUOccupancy,      // Occupancy
-                                solution->sizeMapping.workGroupMapping); // WGM
+                                solution->sizeMapping.CUOccupancy,          // Occupancy
+                                solution->sizeMapping.workGroupMapping,     // WGM
+                                solution->sizeMapping.nonTemporalA,         // Cache flag: A
+                                solution->sizeMapping.nonTemporalB          // Cache flag: B
+                            ); 
 
                             lib.tile_list.emplace_back(solution_tuple);
                             lib.tile_map.insert(std::make_pair(solution_tuple, index));

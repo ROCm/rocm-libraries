@@ -90,7 +90,7 @@ Arguments setup_sparse_to_dense_csc_arguments(sparse_to_dense_csc_bin_tuple tup)
     std::string bin_file = std::get<3>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    arg.set_filename(get_filename(bin_file));
 
     return arg;
 }

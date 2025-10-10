@@ -391,7 +391,9 @@ private:
 
         // Note: we cannot use a while loop here because all threads need to be active during the
         // shuffle.
+#ifndef ROCPRIM_TARGET_SPIRV
         ROCPRIM_UNROLL
+#endif
         for(auto i = 1u; i <= m; i <<= 1u)
         {
             const auto mid = (begin + end) / 2;

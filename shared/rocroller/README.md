@@ -3,235 +3,235 @@
 
 rocRoller is a software library for generating AMDGPU kernels.
 
-[![Master Branch Code Coverage Report for gfx90a](https://img.shields.io/badge/Code%20Coverage-gfx90a-informational)](http://math-ci.amd.com/job/enterprise/job/code-coverage/job/rocRoller/job/master/Code_20coverage_20gfx90a_20report)
-[![Master Branch Code Coverage Report for python](https://img.shields.io/badge/Code%20Coverage-Python-informational)](http://math-ci.amd.com/job/enterprise/job/code-coverage/job/rocRoller/job/master/Python_20Code_20coverage_20gfx90a_20report)
-[![Master Branch Performance Report for gfx90a](https://img.shields.io/badge/Performance-gfx90a-critical)](http://math-ci.amd.com/job/enterprise/job/performance/job/rocRoller/job/master/Performance_20Report_20for_20gfx90a)
-[![Master Branch Performance Report for gfx942](https://img.shields.io/badge/Performance-gfx942-critical)](http://math-ci.amd.com/job/enterprise/job/performance/job/rocRoller/job/master/Performance_20Report_20for_20gfx942)
-[![Master Branch Generated Documentation](https://img.shields.io/badge/Documentation-Generated-informational)](http://math-ci.amd.com/job/enterprise/job/documentation/job/rocRoller/job/master/Generated_20Docs)
+[![Develop Branch Code Coverage Report for gfx942](https://img.shields.io/badge/Code%20Coverage-gfx942-informational)](http://math-ci.amd.com/job/rocm-libraries/job/codecov/job/rocroller/job/develop/Code_20coverage_20gfx942_20report)
+[![Develop Branch Code Coverage Report for python](https://img.shields.io/badge/Code%20Coverage-Python-informational)](http://math-ci.amd.com/job/rocm-libraries/job/codecov/job/rocroller/job/develop/Python_20Code_20coverage_20gfx942_20report)
+[![Develop Branch Performance Report for gfx942](https://img.shields.io/badge/Performance-gfx942-critical)](http://math-ci.amd.com/job/rocm-libraries/job/performance/job/rocroller/job/develop/Performance_20Report_20for_20gfx90a)
+[![Develop Branch Generated Documentation](https://img.shields.io/badge/Documentation-Generated-informational)](http://math-ci.amd.com/job/rocm-libraries/job/documentation/job/rocroller/job/develop/Generated_20Docs)
 
 ## Jump to
 
 - [AMD's rocRoller Assembly Kernel Generator](#amds-rocroller-assembly-kernel-generator)
-  - [Building the library](#building-the-library)
-    - [Quick start instructions](#quick-start-instructions)
-    - [Detailed commandline instructions](#detailed-commandline-instructions)
-    - [Cmake and make commands](#cmake-and-make-commands)
-      - [CMake Options](#cmake-options)
-    - [Running the tests](#running-the-tests)
-    - [Updating pregenerated GPUArchitecture yaml files](#updating-pregenerated-gpuarchitecture-yaml-files)
-  - [GEMM client](#gemm-client)
-  - [File Structure](#file-structure)
-  - [Coding Practices](#coding-practices)
-    - [Style](#style)
-    - [ISO C++ Standard](#iso-c-standard)
-    - [Documentation](#documentation)
-      - [Building Documentation](#building-documentation)
-  - [PR submissions](#pr-submissions)
-  - [Testing](#testing)
-  - [Logging](#logging)
-  - [Debugging](#debugging)
-  - [Profiling](#profiling)
-  - [Performance](#performance)
-  - [Kernel Analysis](#kernel-analysis)
-  - [Graph Visualization](#graph-visualization)
-  - [Memory Access Visualization](#memory-access-visualization)
+  - [Building the Library](#building-the-library)
+    - [Quick Start](#quick-start)
+    - [Building](#building)
+    - [with docker](#with-docker)
+    - [natively (e.g. Ubuntu 22.04)](#natively-eg-ubuntu-2204)
+    - [CMake and Make Commands](#cmake-and-make-commands)
+    - [Common CMake Options](#common-cmake-options)
+  - [Running the Tests (from a build directory)](#running-the-tests-from-a-build-directory)
+    - [With CTest](#with-ctest)
+    - [With GTest](#with-gtest)
+    - [With Catch2](#with-catch2)
+  - [Updating Pregenerated GPUArchitecture YAML Files](#updating-pregenerated-gpuarchitecture-yaml-files)
+  - [GEMM Client](#gemm-client)
+  - [Development](#development)
+    - [File Structure](#file-structure)
+    - [Coding Practices](#coding-practices)
+      - [Style](#style)
+      - [ISO C++ Standard](#iso-c-standard)
+      - [Documentation](#documentation)
+      - [PR submissions](#pr-submissions)
+      - [Testing](#testing)
+  - [Logging and Debugging](#logging-and-debugging)
+    - [Logging](#logging)
+    - [Debugging](#debugging)
+  - [Analysis](#analysis)
+    - [Performance Analysis](#performance-analysis)
+    - [Kernel Analysis](#kernel-analysis)
+    - [KernelGraph Visualization](#kernelgraph-visualization)
+    - [Memory Access Visualization](#memory-access-visualization)
 
-## Building the library
+## Building the Library
 
-### Quick start instructions
+### Quick Start
 
-The rocRoller CMake support should configure out of the box assuming
-project dependencies are installed in a location discoverable
-by CMake by default. In the event that this is not the case, the
-`CMAKE_PREFIX_PATH` can be used to help CMake find required packages.
-Often, ROCm is installed in `/opt/rocm` so setting the prefix path
-accordingly will ensure ROCm dependencies are locatable. To aide in
-setting common configurations a `CMakePresets.json` file is provided
-in the project root directory. Two presets are provided with the following
-options:
-
-1. opt-rocm (used to emulate current dev workflow)
-  1. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
-  2. ROCROLLER_ENABLE_FETCH: "ON"
-  3. CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
-2. precheckin (same config used for ci pipelines)
-  1. ROCROLLER_ENABLE_CPPCHECK: "ON"
-  2. ROCROLLER_ENABLE_YAML_CPP: "OFF"
-  3. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
-  4. CMAKE_BUILD_TYPE: "Release"
-  5. ROCROLLER_ENABLE_FETCH: "ON"
-  6. ROCROLLER_TESTS_SKIP_SLOW: "OFF"
-  7. CMAKE_PREFIX_PATH: "/opt/rocm;/opt/rocm/llvm"
-3. asan (See CMakePresets.json for details)
-4. amd-mrisa (See CMakePresets.json for details)
-5. coverage (See CMakePresets.json for details)
-5. docs (See CMakePresets.json for details)
-
-One can use the presets as follows:
-
-```
-cmake --preset opt-rocm -B build -S . <any additional cmake options>
-cmake --preset precheckin -B build -S . <any additional cmake options>
+**Clone and Sparse Checkout:**
+```bash
+git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-libraries.git
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set shared/rocroller shared/mxdatagenerator
+git checkout develop   # or your desired branch
 ```
 
-As previously mentioned, if dependencies are installed in the environment
-nothing is required. However, if third party dependencies are not installed,
-one can use `ROCROLLER_ENABLE_FETCH` to enable FetchContent for pulling and
-building dependencies (off by default).
+### Building
 
-To build rocRoller using Docker:
+rocRoller uses CMake for configuration and building. If all dependencies are installed in standard locations, CMake should work out of the box. If not, set `CMAKE_PREFIX_PATH` to help CMake find required packages (e.g., `/opt/rocm;/opt/rocm/llvm`). A `CMakePresets.json` file in the project root provides several build presets:
+
+**Common Presets:**
+
+- **default:release**: Emulates the current dev workflow.
+  - `CMAKE_CXX_COMPILER`: `/opt/rocm/bin/amdclang++`
+  - `ROCROLLER_ENABLE_FETCH`: `ON`
+  - `CMAKE_PREFIX_PATH`: `/opt/rocm;/opt/rocm/llvm`
+- **precheckin**: Used for CI pipelines.
+  - `ROCROLLER_ENABLE_CPPCHECK`: `ON`
+  - `ROCROLLER_ENABLE_YAML_CPP`: `OFF`
+  - `CMAKE_CXX_COMPILER`: `/opt/rocm/bin/amdclang++`
+  - `CMAKE_BUILD_TYPE`: `Release`
+  - `ROCROLLER_ENABLE_FETCH`: `ON`
+  - `ROCROLLER_TESTS_SKIP_SLOW`: `OFF`
+  - `CMAKE_PREFIX_PATH`: `/opt/rocm;/opt/rocm/llvm`
+- **asan**, **amd-mrisa**, **coverage**, **docs**: See `CMakePresets.json` for details.
+
+**Usage Example:**
+```bash
+cmake --preset default:release -B build -S . [additional cmake options]
 ```
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
-cd rocRoller
+
+If dependencies are missing, enable FetchContent with `ROCROLLER_ENABLE_FETCH=ON` to automatically download and build them.
+
+#### with docker
+
+```bash
 ./docker/user-image/start_user_container
 docker exec -ti -u ${USER} ${USER}_dev_clang bash
-cd /data
-mkdir -p build
-cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
-make -j
+cd /data/shared/rocroller
+cmake --preset default:release -B build -S .
+cmake --build build -j
 ```
 
-To build rocRoller natively on Ubuntu 22 (jammy):
-```
-# As root, once:
+#### natively (e.g. Ubuntu 22.04)
+
+```bash
+# As root:
 apt update
-apt install -y libboost-container1.74-dev libopenblas-dev ninja-build
+apt install -y libopenblas-dev ninja-build
 
 # As regular user:
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
-cd rocRoller
-mkdir -p build
-cd build
-cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
-make -j
+cd <path-to>/rocm-libraries/shared/rocroller
+cmake --preset default:release -B build -S .
+cmake --build build -j
 ```
 
-To run the unit tests:
-```
-ctest --test-dir build/test <additional ctest options>
-```
+### CMake and Make Commands
 
-### Detailed commandline instructions
-
-The rocRoller repository includes several Docker files.  We recommend
-using these for development work.
-
-[Instructions for building and launching docker](docker/README.md) are available.
-
-The rocRoller repo can be cloned from the internal GitHub repo. The
-tip of the `master` branch contains the latest commits:
-https://github.com/ROCm/rocRoller
-
-```
-git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
+CMake uses the compiler specified by the `CXX` environment variable. To set compilers manually:
+```bash
+CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
 ```
 
-From inside the docker container launched previously, the library can
-be built using these steps.  The cloned directory should be available
-from the `/data` directory in the docker container.  First create a
-`build` directory in the root of the cloned repo and enter that
-directory:
+#### Common CMake Options
 
-```
-mkdir -p build
-cd build
-```
+| Option                                   | Default | Description                                               |
+|-------------------------------------------|---------|-----------------------------------------------------------|
+| ROCROLLER_ENABLE_CLIENT                   | ON      | Build the rocRoller client                                |
+| ROCROLLER_ENABLE_YAML_CPP                 | ON      | Enable yaml-cpp backend                                   |
+| ROCROLLER_ENABLE_LLVM                     | OFF     | Enable LLVM yaml backend                                  |
+| ROCROLLER_BUILD_TESTING                   | ON      | Build rocRoller testing                                   |
+| ROCROLLER_ENABLE_CATCH                    | ON      | Build Catch2 unit tests                                   |
+| ROCROLLER_ENABLE_ARCH_GEN_TEST            | ON      | Build architecture generator test                         |
+| ROCROLLER_ENABLE_TEST_DISCOVERY           | ON      | Use gtest/catch2 test discovery                           |
+| ROCROLLER_ENABLE_COVERAGE                 | OFF     | Build code coverage                                       |
+| ROCROLLER_TESTS_SKIP_SLOW                 | OFF     | Disable slow tests                                        |
+| ROCROLLER_EMBED_ARCH_DEF                  | ON      | Embed msgpack architecture data in library                |
+| ROCROLLER_BUILD_SHARED_LIBS               | ON      | Build as shared library                                   |
+| ROCROLLER_ENABLE_FETCH                    | OFF     | Fetch dependencies if not found                           |
+| ROCROLLER_ENABLE_LLD                      | OFF     | Build LLD-dependent functionality                         |
+| ROCROLLER_ENABLE_TIMERS                   | OFF     | Enable timer code                                         |
+| ROCROLLER_ENABLE_CPPCHECK                 | OFF     | Enable cppcheck                                           |
+| ROCROLLER_MRISAS_DIR                      | `<build>/GPUArchitectureGenerator/amd-mrisa` | MRISA XML directory |
+| ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF    | ON      | Use pregenerated GPU architecture YAML files              |
 
-### CMake and make commands
+## Running the Tests (from a build directory)
 
-CMake will use the default compiler specified in the environment variable `CXX`. If you want to set it manually, configure using the cmake command:
-```
-CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. <cmake options>
-```
+### With CTest
+**Run All Tests:**
+  ```bash
+  ctest
+  # or
+  make test # or ninja, if using
+  ```
+  Runs all tests, one process per test.
 
-Then build:
-```
-make -j$(nproc)
-```
+**Exclude GPU Tests (for CPU-only machines):**
+  ```bash
+  ctest -LE GPU
+  ```
 
-#### CMake Options
+### With GTest
+**Run All GTest Tests:**
+  ```bash
+  ./test/rocroller-tests
+  ```
 
-- `ROCROLLER_ENABLE_CLIENT`: Build the rocRoller client (default ON)
-- `ROCROLLER_ENABLE_YAML_CPP`: Enable yaml-cpp backend (default ON)
-- `ROCROLLER_ENABLE_LLVM`: Enable llvm yaml backend (default OFF)
-- `ROCROLLER_BUILD_TESTING`: Build rocRoller testing (default ON)
-- `ROCROLLER_ENABLE_CATCH`: Build rocRoller catch unit tests (default ON)
-- `ROCROLLER_ENABLE_ARCH_GEN_TEST`: Build rocRoller architecture generator test (default ON)
-- `ROCROLLER_ENABLE_TEST_DISCOVERY`: Use gtest and catch2 test discovery functions (default ON)
-- `ROCROLLER_ENABLE_COVERAGE`: Build code coverage (default OFF)
-- `ROCROLLER_TESTS_SKIP_SLOW`: Disable slow running tests (default OFF)
-- `ROCROLLER_EMBED_ARCH_DEF`: Embed msgpack architecture data in library (default ON)
-- `ROCROLLER_BUILD_SHARED_LIBS`: Build rocRoller as a shared library (default ON)
-- `ROCROLLER_ENABLE_FETCH`: Enable fetch content for dependencies if find_package fails (default OFF)
-- `ROCROLLER_ENABLE_LLD`: Build rocroller functionality requiring LLD (default OFF)
-- `ROCROLLER_ENABLE_TIMERS`: Enable rocRoller timer code (default OFF)
-- `ROCROLLER_ENABLE_CPPCHECK`: Enable cppcheck (default OFF)
-- `ROCROLLER_MRISAS_DIR`: Path to directory containing MRISA XML files (default `<build dir>/GPUArchitectureGenerator/amd-mrisa`)
-- `ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF`: Use the pregenerates GPU architecture definition YAML file(s) in the repository (default ON)
-- `MXDATAGENERATOR_GIT_TAG`: mxDataGenerator tag/commit hash to checkout (default see root CMakeLists.txt)
-- `MXDATAGENERATOR_GIT_URL`: Base Git URL to fetch mxDataGenerator from (default https://github.com/ROCm/mxDataGenerator.git)
+**List All Tests:**
+  ```bash
+  ./test/rocroller-tests --gtest_list_tests
+  ```
 
-### Running the tests
+**Run a Specific Test:**
+  ```bash
+  ./test/rocroller-tests --gtest_filter="<test-name-or-regex>"
+  ```
 
-There are three ways to launch the test applications:
+**List a Specific Test:**
+  ```bash
+  ./test/rocroller-tests --gtest_list_tests --gtest_filter="<test-name-or-regex>"
+  ```
 
-```
-make test
-```
+**Exclude GPU Tests (for CPU-only machines):**
+  ```bash
+  ./test/rocroller-tests --gtest_filter="-*GPU_*"
+  ```
 
-This will run our unit tests using `ctest` (one process per test).
+**Get Help:**
+  ```bash
+  ./test/rocroller-tests --help
+  ```
 
-Alternatively, from the build directory simply run:
-```
-./rocroller-tests
-```
+**Debugging Options:**
+  - Prevent exceptions from being caught by GoogleTest:
+    ```
+    --gtest_catch_exceptions=0
+    ```
+  - Break on test failure:
+    ```
+    --gtest_break_on_failure
+    ```
 
-This command will run all of the tests all together. The tests will
-run faster than using `make test`, however, if there is an
-segmentation fault in any of the tests it will stop.
+### With [Catch2](https://github.com/catchorg/Catch2)
 
-Individual tests can be run at the command line from the build
-directory. For example:
-```
-./rocroller-tests --gtest_filter="*MemoryInstructionsExecuter.GPU_ExecuteFlatTest1Byte*"
-```
+**Run All Catch2 Tests:**
+  ```bash
+  ./test/rocroller-tests-catch
+  ```
 
-Tests that require a GPU are prefixed with `GPU_`.  If you are running
-on a machine without a supported GPU, you can use:
-```
-ctest -LE GPU
-```
-or
-```
-./bin/rocroller-tests --gtest_filter="-*GPU_*"
-```
+**List All Tests:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tests
+  ```
 
-A full list of gtests available can be listed using the command:
-```
-./bin/rocroller-tests --gtest_list_tests
-```
+**List All Test Tags:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tags
+  ```
 
-To prevent exceptions from being eaten by GoogleTest:
-```
---gtest_catch_exceptions=0
-```
-This allows catch/throw to work in GDB.
+**Run a Specific Test:**
+  ```bash
+  ./test/rocroller-tests-catch "<test-name-or-regex>"
+  ```
 
-To turn a test failure directly into a GDB breakpoint:
-```
---gtest_break_on_failure
-```
+**List Specific Tests:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tests "<test-name-or-regex>"
+  ```
+**List Specific Tests via Tags:**
+  ```bash
+  ./test/rocroller-tests-catch --list-tags "<tag-name-or-regex>"
+  ```
 
-### Updating pregenerated GPUArchitecture yaml files
+**Get Help:**
+  ```bash
+  ./test/rocroller-tests-catch --help
+  ```
 
-The [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
-into the repo should be updated anytime there are changes to the underlying MRISA XML files or the
-[GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) file.
 
-Updated yaml files can be copied from `./build/share/rocRoller/split_yamls/` after
-building with `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF`.
+### Updating Pregenerated GPUArchitecture YAML Files
 
+Update the [GPUArchitecture YAML files](GPUArchitectureGenerator/pregenerated) whenever MRISA XML files or [GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) change.
+
+**Steps:**
 ```bash
 cmake --preset amd-mrisa -B build -S .
 cmake --build build --target GPUArchitecture_def
@@ -240,19 +240,18 @@ cd GPUArchitectureGenerator/pregenerated/
 ../scripts/format_yaml.py -I *.yaml
 ```
 
-## GEMM client
+## GEMM Client
 
-To explore GEMM workloads and do performance testing, rocRoller
-provides a GEMM client.  The GEMM client is built alongside the
-library by default.
+rocRoller includes a GEMM client for exploring GEMM workloads and conducting performance tests. The GEMM client is built automatically with the library.
 
-To run the GEMM client from your build directory:
+To launch the GEMM client from your build directory, run:
 
-```
+```bash
 ./bin/client/rocroller-gemm --help
 ```
 
-## File Structure
+## Development
+### File Structure
 
  - `Foo.hpp`: Contains definitions for classes, concepts, etc.  Functions should be declaration-only.
  This is meant to allow for easy reading of the interface.
@@ -261,11 +260,9 @@ To run the GEMM client from your build directory:
  - `Foo_fwd.hpp`: Contains forward declarations for all types defined in `Foo.hpp`, type aliases such as `FooPtr` for `std::shared_ptr<Foo>` and `std::variant`.  Should have zero or very few includes.
  - `Foo.cpp`: Contains definitions for longer functions.
 
-Generally, we want as much as possible to be inlined since performance is important.
+Generally, we prioritize inlining.
 
-## Coding Practices
-
-### Style
+### Coding Style
 
  - Static and free functions should start with an uppercase character
  - Instance functions should start with lowercase
@@ -296,34 +293,31 @@ Documentation of code is as important for maintainability as writing clear and c
 
 Note: If using VSCode consider installing the [Doxygen Documentation Generator](https://marketplace.visualstudio.com/items?itemName=cschlosser.doxdocgen) extension. This extension helps with quickly implementing documentation sections in a Doxygen format.
 
-#### Building Documentation
-
 [Graphviz](https://graphviz.org/) and [Doxygen](https://www.doxygen.nl/index.html) both need to be installed to build the html documentation.
 
 The Doxygen documentation can be built via the make command from the main build directory:
-```
-make -j$(nproc) docs
+```bash
+make -j docs # or ninja, if using
 ```
 
 This will generate an HTML website from the markdown readme files and Doxygen comments and source/object relationships. The `index.html` file can be found in `doc/html` from the root of your local repository.
 
 
-## PR submissions
+### PR submissions
 
 - PRs submitting should have fewer than `500` lines of code change, unless of course those changes are merely lines moved or deleted.
 - If a new feature cannot be implemented in fewer than `500` lines of code then consider either refactoring, or splitting the feature into two or more PRs.
 - When opening a PR, details of what the feature does are essential.
 - PR authors should provide a description on how to review the PR, such as, outlining key changes. This is especially important if the PR is complex, novel, or on the higher side of lines of code change.
-- As mentioned in the coding style section, PR code needs to be formatted with `clang-format` version 13. This can be done manually.
-- rocRoller's dockers already have this version of `clang-format` and formatting can be automated using githooks. The command for installing the hook to the local repo: `.githooks/install`
+- PR code needs to be formatted with `clang-format` version 13 (rocRoller's docker images already have this version of `clang-format`). This can be done manually, with `scripts/fix-format`, or via githooks (with `.githooks/install`).
 - If a PR alters the compilation process in a way that causes the performance job to fail when building the master branch, adding the label `ci:no-build-master` will instead compare the PR against the latest build of the master branch.
 
 
-## Testing
+### Testing
 
 Each new feature is required to have a test.
 - Test sources are placed in the `test` folder.
-- CPP Files for Unit Tests should be included in the `rocroller-tests` executable in [CMakeLists.txt](https://github.com/ROCm/rocRoller/blob/master/test/CMakeLists.txt).
+- CPP Files for Unit Tests should be included in the `rocroller-tests` executable in [CMakeLists.txt](https://github.com/ROCm/rocm-libraries/shared/rocroller/blob/develop/test/CMakeLists.txt).
 
 Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
@@ -338,93 +332,73 @@ Note a few conditions:
 
 [Catch2](https://github.com/catchorg/Catch2) is the preferred unit testing framework for new unit tests.  GTest information for working with older unit tests can be found in the [GoogleTest User's Guide](https://google.github.io/googletest/).
 
-Additionally, there are tests that run against guidepost kernels that have been generated by Tensile. See the [README](https://github.com/ROCm/rocRoller/blob/master/test/unit/GemmGuidePost/README.md) for more information.
 
-## Logging
+## Logging and Debugging
+For a full list of `ROCROLLER_*` environment variables see: [Settings.hpp](lib/include/rocRoller/Utilities/Settings.hpp)
+### Logging
 
 - By default, logging messages of level `info` and above are sent to the console.
-- To disable console output, set the environment variable `ROCROLLER_LOG_CONSOLE=0`.
-- To change the logging level, set the environment variable `ROCROLLER_LOG_LEVEL`.  For example, setting `ROCROLLER_LOG_LEVEL` to `Debug` will cause debug messages to be emitted.
-- To log to a file, set the environment variable `ROCROLLER_LOG_FILE` to a file name.
+- Set `ROCROLLER_LOG_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages.
+- Set `ROCROLLER_LOG_CONSOLE=0` to disable console output.
+- Set `ROCROLLER_LOG_CONSOLE_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages to the console.
+- Set `ROCROLLER_LOG_FILE` to a file name to log output to.
+- Set `ROCROLLER_LOG_FILE_LEVEL` (e.g., `Debug`) to change the logging level and emit debug messages to a file.
 
-## Debugging
+### Debugging
 
-- Setting the environment variable `ROCROLLER_SAVE_ASSEMBLY=1` will cause assembly code to be written to a text file in the current working directory as it is generated. The file name is based on the kernel name and has a `.s` extension. To manually set the assembly file name to something else, set `ROCROLLER_ASSEMBLY_FILE` to the desired name.
-- Setting the environment variable `ROCROLLER_RANDOM_SEED` to an unsigned integer value will set the seed of the `RandomGenerator` used by the unit tests.
-- Setting the environment variable `ROCROLLER_BREAK_ON_THROW=1` will cause exceptions thrown directly by library code to cause a segfault. This causes GDB to break at the original point of failure, instead of at the point where it is rethrown by the Generator class.
-   - You can also set a breakpoint at the constructor of an exception class (e.g. `b std::bad_variant_access::bad_variant_access()` ), and GDB will more reliably break there than on `catch throw`.
-   - STL exceptions will not be affected by this.  Sometimes a better stack trace can be obtained by placing a breakpoint in the constructor of the particular exception that is being thrown.
-- Setting `ROCROLLER_ARCHITECTURE_FILE` will overwrite the default GPU architecture file generated at `source/rocRoller/GPUArchitecture_def.msgpack`. Currently supported file formats are YAML and Msgpack.
-- If your kernel is running out of registers and you want to know how close you are to fitting, setting `ROCROLLER_IGNORE_OUT_OF_REGISTERS=1` will let you generate the complete kernel and look at where the peak register usage is and how high it is.
-- `ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS` and `ROCROLLER_AUDIT_CONTROL_TRACERS` will enable some checks during graph creation and code generation that may expose some issues earlier. These are enabled by default in gtest/catch tests and in `rrperf run`.
-- Setting `AMD_COMGR_SAVE_TEMPS=1` `AMD_COMGR_EMIT_VERBOSE_LOGS=1` `AMD_COMGR_REDIRECT_LOGS=stderr` can help provide more assembler debug output.
-- Set `ROCROLLER_ASSEMBLER=Subprocess` and `ROCROLLER_DEBUG_ASSEMBLER_PATH=<assembler like amdclang>` to use an external assembler.
+- Set `ROCROLLER_SAVE_ASSEMBLY=1` to write generated assembly code to a `.s` text file in the current directory. The file name is based on the kernel name. To specify a custom file name, set `ROCROLLER_ASSEMBLY_FILE` to your desired name.
+- Set `ROCROLLER_RANDOM_SEED` to an integer to control the seed for the `RandomGenerator` used in unit tests.
+- Set `ROCROLLER_BREAK_ON_THROW=1` to trigger a segfault when library code throws an exception. This allows GDB to break at the original failure point, not where the exception is rethrown. For more precise debugging, set a breakpoint at the exception constructor (e.g., `b std::bad_variant_access::bad_variant_access()`). Note: STL exceptions are not affected.
+- Set `ROCROLLER_IGNORE_OUT_OF_REGISTERS=1` to allow kernel generation even when running out of registers. This lets you analyze peak register usage.
+- Set `ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS` and `ROCROLLER_AUDIT_CONTROL_TRACERS` to enable additional checks during graph creation and code generation. These checks are enabled by default in gtest/catch tests and in `rrperf run`.
+- Set `AMD_COMGR_SAVE_TEMPS=1`, `AMD_COMGR_EMIT_VERBOSE_LOGS=1`, and `AMD_COMGR_REDIRECT_LOGS=stderr` to get detailed assembler debug output.
+- Set `ROCROLLER_ASSEMBLER=Subprocess` and specify `ROCROLLER_DEBUG_ASSEMBLER_PATH=<assembler like amdclang>` to use an external assembler.
 
+You can explicitly enable or disable several environment variables by setting the `ROCROLLER_DEBUG` bit field. This variable aggregates multiple debug options into a single value. The following table lists the options and their corresponding bits:
 
-To explicitly enable/disable some of the mentioned environment variables, `ROCROLLER_DEBUG` can be set accordingly. `ROCROLLER_DEBUG` is a bit field that aggregates options together. The following options are covered by `ROCROLLER_DEBUG`:
-| Option | Respective Bit |
-| ------ | -------------- |
-| `ROCROLLER_LOG_CONSOLE` | 0 (0x0001)
-| `ROCROLLER_SAVE_ASSEMBLY` | 1 (0x0002)
-| `ROCROLLER_BREAK_ON_THROW` | 2 (0x0004)
+| Option                      | Bit (Hex Value) |
+|-----------------------------|-----------------|
+| `ROCROLLER_LOG_CONSOLE`     | 0 (0x0001)      |
+| `ROCROLLER_SAVE_ASSEMBLY`   | 1 (0x0002)      |
+| `ROCROLLER_BREAK_ON_THROW`  | 2 (0x0004)      |
 
-Therefore, enabling `ROCROLLER_LOG_CONSOLE` and `ROCROLLER_BREAK_ON_THROW` and disabling `ROCROLLER_SAVE_ASSEMBLY` would require `ROCROLLER_DEBUG=0x0005`. Enabling/disabling all corresponding options requires `ROCROLLER_DEBUG=0xFFFF` / `ROCROLLER_DEBUG=0X0000`, respectively.
+For example, to enable `ROCROLLER_LOG_CONSOLE` and `ROCROLLER_BREAK_ON_THROW` while disabling `ROCROLLER_SAVE_ASSEMBLY`, set `ROCROLLER_DEBUG=0x0005`. To enable all options, use `ROCROLLER_DEBUG=0xFFFF`. To disable all, use `ROCROLLER_DEBUG=0x0000`.
 
-`AssertFatals` can be used in place of `assert`. `AssertFatal` is similar to `assert` but offers more debugging functionality.
+Favour `AssertFatal` instead of `assert`. `AssertFatal` verifies assumptions and invariants via a conditional check. If it evaluates to false it prints detailed information and exits the program. You should also use the `ShowValue()` macro (defined in [Error_impl.hpp](lib/include/rocRoller/Utilities/Error_impl.hpp)) to print variable names and values that were used in the condition.
 
-An example usage:
+Example usage:
 
-```
+```cpp
 auto vr = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
 auto ar = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Int32, 1);
 
-// This call will NOT exit the program
+// This call does NOT exit the program
 AssertFatal(vr->registerCount() == ar->registerCount(), "Register counts are not equivalent");
 
 // This call WILL exit the program and print relevant info
-AssertFatal(vr->regType() == ar->regType(), ShowValue(Register::toString(vr->regType()),
-            ShowValue(Register::toString(ar->regType()), "Register types are not equivalent");
+AssertFatal(
+  vr->regType() == ar->regType(),
+  ShowValue(Register::toString(vr->regType())),
+  ShowValue(Register::toString(ar->regType())),
+  "Register types are not equivalent"
+);
 ```
 
-The first argument is a condition that is checked, `ShowValue()` is a macro defined in `rocRoller/Error_impl.hpp` where it prints out the variable name and value. The last argument is a custom message the developer can print to screen. If the condition is false then the program exits and the file name, line number, and corresponding arguments passed to AssertFatal are then printed.
+The first argument is the condition to check. Additional arguments (such as `ShowValue()` or a custom message) are optional and can appear in any order after the condition.
 
-Note: The condition check must be the first argument, but the other arguments can be in any order and are optional.
+You can also use `Throw<FatalError>("message")` to catch and report incorrect code.
 
-The use of `Throw<FatalError>("message")` can also be used to catch incorrect code.
+## Analysis
 
-## Profiling
+### Performance Analysis
 
-On Linux, we can use the "perf" tool to sample the callgraph and
-generate a flame graph.
+To run performance tests, use the `rrperf` tool. The `autoperf` command benchmarks multiple commits as well as your current workspace. For usage details, refer to the help documentation:
 
-Using FlameGraph: https://github.com/brendangregg/FlameGraph
-
-CMake configure with `-DROCROLLER_ENABLE_TIMERS=ON` and compile.
-
-Then run with the steps outlined in [scripts/flamegraph.py](scripts/flamegraph.py):
-```
-  perf record -F 99 -g ./bin/rocroller-tests --gtest_filter="KernelGraph*03"
-  perf script > out.perf
-  ~/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
-  ~/FlameGraph/flamegraph.pl out.folded > kernel.svg
+```bash
+./scripts/rrperf autoperf --help
 ```
 
-Additionally, when using the trace Dockerfile, you can invoke rrperf to profile RocRoller or Tensile guideposts with Omniperf.
-To see how this works, check rrperf's help documentation:
-```
-  ./scripts/rrperf profile --help
-```
-
-## Performance
-
-Invoke the rrperf tool to run performance tests.
-The autoperf command will test the performance of multiple commits and your current workspace.
-To see how this works, check rrperf's help documentation:
-```
-  ./scripts/rrperf autoperf --help
-```
-
-## Kernel Analysis
+### Kernel Analysis
 
 Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoller.
 
@@ -449,7 +423,7 @@ To view a summary plot of the generated file, run:
 
 and visit http://127.0.0.1:8050/.
 
-## Graph Visualization
+### KernelGraph Visualization
 
 The kgraph script can be run on an assembly file or on log output to generate a .dot file or rendered .pdf of the internal graph.  Run it with the `--help` option to see invocation.
 
@@ -471,9 +445,9 @@ Run the following to compare multiple dot files:
 ./dot_diff.py dots_0000.dot dots_0001.dot dots_0002.dot -o dots
 ```
 
-## Memory Access Visualization
+### Memory Access Visualization
 
-The [GEMM client](client/gemm.cpp) can produce memory trace files, using `--visualize=True`, which can be rendered using the [show_matrix script](scripts/show_matrix).
+The [GEMM client](client/src/gemm.cpp) can produce memory trace files, using `--visualize=True`, which can be rendered using the [show_matrix script](scripts/show_matrix).
 
 The following commands can be used to visualize memory access patterns to png files:
 

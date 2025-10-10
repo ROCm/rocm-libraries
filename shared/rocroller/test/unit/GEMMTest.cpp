@@ -40,6 +40,7 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -538,8 +539,7 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK                       = true;
-                params->streamKTwoTile                = gemm.streamKTwoTile;
+                params->streamK                       = gemm.streamK;
             }
 
             auto memoryTypeA = MemoryType::WAVE;
@@ -580,7 +580,9 @@ namespace GEMMDriverTest
                     {gemm.macM, gemm.macK / gemm.scaleBlockSize},
                     LayoutType::MATRIX_A,
                     {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
-                    gemm.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE,
+                    {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
+                    {gemm.swizzleM, gemm.swizzleN, gemm.swizzleK, gemm.swizzleB});
                 params->setDimensionInfo(*tagLoadScaleA, macTileAScale);
             }
 
@@ -603,7 +605,9 @@ namespace GEMMDriverTest
                     {gemm.macK / gemm.scaleBlockSize, gemm.macN},
                     LayoutType::MATRIX_B,
                     {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
-                    gemm.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE,
+                    {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
+                    {gemm.swizzleM, gemm.swizzleN, gemm.swizzleK, gemm.swizzleB});
                 params->setDimensionInfo(*tagLoadScaleB, macTileBScale);
             }
 
@@ -1095,7 +1099,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1111,7 +1115,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
     }
@@ -1134,7 +1138,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1148,9 +1152,29 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
+    {
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        GEMMProblem gemm;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+        gemm.m      = gemm.macM * 8;
+        gemm.n      = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+        gemm.k = gemm.macK * 8;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+        gemm.streamK   = StreamKMode::TwoTileDPFirst;
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
@@ -1179,7 +1203,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1189,7 +1213,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             for(auto loadLDSA : {false, true})
             {
                 gemm.loadLDSA = loadLDSA;
@@ -1232,12 +1256,12 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<Half>(gemm);
         }
     }
@@ -2280,6 +2304,8 @@ namespace GEMMDriverTest
                 if(unrollK == 4 && waveK == 128)
                     continue;
                 gemm.unrollK = unrollK;
+                if(unrollK > 1)
+                    gemm.swizzleK = 4 * unrollK;
                 basicGEMM<FP4, FP4, float>(gemm);
 
                 std::string generatedCode = m_context->instructions()->toString();
@@ -2344,6 +2370,9 @@ namespace GEMMDriverTest
             gemm.scaleTypeB = DataType::E8M0;
 
             gemm.swizzleScale  = true;
+            gemm.swizzleM      = 64;
+            gemm.swizzleN      = 64;
+            gemm.swizzleK      = 8;
             gemm.prefetchScale = true;
 
             gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
@@ -2445,6 +2474,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.workgroupMappingDim   = 0;
@@ -2502,6 +2534,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.workgroupMappingDim   = 0;
@@ -2572,6 +2607,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.scaleBlockSize

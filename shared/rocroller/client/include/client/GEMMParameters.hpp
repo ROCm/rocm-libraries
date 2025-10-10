@@ -161,10 +161,13 @@ namespace rocRoller
                 unsigned int unrollY = 0;
 
                 std::string scheduler;
+                std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                bool streamK        = false;
-                bool streamKTwoTile = false;
+                // TODO Use StreamKConfig
+                bool streamK               = false;
+                bool streamKTwoTile        = false;
+                bool streamKTwoTileDPFirst = false;
 
                 std::string version;
 
