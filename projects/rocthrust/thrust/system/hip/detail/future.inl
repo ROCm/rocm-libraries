@@ -39,6 +39,7 @@
 
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
+#    include _THRUST_STD_INCLUDE(__memory/addressof.h)
 #    include _THRUST_STD_INCLUDE(__memory/unique_ptr.h)
 // clang-format on
 #  endif
@@ -644,7 +645,7 @@ public:
   // For testing only.
   THRUST_HOST_DEVICE raw_const_pointer data() const
   {
-    return addressof(value_);
+    return _THRUST_STD::addressof(value_);
   }
 #  endif
 };

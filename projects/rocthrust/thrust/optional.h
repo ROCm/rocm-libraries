@@ -42,12 +42,15 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/addressof.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/swap.h>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/detail/memory_wrapper.h>
+#endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
+#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 // clang-format on
 #endif
@@ -425,7 +428,7 @@ struct optional_operations_base : optional_storage_base<T>
   template <class... Args>
   THRUST_HOST_DEVICE void construct(Args&&... args) noexcept
   {
-    new (thrust::addressof(this->m_value)) T(std::forward<Args>(args)...);
+    new (_THRUST_STD::addressof(this->m_value)) T(std::forward<Args>(args)...);
     this->m_has_value = true;
   }
 
@@ -1588,13 +1591,13 @@ public:
       }
       else
       {
-        new (thrust::addressof(rhs.m_value)) T(std::move(this->m_value));
+        new (_THRUST_STD::addressof(rhs.m_value)) T(std::move(this->m_value));
         this->m_value.T::~T();
       }
     }
     else if (rhs.has_value())
     {
-      new (thrust::addressof(this->m_value)) T(std::move(rhs.m_value));
+      new (_THRUST_STD::addressof(this->m_value)) T(std::move(rhs.m_value));
       rhs.m_value.T::~T();
     }
   }
@@ -1606,7 +1609,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE constexpr const T* operator->() const
   {
-    return thrust::addressof(this->m_value);
+    return _THRUST_STD::addressof(this->m_value);
   }
 
   /// \group pointer
@@ -1614,7 +1617,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE THRUST_OPTIONAL_CPP11_CONSTEXPR T* operator->()
   {
-    return thrust::addressof(this->m_value);
+    return _THRUST_STD::addressof(this->m_value);
   }
 
   /// \return the stored value
@@ -2647,7 +2650,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   template <class U = T, detail::enable_if_t<!detail::is_optional<detail::decay_t<U>>::value>* = nullptr>
   THRUST_HOST_DEVICE constexpr optional(U&& u)
-      : m_value(thrust::addressof(u))
+      : m_value(_THRUST_STD::addressof(u))
   {
     static_assert(std::is_lvalue_reference<U>::value, "U must be an lvalue");
   }
@@ -2689,7 +2692,7 @@ public:
   THRUST_HOST_DEVICE optional& operator=(U&& u)
   {
     static_assert(std::is_lvalue_reference<U>::value, "U must be an lvalue");
-    m_value = thrust::addressof(u);
+    m_value = _THRUST_STD::addressof(u);
     return *this;
   }
 
@@ -2701,7 +2704,7 @@ public:
   template <class U>
   THRUST_HOST_DEVICE optional& operator=(const optional<U>& rhs)
   {
-    m_value = thrust::addressof(rhs.value());
+    m_value = _THRUST_STD::addressof(rhs.value());
     return *this;
   }
 
@@ -2713,7 +2716,7 @@ public:
   template <class U>
   THRUST_HOST_DEVICE T& emplace(U& u) noexcept
   {
-    m_value = thrust::addressof(u);
+    m_value = _THRUST_STD::addressof(u);
     return *m_value;
   }
 
