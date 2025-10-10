@@ -31,6 +31,110 @@ namespace rocRoller
     namespace Expression
     {
 
+        struct BitfieldFoldingVisitor
+        {
+            template <CUnary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+
+                cpy.arg = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CBinary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+
+                cpy.lhs = call(expr.lhs);
+                cpy.rhs = call(expr.rhs);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CTernary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                auto cpy = expr;
+
+                cpy.matA   = call(expr.matA);
+                cpy.matB   = call(expr.matB);
+                cpy.matC   = call(expr.matC);
+                cpy.scaleA = call(expr.scaleA);
+                cpy.scaleB = call(expr.scaleB);
+
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CValue Value>
+            ExpressionPtr operator()(Value const& expr) const
+            {
+                return std::make_shared<Expression>(expr);
+            }
+
+            ExpressionPtr operator()(BitFieldExtract const& expr) const
+            {
+                BitFieldExtract cpy = expr;
+
+                cpy.arg = call(expr.arg);
+
+                auto eval = tryEvaluate(std::make_shared<Expression>(cpy));
+                if(eval.has_value())
+                    return literal(eval.value());
+
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
+            {
+                BitfieldCombine cpy = expr;
+
+                cpy.lhs = call(expr.lhs);
+                cpy.rhs = call(expr.rhs);
+
+                auto eval = tryEvaluate(std::make_shared<Expression>(cpy));
+                if(eval.has_value())
+                    return literal(eval.value());
+
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return expr;
+
+                return std::visit(*this, *expr);
+            }
+        };
+
+        /**
+         * Tries to evaluate BitfieldCombine and BitFieldExtract expressions.
+         */
+        ExpressionPtr foldBitfieldCombine(ExpressionPtr expr)
+        {
+            auto visitor = BitfieldFoldingVisitor();
+            return visitor.call(expr);
+        }
+
         struct DeepBitfieldExtractVisitor
         {
 
@@ -93,11 +197,15 @@ namespace rocRoller
             }
 
         private:
-            uint32_t         m_dwordSize = 32;
             mutable uint32_t m_offset;
             uint32_t         m_width;
         };
 
+        /**
+         * Returns a BitFieldExtract expression that extracts the specified bitfield from the given expression.
+         * Looks through Concatenate expressions to find the corresponding operand to extract.
+         * Looks through BitfieldCombine expressions to extract from its destination operand if the BitfieldCombine and BitFieldExtract do not overlap.
+         */
         ExpressionPtr
             deepExtract(ExpressionPtr expr, DataType type, uint32_t offset, uint32_t width)
         {
@@ -110,32 +218,26 @@ namespace rocRoller
                 return extracted;
             }
 
-            ExpressionPtr extract     = bfe(type, extracted, width, offset);
-            auto          extractEval = tryEvaluate(extract);
-            if(extractEval.has_value())
-            {
-                return literal(extractEval.value());
-            }
-
+            ExpressionPtr extract = bfe(type, extracted, width, offset);
             return extract;
         }
 
-        std::vector<ExpressionPtr> splitBitfield(BitfieldCombine const& expr, const size_t dstSize)
+        std::vector<ExpressionPtr>
+            splitBitfield(BitfieldCombine const& expr, const size_t dstSize, const size_t dwordSize)
         {
-            constexpr uint32_t         DWORD = 32;
             std::vector<ExpressionPtr> fields;
             uint32_t                   combineStartBit = expr.dstOffset;
             uint32_t                   combineEndBit   = expr.dstOffset + expr.width - 1;
-            uint32_t                   numDwords       = (dstSize + DWORD - 1) / DWORD;
+            uint32_t                   numDwords       = (dstSize + dwordSize - 1) / dwordSize;
 
             for(int i = 0; i < numDwords; ++i)
             {
-                uint32_t dwordStartBit = i * DWORD;
-                uint32_t dwordEndBit   = dwordStartBit + DWORD - 1;
+                uint32_t dwordStartBit = i * dwordSize;
+                uint32_t dwordEndBit   = dwordStartBit + dwordSize - 1;
 
                 // Get new destination dword
                 ExpressionPtr dstDWord
-                    = deepExtract(expr.rhs, DataType::UInt32, dwordStartBit, DWORD);
+                    = deepExtract(expr.rhs, DataType::UInt32, dwordStartBit, dwordSize);
 
                 // No overlap with this dword
                 if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)
@@ -154,10 +256,6 @@ namespace rocRoller
                               overlapStart - dwordStartBit,
                               overlapWidth);
 
-                    auto subBitfieldCombineEval = tryEvaluate(subBitfieldCombine);
-                    if(subBitfieldCombineEval.has_value())
-                        subBitfieldCombine = literal(subBitfieldCombineEval.value());
-
                     fields.push_back(subBitfieldCombine);
                 }
             }
@@ -167,6 +265,8 @@ namespace rocRoller
 
         struct SplitBitfieldCombineExpressionVisitor
         {
+            const uint32_t dwordSize = 32;
+
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
@@ -221,8 +321,7 @@ namespace rocRoller
 
             ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
-                constexpr uint32_t DWORD = 32;
-                auto               cpy   = expr;
+                auto cpy = expr;
 
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
@@ -242,10 +341,10 @@ namespace rocRoller
                             srcSize);
 
                 // No need to split if destination size is less than or equal to 32 bits
-                if(dstSize <= DWORD)
+                if(dstSize <= dwordSize)
                     return std::make_shared<Expression>(cpy);
 
-                std::vector<ExpressionPtr> fields = splitBitfield(cpy, dstSize);
+                std::vector<ExpressionPtr> fields = splitBitfield(cpy, dstSize, dwordSize);
                 auto                       concatenateExpr
                     = std::make_shared<Expression>(Concatenate{{fields}, resultVariableType(expr)});
 
@@ -269,12 +368,11 @@ namespace rocRoller
 
         /**
          * Splits BitfieldCombine expressions that target more than 32 bits into a Concatenate of 32 bit sub-expressions.
-         * It evaluatuess sub-expressions where possible.
          */
         ExpressionPtr splitBitfieldCombine(ExpressionPtr expr)
         {
             auto visitor = SplitBitfieldCombineExpressionVisitor();
-            return visitor.call(expr);
+            return foldBitfieldCombine(visitor.call(expr));
         }
 
     }
