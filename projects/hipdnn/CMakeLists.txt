@@ -48,11 +48,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for official hipDNN engine plugins")
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE PATH "Build directory for official hipDNN engine plugins")
-set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Full install directory for official hipDNN engine plugins")
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Full install directory for official hipDNN engine plugins. Uses the CMAKE_INSTALL_PREFIX set at configure time (defaults to /opt/rocm/).")
 set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Relative install directory for official hipDNN engine plugins")
 
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Build directory for test plugins")
-set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
+set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
 
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
