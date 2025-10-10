@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +22,12 @@
  *
  * ************************************************************************ */
 
-#include "test.hpp"
-#include "testing_axpyi.hpp"
+#pragma once
+#ifndef HIPSPARSE_PARSE_DATA_HPP
+#define HIPSPARSE_PARSE_DATA_HPP
 
-TEST_ROUTINE(axpyi, level1, arg.N, arg.nnz, arg.alpha, arg.alphai, arg.baseA);
+#include <string>
+
+bool hipsparse_parse_data(int& argc, char** argv, const std::string& default_file = "");
+
+#endif // HIPSPARSE_PARSE_DATA_HPP
