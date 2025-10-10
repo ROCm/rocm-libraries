@@ -140,8 +140,6 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin)
 endif()
 
-set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
-
 if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
