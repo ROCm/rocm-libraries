@@ -195,6 +195,9 @@ function(add_integration_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(integration_test ${TARGET} ${WORKING_DIR})
 endfunction()
 
+# Define the CTest installation directory
+set(MIOPEN_LEGACY_PLUGIN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin")
+
 # Install CTest configuration files for direct test execution
 # This should be called once at the end of the main CMakeLists.txt after all tests are registered
 function(install_miopen_legacy_plugin_ctest_files)
@@ -208,19 +211,14 @@ function(install_miopen_legacy_plugin_ctest_files)
     get_property(all_tests GLOBAL PROPERTY MIOPEN_LEGACY_TEST_TARGETS)
     
     foreach(test_target ${all_tests})
-        # Test executables are in the same directory as CTestTestfile.cmake
         file(APPEND "${INSTALLED_CTEST_FILE}" 
-            "add_test(${test_target} \"./${test_target}\")\n")
-        
-        # Working directory is the bin directory where tests and CTestTestfile.cmake live
-        file(APPEND "${INSTALLED_CTEST_FILE}"
-            "set_tests_properties(${test_target} PROPERTIES WORKING_DIRECTORY \".\")\n")
+            "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
     
-    # Install the generated CTestTestfile.cmake to bin directory
+    # Install the generated CTestTestfile.cmake to MIOPEN_LEGACY_PLUGIN_CTEST_FILE_INSTALL_PATH
     install(
         FILES "${INSTALLED_CTEST_FILE}"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        DESTINATION ${MIOPEN_LEGACY_PLUGIN_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
     )
     

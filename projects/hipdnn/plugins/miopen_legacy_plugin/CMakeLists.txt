@@ -16,8 +16,6 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         VERSION ${MIOPEN_LEGACY_PLUGIN}
         LANGUAGES CXX)
 
-    include(GNUInstallDirs)
-
     if(NOT WIN32)
         # Only set if not already specified by user
         if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -25,6 +23,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         endif()
         message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
     endif()
+
+    include(GNUInstallDirs)
 
     set(CMAKE_CXX_STANDARD 17)
     
