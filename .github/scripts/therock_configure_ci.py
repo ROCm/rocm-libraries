@@ -86,8 +86,11 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     config = load_repo_config("./repos-config.json")
+    print(config)
     valid_prefixes = get_valid_prefixes(config)
+    print(valid_prefixes)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
+    print(matched_subtrees)
     return matched_subtrees
 
 
