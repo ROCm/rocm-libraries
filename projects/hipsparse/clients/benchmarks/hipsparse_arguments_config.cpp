@@ -43,8 +43,8 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
         this->batch_count = 1;
 
-        this->filename      = "";
-        this->function_name = "";
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
 
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
@@ -162,7 +162,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "Batch count (default: 1)")
 
     ("file",
-     value<std::string>(&this->filename)->default_value(""),
+     value<std::string>(&this->b_filename)->default_value(""),
      "read from file with file extension detection.")
 
     ("alpha",
@@ -390,6 +390,12 @@ int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&
     this->orderC  = (this->b_orderC == 0) ? HIPSPARSE_ORDER_ROW : HIPSPARSE_ORDER_COL;
     this->formatA = (hipsparseFormat_t)this->b_formatA;
     this->formatB = (hipsparseFormat_t)this->b_formatB;
+
+    strncpy(this->filename, this->b_filename.c_str(), this->b_filename.length());
+    this->filename[this->b_filename.length()] = '\0';
+
+    strncpy(this->function, this->function_name.c_str(), this->function_name.length());
+    this->function[this->function_name.length()] = '\0';
 
     if(this->M < 0 || this->N < 0)
     {

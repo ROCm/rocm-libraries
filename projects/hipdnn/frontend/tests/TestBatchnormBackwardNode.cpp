@@ -146,10 +146,48 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensorIds)
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
     std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
 
     EXPECT_TRUE(usedIds.find(9) != usedIds.end());
     EXPECT_TRUE(usedIds.find(10) != usedIds.end());
+    EXPECT_TRUE(duplicateIds.empty());
+}
+
+TEST(TestBatchnormBackwardNode, GatherHipdnnTensorsCollectsDuplicates)
+{
+    BatchnormBackwardAttributes batchnormAttributes;
+    batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
+
+    auto peerStat1 = std::make_shared<TensorAttributes>();
+    peerStat1->set_uid(9).set_name("PeerStat1");
+
+    // Introduce duplicate
+    auto duplicatePeerStat1 = std::make_shared<TensorAttributes>();
+    duplicatePeerStat1->set_uid(9).set_name("DuplicatePeerStat1");
+
+    auto peerStat2 = std::make_shared<TensorAttributes>();
+    peerStat2->set_uid(10).set_name("PeerStat2");
+
+    batchnormAttributes.set_peer_stats({peerStat1, duplicatePeerStat1, peerStat2});
+
+    GraphAttributes graphAttributes;
+    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
+
+    std::unordered_set<int64_t> usedIds;
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+
+    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
+    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
+    EXPECT_TRUE(duplicateIds.find(9) != duplicateIds.end());
 }
 
 TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)

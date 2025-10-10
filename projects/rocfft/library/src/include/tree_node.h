@@ -1093,6 +1093,13 @@ struct MultiPlanItem
 
     // This process's rank relative to the plan communicator.
     int local_comm_rank;
+
+    // Sub-communicator for this operation, which is only set if
+    // we know we're only talking to a subset of the ranks
+    std::optional<MPI_Comm_wrapper_t> subcomm;
+    // Helper to get the sub-communicator if it's set, or the plan's
+    // communicator.
+    MPI_Comm ActiveMPIComm(const rocfft_plan plan) const;
 };
 
 // Communication operations
@@ -1376,16 +1383,15 @@ private:
 struct CommAllToAll : public MultiPlanItem
 {
 
-    CommAllToAll(rocfft_precision           _precision,
-                 rocfft_array_type          _arrayType,
-                 const std::vector<size_t>& _sendOffsets,
-                 const std::vector<size_t>& _sendCounts,
-                 const std::vector<size_t>& _recvOffsets,
-                 const std::vector<size_t>& _recvCounts,
-                 BufferPtr                  _sendBuf,
-                 BufferPtr                  _recvBuf,
-                 bool                       uniformCounts,
-                 MPI_Comm_wrapper_t         subcomm = {})
+    CommAllToAll(rocfft_precision                    _precision,
+                 rocfft_array_type                   _arrayType,
+                 const std::vector<size_t>&          _sendOffsets,
+                 const std::vector<size_t>&          _sendCounts,
+                 const std::vector<size_t>&          _recvOffsets,
+                 const std::vector<size_t>&          _recvCounts,
+                 BufferPtr                           _sendBuf,
+                 BufferPtr                           _recvBuf,
+                 std::optional<MPI_Comm_wrapper_t>&& _subcomm)
         : precision(_precision)
         , arrayType(_arrayType)
         , sendOffsets(_sendOffsets)
@@ -1394,9 +1400,16 @@ struct CommAllToAll : public MultiPlanItem
         , recvCounts(_recvCounts)
         , sendBuf(_sendBuf)
         , recvBuf(_recvBuf)
-        , uniform_counts(uniformCounts)
-        , subcomm(std::move(subcomm))
+        // check if uniform exchange to use MPI_Alltoall
+        , uniform_counts(std::all_of(sendCounts.begin(),
+                                     sendCounts.end(),
+                                     [&](size_t c) { return c == sendCounts[0]; })
+                         && std::all_of(recvCounts.begin(), recvCounts.end(), [&](size_t c) {
+                                return c == recvCounts[0];
+                            }))
     {
+        subcomm = std::move(_subcomm);
+
         // Currently MPI interface uses 32-bit signed ints, so assert
         // that our counts/offsets don't overflow that type
         auto checkArray = [](const std::vector<size_t>& arr) {
@@ -1444,16 +1457,6 @@ struct CommAllToAll : public MultiPlanItem
         return true;
     }
 
-    void set_uniform_count_inside_subcomm(size_t val)
-    {
-        uniform_count_inside_subcomm = val;
-    }
-
-    void set_uniform_count(bool val)
-    {
-        uniform_counts = val;
-    }
-
 private:
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
@@ -1465,18 +1468,12 @@ private:
     const std::vector<size_t> recvOffsets;
     const std::vector<size_t> recvCounts;
 
-    // counts for MPIAlltoall inside a subcommunicator
-    size_t uniform_count_inside_subcomm;
-
     // send/receive buffers
     const BufferPtr sendBuf;
     const BufferPtr recvBuf;
 
     // check uniform counts for using AlltoAll instead of AlltoAllv
-    bool uniform_counts = false;
-
-    // subcomm for optimizations whenever possible
-    MPI_Comm_wrapper_t subcomm;
+    const bool uniform_counts = false;
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on
