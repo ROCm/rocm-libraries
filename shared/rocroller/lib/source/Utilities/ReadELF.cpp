@@ -35,6 +35,38 @@
 
 using namespace rocRoller;
 
+const unsigned char ELF_MAGIC[] = {0x7f, 'E', 'L', 'F'};
+const unsigned char ELF_CLASS_64 = 2;      // 64-bit
+const unsigned char ELF_ENDIANNESS = 1;      // Little endian
+
+bool isELF64LE(const std::vector<char>& buffer) {
+    // Check minimum size for ELF header
+    if (buffer.size() < 16) {
+        return false;
+    }
+    
+    // Check ELF magic number (first 4 bytes: 0x7f, 'E', 'L', 'F')
+    if (std::memcmp(buffer.data(), ELF_MAGIC, 4) != 0) {
+        std::cout << "Not an ELF file - invalid magic number" << std::endl;
+        return false;
+    }
+    
+    // Check 64-bit architecture (5th byte should be 2)
+    if (static_cast<unsigned char>(buffer[4]) != ELF_CLASS_64) {
+        std::cout << "Not a 64-bit ELF file" << std::endl;
+        return false;
+    }
+    
+    // Check little endian (6th byte should be 1)
+    if (static_cast<unsigned char>(buffer[5]) != ELF_ENDIANNESS) {
+        std::cout << "Not little endian ELF file" << std::endl;
+        return false;
+    }
+    
+    std::cout << "File is ELF64LE" << std::endl;
+    return true;
+}
+
 std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
 {
     std::string yaml;
@@ -54,6 +86,12 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
     std::vector<char> buffer(fileSize);
     file.read(buffer.data(), fileSize);
     file.close();
+
+    // Check if file is ELF64LE before proceeding
+    if (!isELF64LE(buffer)) {
+        amd_comgr_release_data(elfData);
+        throw std::runtime_error("File is not a valid ELF64LE file: " + fileName);
+    }
     
     // Debug: Print buffer contents (first 256 bytes or less)
     std::cout << "File size:" << fileSize << " bytes" << std::endl;
@@ -87,8 +125,6 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
         }
     }
     std::cout << std::endl;
-
-    fromELF(buffer);
 
     status = amd_comgr_set_data(elfData, buffer.size(), buffer.data());
     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data");
