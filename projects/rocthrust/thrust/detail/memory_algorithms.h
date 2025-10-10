@@ -18,12 +18,17 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/addressof.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/nv_target.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
+// clang-format on
+#endif
 
 #include <new>
 #include <utility>
@@ -57,7 +62,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last) noexcept
 {
   for (; first != last; ++first)
   {
-    destroy_at(addressof(*first));
+    destroy_at(_THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -74,7 +79,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, Fo
 
   for (; first != last; ++first)
   {
-    destroy_at(alloc_T, addressof(*first));
+    destroy_at(alloc_T, _THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -85,7 +90,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n) noexcept
 {
   for (; n > 0; (void) ++first, --n)
   {
-    destroy_at(addressof(*first));
+    destroy_at(_THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -102,7 +107,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, 
 
   for (; n > 0; (void) ++first, --n)
   {
-    destroy_at(alloc_T, addressof(*first));
+    destroy_at(alloc_T, _THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -122,13 +127,13 @@ THRUST_HOST_DEVICE void uninitialized_construct(ForwardIt first, ForwardIt last,
       try {
         for (; current != last; ++current)
         {
-          ::new (static_cast<void*>(addressof(*current))) T(args...);
+          ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...);
         }
       } catch (...) {
         destroy(first, current);
         throw;
       }),
-    (for (; current != last; ++current) { ::new (static_cast<void*>(addressof(*current))) T(args...); }));
+    (for (; current != last; ++current) { ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...); }));
 }
 
 template <typename Allocator, typename ForwardIt, typename... Args>
@@ -149,13 +154,13 @@ void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt fi
       try {
         for (; current != last; ++current)
         {
-          traits::construct(alloc_T, addressof(*current), args...);
+          traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...);
         }
       } catch (...) {
         destroy(alloc_T, first, current);
         throw;
       }),
-    (for (; current != last; ++current) { traits::construct(alloc_T, addressof(*current), args...); }));
+    (for (; current != last; ++current) { traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...); }));
 }
 
 template <typename ForwardIt, typename Size, typename... Args>
@@ -172,13 +177,13 @@ void uninitialized_construct_n(ForwardIt first, Size n, Args const&... args)
       try {
         for (; n > 0; ++current, --n)
         {
-          ::new (static_cast<void*>(addressof(*current))) T(args...);
+          ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...);
         }
       } catch (...) {
         destroy(first, current);
         throw;
       }),
-    (for (; n > 0; ++current, --n) { ::new (static_cast<void*>(addressof(*current))) T(args...); }));
+    (for (; n > 0; ++current, --n) { ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...); }));
 }
 
 template <typename Allocator, typename ForwardIt, typename Size, typename... Args>
@@ -199,13 +204,13 @@ void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt 
       try {
         for (; n > 0; (void) ++current, --n)
         {
-          traits::construct(alloc_T, addressof(*current), args...);
+          traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...);
         }
       } catch (...) {
         destroy(alloc_T, first, current);
         throw;
       }),
-    (for (; n > 0; (void) ++current, --n) { traits::construct(alloc_T, addressof(*current), args...); }));
+    (for (; n > 0; (void) ++current, --n) { traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...); }));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

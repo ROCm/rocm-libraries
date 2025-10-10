@@ -15,20 +15,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/memory_wrapper.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
+// clang-format on
+#else
+#  include <thrust/detail/memory_wrapper.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*! Obtains the actual address of the object or function arg, even in presence of overloaded operator&.
- */
-template <typename T>
-THRUST_HOST_DEVICE T* addressof(T& arg)
-{
-  return reinterpret_cast<T*>(&const_cast<char&>(reinterpret_cast<const volatile char&>(arg)));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
+using _THRUST_STD::addressof;
 THRUST_NAMESPACE_END
