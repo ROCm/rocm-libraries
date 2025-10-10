@@ -217,7 +217,9 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
         MIOPEN_THROW("unsupported data type:");
     // NOLINTEND(*-braces-around-statements)
 
-    kernel_name << "_" << static_cast<int>(problem.EnableTF32());
+    // only float support tf32
+    bool use_tf32 = (IsInputFp32(problem) && IsOutputFp32(problem) && problem.EnableTF32());
+    kernel_name << "_" << static_cast<int>(use_tf32);
 
     return kernel_name.str();
 }
