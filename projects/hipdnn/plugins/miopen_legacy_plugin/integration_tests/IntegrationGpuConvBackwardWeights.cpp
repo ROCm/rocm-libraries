@@ -28,25 +28,25 @@ namespace
 {
 
 template <typename DataType>
-class ConvBackwardData : public ::testing::TestWithParam<ConvTestCase>
+class ConvBackwardWeights : public ::testing::TestWithParam<ConvTestCase>
 {
     struct ConvTensorBundle
     {
         ConvTensorBundle(const ConvTestCase& testCase,
                          const TensorLayout& layout = TensorLayout::NCHW)
-            : dxTensor(testCase.xDims, layout)
-            , wTensor(testCase.wDims, layout)
+            : xTensor(testCase.xDims, layout)
+            , dwTensor(testCase.wDims, layout)
             , dyTensor(testCase.yDims, layout)
         {
             dyTensor.fillWithRandomValues(
                 static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
-            wTensor.fillWithRandomValues(
+            xTensor.fillWithRandomValues(
                 static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
-            dxTensor.fillWithValue(static_cast<DataType>(0.0));
+            dwTensor.fillWithValue(static_cast<DataType>(0.0));
         }
 
-        PinnedTensor<DataType> dxTensor;
-        PinnedTensor<DataType> wTensor;
+        PinnedTensor<DataType> xTensor;
+        PinnedTensor<DataType> dwTensor;
         PinnedTensor<DataType> dyTensor;
     };
 
@@ -84,54 +84,54 @@ protected:
     }
 
     std::unordered_map<int64_t, void*>
-        createVariantPack(const graph::TensorAttributes& dxTensorAttr,
-                          const graph::TensorAttributes& wTensorAttr,
+        createVariantPack(const graph::TensorAttributes& xTensorAttr,
+                          const graph::TensorAttributes& dwTensorAttr,
                           const graph::TensorAttributes& dyTensorAttr,
                           ConvTensorBundle& tensorBundle)
     {
         std::unordered_map<int64_t, void*> variantPack;
-        variantPack[dxTensorAttr.get_uid()] = tensorBundle.dxTensor.memory().deviceData();
-        variantPack[wTensorAttr.get_uid()] = tensorBundle.wTensor.memory().deviceData();
+        variantPack[xTensorAttr.get_uid()] = tensorBundle.xTensor.memory().deviceData();
+        variantPack[dwTensorAttr.get_uid()] = tensorBundle.dwTensor.memory().deviceData();
         variantPack[dyTensorAttr.get_uid()] = tensorBundle.dyTensor.memory().deviceData();
 
         return variantPack;
     }
 
-    void runMiopenConvBwdData(const ConvTestCase& testCase,
+    void runMiopenConvWrwData(const ConvTestCase& testCase,
                               ConvTensorBundle& graphTensorBundle,
                               hipdnn_frontend::DataType dataType)
     {
         auto graphObj = std::make_shared<hipdnn_frontend::graph::Graph>();
 
-        graphObj->set_name("ConvolutionBackwardDataTest");
+        graphObj->set_name("ConvolutionBackwardWeightTest");
 
         int64_t uid = 1;
+
+        auto xAttr = graph::makeTensorAttributes("x", dataType, graphTensorBundle.xTensor);
+        xAttr.set_uid(uid++);
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto dyAttr = graph::makeTensorAttributes("dy", dataType, graphTensorBundle.dyTensor);
         dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
-        auto wAttr = graph::makeTensorAttributes("w", dataType, graphTensorBundle.wTensor);
-        wAttr.set_uid(uid++);
-        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
-
-        graph::ConvDgradAttributes convAttrs;
-        convAttrs.set_name("convolution_backward_data");
+        graph::ConvWgradAttributes convAttrs;
+        convAttrs.set_name("convolution_backward_weights");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
-        auto dxTensorAttr = graphObj->conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        auto dwTensorAttr = graphObj->conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
 
-        if(!dxTensorAttr->has_uid())
+        if(!dwTensorAttr->has_uid())
         {
-            dxTensorAttr->set_uid(uid++);
+            dwTensorAttr->set_uid(uid++);
         }
-        dxTensorAttr->set_dim(graphTensorBundle.dxTensor.dims());
-        dxTensorAttr->set_stride(graphTensorBundle.dxTensor.strides());
-        dxTensorAttr->set_output(true);
-        dxTensorAttr->set_data_type(dataType);
+        dwTensorAttr->set_dim(graphTensorBundle.dwTensor.dims());
+        dwTensorAttr->set_stride(graphTensorBundle.dwTensor.strides());
+        dwTensorAttr->set_output(true);
+        dwTensorAttr->set_data_type(dataType);
 
         auto result = graphObj->validate();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -155,21 +155,21 @@ protected:
         Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack
-            = createVariantPack(*dxTensorAttr, *wTensorAttr, *dyTensorAttr, graphTensorBundle);
+            = createVariantPack(*xTensorAttr, *dwTensorAttr, *dyTensorAttr, graphTensorBundle);
 
         result = graphObj->execute(_handle, variantPack, workspace.get());
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 
-    void runCpuConvBwdData(const ConvTestCase& testCase, ConvTensorBundle& cpuTensorBundle)
+    void runCpuConvWrwData(const ConvTestCase& testCase, ConvTensorBundle& cpuTensorBundle)
     {
-        CpuFpReferenceConvolutionImpl<DataType, float>::convBwdData(cpuTensorBundle.dxTensor,
-                                                                    cpuTensorBundle.wTensor,
-                                                                    cpuTensorBundle.dyTensor,
-                                                                    testCase.convStride,
-                                                                    testCase.convDilation,
-                                                                    testCase.convPrePadding,
-                                                                    testCase.convPostPadding);
+        CpuFpReferenceConvolutionImpl<DataType, float>::convBwdWeight(cpuTensorBundle.xTensor,
+                                                                      cpuTensorBundle.dwTensor,
+                                                                      cpuTensorBundle.dyTensor,
+                                                                      testCase.convStride,
+                                                                      testCase.convDilation,
+                                                                      testCase.convPrePadding,
+                                                                      testCase.convPostPadding);
     }
 
     void runConvTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
@@ -182,14 +182,14 @@ protected:
         ConvTensorBundle cpuTensorBundle(testCase, layout);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
-        runMiopenConvBwdData(testCase, graphTensorBundle, dataType);
-        graphTensorBundle.dxTensor.memory().markDeviceModified();
+        runMiopenConvWrwData(testCase, graphTensorBundle, dataType);
+        graphTensorBundle.dwTensor.memory().markDeviceModified();
 
-        runCpuConvBwdData(testCase, cpuTensorBundle);
+        runCpuConvWrwData(testCase, cpuTensorBundle);
 
         CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
-                                              graphTensorBundle.dxTensor.memory()));
+        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dwTensor.memory(),
+                                              graphTensorBundle.dwTensor.memory()));
     }
 
 private:
@@ -198,130 +198,130 @@ private:
     int _deviceId = 0;
 };
 
-using IntegrationGpuConvBwdDataNchwFp32 = ConvBackwardData<float>;
-using IntegrationGpuConvBwdDataNcdhwFp32 = ConvBackwardData<float>;
+using IntegrationGpuConvWrwDataNchwFp32 = ConvBackwardWeights<float>;
+using IntegrationGpuConvWrwDataNcdhwFp32 = ConvBackwardWeights<float>;
 
-using IntegrationGpuConvBwdDataNchwBfp16 = ConvBackwardData<hip_bfloat16>;
-using IntegrationGpuConvBwdDataNcdhwBfp16 = ConvBackwardData<hip_bfloat16>;
+using IntegrationGpuConvWrwDataNchwBfp16 = ConvBackwardWeights<hip_bfloat16>;
+using IntegrationGpuConvWrwDataNcdhwBfp16 = ConvBackwardWeights<hip_bfloat16>;
 
-using IntegrationGpuConvBwdDataNchwFp16 = ConvBackwardData<half>;
-using IntegrationGpuConvBwdDataNcdhwFp16 = ConvBackwardData<half>;
+using IntegrationGpuConvWrwDataNchwFp16 = ConvBackwardWeights<half>;
+using IntegrationGpuConvWrwDataNcdhwFp16 = ConvBackwardWeights<half>;
 
-using IntegrationGpuConvBwdDataNhwcFp32 = ConvBackwardData<float>;
-using IntegrationGpuConvBwdDataNdhwcFp32 = ConvBackwardData<float>;
+using IntegrationGpuConvWrwDataNhwcFp32 = ConvBackwardWeights<float>;
+using IntegrationGpuConvWrwDataNdhwcFp32 = ConvBackwardWeights<float>;
 
-using IntegrationGpuConvBwdDataNhwcBfp16 = ConvBackwardData<hip_bfloat16>;
-using IntegrationGpuConvBwdDataNdhwcBfp16 = ConvBackwardData<hip_bfloat16>;
+using IntegrationGpuConvWrwDataNhwcBfp16 = ConvBackwardWeights<hip_bfloat16>;
+using IntegrationGpuConvWrwDataNdhwcBfp16 = ConvBackwardWeights<hip_bfloat16>;
 
-using IntegrationGpuConvBwdDataNhwcFp16 = ConvBackwardData<half>;
-using IntegrationGpuConvBwdDataNdhwcFp16 = ConvBackwardData<half>;
+using IntegrationGpuConvWrwDataNhwcFp16 = ConvBackwardWeights<half>;
+using IntegrationGpuConvWrwDataNdhwcFp16 = ConvBackwardWeights<half>;
 
 } // namespace
 
-TEST_P(IntegrationGpuConvBwdDataNchwFp32, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNchwFp32, Correctness)
 {
-    runConvTest(4e-6f, TensorLayout::NCHW);
+    runConvTest(conv::getToleranceWrw<float>(), TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNcdhwFp32, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNcdhwFp32, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceWrw<float>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNchwBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NCHW);
+    runConvTest(conv::getToleranceWrw<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNcdhwBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceWrw<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNchwFp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNchwFp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NCHW);
+    runConvTest(conv::getToleranceWrw<half>(), TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNcdhwFp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNcdhwFp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NCDHW);
+    runConvTest(conv::getToleranceWrw<half>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNhwcFp32, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNhwcFp32, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceWrw<float>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNdhwcFp32, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNdhwcFp32, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<float>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceWrw<float>(), TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceWrw<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNdhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<hip_bfloat16>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceWrw<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNhwcFp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNhwcFp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NHWC);
+    runConvTest(conv::getToleranceWrw<half>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvBwdDataNdhwcFp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNdhwcFp16, Correctness)
 {
-    runConvTest(conv::getToleranceBwd<half>(), TensorLayout::NDHWC);
+    runConvTest(conv::getToleranceWrw<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNchwFp32,
+                         IntegrationGpuConvWrwDataNchwFp32,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNchwBfp16,
+                         IntegrationGpuConvWrwDataNchwBfp16,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNchwFp16,
+                         IntegrationGpuConvWrwDataNchwFp16,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNhwcFp32,
+                         IntegrationGpuConvWrwDataNhwcFp32,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNhwcBfp16,
+                         IntegrationGpuConvWrwDataNhwcBfp16,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNhwcFp16,
+                         IntegrationGpuConvWrwDataNhwcFp16,
                          testing::ValuesIn(getConvTestCases4D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNcdhwFp32,
+                         IntegrationGpuConvWrwDataNcdhwFp32,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNcdhwBfp16,
+                         IntegrationGpuConvWrwDataNcdhwBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNcdhwFp16,
+                         IntegrationGpuConvWrwDataNcdhwFp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNdhwcFp32,
+                         IntegrationGpuConvWrwDataNdhwcFp32,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNdhwcBfp16,
+                         IntegrationGpuConvWrwDataNdhwcBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(,
-                         IntegrationGpuConvBwdDataNdhwcFp16,
+                         IntegrationGpuConvWrwDataNdhwcFp16,
                          testing::ValuesIn(getConvTestCases5D()));
