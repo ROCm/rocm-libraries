@@ -7,6 +7,7 @@
 
 #include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -47,7 +48,7 @@ class ConvFwdPlan : public IPlan
 {
 public:
     ConvFwdPlan(const HipdnnEnginePluginHandle& handle, ConvFwdParams&& params);
-    ~ConvFwdPlan() override;
+    ~ConvFwdPlan() override = default;
 
     ConvFwdPlan(const ConvFwdPlan&) = delete;
     ConvFwdPlan& operator=(const ConvFwdPlan&) = delete;
@@ -62,7 +63,7 @@ public:
 
 private:
     ConvFwdParams _params;
-    miopenSolution_t _solution = nullptr;
+    hipdnn_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
 };
 
 } // namespace miopen_legacy_plugin

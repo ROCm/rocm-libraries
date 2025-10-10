@@ -63,9 +63,22 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
         problem, miopenTensorConvolutionY, _params.dy().tensorDescriptor()));
 
     size_t numSolutions;
+    miopenSolution_t solution = nullptr;
     // Requesting only the best solution
     THROW_ON_MIOPEN_FAILURE(
-        miopenFindSolutions(handle.miopenHandle, problem, nullptr, &_solution, &numSolutions, 1));
+        miopenFindSolutions(handle.miopenHandle, problem, nullptr, &solution, &numSolutions, 1));
+
+    if(solution != nullptr)
+    {
+        _solution = hipdnn_sdk::utilities::ScopedResource<miopenSolution_t>(
+            solution, [](miopenSolution_t s) {
+                auto status = miopenDestroySolution(s);
+                if(status != miopenStatusSuccess)
+                {
+                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvFwdPlan destructor");
+                }
+            });
+    }
 
     if(numSolutions != 1)
     {
@@ -74,40 +87,18 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
     }
 }
 
-ConvBwdPlan::~ConvBwdPlan()
-{
-    if(_solution != nullptr)
-    {
-        auto status = miopenDestroySolution(_solution);
-        if(status != miopenStatusSuccess)
-        {
-            HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan destructor");
-        }
-    }
-}
-
 ConvBwdPlan::ConvBwdPlan(ConvBwdPlan&& other) noexcept
     : _params(std::move(other._params))
-    , _solution(other._solution)
+    , _solution(std::move(other._solution))
 {
-    other._solution = nullptr;
 }
 
 ConvBwdPlan& ConvBwdPlan::operator=(ConvBwdPlan&& other) noexcept
 {
     if(this != &other)
     {
-        if(_solution != nullptr)
-        {
-            auto status = miopenDestroySolution(_solution);
-            if(status != miopenStatusSuccess)
-            {
-                HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan move assignment");
-            }
-        }
         _params = std::move(other._params);
-        _solution = other._solution;
-        other._solution = nullptr;
+        _solution = std::move(other._solution);
     }
     return *this;
 }
@@ -137,11 +128,15 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(workspace != nullptr)
     {
         // Assume the provided workspace is large enough
-        THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution, &workspaceSize));
+        THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &workspaceSize));
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenRunSolution(
-        handle.miopenHandle, _solution, tensors.size(), tensors.data(), workspace, workspaceSize));
+    THROW_ON_MIOPEN_FAILURE(miopenRunSolution(handle.miopenHandle,
+                                              _solution.get(),
+                                              tensors.size(),
+                                              tensors.data(),
+                                              workspace,
+                                              workspaceSize));
 }
 
 } // namespace miopen_legacy_plugin
