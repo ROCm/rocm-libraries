@@ -19,8 +19,6 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
-
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
@@ -241,7 +239,7 @@ if( BUILD_WITH_SOLVER )
 endif()
 
 add_custom_command( OUTPUT "${HIPBLAS_TEST_DATA}"
-                    COMMAND ${Python3_EXECUTABLE} ../common/hipblas_gentest.py -I ../include hipblas_gtest.yaml -o "${HIPBLAS_TEST_DATA}"
+                    COMMAND ${python} ../common/hipblas_gentest.py -I ../include hipblas_gtest.yaml -o "${HIPBLAS_TEST_DATA}"
                     DEPENDS ../common/hipblas_gentest.py ../include/hipblas_common.yaml "${HIPBLAS_AUX_YAML_DATA}" "${HIPBLAS_L1_YAML_DATA}" "${HIPBLAS_L2_YAML_DATA}" "${HIPBLAS_L3_YAML_DATA}" "${HIPBLAS_EX_YAML_DATA}" "${HIPBLAS_SOLVER_YAML_DATA}" hipblas_gtest.yaml
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 

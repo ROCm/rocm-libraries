@@ -57,15 +57,15 @@ protected:
     {
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
-        PinnedTensor<DataType> xTensor(testCase._xDims, _layout);
+        PinnedTensor<DataType> xTensor(testCase.xDims, _layout);
         deviceBuffers.push_back(generateRandomDeviceBuffer(
-            xTensor, 1, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed));
+            xTensor, 1, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed));
 
-        PinnedTensor<DataType> wTensor(testCase._wDims, _layout);
+        PinnedTensor<DataType> wTensor(testCase.wDims, _layout);
         deviceBuffers.push_back(generateRandomDeviceBuffer(
-            wTensor, 2, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed));
+            wTensor, 2, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed));
 
-        PinnedTensor<DataType> yTensor(testCase._yDims, _layout);
+        PinnedTensor<DataType> yTensor(testCase.yDims, _layout);
         deviceBuffers.push_back(generateEmptyDeviceBuffer(yTensor, 3));
 
         auto convBuilder = createValidConvFwdGraph(xTensor.dims(),
@@ -74,10 +74,10 @@ protected:
                                                    wTensor.strides(),
                                                    yTensor.dims(),
                                                    yTensor.strides(),
-                                                   testCase._convPrePadding,
-                                                   testCase._convPostPadding,
-                                                   testCase._convStride,
-                                                   testCase._convDilation,
+                                                   testCase.convPrePadding,
+                                                   testCase.convPostPadding,
+                                                   testCase.convStride,
+                                                   testCase.convDilation,
                                                    dataType);
 
         hipdnnPluginConstData_t opGraph;
@@ -115,18 +115,18 @@ protected:
 
         Tensor<DataType> xTensorCpu(xTensor.dims(), _layout);
         xTensorCpu.fillWithRandomValues(
-            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> wTensorCpu(wTensor.dims(), _layout);
         wTensorCpu.fillWithRandomValues(
-            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> yTensorCpu(yTensor.dims(), _layout);
 
         CpuFpReferenceConvolutionImpl<DataType, float>::convFwdInference(xTensorCpu,
                                                                          wTensorCpu,
                                                                          yTensorCpu,
-                                                                         testCase._convStride,
-                                                                         testCase._convDilation,
-                                                                         testCase._convPrePadding);
+                                                                         testCase.convStride,
+                                                                         testCase.convDilation,
+                                                                         testCase.convPrePadding);
 
         CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
