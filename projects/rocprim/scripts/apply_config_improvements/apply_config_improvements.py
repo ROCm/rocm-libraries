@@ -89,7 +89,7 @@ def add_new_contenders(
     algorithm_name: str,
     new_config: Dict[str, Any],
     new_alg_data: Dict[str, Any],
-    config_get_best: Callable[[List[Dict[str, Any]]], Dict[str, Any]],
+    score_assigner: Callable[[List[Dict[str, Any]]], None],
     contenders: Dict[Tuple[Any, str], Contender],
     improvement_threshold_percentage: float,
 ) -> bool:
@@ -114,12 +114,13 @@ def add_new_contenders(
         for instance_key, new_instance_data in new_arch_specializations.items():
             if instance_key not in new_arch_data:
                 sys.exit(
-                    f"{colors.FAIL}The new JSON data is missing the {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
+                    f"{colors.FAIL}The new JSON data is missing {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
                 )
             new_instances = new_arch_data[instance_key]
 
             add_base_args(new_instance_data["base_args"], new_instances)
-            new_best_instance = config_get_best(new_instances)
+            score_assigner(new_instances)
+            new_best_instance = get_best_instance(new_instances)
 
             total_specializations += 1
 
@@ -161,7 +162,7 @@ def add_new_contenders(
             )
 
             best_instance = (
-                config_get_best([old_best_instance, new_best_instance])
+                get_best_instance([old_best_instance, new_best_instance])
                 if old_best_instance
                 else new_best_instance
             )
@@ -171,10 +172,10 @@ def add_new_contenders(
                 slower_rejected_count += 1
                 continue
 
-            new_ips = new_best_instance.get("items_per_second", 0.0)
-            old_ips = old_best_instance.get("items_per_second", 0.0)
+            new_score = new_best_instance["score"]
+            old_score = old_best_instance.get("score", 0.0)
             improvement = (
-                ((new_ips - old_ips) / old_ips * 100.0) if old_ips > 0 else 0.0
+                ((new_score - old_score) / old_score * 100.0) if old_score > 0 else 0.0
             )
 
             # If improvement is below CLI threshold, skip (no coloring)
@@ -183,18 +184,20 @@ def add_new_contenders(
                 continue
 
             # Adaptive z-score threshold.
+            # This ensures that if the old or new results were very noisy,
+            # that the improvement threshold is raised accordingly.
             cv_old = old_best_instance.get("cv", 0.0)
             cv_new = new_best_instance.get("cv", 0.0)
             adaptive_threshold = Z_SCORE * ((cv_old**2 + cv_new**2) ** 0.5) * 100.0
-            eff_threshold = max(improvement_threshold_percentage, adaptive_threshold)
+            threshold = max(improvement_threshold_percentage, adaptive_threshold)
 
             old_noise_val = cv_old * 100
             new_noise_val = cv_new * 100
 
             # If improvement is below adaptive threshold, print noise values in red and skip
-            if improvement < eff_threshold:
+            if improvement < threshold:
                 noisy_rejected_count += 1
-                status = f"Rejected: {improvement:.1f}% < {eff_threshold:.1f}%"
+                status = f"Rejected: {improvement:.1f}% < {threshold:.1f}% faster"
                 colored_status = f"{colors.FAIL}{status}{colors.END_COLOR}"
                 row["status"] = colored_status
                 row["status_raw"] = status
@@ -219,7 +222,7 @@ def add_new_contenders(
             )
 
     columns = [
-        ("status", f"Status for {algorithm_name}"),
+        ("status", f"Status of {algorithm_name}"),
         ("noise", "Noise (old/new)"),
         ("bps", "Bytes/sec (old/new)"),
         ("arch", "Arch"),
@@ -277,7 +280,7 @@ def get_old_contenders(
     algorithm_name: str,
     old_config: Dict[str, Any],
     old_alg_data: Dict[str, Any],
-    config_get_best: Callable[[List[Dict[str, Any]]], Dict[str, Any]],
+    score_assigner: Callable[[List[Dict[str, Any]]], None],
 ) -> Dict[Tuple[Any, str], Contender]:
     global warnings
 
@@ -302,16 +305,19 @@ def get_old_contenders(
                 # If old_arch_data is falsy, then a warning was already printed
                 if old_arch_data:
                     warnings.append(
-                        f"{colors.WARN}The old JSON data is missing the {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
+                        f"{colors.WARN}The old JSON data is missing {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
                     )
                 old_instances = []
             else:
                 old_instances = old_arch_data[instance_key]
 
             add_base_args(old_instance_data["base_args"], old_instances)
+            score_assigner(old_instances)
 
             # If old_instances is empty, just use the config string as-is
-            old_best_instance = config_get_best(old_instances) if old_instances else {}
+            old_best_instance = (
+                get_best_instance(old_instances) if old_instances else {}
+            )
 
             key = (instance_key, arch)
             contenders[key] = Contender(
@@ -321,10 +327,13 @@ def get_old_contenders(
     return contenders
 
 
+def get_best_instance(instances):
+    return max(instances, key=lambda x: x["score"])
+
+
 def add_base_args(base_args, instances):
     """
-    Adds base arguments to instances for specific algorithms.
-    See get_config_get_best() for details on why this is necessary.
+    Adds base arguments from a config to instances, for get_score_assigner().
     """
     for instance in instances:
         if instance["algo"] in {"merge_sort_block_sort", "radix_sort_block_sort"}:
@@ -332,60 +341,47 @@ def add_base_args(base_args, instances):
             instance["ipt"] = int(base_args[1])
 
 
-# Default formula to pick the best configuration, only looking at items_per_second.
-def default_config_get_best(input: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return max(input, key=lambda x: x["items_per_second"])
-
-
-# If we can double the sorted items_per_block and items_per_second does not degrade more than ~10%, consider it superior.
-def block_sort_config_get_best(input: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return max(
-        input,
-        key=lambda x: x["items_per_second"] * ((x["bs"] * x["ipt"]) ** (1 / 4)),
-    )
-
-
-# This function serves as a shared selector mechanism for determining the "best" config
-# for a given algorithm, across both autotuning and benchmarking contexts.
-#
-# Some background on specific algorithms:
-#
-# - The function returns one of several subfunctions that determine which configuration is best
-#   (e.g., block_sort_config_get_best). These are used by both create_optimization.py and this file
-#   to maintain consistency.
-#
-# - For example, adjacent_difference uses only "value_type" as its config selector, even though its
-#   benchmark names include an additional key ("is_left"). So while adjacent_difference is benchmarked
-#   with both is_left=True and is_left=False, the config selection doesn't distinguish between them.
-#   Hence, the default_config_get_best function is returned, which later determines the best based on performance.
-#
-# - In contrast, merge_sort_block_sort is handled specially. The config selector for it
-#   (block_sort_config_get_best) may choose a config that slightly reduces throughput
-#   (items_per_second) in favor of larger block sizes (items per block), which may have
-#   other downstream benefits.
-#
-# - Note: Autotuning explores many combinations of block size (bs) and items per thread (ipt),
-#   but benchmarking only uses the bs/ipt pair from the algorithm's default config specialization.
-#   This difference is why block_sort_config_get_best consults the config struct directly.
-def get_config_get_best(
-    algorithm_name: str,
-) -> Callable[[List[Dict[str, Any]]], Dict[str, Any]]:
+def score_assigner_default(instances: List[Dict[str, Any]]) -> None:
     """
-    Returns a config selector function for the given algorithm.
+    Default formula to assign scores, only looking at items_per_second.
+    """
+    for instance in instances:
+        instance["score"] = instance["items_per_second"]
 
-    This ensures consistent selection of the best-performing configuration
-    between autotuning and benchmarking, including algorithm-specific overrides.
 
-    Parameters:
-        algorithm_name (str): The name of the algorithm to retrieve a selector for.
+def score_assigner_block_sort(instances: List[Dict[str, Any]]) -> None:
+    """
+    Formula to assign scores for block sort algorithms.
+    If we can double the sorted items_per_block and items_per_second
+    does not degrade more than ~10%, it is considered superior.
+    """
+    for instance in instances:
+        instance["score"] = instance["items_per_second"] * (
+            (instance["bs"] * instance["ipt"]) ** (1 / 4)
+        )
 
-    Returns:
-        Callable[[List[Dict[str, Any]]], Dict[str, Any]]: A function that selects the best
-        configuration from a list of results.
+
+def get_score_assigner(algorithm_name: str) -> Callable[[List[Dict[str, Any]]], None]:
+    """
+    Retrieves the appropriate scoring function for the specified algorithm.
+
+    This function ensures consistent configuration scoring between
+    **autotuning** and **benchmarking** contexts, accounting for algorithm-specific
+    performance trade-offs.
+
+    For most algorithms, `score_assigner_default` is used.
+    For block-sorting algorithms (e.g., merge sort, radix sort), the
+    specialized `score_assigner_block_sort` is used to reward larger block
+    sizes when throughput remains acceptable.
+
+    `adjacent_difference` uses only `value_type` as its config selector,
+    even though its benchmark also includes the keys `"is_left"`.
+    So while adjacent_difference is benchmarked with both is_left=True
+    and is_left=False, the config selection doesn't distinguish between them.
     """
     if algorithm_name in {"merge_sort_block_sort", "radix_sort_block_sort"}:
-        return block_sort_config_get_best
-    return default_config_get_best
+        return score_assigner_block_sort
+    return score_assigner_default
 
 
 def generate_improved_configs(
@@ -402,15 +398,15 @@ def generate_improved_configs(
         old_alg_data = old_data.get(algorithm_name)
         new_alg_data = new_data.get(algorithm_name, {})
 
-        config_get_best = get_config_get_best(algorithm_name)
+        score_assigner = get_score_assigner(algorithm_name)
         contenders = get_old_contenders(
-            algorithm_name, old_config or {}, old_alg_data or {}, config_get_best
+            algorithm_name, old_config or {}, old_alg_data or {}, score_assigner
         )
         improved = add_new_contenders(
             algorithm_name,
             new_config,
             new_alg_data,
-            config_get_best,
+            score_assigner,
             contenders,
             improvement_threshold_percentage,
         )
@@ -744,7 +740,6 @@ def main() -> None:
     new_data = read_data(args.new_json_dir, selectors)
 
     old_configs = read_configs(args.old_configs_dir)
-
     new_configs = read_configs(args.new_configs_dir)
     if len(new_configs) == 0:
         sys.exit(f"{colors.FAIL}No new configs{colors.END_COLOR}")
