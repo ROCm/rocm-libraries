@@ -24,13 +24,22 @@ void ExecutionPlanDescriptor::finalize()
                   "ExecutionPlanDescriptor::finalize() failed: Engine was not set.");
 
     auto engine = _engineConfig->getEngine();
+    auto engineId = engine->getEngineId();
     auto graph = engine->getGraph();
     auto handle = graph->getHandle();
     auto pluginResourceManager = handle->getPluginResourceManager();
     auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
 
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContext(
-        pluginResourceManager, engine->getEngineId(), &engineConfigPluginData, graph.get());
+        pluginResourceManager, engineId, &engineConfigPluginData, graph.get());
+
+    _workspaceSize = static_cast<int64_t>(
+        pluginResourceManager->getWorkspaceSize(engineId, _executionContext->get()));
+
+    THROW_IF_LT(_workspaceSize,
+                0,
+                HIPDNN_STATUS_INTERNAL_ERROR,
+                "ExecutionPlanDescriptor::finalize() failed: Invalid workspace size.");
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
@@ -72,16 +81,26 @@ void ExecutionPlanDescriptor::getWorkspaceSize(hipdnnBackendAttributeType_t attr
                                                int64_t* elementCount,
                                                void* arrayOfElements) const
 {
-    THROW_IF_NULL(_engineConfig,
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "ExecutionPlanDescriptor failed to get workspace size: Engine was not set "
-                  "(internal error).");
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_INT64,
+                HIPDNN_STATUS_BAD_PARAM,
+                "ExecutionPlanDescriptor failed to get workspace size: Invalid attribute type.");
 
-    _engineConfig->getAttribute(HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
-                                attributeType,
-                                requestedElementCount,
-                                elementCount,
-                                arrayOfElements);
+    THROW_IF_NE(requestedElementCount,
+                1,
+                HIPDNN_STATUS_BAD_PARAM,
+                "ExecutionPlanDescriptor failed to get workspace size: Invalid element count.");
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "ExecutionPlanDescriptor failed to get workspace size: Null pointer.");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+
+    *static_cast<int64_t*>(arrayOfElements) = _workspaceSize;
 }
 
 void ExecutionPlanDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
