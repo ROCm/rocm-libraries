@@ -107,9 +107,9 @@ bool ks_test_2(const std::vector<double> & expected, const std::vector<double> &
 
     // calculating the critical value
     double alpha = 0.1; // the signigficance level
-    double c_alpha = std::sqrt(std::log(alpha / 2) * 0.5);
+    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
     double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
- 
+
     return d <= cv; // <= because we reject if d > cv
 }
 
