@@ -53,6 +53,8 @@ public:
     BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
     BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = default;
 
+    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
