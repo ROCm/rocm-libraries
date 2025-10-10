@@ -419,7 +419,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
     default: break; // Unsupported data types - valid_kernels remains empty
     }
 }
-#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#endif
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
@@ -687,6 +687,14 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     return {};
 #endif
 }
+
+#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
+void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
+    const ::miopen::conv::ProblemDescription&)
+{
+    // No-op stub for non-CK builds
+}
+#endif
 
 } // namespace conv
 } // namespace solver

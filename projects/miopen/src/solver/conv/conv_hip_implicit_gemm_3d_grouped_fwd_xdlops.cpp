@@ -354,14 +354,14 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
-        return ::miopen::solver::FillValidKernelsIDs<DeviceOpGFwdBilinearPtrs<DataType>,
-                                                     CKArgs<DataType>>(problem);
+        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdBilinearPtrs<DataType>,
+                                                   CKArgs<DataType>>(problem);
     case SCALE:
-        return ::miopen::solver::FillValidKernelsIDs<DeviceOpGFwdScalePtrs<DataType>,
-                                                     CKArgs<DataType>>(problem);
+        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdScalePtrs<DataType>,
+                                                   CKArgs<DataType>>(problem);
     default:
-        return ::miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType>,
-                                                     CKArgs<DataType>>(problem);
+        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType>,
+                                                   CKArgs<DataType>>(problem);
     }
 }
 } // namespace
@@ -418,7 +418,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
     default: break; // Unsupported data types - valid_kernels remains empty
     }
 }
-#endif // # MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#endif
 
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
@@ -838,6 +838,14 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     return {};
 #endif
 }
+
+#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
+void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
+    const ::miopen::conv::ProblemDescription&)
+{
+    // No-op stub for non-CK builds
+}
+#endif
 
 } // namespace conv
 } // namespace solver
