@@ -40,6 +40,7 @@ public:
 
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::vector<std::shared_ptr<TensorAttributes>> peer_stats;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
