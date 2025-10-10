@@ -7,6 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -152,3 +154,4 @@ jobs:
       amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
       test_runs_on: "windows-strix-halo-gpu-rocm"
       platform: "windows"
+      test_type: ${{ inputs.test_type }}
