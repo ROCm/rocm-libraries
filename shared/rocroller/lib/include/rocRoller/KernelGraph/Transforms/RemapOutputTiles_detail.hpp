@@ -93,7 +93,7 @@ namespace rocRoller
              * Map workgroups to tiles in a Z-order-inspired blockwise manner where
              * the blocks are divided/bounded by `size` along `dimension` (M=0 or N=1).
              *
-             * TODO add a more descriptive comment.
+             * See docs/src/WorkgroupMapping.rst for more information.
              */
             std::tuple<int, int, int> workgroupMapping(TileSizeInfo const&                  info,
                                                        rocRoller::KernelGraph::KernelGraph& graph,
