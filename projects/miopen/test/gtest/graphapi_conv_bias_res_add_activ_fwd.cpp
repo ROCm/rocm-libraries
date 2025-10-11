@@ -377,7 +377,13 @@ public:
         EXPECT_TRUE(miopen::range_distance(referenceOutput) == miopen::range_distance(output));
 
         const double tolerance = 80;
-        double threshold       = std::numeric_limits<T>::epsilon() * tolerance;
+        double epsilon_        = std::numeric_limits<T>::epsilon();
+        if constexpr(std::is_same_v<T, float>)
+        {
+            // float use tf32 compute which share same mantissa bits
+            epsilon_ = std::numeric_limits<half>::epsilon();
+        }
+        double threshold       = epsilon_ * tolerance;
         auto error             = miopen::rms_range(referenceOutput, output);
 
         EXPECT_FALSE(miopen::find_idx(referenceOutput, miopen::not_finite) >= 0)

@@ -424,7 +424,13 @@ protected:
             tolerance = 4;
         }
 
-        double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+        double epsilon_ = std::numeric_limits<T>::epsilon();
+        if constexpr(std::is_same_v<T, float>)
+        {
+            // float use tf32 compute which share same mantissa bits
+            epsilon_ = std::numeric_limits<half>::epsilon();
+        }
+        double threshold = epsilon_ * tolerance;
         auto error       = miopen::rms_range(ref_out, output);
 
         ASSERT_LT(miopen::find_idx(ref_out, miopen::not_finite), 0)

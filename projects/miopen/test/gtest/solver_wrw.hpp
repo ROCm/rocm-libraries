@@ -148,7 +148,13 @@ private:
         ASSERT_EQ(miopen::range_distance(ref_weights), miopen::range_distance(weights));
 
         const double tolerance = 80;
-        double threshold       = std::numeric_limits<T>::epsilon() * tolerance;
+        double epsilon_        = std::numeric_limits<T>::epsilon();
+        if constexpr(std::is_same_v<T, float>)
+        {
+            // float use tf32 compute which share same mantissa bits
+            epsilon_ = std::numeric_limits<half>::epsilon();
+        }
+        double threshold       = epsilon_ * tolerance;
         auto error             = miopen::rms_range(ref_weights, weights);
 
         ASSERT_LT(miopen::find_idx(ref_weights, miopen::not_finite), 0)
