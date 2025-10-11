@@ -107,7 +107,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
         {"MIO_BN_GRP1", static_cast<int>(1)},
         {"MIO_BN_GRP2", static_cast<int>(1)},
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
-        {"MIOPEN_SBN_BOUNDS", static_cast<unsigned>(read_len / read_unit)},
+        {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_PREC_READ_TYPE", PREC_READ_TYPE},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
