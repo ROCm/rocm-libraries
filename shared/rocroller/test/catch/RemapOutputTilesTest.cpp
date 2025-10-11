@@ -37,13 +37,12 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
+#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemapOutputTiles.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemapOutputTiles_detail.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
-
-#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
-#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
 
 #include "CustomMatchers.hpp"
 #include "ExpressionMatchers.hpp"
@@ -285,8 +284,7 @@ namespace RemapOutputTilesTest
 
     TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu][a123]")
     {
-        //auto remapDim = GENERATE(0, 1);
-        auto remapDim = GENERATE(0);
+        auto remapDim = GENERATE(0, 1);
         {
             // Note:
             //
@@ -298,16 +296,12 @@ namespace RemapOutputTilesTest
             auto context = TestContext::ForTestDevice({{.enableFullDivision = true}}, remapDim);
             auto kernel  = RemapWorkgroupKernel(context.get(), remapDim);
 
-            //auto numTilesM = GENERATE(22, 55);
-            //auto numTilesN = GENERATE(7, 8, 11);
-
-            auto numTilesM = GENERATE(22);
-            auto numTilesN = GENERATE(7);
+            auto numTilesM = GENERATE(22, 55);
+            auto numTilesN = GENERATE(7, 8, 11);
 
             uint totalSize = numTilesM * numTilesN;
 
-            //auto WGM = GENERATE(range(1, 50));
-            auto WGM = GENERATE(4);
+            auto WGM = GENERATE(range(1, 50));
             {
                 //
                 // WGM is the workgroup-mapping "group size".  It is a kernel argument.

@@ -178,7 +178,9 @@ namespace rocRoller
 
                 auto totalSize = totalNumberOfWorkgroups(info);
 
-                //auto workgroup = graph.coordinates.addElement(Linear(totalSize, nullptr));
+                // This MacroTileNumber will be connected to a workgroup in
+                // later transformation or be used in AddStreamK with dimension
+                // K to create a flattened tile space.
                 auto workgroup
                     = graph.coordinates.addElement(MacroTileNumber(0, totalSize, nullptr));
                 Log::info("RemapOutputTiles total workgroup tag = {}", workgroup);

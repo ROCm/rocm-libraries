@@ -710,7 +710,7 @@ namespace rocRoller
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
 
         /**
-         * Give a tag in coordinate graph, this function returns which direction it is
+         * @brief Gave a tag in coordinate graph, this function returns which direction it is
          * dangling. If the node is not dangling, it returns std::nullopt.
          */
         std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag);

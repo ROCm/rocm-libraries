@@ -433,7 +433,6 @@ namespace rocRoller
             };
 
             auto workgroup = graph.coordinates.addElement(Workgroup(0));
-            Log::info("SK adds a workgroup = {}", workgroup);
             graph.coordinates.addElement(PassThrough(), {workgroup}, {flagsScratchTag});
 
             // Store tile
@@ -542,7 +541,7 @@ namespace rocRoller
             auto zero = Expression::literal(0u);
 
             auto workgroup = graph.coordinates.addElement(Workgroup(0));
-            Log::info("2 SK adds a workgroup = {}", workgroup);
+
             // Read tile
             auto receiveTileTag
                 = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
@@ -808,7 +807,7 @@ namespace rocRoller
 
             auto WGs       = graph.coordinates.addElement(Linear(argInfo.numWGs, nullptr));
             auto workgroup = graph.coordinates.addElement(Workgroup());
-            Log::info("SK adds a workgroup => {}", workgroup);
+
             auto localTileSpaceSK
                 = graph.coordinates.addElement(Linear(argInfo.numSKTilesPerWG, nullptr));
             auto localTileSpaceDP
@@ -1317,8 +1316,6 @@ namespace rocRoller
                                 = convert(numTilesDT, macTileNumber->size);
                     }
                 }
-                //argInfo.numTileArgExprs.back() =
-                //    graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size;
 
                 argInfo.numTileArgExprs.back() = convert(
                     numTilesDT, graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size);
