@@ -57,7 +57,6 @@ public:
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
-    //virtual int64_t indexFromFlattened(size_t flattenedIndex) const = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
@@ -217,34 +216,9 @@ public:
         , _elementCount(TensorBase<T>::calculateItemCount(dims))
         , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
-        // Validation 1: Same number of dimensions
-        if(dims.size() != strides.size())
-        {
-            throw std::invalid_argument("Number of dimensions (" + std::to_string(dims.size())
-                                        + ") must match number of strides ("
-                                        + std::to_string(strides.size()) + ")");
-        }
-
-        // Validation 2: All dimensions must be positive
-        for(size_t i = 0; i < dims.size(); ++i)
-        {
-            if(dims[i] <= 0)
-            {
-                throw std::invalid_argument("All dimensions must be positive. Dimension "
-                                            + std::to_string(i) + " is " + std::to_string(dims[i]));
-            }
-        }
-
-        // Validation 3: All strides must be positive (non-zero)
-        for(size_t i = 0; i < strides.size(); ++i)
-        {
-            if(strides[i] <= 0)
-            {
-                throw std::invalid_argument("All strides must be positive. Stride "
-                                            + std::to_string(i) + " is "
-                                            + std::to_string(strides[i]));
-            }
-        }
+        validateDimsAndStridesSameSize();
+        validateAllPositive(_dims, "dimension");
+        validateAllPositive(_strides, "stride");
 
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(
             TensorBase<T>::calculateElementSpace(dims, strides));
@@ -320,6 +294,30 @@ public:
     }
 
 private:
+    void validateDimsAndStridesSameSize() const
+    {
+        if(_dims.size() != _strides.size())
+        {
+            throw std::invalid_argument("Number of dimensions (" + std::to_string(_dims.size())
+                                        + ") must match number of strides ("
+                                        + std::to_string(_strides.size()) + ")");
+        }
+    }
+
+    void validateAllPositive(const std::vector<int64_t>& values, const std::string& valueName) const
+    {
+        for(size_t i = 0; i < values.size(); ++i)
+        {
+            if(values[i] <= 0)
+            {
+                std::ostringstream oss;
+                oss << "All " << valueName << "s must be positive. " << valueName << " " << i
+                    << " is " << values[i];
+                throw std::invalid_argument(oss.str());
+            }
+        }
+    }
+
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;

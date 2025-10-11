@@ -67,20 +67,28 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     BatchnormFwdPlan<float, float, float> patient(std::move(params));
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.x_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.scale_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.bias_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.mean_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.inv_variance_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.y_tensor_uid()].get()),
-        epsilon);
+    auto shallowXTensor = createShallowTensor<float>(
+        params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
+    auto shallowScaleTensor = createShallowTensor<float>(
+        params.scaleTensor,
+        directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
+    auto shallowBiasTensor = createShallowTensor<float>(
+        params.biasTensor, directTensorBundle.tensors[attributes.bias_tensor_uid()]->rawHostData());
+    auto shallowMeanTensor = createShallowTensor<float>(
+        params.meanTensor, directTensorBundle.tensors[attributes.mean_tensor_uid()]->rawHostData());
+    auto shallowInvVarTensor = createShallowTensor<float>(
+        params.invVarianceTensor,
+        directTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->rawHostData());
+    auto shallowYTensor = createShallowTensor<float>(
+        params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
+
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(*shallowXTensor,
+                                                                     *shallowScaleTensor,
+                                                                     *shallowBiasTensor,
+                                                                     *shallowMeanTensor,
+                                                                     *shallowInvVarTensor,
+                                                                     *shallowYTensor,
+                                                                     epsilon);
 
     patient.execute(variantPack);
 
