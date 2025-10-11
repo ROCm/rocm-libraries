@@ -64,8 +64,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     const FP_TYPE_PREC invVariance = rsqrt(pvar + epsilon);
 
     // load the input data (this is done in a vectorized manner)
-    // IMPROVEMENT: Can we fit this and also the other arrays that follow in registers?
-    // Maybe we should use __shared__ memory?
     FP_TYPE data[MIOPEN_READ_UNIT];
 
 #pragma unroll 2
@@ -123,14 +121,11 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 
     unsigned int chw_i = tidx * MIOPEN_READ_UNIT;
 
-    // IMPROVEMENT: Can we fit this memory and the other arrays that follow in registers?
-    // Maybe we should use __shared__ memory?
+    // perform a vectorized load of the mean, variance, scale, and bias
     FP_TYPE_PREC pmean[MIOPEN_READ_UNIT];
     FP_TYPE_PREC pvar[MIOPEN_READ_UNIT];
     FP_TYPE_PREC pscale[MIOPEN_READ_UNIT];
     FP_TYPE_PREC pbias[MIOPEN_READ_UNIT];
-
-    // perform a vectorized load of the mean, variance, scale, and bias
     *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pmean)) =
         *(reinterpret_cast<const MIOPEN_PREC_READ_TYPE*>(estimatedMean + chw_i));
     *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pvar)) =
