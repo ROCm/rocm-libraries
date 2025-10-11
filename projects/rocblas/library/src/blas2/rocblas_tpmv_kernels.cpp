@@ -52,13 +52,14 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvn_kernel_calc(bool        is_upper,
         T res = x[tid * incx];
         if(is_upper)
         {
+            size_t index = tmpv_calc_upperat(tid, tid);
             if(!is_unit_diag)
             {
-                res *= AP[tmpv_calc_upperat(tid, tid)];
+                res *= AP[index];
             }
             for(rocblas_int col = tid + 1; col < n; ++col)
             {
-                res += AP[tmpv_calc_upperat(tid, col)] * x[col * incx];
+                res += AP[index += col] * x[col * incx];
             }
         }
         else
@@ -69,7 +70,7 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvn_kernel_calc(bool        is_upper,
                 res *= AP[tmpv_calc_lowerat(tid, tid)];
             }
             size_t index = tid;
-            for(rocblas_int col = 0; col < tid; index += n - col - 1, ++col)
+            for(rocblas_int col = 0; col < tid; ++col, index += n - col)
             {
                 res += AP[index] * x[col * incx];
             }
@@ -95,25 +96,28 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvc_kernel_calc(bool        is_upper,
         T res = x[tid * incx];
         if(is_upper)
         {
+            size_t index = tmpv_calc_upperat(tid, tid);
             if(!is_unit_diag)
             {
-                res *= conj(AP[tmpv_calc_upperat(tid, tid)]);
+                res *= conj(AP[index]);
             }
-            for(rocblas_int row = 0; row < tid; ++row)
+            index -= tid;
+            for(rocblas_int row = 0; row < tid; ++row, ++index)
             {
-                res += conj(AP[tmpv_calc_upperat(row, tid)]) * x[row * incx];
+                res += conj(AP[index]) * x[row * incx];
             }
         }
         else
         {
+            size_t index = tmpv_calc_lowerat(tid, tid);
             if(!is_unit_diag)
             {
                 //cppcheck-suppress duplicateExpression
-                res *= conj(AP[tmpv_calc_lowerat(tid, tid)]);
+                res *= conj(AP[index]);
             }
             for(rocblas_int row = tid + 1; row < n; ++row)
             {
-                res += conj(AP[tmpv_calc_lowerat(row, tid)]) * x[row * incx];
+                res += conj(AP[++index]) * x[row * incx];
             }
         }
         workspace[tid] = res;
@@ -139,27 +143,30 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvt_kernel_calc(bool        is_upper,
         res = x[tid * incx];
         if(is_upper)
         {
+            size_t index = tmpv_calc_upperat(tid, tid);
             if(!is_unit_diag)
             {
-                res *= AP[tmpv_calc_upperat(tid, tid)];
+                res *= AP[index];
             }
 
-            for(row = 0; row < tid; ++row)
+            index -= tid;
+            for(row = 0; row < tid; ++row, ++index)
             {
-                res += AP[tmpv_calc_upperat(row, tid)] * x[row * incx];
+                res += AP[index] * x[row * incx];
             }
         }
         else
         {
+            size_t index = tmpv_calc_lowerat(tid, tid);
             if(!is_unit_diag)
             {
                 //cppcheck-suppress duplicateExpression
-                res *= AP[tmpv_calc_lowerat(tid, tid)];
+                res *= AP[index];
             }
 
             for(row = tid + 1; row < n; ++row)
             {
-                res += AP[tmpv_calc_lowerat(row, tid)] * x[row * incx];
+                res += AP[++index] * x[row * incx];
             }
         }
         workspace[tid] = res;
