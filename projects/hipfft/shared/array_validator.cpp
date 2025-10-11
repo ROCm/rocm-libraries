@@ -22,6 +22,7 @@
 #include <numeric>
 #include <unordered_set>
 
+#include "arithmetic.h"
 #include "array_validator.h"
 #include "increment.h"
 
@@ -64,8 +65,8 @@ bool valid_length_stride_1d_multi(const unsigned int        idx,
 
     // We only need to go to the maximum pointer offset for (l1,s1).
     const auto max_offset
-        = std::accumulate(l1.begin(), l1.end(), (size_t)1, std::multiplies<size_t>())
-          - std ::inner_product(l1.begin(), l1.end(), s1.begin(), (size_t)0);
+        = product(l1.begin(), l1.end())
+          - std ::inner_product(l1.begin(), l1.end(), s1.begin(), static_cast<size_t>(0));
     std::unordered_set<size_t> a0{};
     for(size_t i = 1; i < l0; ++i)
     {
@@ -99,7 +100,8 @@ bool valid_length_stride_1d_multi(const unsigned int        idx,
     std::fill(index.begin(), index.end(), 0);
     do
     {
-        const int i = std::inner_product(index.begin(), index.end(), s1.begin(), (size_t)0);
+        const auto i
+            = std::inner_product(index.begin(), index.end(), s1.begin(), static_cast<size_t>(0));
         if(i > 0 && (i % s0 == 0))
         {
             // TODO: use an ordered set and binary search
@@ -136,13 +138,14 @@ bool valid_length_stride_multi_multi(const std::vector<size_t> l0,
     std::unordered_set<size_t> a0{};
 
     const auto max_offset
-        = std::accumulate(l1.begin(), l1.end(), (size_t)1, std::multiplies<size_t>())
-          - std::inner_product(l1.begin(), l1.end(), s1.begin(), (size_t)0);
+        = product(l1.begin(), l1.end())
+          - std::inner_product(l1.begin(), l1.end(), s1.begin(), static_cast<size_t>(0));
     std::vector<size_t> index0(l0.size()); // TODO: check this
     std::fill(index0.begin(), index0.end(), 0);
     do
     {
-        const auto i = std::inner_product(index0.begin(), index0.end(), s0.begin(), (size_t)0);
+        const auto i
+            = std::inner_product(index0.begin(), index0.end(), s0.begin(), static_cast<size_t>(0));
         if(i > max_offset)
             a0.insert(i);
     } while(increment_rowmajor(index0, l0));
@@ -151,7 +154,8 @@ bool valid_length_stride_multi_multi(const std::vector<size_t> l0,
     std::fill(index1.begin(), index1.end(), 0);
     do
     {
-        const auto i = std::inner_product(index1.begin(), index1.end(), s1.begin(), (size_t)0);
+        const auto i
+            = std::inner_product(index1.begin(), index1.end(), s1.begin(), static_cast<size_t>(0));
         if(i > 0)
         {
             // TODO: use an ordered set and binary search
