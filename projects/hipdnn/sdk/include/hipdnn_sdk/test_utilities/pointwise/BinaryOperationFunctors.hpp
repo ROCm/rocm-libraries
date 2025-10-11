@@ -35,6 +35,15 @@ struct Subtract
     }
 };
 
+struct Multiply
+{
+    template <typename X0, typename X1>
+    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 * x1)
+    {
+        return x0 * x1;
+    }
+};
+
 // Backward activation operations: dx = dy * local_gradient
 // Takes input x and upstream gradient dy, returns downstream gradient dx
 

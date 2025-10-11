@@ -46,6 +46,7 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
         // Only include operations with implemented functors in ReferencePointwiseBase
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::ADD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::SUB));
+        bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::MUL));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD));
@@ -131,7 +132,6 @@ inline const PointwiseModeBitset& getTernaryModesBitset()
     return s_ternaryModes;
 }
 
-
 inline bool isUnaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)
 {
     auto position = toBitPosition(mode);
@@ -149,7 +149,6 @@ inline bool isTernaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)
     auto position = toBitPosition(mode);
     return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
 }
-
 
 // Check if operations have implemented functors (for ReferencePointwiseBase usage)
 inline bool isImplementedUnaryPointwiseMode(hipdnn_sdk::data_objects::PointwiseMode mode)

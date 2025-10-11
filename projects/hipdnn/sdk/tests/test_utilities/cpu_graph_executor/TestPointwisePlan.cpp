@@ -7,9 +7,9 @@
 #include "PointwiseTensorBundles.hpp"
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
+#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
@@ -41,8 +41,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
     std::vector<int64_t> outputDims = {1, 3, 4, 4};
 
     unsigned int seed = 1;
-    PointwiseUnaryTensorBundle<float> planTensorBundle(inputDims, outputDims, seed, TensorLayout::NCHW);
-    PointwiseUnaryTensorBundle<float> directTensorBundle(inputDims, outputDims, seed, TensorLayout::NCHW);
+    PointwiseUnaryTensorBundle<float> planTensorBundle(
+        inputDims, outputDims, seed, TensorLayout::NCHW);
+    PointwiseUnaryTensorBundle<float> directTensorBundle(
+        inputDims, outputDims, seed, TensorLayout::NCHW);
 
     PointwiseParams params;
     params.mode = PointwiseMode::RELU_FWD;
@@ -56,9 +58,8 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
     variantPack[2] = planTensorBundle.outputTensor.memory().hostData();
 
     // Execute direct reference
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::RELU_FWD, 
-                                                        directTensorBundle.outputTensor, 
-                                                        directTensorBundle.inputTensor);
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        PointwiseMode::RELU_FWD, directTensorBundle.outputTensor, directTensorBundle.inputTensor);
 
     // Execute plan
     patient.execute(variantPack);
@@ -78,8 +79,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
     unsigned int seed = 1;
-    PointwiseBinaryTensorBundle<float> planTensorBundle(input1Dims, input2Dims, outputDims, seed, TensorLayout::NCHW);
-    PointwiseBinaryTensorBundle<float> directTensorBundle(input1Dims, input2Dims, outputDims, seed, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> planTensorBundle(
+        input1Dims, input2Dims, outputDims, seed, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> directTensorBundle(
+        input1Dims, input2Dims, outputDims, seed, TensorLayout::NCHW);
 
     PointwiseParams params;
     params.mode = PointwiseMode::ADD;
@@ -95,10 +98,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
     variantPack[3] = planTensorBundle.outputTensor.memory().hostData();
 
     // Execute direct reference
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::ADD, 
-                                                        directTensorBundle.outputTensor, 
-                                                        directTensorBundle.input1Tensor,
-                                                        directTensorBundle.input2Tensor);
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::ADD,
+                                                       directTensorBundle.outputTensor,
+                                                       directTensorBundle.input1Tensor,
+                                                       directTensorBundle.input2Tensor);
 
     // Execute plan
     patient.execute(variantPack);
@@ -119,8 +122,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
 
     unsigned int seed = 1;
     // Use PointwiseBinaryTensorBundle for backward operations since they are binary (dy, x -> dx)
-    PointwiseBinaryTensorBundle<float> planTensorBundle(dyDims, xDims, dxDims, seed, TensorLayout::NCHW);
-    PointwiseBinaryTensorBundle<float> directTensorBundle(dyDims, xDims, dxDims, seed, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> planTensorBundle(
+        dyDims, xDims, dxDims, seed, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> directTensorBundle(
+        dyDims, xDims, dxDims, seed, TensorLayout::NCHW);
 
     PointwiseParams params;
     params.mode = PointwiseMode::RELU_BWD;
@@ -136,10 +141,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
     variantPack[3] = planTensorBundle.outputTensor.memory().hostData();
 
     // Execute direct reference
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::RELU_BWD, 
-                                                        directTensorBundle.outputTensor, 
-                                                        directTensorBundle.input1Tensor,
-                                                        directTensorBundle.input2Tensor);
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::RELU_BWD,
+                                                       directTensorBundle.outputTensor,
+                                                       directTensorBundle.input1Tensor,
+                                                       directTensorBundle.input2Tensor);
 
     // Execute plan
     patient.execute(variantPack);
@@ -158,7 +163,11 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
 
     PointwiseUnaryTensorBundle<float> tensorBundle(inputDims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::RELU_FWD);
+    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               hipdnn_frontend::PointwiseMode::RELU_FWD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -179,9 +188,15 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
-    PointwiseBinaryTensorBundle<float> tensorBundle(input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> tensorBundle(
+        input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::ADD);
+    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                hipdnn_frontend::PointwiseMode::ADD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -203,7 +218,11 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnary)
 
     PointwiseUnaryTensorBundle<float> tensorBundle(inputDims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::RELU_FWD);
+    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               hipdnn_frontend::PointwiseMode::RELU_FWD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -225,9 +244,15 @@ TEST(TestPointwisePlanBuilder, IsApplicableBinary)
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
-    PointwiseBinaryTensorBundle<float> tensorBundle(input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<float> tensorBundle(
+        input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::ADD);
+    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                hipdnn_frontend::PointwiseMode::ADD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -252,7 +277,11 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
     PointwiseUnaryTensorBundle<float> tensorBundle(inputDims, outputDims, 1, TensorLayout::NCHW);
 
     // Try with an unsupported operation (not in our getSupportedUnaryOperations list)
-    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::EXP);
+    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               hipdnn_frontend::PointwiseMode::EXP);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();

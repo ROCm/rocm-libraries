@@ -86,22 +86,25 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
 
     PointwiseUnaryTensorBundle<float> tensorBundle(inputDims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::RELU_FWD);
+    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               hipdnn_frontend::PointwiseMode::RELU_FWD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    PointwiseSignatureKey keyFromNode(
-        graphWrap.getNode(0), graphWrap.getTensorMap());
+    PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     // Debug output to see the actual mismatch
     std::cout << "Expected key: operation=" << static_cast<int>(expectedKey.operation)
               << ", inputDataType=" << static_cast<int>(expectedKey.inputDataType)
               << ", outputDataType=" << static_cast<int>(expectedKey.outputDataType)
               << ", input1DataType=" << static_cast<int>(expectedKey.input1DataType) << '\n';
-    
+
     std::cout << "Actual key: operation=" << static_cast<int>(keyFromNode.operation)
               << ", inputDataType=" << static_cast<int>(keyFromNode.inputDataType)
               << ", outputDataType=" << static_cast<int>(keyFromNode.outputDataType)
@@ -112,29 +115,35 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
 
 TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
 {
-    PointwiseSignatureKey expectedKey{PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    PointwiseSignatureKey expectedKey{
+        PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF};
     std::vector<int64_t> input1Dims = {1, 3, 2, 2};
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
-    PointwiseBinaryTensorBundle<half> tensorBundle(input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
+    PointwiseBinaryTensorBundle<half> tensorBundle(
+        input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
 
-    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle, DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::FLOAT, hipdnn_frontend::PointwiseMode::ADD);
+    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle,
+                                                DataType::HALF,
+                                                DataType::HALF,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                hipdnn_frontend::PointwiseMode::ADD);
 
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    PointwiseSignatureKey keyFromNode(
-        graphWrap.getNode(0), graphWrap.getTensorMap());
+    PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
     // Debug output to see the actual mismatch
     std::cout << "Expected key: operation=" << static_cast<int>(expectedKey.operation)
               << ", inputDataType=" << static_cast<int>(expectedKey.inputDataType)
               << ", outputDataType=" << static_cast<int>(expectedKey.outputDataType)
               << ", input1DataType=" << static_cast<int>(expectedKey.input1DataType) << '\n';
-    
+
     std::cout << "Actual key: operation=" << static_cast<int>(keyFromNode.operation)
               << ", inputDataType=" << static_cast<int>(keyFromNode.inputDataType)
               << ", outputDataType=" << static_cast<int>(keyFromNode.outputDataType)
@@ -171,7 +180,8 @@ TEST(TestPointwiseSignatureKey, UnorderedSetUsage)
 
     PointwiseSignatureKey key1{PointwiseMode::RELU_FWD, DataType::FLOAT, DataType::FLOAT};
     PointwiseSignatureKey key2{PointwiseMode::SIGMOID_FWD, DataType::FLOAT, DataType::FLOAT};
-    PointwiseSignatureKey key3{PointwiseMode::RELU_FWD, DataType::FLOAT, DataType::FLOAT}; // Duplicate of key1
+    PointwiseSignatureKey key3{
+        PointwiseMode::RELU_FWD, DataType::FLOAT, DataType::FLOAT}; // Duplicate of key1
 
     testSet.insert(key1);
     testSet.insert(key2);

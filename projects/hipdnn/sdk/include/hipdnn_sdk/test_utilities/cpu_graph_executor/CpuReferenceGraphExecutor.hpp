@@ -6,8 +6,8 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {

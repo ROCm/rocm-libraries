@@ -24,9 +24,10 @@ struct PointwiseSignatureKey
 
     PointwiseSignatureKey() = default;
     constexpr PointwiseSignatureKey(hipdnn_sdk::data_objects::PointwiseMode op,
-                                   hipdnn_sdk::data_objects::DataType input,
-                                   hipdnn_sdk::data_objects::DataType output,
-                                   hipdnn_sdk::data_objects::DataType input1 = hipdnn_sdk::data_objects::DataType::UNSET)
+                                    hipdnn_sdk::data_objects::DataType input,
+                                    hipdnn_sdk::data_objects::DataType output,
+                                    hipdnn_sdk::data_objects::DataType input1
+                                    = hipdnn_sdk::data_objects::DataType::UNSET)
         : operation(op)
         , inputDataType(input)
         , outputDataType(output)
@@ -42,8 +43,7 @@ struct PointwiseSignatureKey
         const auto* nodeAttributes = node.attributes_as_PointwiseAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error(
-                "Node attributes could not be cast to PointwiseAttributes");
+            throw std::runtime_error("Node attributes could not be cast to PointwiseAttributes");
         }
 
         operation = nodeAttributes->operation();
@@ -72,7 +72,8 @@ struct PointwiseSignatureKey
                 auto input1TensorAttr = tensorMap.at(nodeAttributes->in_1_tensor_uid().value());
                 if(input1TensorAttr == nullptr)
                 {
-                    throw std::runtime_error("Second input tensor attributes could not be found in the map");
+                    throw std::runtime_error(
+                        "Second input tensor attributes could not be found in the map");
                 }
                 input1DataType = input1TensorAttr->data_type();
             }
@@ -103,10 +104,8 @@ struct PointwiseSignatureKey
 
     bool operator==(const PointwiseSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType 
-               && operation == other.operation
-               && inputDataType == other.inputDataType
-               && outputDataType == other.outputDataType
+        return nodeType == other.nodeType && operation == other.operation
+               && inputDataType == other.inputDataType && outputDataType == other.outputDataType
                && input1DataType == other.input1DataType;
     }
 
@@ -141,7 +140,8 @@ private:
     {
         // Add all implemented unary operations
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, DataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD, DataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD, DataTypeEnum>(
+            map);
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD, DataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS, DataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG, DataTypeEnum>(map);
@@ -155,8 +155,10 @@ private:
         // Add all implemented binary operations
         addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ADD, DataTypeEnum>(map);
         addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SUB, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::MUL, DataTypeEnum>(map);
         addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD, DataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD, DataTypeEnum>(
+            map);
         addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD, DataTypeEnum>(map);
     }
 

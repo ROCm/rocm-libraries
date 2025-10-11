@@ -77,5 +77,4 @@ struct PointwiseBinaryTensorBundle
     Tensor<InputType> outputTensor;
 };
 
-
 }

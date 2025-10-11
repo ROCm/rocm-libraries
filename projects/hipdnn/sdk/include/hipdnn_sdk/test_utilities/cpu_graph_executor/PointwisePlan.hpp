@@ -8,12 +8,12 @@
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanUtils.hpp>
+#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -30,7 +30,7 @@ struct PointwiseParams
         , out0Tensor(unpackTensorAttributes(out0Attributes))
         , mode(pointwiseMode)
     {
-        if (in1Attributes != nullptr)
+        if(in1Attributes != nullptr)
         {
             in1Tensor = unpackTensorAttributes(*in1Attributes);
         }
@@ -59,28 +59,23 @@ public:
         auto shallowOut0Tensor = createShallowTensor<DataType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if (isUnaryPointwiseMode(_params.mode))
+        if(isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                _params.mode,
-                *shallowOut0Tensor,
-                *shallowIn0Tensor);
+                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
-        else if (isBinaryPointwiseMode(_params.mode))
+        else if(isBinaryPointwiseMode(_params.mode))
         {
-            if (!_params.in1Tensor.has_value())
+            if(!_params.in1Tensor.has_value())
             {
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
-            
+
             auto shallowIn1Tensor = createShallowTensor<DataType>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                _params.mode,
-                *shallowOut0Tensor,
-                *shallowIn0Tensor,
-                *shallowIn1Tensor);
+                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
         else
         {
@@ -112,16 +107,16 @@ public:
         // Check that the operation is implemented
         auto mode = nodeAttributes->operation();
         bool isImplemented = false;
-        if (isUnaryPointwiseMode(mode))
+        if(isUnaryPointwiseMode(mode))
         {
             isImplemented = isImplementedUnaryPointwiseMode(mode);
         }
-        else if (isBinaryPointwiseMode(mode))
+        else if(isBinaryPointwiseMode(mode))
         {
             isImplemented = isImplementedBinaryPointwiseMode(mode);
         }
-        
-        if (!isImplemented)
+
+        if(!isImplemented)
         {
             return false;
         }
@@ -135,9 +130,9 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), DataTypeEnum);
 
         // Check optional tensors based on operation mode
-        if (isBinaryPointwiseMode(mode))
+        if(isBinaryPointwiseMode(mode))
         {
-            if (!nodeAttributes->in_1_tensor_uid() || *nodeAttributes->in_1_tensor_uid() == 0)
+            if(!nodeAttributes->in_1_tensor_uid() || *nodeAttributes->in_1_tensor_uid() == 0)
             {
                 return false; // Binary operations require in1 tensor
             }
@@ -159,20 +154,18 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        
+
         // Get required tensors
         const auto* in0Tensor = tensorMap.at(nodeAttributes->in_0_tensor_uid());
         const auto* out0Tensor = tensorMap.at(nodeAttributes->out_0_tensor_uid());
-        
-        // Get optional tensors
-        const auto* in1Tensor = (nodeAttributes->in_1_tensor_uid() && *nodeAttributes->in_1_tensor_uid() != 0) 
-            ? tensorMap.at(*nodeAttributes->in_1_tensor_uid()) : nullptr;
 
-        PointwiseParams params(
-            nodeAttributes->operation(),
-            *in0Tensor,
-            in1Tensor,
-            *out0Tensor);
+        // Get optional tensors
+        const auto* in1Tensor
+            = (nodeAttributes->in_1_tensor_uid() && *nodeAttributes->in_1_tensor_uid() != 0)
+                  ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
+                  : nullptr;
+
+        PointwiseParams params(nodeAttributes->operation(), *in0Tensor, in1Tensor, *out0Tensor);
 
         return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }

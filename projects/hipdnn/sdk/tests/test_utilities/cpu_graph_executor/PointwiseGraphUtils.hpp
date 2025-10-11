@@ -33,7 +33,8 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto inputAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input", hipdnn_frontend::fromSdkType(input0DataType), tensorBundle.inputTensor);
     inputAttr.set_uid(uid++);
-    auto inputTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(inputAttr));
+    auto inputTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(inputAttr));
 
     hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
     pointwiseAttrs.set_name("PointwiseUnary");
@@ -71,12 +72,14 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input1", hipdnn_frontend::fromSdkType(input0DataType), tensorBundle.input1Tensor);
     input1Attr.set_uid(uid++);
-    auto input1TensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
+    auto input1TensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
 
     auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input2", hipdnn_frontend::fromSdkType(input1DataType), tensorBundle.input2Tensor);
     input2Attr.set_uid(uid++);
-    auto input2TensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input2Attr));
+    auto input2TensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input2Attr));
 
     hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
     pointwiseAttrs.set_name("PointwiseBinary");
@@ -91,11 +94,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
 
-    auto variantPack = tensorBundle.createVariantPack(*input1TensorAttr, *input2TensorAttr, *outputTensorAttr);
+    auto variantPack
+        = tensorBundle.createVariantPack(*input1TensorAttr, *input2TensorAttr, *outputTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }
-
-
 
 }
