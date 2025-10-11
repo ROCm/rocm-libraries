@@ -149,6 +149,7 @@ void testing_sptrsm_coo(const Arguments& arg)
     }
 
     host_dense_matrix<T> hC(nrowC, ncolC);
+    memset(hC, 0, sizeof(T) * nrowC * ncolC);
 
     // Copy B to C
     if(order_B == rocsparse_order_column)
