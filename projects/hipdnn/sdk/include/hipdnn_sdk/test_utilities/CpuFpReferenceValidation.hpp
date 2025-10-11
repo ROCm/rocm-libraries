@@ -33,20 +33,15 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(const ITensor& reference, const ITensor& implementation)
+    bool allClose(const ITensor& reference, const ITensor& implementation) override
     {
         if(reference.elementCount() != implementation.elementCount())
         {
             return false;
         }
-
         bool result = true;
-        iterateAlongDimensions(reference.dims(), [&](const std::vector<int64_t>& indices) {
-            if(!result)
-            {
-                return;
-            }
 
+        iterateAlongDimensions(reference.dims(), [&](const std::vector<int64_t>& indices) {
             auto refIdx = reference.getIndex(indices);
             auto implIdx = implementation.getIndex(indices);
             T refValue = *static_cast<const T*>(reference.hostDataOffsetFromIndex(refIdx));
@@ -70,7 +65,9 @@ public:
                     _absoluteTolerance,
                     _relativeTolerance);
                 result = false;
+                return false;
             }
+            return true;
         });
         return result;
     }

@@ -180,7 +180,17 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     // Iterate over each unique position
     for(int64_t iter = 0; iter < totalElements; ++iter)
     {
-        func(indices);
+        if constexpr(std::is_invocable_r_v<bool, F, const std::vector<int64_t>&>)
+        {
+            if(!func(indices))
+            {
+                return; // Early exit if lambda returns false
+            }
+        }
+        else
+        {
+            func(indices); // Original behavior for void-returning lambdas
+        }
 
         for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
         {
