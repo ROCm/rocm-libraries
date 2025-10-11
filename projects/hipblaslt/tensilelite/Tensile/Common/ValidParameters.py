@@ -654,6 +654,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
     "StreamKXCCMapping": [0] + list(range(2, 9)),
+    # Enables using a Tree-reduction for the fixup step of StreamK algorithm
+    # 0: use linear reduction
+    # 1: use tree reduction
+    "StreamKFixupTreeReduction": [0, 1],
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code

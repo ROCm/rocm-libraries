@@ -75,11 +75,11 @@ struct actor : Eval
 };
 
 template <typename T>
-struct is_actor : ::thrust::detail::false_type
+struct is_actor : _THRUST_STD::false_type
 {};
 
 template <typename T>
-struct is_actor<actor<T>> : ::thrust::detail::true_type
+struct is_actor<actor<T>> : _THRUST_STD::true_type
 {};
 
 // a node selecting and returning one of the arguments to the entire expression template

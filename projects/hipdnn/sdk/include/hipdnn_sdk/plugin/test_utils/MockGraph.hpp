@@ -21,6 +21,7 @@ public:
                 (std::set<hipdnn_sdk::data_objects::NodeAttributes> supportedAttributes),
                 (const, override));
     MOCK_METHOD(const hipdnn_sdk::data_objects::Node&, getNode, (uint index), (const, override));
+    MOCK_METHOD(const INodeWrapper&, getNodeWrapper, (uint index), (const, override));
     MOCK_METHOD(
         (const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&),
         getTensorMap,

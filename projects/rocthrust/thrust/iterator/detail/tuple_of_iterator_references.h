@@ -157,8 +157,7 @@ _THRUST_STD_NAMESPACE_BEGIN
 THRUST_NAMESPACE_BEGIN
 #endif
 
-// 'libhipcxx' implementation is incomplete so we ignore this for now
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Ts>
 struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
 {};
