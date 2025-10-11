@@ -2,30 +2,6 @@ import os
 import re
 import csv
 
-def parse_input_log(args, tuning_info):
-    # save unique lines in hipblaslt log
-    unique_log_name = args.output_path + '/unique_' + args.input_file.split('/')[-1]
-    f_out = open(unique_log_name, 'w')
-
-    with open(args.input_file, 'r') as f:
-        for line in f:
-            if 'hipblaslt-bench' not in line:
-                continue
-
-            if line in tuning_info:
-                tuning_info[line]['count'] += 1
-                continue
-            else:
-                tuning_info[line] = {}
-                tuning_info[line]['count'] = 1
-                f_out.write(line)
-            matches = re.findall(r"-(m|n|k)\s+(\d+)", line)
-            matches.extend(re.findall(r"--(lda|ldb|ldc|ldd)\s+(\d+)", line))
-            matches.extend(re.findall(r"--(a_type|b_type|c_type|d_type)\s+(\S+)", line))
-            tuning_info[line].update({key: value for key, value in matches})
-
-    return unique_log_name
-
 def parse_hipblaslt_output(output, line, tuning_info, mode):
     outputs = output.split('\n')
     print(output)
@@ -94,11 +70,8 @@ def convert_command(input_cmd, args, tuning_info, mode):
     else:
         output_cmd = output_cmd + f" --requested_solution {requested_solution}"
         output_cmd = output_cmd + f" --skip_slow_solution_ratio 0.8"
-        if (args.swizzleA == True) or (args.swizzleB == True):
+        if args.swizzleA == True:
             output_cmd = re.sub("--transA\s+\S+", "--transA T", output_cmd)
-            if args.swizzleA == True:
-                output_cmd = output_cmd + f" --swizzleA"
-            if args.swizzleB == True:
-                output_cmd = output_cmd + f" --swizzleB"
+            output_cmd = output_cmd + f" --swizzleA"
 
     return output_cmd
