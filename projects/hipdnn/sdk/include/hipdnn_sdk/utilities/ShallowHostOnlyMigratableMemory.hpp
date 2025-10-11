@@ -19,11 +19,34 @@ template <class T>
 class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
 {
 public:
-    ShallowHostOnlyMigratableMemory(void* memory, size_t count)
+    explicit ShallowHostOnlyMigratableMemory(void* memory = nullptr, size_t count = 0)
         : _memory(static_cast<T*>(memory))
         , _count(count)
     {
     }
+
+    ShallowHostOnlyMigratableMemory(ShallowHostOnlyMigratableMemory&& other) noexcept
+        : _memory(other._memory)
+        , _count(other._count)
+    {
+        other._memory = nullptr;
+        other._count = 0;
+    }
+
+    ShallowHostOnlyMigratableMemory& operator=(ShallowHostOnlyMigratableMemory&& other) noexcept
+    {
+        if(this != &other)
+        {
+            _memory = other._memory;
+            _count = other._count;
+            other._memory = nullptr;
+            other._count = 0;
+        }
+        return *this;
+    }
+
+    ShallowHostOnlyMigratableMemory(const ShallowHostOnlyMigratableMemory&) = delete;
+    ShallowHostOnlyMigratableMemory& operator=(const ShallowHostOnlyMigratableMemory&) = delete;
 
     T* hostData() override
     {

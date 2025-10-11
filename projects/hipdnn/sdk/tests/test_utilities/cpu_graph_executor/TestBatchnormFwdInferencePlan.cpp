@@ -46,15 +46,12 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
-    BatchnormFwdTensorBundle planTensorBundle(
-        graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
-    BatchnormFwdTensorBundle directTensorBundle(
-        graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
-
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+    BatchnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
+    BatchnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
+
     const auto& attributes
         = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
-
     const auto& tensorMap = graphWrapper.getTensorMap();
     BatchnormFwdInferenceParams params(*tensorMap.at(attributes.x_tensor_uid()),
                                        *tensorMap.at(attributes.y_tensor_uid()),
@@ -64,7 +61,6 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.inv_variance_tensor_uid()),
                                        epsilon);
 
-    BatchnormFwdPlan<float, float, float> patient(std::move(params));
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
@@ -90,7 +86,8 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                                      *shallowYTensor,
                                                                      epsilon);
 
-    patient.execute(variantPack);
+    BatchnormFwdPlan<float, float, float> fwdPlan(std::move(params));
+    fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
