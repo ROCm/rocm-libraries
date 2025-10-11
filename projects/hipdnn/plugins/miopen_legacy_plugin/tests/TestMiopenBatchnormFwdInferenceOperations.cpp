@@ -14,6 +14,7 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/Visitor.hpp>
 #include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
@@ -49,7 +50,6 @@ protected:
         _graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
     }
 
-    template <class T>
     void goldenReferenceTestSuite()
     {
         hipdnnPluginConstData_t opGraph
@@ -71,30 +71,36 @@ protected:
                                           ->attributes_as_BatchnormInferenceAttributes();
         int64_t yIndex = batchnormInferenceNode->y_tensor_uid();
 
-        ASSERT_TRUE(
-            std::holds_alternative<hipdnn_sdk::json::TensorMap<T>>(_graphAndTensors.tensorMap));
+        auto executeAndValidate = hipdnn_sdk::utilities::Visitor{
+            [&](auto& tensorMap) {
+                using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
 
-        auto& tensorMap = std::get<hipdnn_sdk::json::TensorMap<T>>(_graphAndTensors.tensorMap);
+                auto referenceOutput = tensorMap.at(yIndex)->copy();
+                tensorMap.at(yIndex)->fillWithValue(static_cast<DataType>(0.f));
 
-        auto referenceOutput = tensorMap.at(yIndex)->copy();
+                status
+                    = hipdnnEnginePluginExecuteOpGraph(_handle,
+                                                       executionContext,
+                                                       nullptr,
+                                                       deviceBuffers.data(),
+                                                       static_cast<uint32_t>(deviceBuffers.size()));
 
-        status = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                  executionContext,
-                                                  nullptr,
-                                                  deviceBuffers.data(),
-                                                  static_cast<uint32_t>(deviceBuffers.size()));
+                EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-        EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
+                CpuFpReferenceValidation<DataType> cpuRefValidation;
+                tensorMap.at(yIndex)->memory().markDeviceModified();
+                EXPECT_TRUE(cpuRefValidation.allClose(referenceOutput.memory(),
+                                                      tensorMap.at(yIndex)->memory()));
+            },
+            [](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }};
 
-        CpuFpReferenceValidation<T> cpuRefValidation;
-        EXPECT_TRUE(
-            cpuRefValidation.allClose(referenceOutput.memory(), tensorMap.at(yIndex)->memory()));
+        std::visit(executeAndValidate, _graphAndTensors.tensorMap);
     }
 };
 
 TEST_P(TestBatchnormFwdInferenceExecuteGraphGoldenReference, Correctness)
 {
-    goldenReferenceTestSuite<float>();
+    goldenReferenceTestSuite();
 }
 
 INSTANTIATE_TEST_SUITE_P(,

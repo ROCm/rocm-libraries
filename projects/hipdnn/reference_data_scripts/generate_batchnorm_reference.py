@@ -9,22 +9,27 @@ from graph import Graph
 from common import DTypeConverter
 import argparse
 
-def save_batchnorm_inference_execution(x_size: list[int], dtype: torch.dtype, min_val, max_val, base_filename: str):
+def save_batchnorm_inference_execution(x_size: list[int], 
+                                       io_type: torch.dtype, 
+                                       compute_type: torch.dtype, 
+                                       min_val, 
+                                       max_val, 
+                                       base_filename: str):
     channel_idx = 1
     derived_sizes = [1, x_size[channel_idx], 1, 1]
 
-    x            = TensorAttributes.random(min_val, max_val, dtype, x_size)
-    mean         = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
-    inv_variance = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
-    scale        = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
-    bias         = TensorAttributes.random(min_val, max_val, dtype, derived_sizes)
+    x            = TensorAttributes.random(min_val, max_val, io_type, x_size)
+    mean         = TensorAttributes.random(min_val, max_val, io_type, derived_sizes)
+    inv_variance = TensorAttributes.random(min_val, max_val, io_type, derived_sizes)
+    scale        = TensorAttributes.random(min_val, max_val, io_type, derived_sizes)
+    bias         = TensorAttributes.random(min_val, max_val, io_type, derived_sizes)
     y            = TensorAttributes.empty()
 
     node = BatchnormInference(x, mean, inv_variance, scale, bias, y)
 
     node.execute()
 
-    graph = Graph([node], dtype)
+    graph = Graph([node], io_type=io_type, compute_type=compute_type, intermediate_type=io_type)
     graph.save(base_filename)
 
 def main():
@@ -34,7 +39,9 @@ def main():
     )
     parser.add_argument("-f", "--base-filename", required=True, type=str,
                         help="base file name and path for output files (without extensions)")
-    parser.add_argument("-d", "--datatype", required=True, type=str, 
+    parser.add_argument("-d", "--io-type", required=True, type=str, 
+                        help="datatype for batch norm operations (float, half, bfloat16, double, uint8, int32)")
+    parser.add_argument("-c", "--compute-type", required=True, type=str, 
                         help="datatype for batch norm operations (float, half, bfloat16, double, uint8, int32)")
     parser.add_argument("-s", "--size", required=True, nargs="+", type=int, 
                         help="size of x tensor (ex: --size 2 4 6 8)")
@@ -45,7 +52,12 @@ def main():
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    save_batchnorm_inference_execution(args.size, DTypeConverter.from_string(args.datatype), args.min, args.max, args.base_filename)
+    save_batchnorm_inference_execution(args.size, 
+                                       DTypeConverter.from_string(args.io_type), 
+                                       DTypeConverter.from_string(args.compute_type), 
+                                       args.min, 
+                                       args.max, 
+                                       args.base_filename)
 
 if __name__ == "__main__":
     main()

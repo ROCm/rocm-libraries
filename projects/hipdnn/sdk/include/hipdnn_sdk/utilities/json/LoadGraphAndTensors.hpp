@@ -85,9 +85,6 @@ template <class T>
 using DataTypeFromTensorMap =
     typename detail::DataTypeFromTensorMap<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
 
-using T = DataTypeFromTensorMap<
-    const std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<float>>>&>;
-
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
