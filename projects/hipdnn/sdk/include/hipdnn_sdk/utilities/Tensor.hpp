@@ -8,6 +8,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <typeindex>
 #include <vector>
 
 namespace hipdnn_sdk
@@ -44,16 +45,42 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
-template <typename T>
-class TensorBase
+class ITensor
 {
 public:
-    virtual ~TensorBase() = default;
-
-    using value_type = T;
+    virtual ~ITensor() = default;
 
     virtual const std::vector<int64_t>& dims() const = 0;
     virtual const std::vector<int64_t>& strides() const = 0;
+
+    virtual void* rawHostData() = 0;
+
+    virtual void fillTensorWithValue(float value) = 0;
+    virtual void
+        fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
+        = 0;
+};
+
+template <typename T>
+class TensorBase : public ITensor
+{
+public:
+    void* rawHostData() override
+    {
+        return memory().hostData();
+    }
+
+    void fillTensorWithValue(float value) override
+    {
+        fillWithValue(static_cast<T>(value));
+    }
+
+    void fillTensorWithRandomValues(float min,
+                                    float max,
+                                    unsigned int seed = std::random_device{}()) override
+    {
+        fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
+    }
 
     virtual IMigratableMemory<T>& memory() = 0;
     virtual const IMigratableMemory<T>& memory() const = 0;

@@ -95,6 +95,27 @@ constexpr T getToleranceFwd()
     }
 }
 
+template <typename T>
+constexpr T getToleranceBwd()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 8.5e-6f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 1e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
 } // namespace conv
 
 namespace pointwise

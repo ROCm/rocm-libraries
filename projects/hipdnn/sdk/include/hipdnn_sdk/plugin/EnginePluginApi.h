@@ -205,6 +205,22 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
         hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t execution_context);
 
 /**
+ * @brief Retrieves the required workspace size for a given execution context.
+ *
+ * @param[in] handle The engine plugin handle.
+ * @param[in] execution_context The execution context that encapsulates the operation graph and the engine
+ *                             configuration.
+ * @param[out] workspace_size A pointer to a variable where the required workspace size (in bytes) will be stored.
+ *
+ * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t execution_context,
+        size_t* workspace_size);
+
+/**
  * @brief Executes an operation graph using a specified execution context.
  *
  * @param[in] handle The engine plugin handle.
