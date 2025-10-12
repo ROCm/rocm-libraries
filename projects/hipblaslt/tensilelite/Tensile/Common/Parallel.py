@@ -25,6 +25,7 @@
 import concurrent.futures
 import itertools
 import os
+import re
 import sys
 import time
 
@@ -33,32 +34,47 @@ from joblib import Parallel, delayed
 from .Utilities import tqdm
 
 
-def joblibParallelSupportsGenerator():
-    import joblib
-    from packaging.version import Version
+def get_inherited_job_limit() -> int:
+    # 1. Check CMAKE_BUILD_PARALLEL_LEVEL (CMake 3.12+)
+    if 'CMAKE_BUILD_PARALLEL_LEVEL' in os.environ:
+        try:
+            return int(os.environ['CMAKE_BUILD_PARALLEL_LEVEL'])
+        except ValueError:
+            pass
 
-    joblibVer = joblib.__version__
-    return Version(joblibVer) >= Version("1.4.0")
+    # 2. Parse MAKEFLAGS for -jN
+    makeflags = os.environ.get('MAKEFLAGS', '')
+    match = re.search(r'-j\s*(\d+)', makeflags)
+    if match:
+        return int(match.group(1))
+
+    return -1
 
 
 def CPUThreadCount(enable=True):
-    from .GlobalParameters import globalParameters
-
     if not enable:
         return 1
-    else:
-        if os.name == "nt":
-            # Windows supports at most 61 workers because the scheduler uses
-            # WaitForMultipleObjects directly, which has the limit (the limit
-            # is actually 64, but some handles are needed for accounting).
-            cpu_count = min(os.cpu_count(), 61)
-        else:
-            cpu_count = len(os.sched_getaffinity(0))
-        cpuThreads = globalParameters["CpuThreads"]
-        if cpuThreads == -1:
-            return cpu_count
+    from .GlobalParameters import globalParameters
 
-        return min(cpu_count, cpuThreads)
+    # Priority order:
+    # 1. Inherited from build system (CMAKE_BUILD_PARALLEL_LEVEL or MAKEFLAGS)
+    # 2. Explicit --jobs flag
+    # 3. Auto-detect
+    inherited_limit = get_inherited_job_limit()
+    cpuThreads = inherited_limit if inherited_limit > 0 else globalParameters["CpuThreads"]
+
+    if cpuThreads < 1:
+        if os.name == "nt":
+            cpuThreads = os.cpu_count()
+        else:
+            cpuThreads = len(os.sched_getaffinity(0))
+
+    if os.name == "nt":
+        # Windows supports at most 61 workers because the scheduler uses
+        # WaitForMultipleObjects directly, which has the limit (the limit
+        # is actually 64, but some handles are needed for accounting).
+        cpuThreads = min(cpuThreads, 61)
+    return max(1, cpuThreads)
 
 
 def pcallWithGlobalParamsMultiArg(f, args, newGlobalParameters):
