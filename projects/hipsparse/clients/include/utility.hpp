@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,11 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+/*! \brief Return path of this executable */
 std::string hipsparse_exepath();
+/*! \brief Return path where the test data file (hipsparse_test.data) is located */
+std::string hipsparse_datapath();
+
 /*!\file
  * \brief provide data initialization and timing utilities.
  */
