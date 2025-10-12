@@ -210,12 +210,12 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
         kName = getKernelNameMin(kernels[kernIdx], splitGSU)
-        resultDict["%s"%kName] = r
+        resultDict[kName] = r
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
             kName = getKernelNameMin(kernel, splitGSU)
-            result = resultDict["%s"%kName]
+            result = resultDict[kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
@@ -825,7 +825,7 @@ def run():
         for kernel in solutionKernels:
             kName = getKeyNoInternalArgs(kernel, False)
             if kName not in solDict:
-                solDict["%s"%kName] = kernel
+                solDict[kName] = kernel
 
     filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
     LibraryIO.write(filename, libraryMapping, "msgpack")
@@ -845,7 +845,7 @@ def run():
             for name, lib in newMasterLibrary.lazyLibraries.items():
                 for k, s in lib.solutions.items():
                     kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
-                    s.sizeMapping.CUOccupancy = solDict["%s"%kName]["CUOccupancy"]
+                    s.sizeMapping.CUOccupancy = solDict[kName]["CUOccupancy"]
 
             writeFn = functools.partial(
                 writeMasterSolutionLibrary,

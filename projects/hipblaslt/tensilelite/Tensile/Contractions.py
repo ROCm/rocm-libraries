@@ -788,7 +788,7 @@ class Solution:
 
     @classmethod
     def ReadOriginalInfo(cls, d):
-        return dict([(key, str(value)) for (key, value) in list(d.items()) if key != 'ProblemType'])
+        return {key: str(value) for key, value in d.items() if key != 'ProblemType'}
 
     def __init__(self, **kwargs):
         self.name = None

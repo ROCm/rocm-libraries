@@ -46,6 +46,11 @@ def parse_mapping(loader: yaml.Loader):
     return ret
 
 def is_float(value):
+    if not value:
+        return False
+    first_char = value[0]
+    if not (first_char in '+-.' or first_char.isdigit()):
+        return False
     try:
         float(value)
         return True
@@ -56,19 +61,29 @@ def parse_scalar(loader: yaml.Loader):
     assert loader.check_event(yaml.ScalarEvent)
     evt = loader.get_event()
     value: str = evt.value
-    value_lower: str = value.lower()
 
-    if value_lower in ('true', 'yes',):
-        return True
-    elif value_lower in ('false', 'no',):
-        return False
-    elif value_lower in ('null', '', '~'):
+    if not value:
         if not evt.style:
             return None
-    elif value_lower.lstrip('+-').isnumeric():
-        return int(value_lower)
-    elif is_float(value_lower):
-        return float(value_lower)
+        return value
+
+    first_char = value[0]
+    if first_char in '+-' or first_char.isdigit():
+        stripped = value.lstrip('+-')
+        if stripped.isdigit():
+            return int(value)
+        elif is_float(value):
+            return float(value)
+
+    value_folded = value.casefold()
+
+    if value_folded in ('true', 'yes'):
+        return True
+    elif value_folded in ('false', 'no'):
+        return False
+    elif value_folded in ('null', '~'):
+        if not evt.style:
+            return None
 
     return value
 
