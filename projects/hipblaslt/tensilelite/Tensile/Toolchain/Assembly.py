@@ -30,7 +30,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Union, NamedTuple
 
-from Tensile.Common import print2
+from Tensile.Common import print1, print2
 from Tensile.Common.Architectures import isaToGfx
 from ..SolutionStructs import Solution
 
@@ -92,8 +92,26 @@ def buildAssemblyCodeObjectFiles(
         if coName:
           coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
+      # Build reference count map for .o files to handle shared object files
+      # (.o files from kernels marked .duplicate in TensileCreateLibrary)
+      objFileRefCount = collections.Counter()
+      for coFileRaw, objFiles in coFileMap.items():
+        for objFile in objFiles:
+          objFileRefCount[objFile] += 1
+
+      sharedObjFiles = {objFile: count for objFile, count in objFileRefCount.items() if count > 1}
+      if sharedObjFiles:
+        print1(f"Found {len(sharedObjFiles)} .o files shared across multiple code objects:")
+
       for coFileRaw, objFiles in coFileMap.items():
         linker(objFiles, str(coFileRaw))
+
+        # Delete .o files after linking once usage count reaches 0
+        for objFile in objFiles:
+          objFileRefCount[objFile] -= 1
+          if objFileRefCount[objFile] == 0:
+            Path(objFile).unlink()
+
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
           bundler.compress(str(coFileRaw), str(coFile), gfx)

@@ -26,7 +26,7 @@ from . import LibraryIO
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
 from .Common import assignGlobalParameters, print1, restoreDefaultGlobalParameters, HR, \
-                    globalParameters, architectureMap, ensurePath, ParallelMap, __version__
+                    globalParameters, architectureMap, ensurePath, ParallelMap2, __version__
 
 import argparse
 import copy
@@ -149,7 +149,7 @@ def TensileUpdateLibrary(userArgs):
     for logicFile in logicFiles:
         print("#   %s" % logicFile)
     fIter = zip(logicFiles, itertools.repeat(args.logic_path), itertools.repeat(outputPath))
-    libraries = ParallelMap(UpdateLogic, fIter, "Updating logic files", method=lambda x: x.starmap)
+    libraries = ParallelMap2(UpdateLogic, fIter, "Updating logic files", multiArg=True, return_as="list")
 
 
 def main():

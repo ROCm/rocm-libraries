@@ -303,8 +303,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         logicsFiles[origFile] = origFile
         logicsFiles[incFile] = incFile
 
-    iters = zip(logicsFiles.keys())
-    logicsList = ParallelMap2(loadData, iters, "Loading Logics...", return_as="list")
+    logicsList = ParallelMap2(loadData, logicsFiles.keys(), "Loading Logics...", return_as="list", multiArg=False)
     logicsDict = {}
     for i, _ in enumerate(logicsList):
         logicsDict[logicsList[i][0]] = logicsList[i][1]

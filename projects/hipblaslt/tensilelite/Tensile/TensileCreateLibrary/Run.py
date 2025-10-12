@@ -26,6 +26,7 @@ import rocisa
 
 import functools
 import glob
+import gc
 import itertools
 import os
 import resource
@@ -135,6 +136,29 @@ def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelC
     )
 
 
+def processAndAssembleKernelTCL(kernelWriterAssembly, rocisa_data, splitGSU, kernel, assemblyTmpPath, assembler):
+    """
+    Pipeline function for TCL mode that:
+    1. Generates kernel source
+    2. Writes .s file to disk
+    3. Assembles to .o file
+    4. Deletes .s file
+    """
+    result = processKernelSource(kernelWriterAssembly, rocisa_data, splitGSU, kernel)
+    return writeAndAssembleKernel(result, assemblyTmpPath, assembler)
+
+
+def writeMasterSolutionLibrary(name_lib_tuple, newLibraryDir, splitGSU, libraryFormat):
+    """
+    Write a master solution library to disk.
+    Module-level function to support multiprocessing.
+    """
+    name, lib = name_lib_tuple
+    filename = os.path.join(newLibraryDir, name)
+    lib.applyNaming(splitGSU)
+    LibraryIO.write(filename, state(lib), libraryFormat)
+
+
 def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
     removeKernels = []
     removeKernelNames = []
@@ -207,6 +231,24 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
 
     minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
     return path, isa, wfsize, minResult
+
+
+def writeAndAssembleKernel(result: KernelCodeGenResult, asmPath: Union[Path, str], assembler):
+    """Write assembly file and immediately assemble it to .o file"""
+    if result.err:
+        printExit(f"Failed to build kernel {result.name} because it has error code {result.err}")
+
+    path = Path(asmPath) / f"{result.name}.s"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(result.src)
+
+    # Assemble .s -> .o
+    assembler(isaToGfx(result.isa), result.wavefrontSize, str(path), str(path.with_suffix(".o")))
+
+    # Delete assembly file immediately to save disk space
+    path.unlink()
+
+    return KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
 
 
 def writeHelpers(
@@ -288,13 +330,14 @@ def writeSolutionsAndKernels(
     numAsmKernels = len(asmKernels)
     numKernels = len(asmKernels)
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-    asmIter = zip(
-        itertools.repeat(kernelWriterAssembly),
-        itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-        itertools.repeat(splitGSU),
-        asmKernels
+
+    processKernelFn = functools.partial(
+        processKernelSource,
+        kernelWriterAssembly=kernelWriterAssembly,
+        data=rocisa.rocIsa.getInstance().getData(),
+        splitGSU=splitGSU
     )
-    asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels", return_as="list")
+    asmResults = ParallelMap2(processKernelFn, asmKernels, "Generating assembly kernels", return_as="list", multiArg=False)
     removeInvalidSolutionsAndKernels(
         asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
     )
@@ -302,19 +345,21 @@ def writeSolutionsAndKernels(
         asmResults, asmKernels, solutions, splitGSU
     )
 
-    def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
-
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
-    compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
+    # Use functools.partial to bind assemblyTmpPath and assembler
+    writeAndAssembleFn = functools.partial(
+        writeAndAssembleKernel,
+        asmPath=assemblyTmpPath,
+        assembler=asmToolchain.assembler
+    )
     ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly),
+        writeAndAssembleFn,
         asmResults,
         "Writing assembly kernels",
         return_as="list",
         multiArg=False,
     )
+    del asmResults
+    gc.collect()
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
@@ -389,32 +434,31 @@ def writeSolutionsAndKernelsTCL(
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
-    def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
-        return result
-
-    unaryProcessKernelSource = functools.partial(
-        processKernelSource,
+    processKernelFn = functools.partial(
+        processAndAssembleKernelTCL,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         splitGSU,
+        assemblyTmpPath=assemblyTmpPath,
+        assembler=asmToolchain.assembler
     )
 
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
-    compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
-    ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly, unaryProcessKernelSource),
+    results = ParallelMap2(
+        processKernelFn,
         uniqueAsmKernels,
         "Generating assembly kernels",
         multiArg=False,
         return_as="list"
     )
+    del processKernelFn
+    gc.collect()
+
     passPostKernelInfoToSolution(
-        ret, uniqueAsmKernels, solutions, splitGSU
+        results, uniqueAsmKernels, solutions, splitGSU
     )
-    # result.src is very large so let garbage collector know to clean up
-    del ret
+    del results
+    gc.collect()
+
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
@@ -513,6 +557,15 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
     return sorted(khos, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
 
 
+def libraryIter(lib: MasterSolutionLibrary):
+    if len(lib.solutions):
+        for i, s in enumerate(lib.solutions.items()):
+            yield (i, *s)
+    else:
+        for _, lazyLib in lib.lazyLibraries.items():
+            yield from libraryIter(lazyLib)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -528,26 +581,23 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
 
-    fIter = zip(
-        logicFiles,
-        itertools.repeat(assembler),
-        itertools.repeat(splitGSU),
-        itertools.repeat(printSolutionRejectionReason),
-        itertools.repeat(printIndexAssignmentInfo),
-        itertools.repeat(isaInfoMap),
-        itertools.repeat(args["LazyLibraryLoading"]),
+    parseLogicFn = functools.partial(
+        LibraryIO.parseLibraryLogicFile,
+        assembler=assembler,
+        splitGSU=splitGSU,
+        printSolutionRejectionReason=printSolutionRejectionReason,
+        printIndexAssignmentInfo=printIndexAssignmentInfo,
+        isaInfoMap=isaInfoMap,
+        lazyLibraryLoading=args["LazyLibraryLoading"]
     )
 
-    def libraryIter(lib: MasterSolutionLibrary):
-        if len(lib.solutions):
-            for i, s in enumerate(lib.solutions.items()):
-                yield (i, *s)
-        else:
-            for _, lazyLib in lib.lazyLibraries.items():
-                yield from libraryIter(lazyLib)
-
     for library in ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator_unordered"
+        parseLogicFn, logicFiles, "Loading Logics...",
+        return_as="generator_unordered",
+        minChunkSize=24,
+        maxWorkers=32,
+        maxtasksperchild=1,
+        multiArg=False,
     ):
         _, architectureName, _, _, _, newLibrary = library
 
@@ -559,6 +609,9 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
+        del library, newLibrary
+
+    gc.collect()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
@@ -754,6 +807,9 @@ def run():
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
+    numKernelHelperObjs = len(kernelHelperObjs)
+    del kernelWriterAssembly, kernelHelperObjs
+    gc.collect()
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
@@ -771,13 +827,10 @@ def run():
             if kName not in solDict:
                 solDict["%s"%kName] = kernel
 
-    def writeMsl(name, lib):
-        filename = os.path.join(newLibraryDir, name)
-        lib.applyNaming(splitGSU)
-        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
-
     filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
     LibraryIO.write(filename, libraryMapping, "msgpack")
+    del libraryMapping
+    gc.collect()
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
@@ -794,12 +847,22 @@ def run():
                     kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
                     s.sizeMapping.CUOccupancy = solDict["%s"%kName]["CUOccupancy"]
 
-            ParallelMap2(writeMsl,
+            writeFn = functools.partial(
+                writeMasterSolutionLibrary,
+                newLibraryDir=newLibraryDir,
+                splitGSU=splitGSU,
+                libraryFormat=arguments["LibraryFormat"]
+            )
+
+            ParallelMap2(writeFn,
                          newMasterLibrary.lazyLibraries.items(),
                          "Writing master solution libraries",
+                         multiArg=False,
                          return_as="list")
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
+    del masterLibraries, solutions, kernels, solDict
+    gc.collect()
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
@@ -821,6 +884,6 @@ def run():
     print(f"Total time (s): {(stop-start):3.2f}")
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
-    print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    print(f"KernelHelperObjs: {numKernelHelperObjs}")
     print(f"Peak memory usage (MB): {peak_memory_mb:,.1f}")
     print(f"Current memory usage (MB): {current_memory_mb:,.1f}")

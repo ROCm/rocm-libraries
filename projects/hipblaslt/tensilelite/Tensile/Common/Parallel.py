@@ -22,14 +22,13 @@
 #
 ################################################################################
 
-import concurrent.futures
-import itertools
+import multiprocessing
 import os
 import re
 import sys
 import time
-
-from joblib import Parallel, delayed
+from functools import partial
+from typing import Any, Callable
 
 from .Utilities import tqdm
 
@@ -87,19 +86,15 @@ def pcallWithGlobalParamsSingleArg(f, arg, newGlobalParameters):
     return f(arg)
 
 
-def apply_print_exception(item, *args):
-    # print(item, args)
+def worker_function(args, function, multiArg):
+    """Worker function that executes in the pool process."""
     try:
-        if len(args) > 0:
-            func = item
-            args = args[0]
-            return func(*args)
+        if multiArg:
+            return function(*args)
         else:
-            func, item = item
-            return func(item)
+            return function(args)
     except Exception:
         import traceback
-
         traceback.print_exc()
         raise
     finally:
@@ -114,154 +109,121 @@ def OverwriteGlobalParameters(newGlobalParameters):
     GlobalParameters.globalParameters.update(newGlobalParameters)
 
 
-def ProcessingPool(enable=True, maxTasksPerChild=None):
-    import multiprocessing
-    import multiprocessing.dummy
-
-    threadCount = CPUThreadCount()
-
-    if (not enable) or threadCount <= 1:
-        return multiprocessing.dummy.Pool(1)
-
-    if multiprocessing.get_start_method() == "spawn":
-        from . import GlobalParameters
-
-        return multiprocessing.Pool(
-            threadCount,
-            initializer=OverwriteGlobalParameters,
-            maxtasksperchild=maxTasksPerChild,
-            initargs=(GlobalParameters.globalParameters,),
-        )
-    else:
-        return multiprocessing.Pool(threadCount, maxtasksperchild=maxTasksPerChild)
-
-
-def ParallelMap(function, objects, message="", enable=True, method=None, maxTasksPerChild=None):
+def progress_logger(iterable, total, message, min_log_interval=5.0):
     """
-    Generally equivalent to list(map(function, objects)), possibly executing in parallel.
+    Generator that wraps an iterable and logs progress with time-based throttling.
 
-      message: A message describing the operation to be performed.
-      enable: May be set to false to disable parallelism.
-      method: A function which can fetch the mapping function from a processing pool object.
-          Leave blank to use .map(), other possiblities:
-             - `lambda x: x.starmap` - useful if `function` takes multiple parameters.
-             - `lambda x: x.imap` - lazy evaluation
-             - `lambda x: x.imap_unordered` - lazy evaluation, does not preserve order of return value.
+    Only logs progress if at least min_log_interval seconds have passed since last log.
+    Only prints completion message if task took >= min_log_interval seconds.
+
+    Yields (index, item) tuples.
     """
-    from .GlobalParameters import globalParameters
+    start_time = time.time()
+    last_log_time = start_time
+    log_interval = 1 + (total // 100)
 
-    threadCount = CPUThreadCount(enable)
-    pool = ProcessingPool(enable, maxTasksPerChild)
+    for idx, item in enumerate(iterable):
+        if idx % log_interval == 0:
+            current_time = time.time()
+            if (current_time - last_log_time) >= min_log_interval:
+                print(f"{message}\t{idx+1: 5d}/{total: 5d}")
+                last_log_time = current_time
+        yield idx, item
 
-    if threadCount <= 1 and globalParameters["ShowProgressBar"]:
-        # Provide a progress bar for single-threaded operation.
-        # This works for method=None, and for starmap.
-        mapFunc = map
-        if method is not None:
-            # itertools provides starmap which can fill in for pool.starmap.  It provides imap on Python 2.7.
-            # If this works, we will use it, otherwise we will fallback to the "dummy" pool for single threaded
-            # operation.
-            try:
-                mapFunc = method(itertools)
-            except NameError:
-                mapFunc = None
+    elapsed = time.time() - start_time
+    final_idx = idx + 1 if 'idx' in locals() else 0
 
-        if mapFunc is not None:
-            return list(mapFunc(function, tqdm(objects, message)))
-
-    mapFunc = pool.map
-    if method:
-        mapFunc = method(pool)
-
-    objects = zip(itertools.repeat(function), objects)
-    function = apply_print_exception
-
-    countMessage = ""
-    try:
-        countMessage = " for {} tasks".format(len(objects))
-    except TypeError:
-        pass
-
-    if message != "":
-        message += ": "
-
-    print("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
-    sys.stdout.flush()
-    currentTime = time.time()
-    rv = mapFunc(function, objects)
-    totalTime = time.time() - currentTime
-    print("{0}Done. ({1:.1f} secs elapsed)".format(message, totalTime))
-    sys.stdout.flush()
-    pool.close()
-    return rv
+    if elapsed >= min_log_interval or last_log_time > start_time:
+        print(f"{message} done in {elapsed:.1f}s!\t{final_idx: 5d}/{total: 5d}")
 
 
-def ParallelMapReturnAsGenerator(function, objects, message="", enable=True, multiArg=True):
-    from .GlobalParameters import globalParameters
+def imap_with_progress(pool, func, iterable, total, message, chunksize):
+    results = []
+    for _, result in progress_logger(pool.imap(func, iterable, chunksize=chunksize), total, message):
+        results.append(result)
+    return results
 
-    threadCount = CPUThreadCount(enable)
-    print("{0}Launching {1} threads...".format(message, threadCount))
 
-    if threadCount <= 1 and globalParameters["ShowProgressBar"]:
-        # Provide a progress bar for single-threaded operation.
-        callFunc = lambda args: function(*args) if multiArg else lambda args: function(args)
-        return [callFunc(args) for args in tqdm(objects, message)]
+def _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, maxtasksperchild):
+    # separate fn because yield makes the entire fn a generator even if unreachable
+    ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=threadCount) as executor:
-        resultFutures = (executor.submit(function, *arg if multiArg else arg) for arg in objects)
-        for result in concurrent.futures.as_completed(resultFutures):
-            yield result.result()
+    with ctx.Pool(processes=threadCount, maxtasksperchild=maxtasksperchild,
+                  initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
+        for _, result in progress_logger(pool.imap_unordered(worker, objects, chunksize=chunksize), objLen, message):
+            yield result
 
 
 def ParallelMap2(
-    function, objects, message="", enable=True, multiArg=True, return_as="list", procs=None
+    function: Callable,
+    objects: Any,
+    message: str = "",
+    enable: bool = True,
+    multiArg: bool = True,
+    minChunkSize: int = 1,
+    maxWorkers: int = -1,
+    maxtasksperchild: int = 1024,
+    return_as: str = "list"
 ):
-    """
-    Generally equivalent to list(map(function, objects)), possibly executing in parallel.
+    """Executes a function over a list of objects in parallel or sequentially.
 
-      message: A message describing the operation to be performed.
-      enable: May be set to false to disable parallelism.
-      multiArg: True if objects represent multiple arguments
-                  (differentiates multi args vs single collection arg)
-    """
-    if return_as in ("generator", "generator_unordered") and not joblibParallelSupportsGenerator():
-        return ParallelMapReturnAsGenerator(function, objects, message, enable, multiArg)
+    This function is generally equivalent to ``list(map(function, objects))``. However, it provides
+    additional functionality to run in parallel, depending on the 'enable' flag and available CPU
+    threads.
 
+    Args:
+        function: The function to apply to each item in 'objects'. If 'multiArg' is True, 'function'
+                  should accept multiple arguments.
+        objects: An iterable of objects to be processed by 'function'. If 'multiArg' is True, each
+                 item in 'objects' should be an iterable of arguments for 'function'.
+        message: Optional; a message describing the operation. Default is an empty string.
+        enable: Optional; if False, disables parallel execution and runs sequentially. Default is True.
+        multiArg: Optional; if True, treats each item in 'objects' as multiple arguments for
+                  'function'. Default is True.
+        return_as: Optional; "list" (default) or "generator_unordered" for streaming results
+
+    Returns:
+        A list or generator containing the results of applying **function** to each item in **objects**.
+    """
     from .GlobalParameters import globalParameters
-
-    threadCount = procs if procs else CPUThreadCount(enable)
 
     threadCount = CPUThreadCount(enable)
 
-    if threadCount <= 1 and globalParameters["ShowProgressBar"]:
-        # Provide a progress bar for single-threaded operation.
-        return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]
+    if not hasattr(objects, "__len__"):
+        objects = list(objects)
 
-    countMessage = ""
-    try:
-        countMessage = " for {} tasks".format(len(objects))
-    except TypeError:
-        pass
+    objLen = len(objects)
+    if objLen == 0:
+        return [] if return_as == "list" else iter([])
 
-    if message != "":
-        message += ": "
-    print("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
-    sys.stdout.flush()
-    currentTime = time.time()
+    f = (lambda x: function(*x)) if multiArg else function
+    if objLen == 1:
+        print(f"{message}: (1 task)")
+        result = [f(x) for x in objects]
+        return result if return_as == "list" else iter(result)
 
-    pcall = pcallWithGlobalParamsMultiArg if multiArg else pcallWithGlobalParamsSingleArg
-    pargs = zip(objects, itertools.repeat(globalParameters))
+    extra_message = (
+        f": {threadCount} thread(s)" + f", {objLen} tasks"
+        if objLen
+        else ""
+    )
 
-    if joblibParallelSupportsGenerator():
-        rv = Parallel(n_jobs=threadCount, timeout=99999, return_as=return_as)(
-            delayed(pcall)(function, a, params) for a, params in pargs
-        )
+    print(f"ParallelMap {message}{extra_message}")
+
+    if threadCount <= 1:
+        result = [f(x) for x in objects]
+        return result if return_as == "list" else iter(result)
+
+    if maxWorkers > 0:
+        threadCount = min(maxWorkers, threadCount)
+
+    chunksize = max(minChunkSize, objLen // 2000)
+    worker = partial(worker_function, function=function, multiArg=multiArg)
+    if return_as == "generator_unordered":
+        # yield results as they complete without buffering
+        return _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, maxtasksperchild)
     else:
-        rv = Parallel(n_jobs=threadCount, timeout=99999)(
-            delayed(pcall)(function, a, params) for a, params in pargs
-        )
-
-    totalTime = time.time() - currentTime
-    print("{0}Done. ({1:.1f} secs elapsed)".format(message, totalTime))
-    sys.stdout.flush()
-    return rv
+        ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
+        with ctx.Pool(processes=threadCount, maxtasksperchild=maxtasksperchild,
+                      initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
+            return list(imap_with_progress(pool, worker, objects, objLen, message, chunksize))
