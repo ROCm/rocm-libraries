@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import sys
 import yaml
 from pathlib import Path
 
@@ -85,7 +86,7 @@ def parse_scalar(loader: yaml.Loader):
         if not evt.style:
             return None
 
-    return value
+    return sys.intern(value)
 
 def load_yaml_stream(yaml_path: Path, loader_type: yaml.Loader):
     with open(yaml_path, 'r') as f:
