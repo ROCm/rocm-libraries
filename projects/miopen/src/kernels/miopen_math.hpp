@@ -61,13 +61,12 @@ __forceinline__ __device__ _Float16 cos(_Float16 x) { return hcos(__half(x)); }
 __forceinline__ __device__ _Float16 fabs(_Float16 x) { return __habs(__half(x)); }
 __forceinline__ __device__ _Float16 fmax(_Float16 x, _Float16 y)
 {
-    return fmax(static_cast<float>(x), static_cast<float>(y));
+    return __hmax(__half(x), __half(y));
 }
 __forceinline__ __device__ _Float16 fmin(_Float16 x, _Float16 y)
 {
-    return fmin(static_cast<float>(x), static_cast<float>(y));
+    return __hmin(__half(x), __half(y));
 }
-
 __forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y)
 {
     return hexp(__hmul(__half(y), hlog(__half(x))));
@@ -79,11 +78,7 @@ __forceinline__ __device__ _Float16 tan(_Float16 x)
 }
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
-    __half h           = __half(x);
-    __half exp2x       = hexp(__hmul(__half(2.0f), h));
-    __half numerator   = __hsub(exp2x, __half(1.0f));
-    __half denominator = __hadd(exp2x, __half(1.0f));
-    return __hdiv(numerator, denominator);
+    return static_cast<_Float16>(tanhf(static_cast<float>(x)));
 }
 
 //=============================================================================
