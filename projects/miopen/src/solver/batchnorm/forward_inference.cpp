@@ -148,7 +148,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIO_BN_VEC_SIZE", vectorsize},
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

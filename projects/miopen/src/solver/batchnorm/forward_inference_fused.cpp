@@ -113,7 +113,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
         {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
     if(bn_problem.GetMode() == miopenBNSpatial)
         kernel.comp_options += " -DSPATIAL_BN";
     else
