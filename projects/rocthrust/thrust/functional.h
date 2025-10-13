@@ -31,8 +31,6 @@
 #endif // no system header
 
 #include <thrust/detail/functional/actor.h>
-#include <thrust/detail/functional/address_stability.h>
-#include <thrust/detail/type_traits.h>
 
 #include _THRUST_STD_INCLUDE(functional)
 
@@ -40,6 +38,11 @@
 #  include _THRUST_LIBCXX_INCLUDE(functional)
 #  include <functional>
 #else
+#  include <thrust/detail/type_traits.h>
+
+#  include <any>
+#  include <tuple>
+#  include <type_traits>
 #  include <utility>
 #endif
 
@@ -51,6 +54,7 @@ namespace internal
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
 using _THRUST_LIBCXX::maximum;
 using _THRUST_LIBCXX::minimum;
+using _THRUST_STD::not_fn;
 using identity = _THRUST_STD::__identity;
 #  else
 // cuda::maximum or hip::maximum
@@ -101,6 +105,264 @@ struct minimum<void>
   }
 };
 
+// _THRUST_STD::not_fn
+namespace detail
+{
+
+struct nat
+{
+  nat()                      = delete;
+  nat(const nat&)            = delete;
+  nat& operator=(const nat&) = delete;
+  ~nat()                     = delete;
+};
+
+template <typename DecayedFp>
+struct member_pointer_class_type
+{};
+
+template <typename Ret, typename ClassType>
+struct member_pointer_class_type<Ret ClassType::*>
+{
+  typedef ClassType type;
+};
+
+template <typename Tp>
+struct is_reference_wrapper_impl : public ::std::false_type
+{};
+template <typename Tp>
+struct is_reference_wrapper_impl<::std::reference_wrapper<Tp>> : public ::std::true_type
+{};
+template <typename Tp>
+struct is_reference_wrapper : public is_reference_wrapper_impl<::std::remove_cv_t<Tp>>
+{};
+
+template <typename Fp,
+          typename A0,
+          typename DecayFp = ::internal::decay_t<Fp>,
+          typename DecayA0 = ::internal::decay_t<A0>,
+          typename ClassT  = typename member_pointer_class_type<DecayFp>::type>
+using enable_if_bullet1 =
+  ::std::enable_if_t<::std::is_member_function_pointer<DecayFp>::value&& ::std::is_base_of<ClassT, DecayA0>::value>;
+
+template <typename Fp, typename A0, typename DecayFp = ::internal::decay_t<Fp>, typename DecayA0 = ::internal::decay_t<A0>>
+using enable_if_bullet2 =
+  ::std::enable_if_t<::std::is_member_function_pointer<DecayFp>::value && is_reference_wrapper<DecayA0>::value>;
+
+template <typename Fp,
+          typename A0,
+          typename DecayFp = ::internal::decay_t<Fp>,
+          typename DecayA0 = ::internal::decay_t<A0>,
+          typename ClassT  = typename member_pointer_class_type<DecayFp>::type>
+using enable_if_bullet3 =
+  ::std::enable_if_t<::std::is_member_function_pointer<DecayFp>::value && !::std::is_base_of<ClassT, DecayA0>::value
+                     && !is_reference_wrapper<DecayA0>::value>;
+
+template <typename Fp,
+          typename A0,
+          typename DecayFp = ::internal::decay_t<Fp>,
+          typename DecayA0 = ::internal::decay_t<A0>,
+          typename ClassT  = typename member_pointer_class_type<DecayFp>::type>
+using enable_if_bullet4 =
+  ::std::enable_if_t<::std::is_member_object_pointer<DecayFp>::value&& ::std::is_base_of<ClassT, DecayA0>::value>;
+
+template <typename Fp, typename A0, typename DecayFp = ::internal::decay_t<Fp>, typename DecayA0 = ::internal::decay_t<A0>>
+using enable_if_bullet5 =
+  ::std::enable_if_t<::std::is_member_object_pointer<DecayFp>::value && is_reference_wrapper<DecayA0>::value>;
+
+template <typename Fp,
+          typename A0,
+          typename DecayFp = ::internal::decay_t<Fp>,
+          typename DecayA0 = ::internal::decay_t<A0>,
+          typename ClassT  = typename member_pointer_class_type<DecayFp>::type>
+using enable_if_bullet6 =
+  ::std::enable_if_t<::std::is_member_object_pointer<DecayFp>::value && !::std::is_base_of<ClassT, DecayA0>::value
+                     && !is_reference_wrapper<DecayA0>::value>;
+
+template <typename... Args>
+inline THRUST_HOST_DEVICE nat __invoke(::std::any, Args&&... args);
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename... Args, typename = enable_if_bullet1<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype((::std::declval<A0>().*::std::declval<Fp>())(::std::declval<Args>()...))
+__invoke(Fp&& f, A0&& a0, Args&&... args) noexcept(noexcept((static_cast<A0&&>(a0).*f)(static_cast<Args&&>(args)...)))
+{
+  return (static_cast<A0&&>(a0).*f)(static_cast<Args&&>(args)...);
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename... Args, typename = enable_if_bullet2<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype((::std::declval<A0>().get().*::std::declval<Fp>())(
+  ::std::declval<Args>()...))
+__invoke(Fp&& f, A0&& a0, Args&&... args) noexcept(noexcept((a0.get().*f)(static_cast<Args&&>(args)...)))
+{
+  return (a0.get().*f)(static_cast<Args&&>(args)...);
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename... Args, typename = enable_if_bullet3<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype(((*::std::declval<A0>()).*::std::declval<Fp>())(::std::declval<Args>()...))
+__invoke(Fp&& f, A0&& a0, Args&&... args) noexcept(noexcept(((*static_cast<A0&&>(a0)).*f)(static_cast<Args&&>(args)...)))
+{
+  return ((*static_cast<A0&&>(a0)).*f)(static_cast<Args&&>(args)...);
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename = enable_if_bullet4<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype(::std::declval<A0>().*::std::declval<Fp>())
+__invoke(Fp&& f, A0&& a0) noexcept(noexcept(static_cast<A0&&>(a0).*f))
+{
+  return static_cast<A0&&>(a0).*f;
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename = enable_if_bullet5<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype(::std::declval<A0>().get().*::std::declval<Fp>())
+__invoke(Fp&& f, A0&& a0) noexcept(noexcept(a0.get().*f))
+{
+  return a0.get().*f;
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename A0, typename = enable_if_bullet6<Fp, A0>>
+inline THRUST_HOST_DEVICE constexpr decltype((*::std::declval<A0>()).*::std::declval<Fp>())
+__invoke(Fp&& f, A0&& a0) noexcept(noexcept((*static_cast<A0&&>(a0)).*f))
+{
+  return (*static_cast<A0&&>(a0)).*f;
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Fp, typename... Args>
+inline THRUST_HOST_DEVICE constexpr decltype(::std::declval<Fp>()(::std::declval<Args>()...))
+__invoke(Fp&& f, Args&&... args) noexcept(noexcept(static_cast<Fp&&>(f)(static_cast<Args&&>(args)...)))
+{
+  return static_cast<Fp&&>(f)(static_cast<Args&&>(args)...);
+}
+
+template <typename Fn, typename... Args>
+inline THRUST_HOST_DEVICE constexpr ::thrust::detail::invoke_result_t<Fn, Args...>
+invoke(Fn&& f, Args&&... args) noexcept(::std::is_nothrow_invocable_v<Fn, Args...>)
+{
+  return ::internal::detail::__invoke(::std::forward<Fn>(f), ::std::forward<Args>(args)...);
+}
+
+template <typename Op, typename Indices, typename... BoundArgs>
+struct perfect_forward_impl;
+
+template <typename Op, size_t... Idx, typename... BoundArgs>
+struct perfect_forward_impl<Op, ::std::index_sequence<Idx...>, BoundArgs...>
+{
+private:
+  ::std::tuple<BoundArgs...> bound_args;
+
+public:
+  template <typename... Args,
+            bool cccl_true = true,
+            ::std::enable_if_t<::std::is_constructible_v<::std::tuple<BoundArgs...>, Args&&...> && cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE explicit constexpr perfect_forward_impl(Args&&... args) noexcept(
+    ::std::is_nothrow_constructible_v<::std::tuple<BoundArgs...>, Args&&...>)
+      : bound_args(::std::forward<Args>(args)...)
+  {}
+
+  inline perfect_forward_impl(perfect_forward_impl const&) = default;
+  inline perfect_forward_impl(perfect_forward_impl&&)      = default;
+
+  inline perfect_forward_impl& operator=(perfect_forward_impl const&) = default;
+  inline perfect_forward_impl& operator=(perfect_forward_impl&&)      = default;
+
+  template <typename... Args,
+            bool cccl_true                                                                          = true,
+            ::std::enable_if_t<::std::is_invocable_v<Op, BoundArgs&..., Args...> && cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE constexpr auto
+  operator()(Args&&... args) & noexcept(noexcept(Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...)))
+    -> decltype(Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...))
+  {
+    return Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...);
+  }
+
+  template <typename... Args,
+            bool cccl_true                                                                            = true,
+            ::std::enable_if_t<(!::std::is_invocable_v<Op, BoundArgs&..., Args...>) &&cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE auto operator()(Args&&...) & = delete;
+
+  template <typename... Args,
+            bool cccl_true                                                                                = true,
+            ::std::enable_if_t<::std::is_invocable_v<Op, BoundArgs const&..., Args...> && cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE constexpr auto operator()(Args&&... args) const& noexcept(
+    noexcept(Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...)))
+    -> decltype(Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...))
+  {
+    return Op()(::std::get<Idx>(bound_args)..., ::std::forward<Args>(args)...);
+  }
+
+  template <typename... Args,
+            bool cccl_true                                                                                  = true,
+            ::std::enable_if_t<(!::std::is_invocable_v<Op, BoundArgs const&..., Args...>) &&cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE auto operator()(Args&&...) const& = delete;
+
+  template <typename... Args,
+            bool cccl_true                                                                         = true,
+            ::std::enable_if_t<::std::is_invocable_v<Op, BoundArgs..., Args...> && cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE constexpr auto operator()(Args&&... args) && noexcept(
+    noexcept(Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...)))
+    -> decltype(Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...))
+  {
+    return Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...);
+  }
+
+  template <typename... Args,
+            bool cccl_true                                                                           = true,
+            ::std::enable_if_t<(!::std::is_invocable_v<Op, BoundArgs..., Args...>) &&cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE auto operator()(Args&&...) && = delete;
+
+  template <typename... Args,
+            bool cccl_true                                                                               = true,
+            ::std::enable_if_t<::std::is_invocable_v<Op, BoundArgs const..., Args...> && cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE constexpr auto operator()(Args&&... args) const&& noexcept(
+    noexcept(Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...)))
+    -> decltype(Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...))
+  {
+    return Op()(::std::get<Idx>(::std::move(bound_args))..., ::std::forward<Args>(args)...);
+  }
+
+  template <typename... Args,
+            bool cccl_true                                                                                 = true,
+            ::std::enable_if_t<(!::std::is_invocable_v<Op, BoundArgs const..., Args...>) &&cccl_true, int> = 0>
+  inline THRUST_HOST_DEVICE auto operator()(Args&&...) const&& = delete;
+};
+
+template <typename Op, typename... Args>
+using perfect_forward = perfect_forward_impl<Op, ::std::index_sequence_for<Args...>, Args...>;
+
+struct not_fn_op
+{
+  template <typename... Args>
+  inline THRUST_HOST_DEVICE THRUST_CONSTEXPR_CXX20 auto operator()(Args&&... args) const
+    noexcept(noexcept(!::internal::detail::invoke(::std::forward<Args>(args)...)))
+      -> decltype(!::internal::detail::invoke(::std::forward<Args>(args)...))
+  {
+    return !::internal::detail::invoke(::std::forward<Args>(args)...);
+  }
+};
+
+template <typename Fn>
+struct not_fn_t : perfect_forward<not_fn_op, Fn>
+{
+  using base = perfect_forward<not_fn_op, Fn>;
+  using base::base;
+  inline constexpr not_fn_t() noexcept = default;
+};
+
+} // namespace detail
+
+template <typename Fn,
+          typename =
+            ::std::enable_if_t<::std::is_constructible_v<decay_t<Fn>, Fn>&& ::std::is_move_constructible_v<decay_t<Fn>>>>
+inline THRUST_HOST_DEVICE THRUST_CONSTEXPR_CXX20 auto not_fn(Fn&& f)
+{
+  return detail::not_fn_t<decay_t<Fn>>(::std::forward<Fn>(f));
+}
+
 // _THRUST_STD::__identity
 struct identity
 {
@@ -128,339 +390,12 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-#define THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(func, impl)                                                       \
-  template <>                                                                                                       \
-  struct func<void>                                                                                                 \
-  {                                                                                                                 \
-    /*! This functor is transparent. */                                                                             \
-    using is_transparent = void;                                                                                    \
-    /*! Function call operator. */                                                                                  \
-    THRUST_EXEC_CHECK_DISABLE                                                                                       \
-    template <typename T1, typename T2>                                                                             \
-    THRUST_HOST_DEVICE constexpr auto operator()(T1&& t1, T2&& t2) const noexcept(noexcept(impl)) -> decltype(impl) \
-    {                                                                                                               \
-      return impl;                                                                                                  \
-    }                                                                                                               \
-  }
-
-/*! \p plus is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>plus<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x+y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x+y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>plus</tt> to sum two
- *  device_vectors of \c floats.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *  thrust::device_vector<float> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 75);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::plus<float>());
- *  // V3 is now {76, 77, 78, ..., 1075}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/plus
- */
-template <typename T = void>
-struct plus : public _THRUST_STD::plus<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end plus
-
-/*! \p minus is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>minus<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x-y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x-y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>minus</tt> to subtract
- *  a device_vector of \c floats from another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *  thrust::device_vector<float> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 75);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::minus<float>());
- *  // V3 is now {-74, -73, -72, ..., 925}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/minus
- */
-template <typename T = void>
-struct minus : public _THRUST_STD::minus<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end minus
-
-/*! \p multiplies is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>multiplies<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x*y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x*y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>multiplies</tt> to multiply
- *  two device_vectors of \c floats.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *  thrust::device_vector<float> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 75);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::multiplies<float>());
- *  // V3 is now {75, 150, 225, ..., 75000}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/multiplies
- */
-template <typename T = void>
-struct multiplies : public _THRUST_STD::multiplies<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end multiplies
-
-/*! \p divides is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>divides<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x/y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x/y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>divides</tt> to divide
- *  one device_vectors of \c floats by another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *  thrust::device_vector<float> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 75);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::divides<float>());
- *  // V3 is now {1/75, 2/75, 3/75, ..., 1000/75}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/divides
- */
-template <typename T = void>
-struct divides : public _THRUST_STD::divides<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end divides
-
-/*! \p modulus is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>modulus<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x \% y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x \% y</tt> must be defined and must have a return
- * type that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>modulus</tt> to take
- *  the modulus of one device_vectors of \c floats by another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *  thrust::device_vector<float> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 75);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::modulus<int>());
- *  // V3 is now {1%75, 2%75, 3%75, ..., 1000%75}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/modulus
- */
-template <typename T = void>
-struct modulus : public _THRUST_STD::modulus<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end modulus
-
-/*! \p negate is a function object. Specifically, it is an Adaptable Unary Function.
- *  If \c f is an object of class <tt>negate<T></tt>, and \c x is an object
- *  of class \c T, then <tt>f(x)</tt> returns <tt>-x</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x is an object of type \p T, then <tt>-x</tt> must be defined and must have a return type that is
- * convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>negate</tt> to negate
- *  the elements of a device_vector of \c floats.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<float> V1(N);
- *  thrust::device_vector<float> V2(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(),
- *                    thrust::negate<float>());
- *  // V2 is now {-1, -2, -3, ..., -1000}
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/negate
- */
-template <typename T = void>
-struct negate : _THRUST_STD::negate<T>
-{
-  /*! \typedef argument_type
-   *  \brief The type of the function object's argument.
-   */
-  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end negate
+using _THRUST_STD::divides;
+using _THRUST_STD::minus;
+using _THRUST_STD::modulus;
+using _THRUST_STD::multiplies;
+using _THRUST_STD::negate;
+using _THRUST_STD::plus;
 
 /*! \p square is a function object. Specifically, it is an Adaptable Unary Function.
  *  If \c f is an object of class <tt>square<T></tt>, and \c x is an object
@@ -493,16 +428,6 @@ struct negate : _THRUST_STD::negate<T>
 template <typename T = void>
 struct square
 {
-  /*! \typedef argument_type
-   *  \brief The type of the function object's argument.
-   */
-  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-
   /*! Function call operator. The return value is <tt>x*x</tt>.
    */
   THRUST_EXEC_CHECK_DISABLE
@@ -510,7 +435,7 @@ struct square
   {
     return x * x;
   }
-}; // end square
+};
 
 /*! \brief Specialization of \p square for type void.
  */
@@ -537,203 +462,12 @@ struct square<void>
  *  \{
  */
 
-/*! \p equal_to is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>equal_to<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x == y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/equal_to
- */
-template <typename T = void>
-struct equal_to : public _THRUST_STD::equal_to<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end equal_to
-
-/*! \p not_equal_to is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>not_equal_to<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x != y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/not_equal_to
- */
-template <typename T = void>
-struct not_equal_to : public _THRUST_STD::not_equal_to<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end not_equal_to
-
-/*! \p greater is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>greater<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x > y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/greater
- */
-template <typename T = void>
-struct greater : public _THRUST_STD::greater<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end greater
-
-/*! \p less is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>less<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x < y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/less
- */
-template <typename T = void>
-struct less : public _THRUST_STD::less<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end less
-
-/*! \p greater_equal is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>greater_equal<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x >= y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/greater_equal
- */
-template <typename T = void>
-struct greater_equal : public _THRUST_STD::greater_equal<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end greater_equal
-
-/*! \p less_equal is a function object. Specifically, it is an Adaptable Binary
- *  Predicate, which means it is a function object that tests the truth or falsehood
- *  of some condition. If \c f is an object of class <tt>less_equal<T></tt> and \c x
- *  and \c y are objects of class \c T, then <tt>f(x,y)</tt> returns \c true if
- *  <tt>x <= y</tt> and \c false otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/less_equal
- */
-template <typename T = void>
-struct less_equal : public _THRUST_STD::less_equal<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end less_equal
+using _THRUST_STD::equal_to;
+using _THRUST_STD::greater;
+using _THRUST_STD::greater_equal;
+using _THRUST_STD::less;
+using _THRUST_STD::less_equal;
+using _THRUST_STD::not_equal_to;
 
 /*! \}
  */
@@ -743,115 +477,9 @@ struct less_equal : public _THRUST_STD::less_equal<T>
  *  \{
  */
 
-/*! \p logical_and is a function object. Specifically, it is an Adaptable Binary Predicate,
- *  which means it is a function object that tests the truth or falsehood of some condition.
- *  If \c f is an object of class <tt>logical_and<T></tt> and \c x and \c y are objects of
- *  class \c T (where \c T is convertible to \c bool) then <tt>f(x,y)</tt> returns \c true
- *  if and only if both \c x and \c y are \c true.
- *
- *  \tparam T must be convertible to \c bool.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_and
- */
-template <typename T = void>
-struct logical_and : public _THRUST_STD::logical_and<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end logical_and
-
-/*! \p logical_or is a function object. Specifically, it is an Adaptable Binary Predicate,
- *  which means it is a function object that tests the truth or falsehood of some condition.
- *  If \c f is an object of class <tt>logical_or<T></tt> and \c x and \c y are objects of
- *  class \c T (where \c T is convertible to \c bool) then <tt>f(x,y)</tt> returns \c true
- *  if and only if either \c x or \c y are \c true.
- *
- *  \tparam T must be convertible to \c bool.
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_or
- */
-template <typename T = void>
-struct logical_or : public _THRUST_STD::logical_or<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end logical_or
-
-/*! \p logical_not is a function object. Specifically, it is an Adaptable Predicate,
- *  which means it is a function object that tests the truth or falsehood of some condition.
- *  If \c f is an object of class <tt>logical_not<T></tt> and \c x is an object of
- *  class \c T (where \c T is convertible to \c bool) then <tt>f(x)</tt> returns \c true
- *  if and only if \c x is \c false.
- *
- *  \tparam T must be convertible to \c bool.
- *
- *  The following code snippet demonstrates how to use \p logical_not to transform
- *  a device_vector of \c bools into its logical complement.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/transform.h>
- *  #include <thrust/functional.h>
- *  ...
- *  thrust::device_vector<bool> V;
- *  ...
- *  thrust::transform(V.begin(), V.end(), V.begin(), thrust::logical_not<bool>());
- *  // The elements of V are now the logical complement of what they were prior
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/logical_not
- */
-template <typename T = void>
-struct logical_not : public _THRUST_STD::logical_not<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end logical_not
+using _THRUST_STD::logical_and;
+using _THRUST_STD::logical_not;
+using _THRUST_STD::logical_or;
 
 /*! \}
  */
@@ -861,164 +489,9 @@ struct logical_not : public _THRUST_STD::logical_not<T>
  *  \{
  */
 
-/*! \p bit_and is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>bit_and<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x&y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x&y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>bit_and</tt> to take
- *  the bitwise AND of one device_vector of \c ints by another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<int> V1(N);
- *  thrust::device_vector<int> V2(N);
- *  thrust::device_vector<int> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 13);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::bit_and<int>());
- *  // V3 is now {1&13, 2&13, 3&13, ..., 1000%13}
- *  \endcode
- */
-template <typename T = void>
-struct bit_and : public _THRUST_STD::bit_and<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end bit_and
-
-/*! \p bit_or is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>bit_and<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x|y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x|y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>bit_or</tt> to take
- *  the bitwise OR of one device_vector of \c ints by another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<int> V1(N);
- *  thrust::device_vector<int> V2(N);
- *  thrust::device_vector<int> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 13);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::bit_or<int>());
- *  // V3 is now {1|13, 2|13, 3|13, ..., 1000|13}
- *  \endcode
- */
-template <typename T = void>
-struct bit_or : public _THRUST_STD::bit_or<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end bit_or
-
-/*! \p bit_xor is a function object. Specifically, it is an Adaptable Binary Function.
- *  If \c f is an object of class <tt>bit_and<T></tt>, and \c x and \c y are objects
- *  of class \c T, then <tt>f(x,y)</tt> returns <tt>x^y</tt>.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and if \c x and \c y are objects of type \p T, then <tt>x^y</tt> must be defined and must have a return type
- * that is convertible to \c T.
- *
- *  The following code snippet demonstrates how to use <tt>bit_xor</tt> to take
- *  the bitwise XOR of one device_vector of \c ints by another.
- *
- *  \code
- *  #include <thrust/device_vector.h>
- *  #include <thrust/functional.h>
- *  #include <thrust/sequence.h>
- *  #include <thrust/fill.h>
- *  #include <thrust/transform.h>
- *  ...
- *  const int N = 1000;
- *  thrust::device_vector<int> V1(N);
- *  thrust::device_vector<int> V2(N);
- *  thrust::device_vector<int> V3(N);
- *
- *  thrust::sequence(V1.begin(), V1.end(), 1);
- *  thrust::fill(V2.begin(), V2.end(), 13);
- *
- *  thrust::transform(V1.begin(), V1.end(), V2.begin(), V3.begin(),
- *                    thrust::bit_xor<int>());
- *  // V3 is now {1^13, 2^13, 3^13, ..., 1000^13}
- *  \endcode
- */
-template <typename T = void>
-struct bit_xor : public _THRUST_STD::bit_xor<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end bit_xor
+using _THRUST_STD::bit_and;
+using _THRUST_STD::bit_or;
+using _THRUST_STD::bit_xor;
 
 /*! \}
  */
@@ -1051,11 +524,7 @@ struct bit_xor : public _THRUST_STD::bit_xor<T>
 template <typename T = void>
 struct identity
 {
-  /*! \typedef argument_type
-   *  \brief The type of the function object's first argument.
-   */
-  using argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
+  // FIXME(bgruber): we cannot remove this yet, because transform_iterator depends on it
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
@@ -1093,97 +562,8 @@ template <>
 struct identity<void> : ::internal::identity
 {};
 
-/*! \p maximum is a function object that takes two arguments and returns the greater
- *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an
- *  object of class <tt>maximum<T></tt> and \c x and \c y are objects of class \c T
- *  <tt>f(x,y)</tt> returns \c x if <tt>x > y</tt> and \c y, otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  The following code snippet demonstrates that \p maximum returns its
- *  greater argument.
- *
- *  \code
- *  #include <thrust/functional.h>
- *  #include <assert.h>
- *  ...
- *  int x =  137;
- *  int y = -137;
- *  thrust::maximum<int> mx;
- *  assert(x == mx(x,y));
- *  \endcode
- *
- *  \see minimum
- *  \see min
- */
-template <typename T = void>
-struct maximum : ::internal::maximum<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-}; // end maximum
-
-/*! \p minimum is a function object that takes two arguments and returns the lesser
- *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an
- *  object of class <tt>minimum<T></tt> and \c x and \c y are objects of class \c T
- *  <tt>f(x,y)</tt> returns \c x if <tt>x < y</tt> and \c y, otherwise.
- *
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan
- * Comparable</a>.
- *
- *  The following code snippet demonstrates that \p minimum returns its
- *  lesser argument.
- *
- *  \code
- *  #include <thrust/functional.h>
- *  #include <assert.h>
- *  ...
- *  int x =  137;
- *  int y = -137;
- *  thrust::minimum<int> mn;
- *  assert(y == mn(x,y));
- *  \endcode
- *
- *  \see maximum
- *  \see max
- */
-template <typename T = void>
-struct minimum : ::internal::minimum<T>
-{
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
-}; // end minimum
+using ::internal::maximum;
+using ::internal::minimum;
 
 /*! \p project1st is a function object that takes two arguments and returns
  *  its first argument; the second argument is unused. It is essentially a
@@ -1205,31 +585,13 @@ struct minimum : ::internal::minimum<T>
 template <typename T1 = void, typename T2 = void>
 struct project1st
 {
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
-
   /*! Function call operator. The return value is <tt>lhs</tt>.
    */
   THRUST_HOST_DEVICE constexpr const T1& operator()(const T1& lhs, const T2& /*rhs*/) const
   {
     return lhs;
   }
-}; // end project1st
+};
 
 /*! \brief Specialization of \p project1st for two void arguments.
  */
@@ -1270,24 +632,6 @@ struct project1st<void, void>
 template <typename T1 = void, typename T2 = void>
 struct project2nd
 {
-  /*! \typedef first_argument_type
-   *  \brief The type of the function object's first argument.
-   *  deprecated [Since 2.6]
-   */
-  using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
-
-  /*! \typedef second_argument_type
-   *  \brief The type of the function object's second argument.
-   *  deprecated [Since 2.6]
-   */
-  using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
-
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   *  deprecated [Since 2.6]
-   */
-  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
-
   /*! Function call operator. The return value is <tt>rhs</tt>.
    */
   THRUST_HOST_DEVICE constexpr const T2& operator()(const T1& /*lhs*/, const T2& rhs) const
@@ -1324,37 +668,7 @@ struct project2nd<void, void>
  *  \{
  */
 
-namespace detail
-{
-template <typename F>
-struct not_fun_t
-{
-  F f;
-
-  template <typename... Ts>
-  THRUST_HOST_DEVICE auto operator()(Ts&&... args) noexcept(noexcept(!f(std::forward<Ts>(args)...)))
-    -> decltype(!f(std::forward<Ts>(args)...))
-  {
-    return !f(std::forward<Ts>(args)...);
-  }
-
-  template <typename... Ts>
-  THRUST_HOST_DEVICE auto operator()(Ts&&... args) const noexcept(noexcept(!f(std::forward<Ts>(args)...)))
-    -> decltype(!f(std::forward<Ts>(args)...))
-  {
-    return !f(std::forward<Ts>(args)...);
-  }
-};
-} // namespace detail
-
-//! Takes a predicate (a callable returning bool) and returns a new predicate that returns the negated result.
-//! \see https://en.cppreference.com/w/cpp/utility/functional/not_fn
-// TODO(bgruber): alias to _THRUST_STD::not_fn in C++17
-template <class F>
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::internal::decay_t<F>>
-{
-  return detail::not_fun_t<::internal::decay_t<F>>{std::forward<F>(f)};
-}
+using ::internal::not_fn;
 
 /*! \}
  */
@@ -1454,44 +768,7 @@ THRUST_INLINE_CONSTANT thrust::detail::functional::placeholder<9>::type _10;
 /*! \} // placeholder_objects
  */
 
-#undef THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION
-
 THRUST_NAMESPACE_END
-
-#ifndef THRUST_DOXYGEN_INVOKED // Do not document
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-_LIBCUDACXX_BEGIN_NAMESPACE_CUDA
-#  else
-THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-#  endif
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::plus);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::minus);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::multiplies);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::divides);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::modulus);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::negate);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::bit_and);
-// THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::bit_not); // does not exist?
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::bit_or);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::bit_xor);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::equal_to);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::not_equal_to);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::less);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::less_equal);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::greater_equal);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::greater);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_and);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_not);
-THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_or);
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-_LIBCUDACXX_END_NAMESPACE_CUDA
-#  else
-}
-THRUST_NAMESPACE_END
-#  endif
-#endif // THRUST_DOXYGEN_INVOKED
 
 #include <thrust/detail/functional/operators.h>
 #include <thrust/detail/type_traits/is_commutative.h>

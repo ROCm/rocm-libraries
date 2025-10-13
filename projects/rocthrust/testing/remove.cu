@@ -45,29 +45,24 @@ struct is_true
 };
 
 template <typename Vector>
-void TestRemoveSimple(void)
+void TestRemoveSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
   typename Vector::iterator end = thrust::remove(data.begin(), data.end(), (T) 2);
 
   ASSERT_EQUAL(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQUAL(data[0], 1);
-  ASSERT_EQUAL(data[1], 1);
-  ASSERT_EQUAL(data[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(data, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestRemoveSimple);
 
 template <typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE ForwardIterator remove(my_system& system, ForwardIterator first, ForwardIterator, const T&)
+ForwardIterator remove(my_system& system, ForwardIterator first, ForwardIterator, const T&)
 {
   system.validate_dispatch();
   return first;
@@ -85,7 +80,7 @@ void TestRemoveDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveDispatchExplicit);
 
 template <typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE ForwardIterator remove(my_tag, ForwardIterator first, ForwardIterator, const T&)
+ForwardIterator remove(my_tag, ForwardIterator first, ForwardIterator, const T&)
 {
   *first = 13;
   return first;
@@ -102,32 +97,26 @@ void TestRemoveDispatchImplicit()
 DECLARE_UNITTEST(TestRemoveDispatchImplicit);
 
 template <typename Vector>
-void TestRemoveCopySimple(void)
+void TestRemoveCopySimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
   Vector result(5);
 
   typename Vector::iterator end = thrust::remove_copy(data.begin(), data.end(), result.begin(), (T) 2);
 
   ASSERT_EQUAL(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQUAL(result[0], 1);
-  ASSERT_EQUAL(result[1], 1);
-  ASSERT_EQUAL(result[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(result, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestRemoveCopySimple);
 
 template <typename InputIterator, typename OutputIterator, typename T>
-THRUST_HOST_DEVICE OutputIterator
-remove_copy(my_system& system, InputIterator, InputIterator, OutputIterator result, const T&)
+OutputIterator remove_copy(my_system& system, InputIterator, InputIterator, OutputIterator result, const T&)
 {
   system.validate_dispatch();
   return result;
@@ -145,7 +134,7 @@ void TestRemoveCopyDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveCopyDispatchExplicit);
 
 template <typename InputIterator, typename OutputIterator, typename T>
-THRUST_HOST_DEVICE OutputIterator remove_copy(my_tag, InputIterator, InputIterator, OutputIterator result, const T&)
+OutputIterator remove_copy(my_tag, InputIterator, InputIterator, OutputIterator result, const T&)
 {
   *result = 13;
   return result;
@@ -163,29 +152,24 @@ void TestRemoveCopyDispatchImplicit()
 DECLARE_UNITTEST(TestRemoveCopyDispatchImplicit);
 
 template <typename Vector>
-void TestRemoveIfSimple(void)
+void TestRemoveIfSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
   typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), is_even<T>());
 
   ASSERT_EQUAL(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQUAL(data[0], 1);
-  ASSERT_EQUAL(data[1], 1);
-  ASSERT_EQUAL(data[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(data, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveIfSimple);
 
 template <typename ForwardIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -203,7 +187,7 @@ void TestRemoveIfDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveIfDispatchExplicit);
 
 template <typename ForwardIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -220,37 +204,26 @@ void TestRemoveIfDispatchImplicit()
 DECLARE_UNITTEST(TestRemoveIfDispatchImplicit);
 
 template <typename Vector>
-void TestRemoveIfStencilSimple(void)
+void TestRemoveIfStencilSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
-  Vector stencil(5);
-  stencil[0] = 0;
-  stencil[1] = 1;
-  stencil[2] = 0;
-  stencil[3] = 0;
-  stencil[4] = 1;
+  Vector stencil{0, 1, 0, 0, 1};
 
   typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
   ASSERT_EQUAL(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQUAL(data[0], 1);
-  ASSERT_EQUAL(data[1], 1);
-  ASSERT_EQUAL(data[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(data, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestRemoveIfStencilSimple);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator
-remove_if(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -268,7 +241,7 @@ void TestRemoveIfStencilDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveIfStencilDispatchExplicit);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -286,32 +259,26 @@ void TestRemoveIfStencilDispatchImplicit()
 DECLARE_UNITTEST(TestRemoveIfStencilDispatchImplicit);
 
 template <typename Vector>
-void TestRemoveCopyIfSimple(void)
+void TestRemoveCopyIfSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
   Vector result(5);
 
   typename Vector::iterator end = thrust::remove_copy_if(data.begin(), data.end(), result.begin(), is_even<T>());
 
   ASSERT_EQUAL(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQUAL(result[0], 1);
-  ASSERT_EQUAL(result[1], 1);
-  ASSERT_EQUAL(result[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(result, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveCopyIfSimple);
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-THRUST_HOST_DEVICE InputIterator
-remove_copy_if(my_system& system, InputIterator first, InputIterator, OutputIterator, Predicate)
+InputIterator remove_copy_if(my_system& system, InputIterator first, InputIterator, OutputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -329,7 +296,7 @@ void TestRemoveCopyIfDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveCopyIfDispatchExplicit);
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-THRUST_HOST_DEVICE InputIterator remove_copy_if(my_tag, InputIterator first, InputIterator, OutputIterator, Predicate)
+InputIterator remove_copy_if(my_tag, InputIterator first, InputIterator, OutputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -347,23 +314,13 @@ void TestRemoveCopyIfDispatchImplicit()
 DECLARE_UNITTEST(TestRemoveCopyIfDispatchImplicit);
 
 template <typename Vector>
-void TestRemoveCopyIfStencilSimple(void)
+void TestRemoveCopyIfStencilSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
-  Vector stencil(5);
-  stencil[0] = 0;
-  stencil[1] = 1;
-  stencil[2] = 0;
-  stencil[3] = 0;
-  stencil[4] = 1;
+  Vector stencil{0, 1, 0, 0, 1};
 
   Vector result(5);
 
@@ -371,15 +328,15 @@ void TestRemoveCopyIfStencilSimple(void)
     thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
 
   ASSERT_EQUAL(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQUAL(result[0], 1);
-  ASSERT_EQUAL(result[1], 1);
-  ASSERT_EQUAL(result[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQUAL(result, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestRemoveCopyIfStencilSimple);
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-THRUST_HOST_DEVICE OutputIterator
+OutputIterator
 remove_copy_if(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   system.validate_dispatch();
@@ -398,8 +355,7 @@ void TestRemoveCopyIfStencilDispatchExplicit()
 DECLARE_UNITTEST(TestRemoveCopyIfStencilDispatchExplicit);
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-THRUST_HOST_DEVICE OutputIterator
-remove_copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
+OutputIterator remove_copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   *result = 13;
   return result;

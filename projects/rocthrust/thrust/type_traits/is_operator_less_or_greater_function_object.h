@@ -160,9 +160,11 @@ struct is_operator_less_function_object_impl : false_type
 template <typename T>
 struct is_operator_less_function_object_impl<thrust::less<T>> : true_type
 {};
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T>
 struct is_operator_less_function_object_impl<std::less<T>> : true_type
 {};
+#endif
 
 template <typename T>
 struct is_operator_greater_function_object_impl : false_type
@@ -170,9 +172,11 @@ struct is_operator_greater_function_object_impl : false_type
 template <typename T>
 struct is_operator_greater_function_object_impl<thrust::greater<T>> : true_type
 {};
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T>
 struct is_operator_greater_function_object_impl<std::greater<T>> : true_type
 {};
+#endif
 
 } // namespace detail
 

@@ -77,8 +77,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/iterator/transform_iterator.h>
  *  #include <thrust/device_vector.h>
  *
- *  // note: functor inherits from unary_function
- *  struct square_root : public thrust::unary_function<float,float>
+ *  struct square_root
  *  {
  *    __host__ __device__
  *    float operator()(float x) const
@@ -120,8 +119,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/reduce.h>
  *  #include <iostream>
  *
- *  // note: functor inherits from unary_function
- *  struct square : public thrust::unary_function<float,float>
+ *  struct square
  *  {
  *    __host__ __device__
  *    float operator()(float x) const
@@ -148,20 +146,13 @@ THRUST_NAMESPACE_BEGIN
  *  }
  *  \endcode
  *
- *  Note that in the previous two examples the transform functor (namely \c square_root
- *  and \c square) inherits from \c thrust::unary_function.  Inheriting from
- *  \c thrust::unary_function ensures that a functor is a valid \c AdaptableUnaryFunction
- *  and provides all the necessary nested alias.  The \p transform_iterator
- *  can also be applied to a \c UnaryFunction that does not inherit from
- *  \c thrust::unary_function using an optional template argument.  The following example
- *  illustrates how to use the third template argument to specify the \c result_type of
+ *  The following example illustrates how to use the third template argument to explicitly specify the return type of
  *  the function.
  *
  *  \code
  *  #include <thrust/iterator/transform_iterator.h>
  *  #include <thrust/device_vector.h>
  *
- *  // note: functor *does not* inherit from unary_function
  *  struct square_root
  *  {
  *    __host__ __device__
