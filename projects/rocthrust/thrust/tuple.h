@@ -50,10 +50,12 @@
 THRUST_NAMESPACE_BEGIN
 
 // define null_type for backwards compatibility
-struct null_type
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
 {};
 
 #ifndef THRUST_DOXYGEN_INVOKED
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
 {
@@ -84,6 +86,8 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
 {
   return false;
 }
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 #endif
 
@@ -195,6 +199,7 @@ using _THRUST_STD::tie;
 THRUST_NAMESPACE_END
 
 _THRUST_STD_NAMESPACE_BEGIN
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <>
 struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
@@ -303,6 +308,7 @@ struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER:
     : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
 {};
 
+THRUST_SUPPRESS_DEPRECATED_POP
 _THRUST_STD_NAMESPACE_END
 
 #else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
@@ -438,6 +444,8 @@ struct pair;
  */
 template <class T1, class T2>
 tuple(pair<T1, T2>) -> tuple<T1, T2>;
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p
@@ -738,6 +746,8 @@ public:
 /*! \endcond
  */
 
+THRUST_SUPPRESS_DEPRECATED_POP
+
 /*! This version of \p make_tuple creates a new \c tuple object from a
  *  single object.
  *
@@ -922,6 +932,8 @@ template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element<Id, std::tuple<Ts...>>
 {};
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 template <>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<
   THRUST_NS_QUALIFIER::null_type,
@@ -1045,6 +1057,7 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8,
     : std::integral_constant<std::size_t, 9>
 {};
 
+THRUST_SUPPRESS_DEPRECATED_POP
 _THRUST_STD_NAMESPACE_END
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
