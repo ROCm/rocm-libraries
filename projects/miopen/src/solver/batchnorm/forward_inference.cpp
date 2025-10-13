@@ -122,12 +122,12 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         kernel.kernel_name = "MIOpenBatchNormFwdInfer";
         if(problem.GetMode() == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "Spatial.cpp";
+            kernel.kernel_file += "SpatialHIP.cpp";
             kernel.kernel_name += "SpatialEst";
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerAct.cpp";
+            kernel.kernel_file += "PerActHIP.cpp";
             kernel.kernel_name += "PerActivationEst";
         }
 
