@@ -3347,7 +3347,7 @@ class Solution(collections.abc.Mapping):
     return self._state
 
   def __hash__(self):
-    return hash(str(self) + self._state.get("codeObjectFile", ""))
+    return hash(str(self))
     #return hash(self.getAttributes())
 
   def __eq__(self, other):

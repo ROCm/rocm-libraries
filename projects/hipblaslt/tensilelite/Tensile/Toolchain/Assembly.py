@@ -52,71 +52,112 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
 def buildAssemblyCodeObjectFiles(
       linker: Linker,
       bundler: Bundler,
-      kernels: List[Solution],
       destDir: Union[Path, str],
       asmDir: Union[Path, str],
       compress: bool=True,
+      cofile_objects: dict=None,
     ):
     """Builds code object files from assembly files
 
     Args:
-        toolchain: The assembly toolchain object to use for building.
-        kernels: A list of the kernel objects to build.
-        writer: The KernelWriterAssembly object to use.
+        linker: The linker object for combining .o files.
+        bundler: The bundler object for compressing .co files.
         destDir: The destination directory for the code object files.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
+        cofile_objects: Mapping from ISA to dict of cofile_name to list of (sol.index, solution) tuples.
+                       Format: {isa: {cofile_name: [(sol.index, solution), ...]}}
     """
+
+    if cofile_objects is None:
+        raise RuntimeError("cofile_objects must be provided to buildAssemblyCodeObjectFiles")
 
     extObj = ".o"
     extCo = ".co"
     extCoRaw = ".co.raw"
-
-    archKernelMap = collections.defaultdict(list)
-    for k in kernels:
-      archKernelMap[tuple(k['ISA'])].append(k)
+    asmDir = Path(asmDir)
+    destDir = Path(destDir)
 
     coFiles = []
-    for arch, archKernels in archKernelMap.items():
-      if len(archKernels) == 0:
-        continue
 
-      gfx = isaToGfx(arch)
+    lostSolutions = []
+    # Build a global map of .o files to their reference counts and which .co files reference them
+    objFileRefCount = collections.Counter()
+    objFileToCoFiles = collections.defaultdict(list)  # Track which .co files reference each .o file
+    for isa, cofile_map in cofile_objects.items():
+        gfx = isaToGfx(isa)
+        for cofile_name, sol_list in cofile_map.items():
+            # Determine .co filename
+            if cofile_name is None:
+                coFileName = f"TensileLibrary_{gfx}.co"
+            else:
+                coFileName = f"{cofile_name}.co"
 
-      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
-      coFileMap = collections.defaultdict(set)
-      if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ gfx + extCoRaw)] = objectFiles
-      for kernel in archKernels:
-        coName = kernel.get("codeObjectFile", None)
-        if coName:
-          coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
+            # Deduplicate solutions in this .co file by basename
+            seen_basenames = set()
+            for sol_idx, sol in sol_list:
+                basename = sol.getKernels()[0].get("BaseName", None)
+                if basename is None:
+                    basename = "MISSING!.o"
+                    lostSolutions += [(sol_idx, cofile_name, sol)]
+                if basename not in seen_basenames:
+                    seen_basenames.add(basename)
+                    objFilePath = asmDir / (basename + extObj)
+                    objFileRefCount[str(objFilePath)] += 1
+                    objFileToCoFiles[str(objFilePath)].append(coFileName)
 
-      # Build reference count map for .o files to handle shared object files
-      # (.o files from kernels marked .duplicate in TensileCreateLibrary)
-      objFileRefCount = collections.Counter()
-      for coFileRaw, objFiles in coFileMap.items():
-        for objFile in objFiles:
-          objFileRefCount[objFile] += 1
-
-      sharedObjFiles = {objFile: count for objFile, count in objFileRefCount.items() if count > 1}
-      if sharedObjFiles:
+    sharedObjFiles = {objFile: count for objFile, count in objFileRefCount.items() if count > 1}
+    if sharedObjFiles:
         print1(f"Found {len(sharedObjFiles)} .o files shared across multiple code objects:")
+        for objFile in list(sharedObjFiles.keys())[:10]:  # Show first 10 examples
+            coFiles = objFileToCoFiles[objFile]
+            basename = Path(objFile).name
+            print1(f"  {basename} -> {', '.join(coFiles)}")
+    
+    if lostSolutions:
+        for a, b, c in lostSolutions[:10]:
+            print(a, b, c)
+        raise Exception("Some solutions are missing a BaseName. First 10 printed.")
 
-      for coFileRaw, objFiles in coFileMap.items():
-        linker(objFiles, str(coFileRaw))
+    # Now process each ISA and .co file
+    for isa, cofile_map in cofile_objects.items():
+        gfx = isaToGfx(isa)
 
-        # Delete .o files after linking once usage count reaches 0
-        for objFile in objFiles:
-          objFileRefCount[objFile] -= 1
-          if objFileRefCount[objFile] == 0:
-            Path(objFile).unlink()
+        for cofile_name, sol_list in cofile_map.items():
+            # Sort by solution index to ensure correct kernel ordering
+            sol_list.sort(key=lambda x: x[0])
 
-        coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
-        if compress:
-          bundler.compress(str(coFileRaw), str(coFile), gfx)
-        else:
-          shutil.move(coFileRaw, coFile)
-        coFiles.append(coFile)
+            # Build list of .o files, deduplicating by basename within this .co file
+            objFiles = []
+            seen_basenames = set()
+            for sol_idx, sol in sol_list:
+                basename = sol.getKernels()[0].get("BaseName", "MISSING!.o")
+                if basename not in seen_basenames:
+                    seen_basenames.add(basename)
+                    objFilePath = asmDir / (basename + extObj)
+                    objFiles.append(str(objFilePath))
+
+            # Determine output filename
+            if cofile_name is None:
+                coFileRaw = asmDir / f"TensileLibrary_{gfx}{extCoRaw}"
+            else:
+                coFileRaw = asmDir / f"{cofile_name}{extCoRaw}"
+
+            # Link the .o files into a .co file
+            linker(objFiles, str(coFileRaw))
+
+            # Delete .o files after linking once usage count reaches 0
+            for objFile in objFiles:
+                objFileRefCount[objFile] -= 1
+                if objFileRefCount[objFile] == 0:
+                    Path(objFile).unlink()
+
+            # Compress/move the .co file to destination
+            coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
+            if compress:
+                bundler.compress(str(coFileRaw), str(coFile), gfx)
+            else:
+                shutil.move(coFileRaw, coFile)
+            coFiles.append(coFile)
 
     return coFiles

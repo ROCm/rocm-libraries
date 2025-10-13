@@ -24,6 +24,7 @@
 
 import rocisa
 
+import collections
 import functools
 import glob
 import gc
@@ -317,9 +318,8 @@ def writeSolutionsAndKernels(
     duplicates = 0
     for k in asmKernels:
         base = getKernelFileBase(splitGSU, k)
+        k["BaseName"] = base
         k.duplicate = True if base in visited else False
-        if not k.duplicate:
-            k["BaseName"] = base
         duplicates += k.duplicate
         print2(f"Duplicate: {base}")
         visited.add(base)
@@ -372,13 +372,21 @@ def writeSolutionsAndKernels(
                 yappi.get_thread_stats().print_all(out=f)
 
     if not generateSourcesAndExit:
+        # Build cofile_objects from solutions for the old code path (no lazy loading)
+        # All solutions go into the default .co file (None) per architecture
+        cofile_objects = collections.defaultdict(lambda: collections.defaultdict(list))
+        for solution in solutions:
+            isa = tuple(solution.getKernels()[0]['ISA'])
+            # Use a dummy index of 0 since we're not tracking solution indices in the old code path
+            cofile_objects[isa][None].append((0, solution))
+
         codeObjectFiles += buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
             asmToolchain.bundler,
-            asmKernels,
             destLibPath,
             assemblyTmpPath,
             compress,
+            cofile_objects,
         )
         buildSourceCodeObjectFiles(
             srcToolchain.compiler,
@@ -402,6 +410,7 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
+    cofile_objects,
     compress=True,
 ):
     outputPath = Path(outputPath)
@@ -429,6 +438,15 @@ def writeSolutionsAndKernelsTCL(
         print2(f"Duplicate: {base}")
         visited.add(base)
     print1(f"Number of duplicate kernels: {duplicates}")
+
+    # Also set BaseName on ALL solutions' kernels (including those with duplicate kernels)
+    # since solutions that weren't in the unique kernels list won't have BaseName set yet
+    # FIXME: this is jank
+    for solution in solutions:
+        for kernel in solution.getKernels():
+            if "BaseName" not in kernel:
+                base = getKernelFileBase(splitGSU, kernel)
+                kernel["BaseName"] = base
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
@@ -460,10 +478,10 @@ def writeSolutionsAndKernelsTCL(
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
-        asmKernels,
         destLibPath,
         assemblyTmpPath,
         compress,
+        cofile_objects,
     )
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -566,14 +584,12 @@ def libraryIter(lib: MasterSolutionLibrary):
 
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
+    # NB: Be careful with the two solution types
+    # Contractions.Solution's originalSolution field contains SolutionStruct.Solution
+    # masterLibrary.lazyLibraries[i].solutions and masterLibrary.solutions both contain
+    # Contraction Solutions, which then refer to a SolutionStructs.Solution in their originalSolution
 
-    if ";" in args["Architecture"]:
-        archs = args["Architecture"].split(";")  # user arg list format
-    else:
-        archs = args["Architecture"].split("_")  # workaround for cmake list in list issue
-
-    solutions = []
-    masterLibraries = {}
+    masterLibraries: dict[str, MasterSolutionLibrary] = {}
     nextSolIndex = 0
     splitGSU = False
     printSolutionRejectionReason = True
@@ -592,8 +608,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     for library in ParallelMap2(
         parseLogicFn, logicFiles, "Loading Logics...",
         return_as="generator_unordered",
-        minChunkSize=24,
-        maxWorkers=32,
+        minChunkSize=12,
+        maxWorkers=64,
         maxtasksperchild=1,
         multiArg=False,
     ):
@@ -607,13 +623,13 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
-        del library, newLibrary
+        del library, newLibrary, _
 
     gc.collect()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
-    masterLibraries = dict(sorted(masterLibraries.items()))
+    masterLibraries: dict[str, MasterSolutionLibrary] = dict(sorted(masterLibraries.items()))
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
             sol.index = solnReIndex
@@ -628,6 +644,12 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             }
             for _, sol in lib.solutions.items():
                 sol.index = solnReIndex
+                if "BaseName" in sol.originalSolution._state:
+                    # FIXME: clearing BaseName here since it's often a) in logic yaml b) wrong
+                    # gfx{1200,1201}_Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs.yaml
+                    # both have it set to the same value which is not what gets computed at runtime
+                    # Maybe we can do something smarter below?
+                    del sol.originalSolution._state["BaseName"]
                 solnReIndex += 1
 
     if args["GenSolTable"]:
@@ -643,39 +665,94 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             if key != "fallback":
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
-    solIndex = []
+
+    # Validate lazy loading invariant: solutions and lazyLibraries are mutually exclusive
+    lazyLoading = args["LazyLibraryLoading"]
+    for archName, masterLibrary in masterLibraries.items():
+        hasSolutions = len(masterLibrary.solutions) > 0
+        hasLazyLibraries = len(masterLibrary.lazyLibraries) > 0
+
+        if lazyLoading and hasSolutions:
+            printExit(f"Architecture {archName}: LazyLibraryLoading is enabled but masterLibrary.solutions is not empty ({len(masterLibrary.solutions)} solutions found)")
+        if not lazyLoading and hasLazyLibraries:
+            printExit(f"Architecture {archName}: LazyLibraryLoading is disabled but masterLibrary.lazyLibraries is not empty ({len(masterLibrary.lazyLibraries)} lazy libraries found)")
+
+    codeObjectFilesIndex = {}
+    # YAML files with different CUCount values (104CU vs 110CU) may contain identical solutions
+    # that generate the same .S and .o files, but need to be linked into different .co files
+    # Example: aldebaran_Cijk_Ailk_Bjlk_SB_Bias_HA_SAV.yaml from 104CU (SolutionIndex 210, 1122) and
+    # 110CU (SolutionIndex 1362) all contain the identical solution
+    # "Cijk_Ailk_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT128x128x16_MI32x32x1_SN_LDSB0_AA0..."
+    # which produces the same .S/.o file but must be linked into both:
+    #   - TensileLibrary_SS_SS_HA_Bias_SAV_Type_SS_Contraction_l_Ailk_Bjlk_Cijk_Dijk_CU104_gfx90a.co
+    #   - TensileLibrary_SS_SS_HA_Bias_SAV_Type_SS_Contraction_l_Ailk_Bjlk_Cijk_Dijk_gfx90a.co
+    # We build cofile_objects grouped by ISA and .co file name, with (sol.index, solution) tuples
+    # that will be sorted by index before linking to ensure correct kernel ordering per .co file.
+    cofile_objects = collections.defaultdict(lambda: collections.defaultdict(list))
+    # {isa: {cofile_name: [(sol.index, solution), ...]}}
+
+    solutions: list[Solution] = []
+    # When tracking cofile_objects we reuse an existing same named Solution instance
+    # if present here
+    seenSolutions: dict[str, Solution] = {}
+    seenCodeObjectSolutions: tuple[bool, str, str] = set()
+
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
-            solutions.append(sol.originalSolution)
-            solIndex.append(sol.index)
+            tensileSolution: Solution = sol.originalSolution
+            solutionName = str(tensileSolution)
+            isa = tensileSolution["ISA"]
+            if (isa, solutionName) in seenCodeObjectSolutions:
+                continue
+            seenCodeObjectSolutions.add((False, isa, solutionName))
+            solutions.append(tensileSolution)
+            # Track that this solution goes in the default .co file (no codeObjectFile attribute)
+            cofile_objects[isa][None].append((sol.index, seenSolutions.setdefault(solutionName, tensileSolution)))
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution._state["codeObjectFile"] = name
-                solutions.append(sol.originalSolution)
-                solIndex.append(sol.index)
+                tensileSolution: Solution = sol.originalSolution
+                solutionName = str(tensileSolution)
+                if (name, solutionName) in seenCodeObjectSolutions:
+                    continue
+                seenCodeObjectSolutions.add((True, name, solutionName))
+                solutions.append(tensileSolution)
+                isa = tensileSolution["ISA"]
+                # Track which .co file(s) this solution needs to be linked into
+                cofile_objects[isa][name].append((sol.index, seenSolutions.setdefault(solutionName, tensileSolution)))
+                # Build lazy library mapping directly
+                if name not in codeObjectFilesIndex:
+                    codeObjectFilesIndex[name] = sol.index
+                else:
+                    codeObjectFilesIndex[name] = min(codeObjectFilesIndex[name], sol.index)
+    del seenCodeObjectSolutions
 
-    # Get the solution index and it's codeObjectFile name
-    codeObjectFilesIndex = {}
-    for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
-            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
-            else:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
-
-    # Reorder to int: name format
+    # codeObjectFilesIndex uses sol.index values assigned during YAML parsing (lines 619-631)
+    # BEFORE deduplication. These indices are stable identifiers for lazy loading, not array positions.
+    # The runtime uses them via upper_bound() for range-based lookup: "indices 0-499 are in file A,
+    # indices 500-999 are in file B". After deduplication, some indices may not have corresponding
+    # solutions (if they were duplicates), but the mapping remains valid
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
     # Reorder to maintain ascending order by index
     codeObjectFilesIndex = dict(sorted(codeObjectFilesIndex.items()))
 
     # remove duplicates while preserving order
     numSoln = len(solutions)
-    solutions = dict.fromkeys(solutions).keys()
+    solutions = seenSolutions.values()
 
-    print1(f"Number of solutions parsed: {numSoln}")
+    print1(f"Number of solutions parsed: {solnReIndex}")
+    print1(f"Number of unique solutions accounting for .co name: {numSoln}")
     print1(f"Number of unique solutions: {len(solutions)}")
 
-    return solutions, masterLibraries, codeObjectFilesIndex
+    # Count solutions that appear in multiple .co files across all ISAs
+    solution_cofile_counts = collections.defaultdict(set)
+    for isa_cofiles in cofile_objects.values():
+        for cofile_name, sol_list in isa_cofiles.items():
+            for sol_idx, sol in sol_list:
+                solution_cofile_counts[str(sol)].add(cofile_name)
+    num_multi_co = sum(1 for cofiles in solution_cofile_counts.values() if len(cofiles) > 1)
+    print1(f"Number of solutions needing multiple .co files: {num_multi_co}")
+
+    return solutions, masterLibraries, codeObjectFilesIndex, cofile_objects
 
 
 ################################################################################
@@ -778,7 +855,7 @@ def run():
         print2("#   %s" % logicFile)
 
     start_glds = timer()
-    solutions, masterLibraries, libraryMapping = generateLogicDataAndSolutions(
+    solutions, masterLibraries, libraryMapping, cofile_objects = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
     stop_glds = timer()
@@ -801,6 +878,7 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
+        cofile_objects,
         compress=arguments["UseCompression"],
     )
     stop_wsk = timer()

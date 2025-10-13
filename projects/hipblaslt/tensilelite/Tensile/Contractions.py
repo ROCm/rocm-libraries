@@ -777,7 +777,7 @@ class Solution:
         assembler: Assembler,
         isaInfoMap: Dict[str, IsaInfo]
     ):
-        return cls.FromOriginalState(
+        rv = cls.FromOriginalState(
                    solution._state,
                    splitGSU,
                    printSolutionRejectionReason,
@@ -786,6 +786,9 @@ class Solution:
                    isaInfoMap,
                    solution.srcName
                )
+        # Store reference to original solution instead of creating duplicate
+        rv.originalSolution = solution
+        return rv
 
     @classmethod
     def FromOriginalState(
