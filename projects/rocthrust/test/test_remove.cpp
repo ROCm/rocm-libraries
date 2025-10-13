@@ -22,6 +22,8 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/remove.h>
 
+#include <stdexcept>
+
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
@@ -33,7 +35,7 @@ TESTS_DEFINE(RemoveVariableTests, NumericalTestsParams);
 template <typename T>
 struct is_even
 {
-  __host__ __device__ bool operator()(T x)
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
     return (static_cast<unsigned int>(x) & 1) == 0;
   }
@@ -42,7 +44,7 @@ struct is_even
 template <typename T>
 struct is_true
 {
-  __host__ __device__ bool operator()(T x)
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
     return x ? true : false;
   }
@@ -51,25 +53,19 @@ struct is_true
 TYPED_TEST(RemoveTests, TestRemoveSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = T(1);
-  data[1] = T(2);
-  data[2] = T(1);
-  data[3] = T(3);
-  data[4] = T(2);
+  Vector data{1, 2, 1, 3, 2};
 
-  typename Vector::iterator end = thrust::remove(Policy{}, data.begin(), data.end(), (T) 2);
+  typename Vector::iterator end = thrust::remove(data.begin(), data.end(), (T) 2);
 
   ASSERT_EQ(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQ(data[0], T(1));
-  ASSERT_EQ(data[1], T(1));
-  ASSERT_EQ(data[2], T(3));
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(data, ref);
 }
 
 template <typename ForwardIterator, typename T>
@@ -101,6 +97,7 @@ ForwardIterator remove(my_tag, ForwardIterator first, ForwardIterator, const T&)
 TEST(RemoveTests, TestRemoveDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   thrust::device_vector<int> vec(1);
 
   thrust::remove(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
@@ -111,27 +108,21 @@ TEST(RemoveTests, TestRemoveDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopySimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = T(1);
-  data[1] = T(2);
-  data[2] = T(1);
-  data[3] = T(3);
-  data[4] = T(2);
+  Vector data{1, 2, 1, 3, 2};
 
   Vector result(5);
 
-  typename Vector::iterator end = thrust::remove_copy(Policy{}, data.begin(), data.end(), result.begin(), T(2));
+  typename Vector::iterator end = thrust::remove_copy(data.begin(), data.end(), result.begin(), (T) 2);
 
   ASSERT_EQ(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQ(result[0], T(1));
-  ASSERT_EQ(result[1], T(1));
-  ASSERT_EQ(result[2], T(3));
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(result, ref);
 }
 
 template <typename InputIterator, typename OutputIterator, typename T>
@@ -175,29 +166,23 @@ TEST(RemoveTests, TestRemoveCopyDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveIfSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
-  typename Vector::iterator end = thrust::remove_if(Policy{}, data.begin(), data.end(), is_even<T>());
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), is_even<T>());
 
   ASSERT_EQ(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQ(data[0], 1);
-  ASSERT_EQ(data[1], 1);
-  ASSERT_EQ(data[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(data, ref);
 }
 
 template <typename ForwardIterator, typename Predicate>
-__host__ __device__ ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -216,7 +201,7 @@ TEST(RemoveTests, TestRemoveIfDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Predicate>
-__host__ __device__ ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -236,38 +221,25 @@ TEST(RemoveTests, TestRemoveIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
-  Vector stencil(5);
-  stencil[0] = 0;
-  stencil[1] = 1;
-  stencil[2] = 0;
-  stencil[3] = 0;
-  stencil[4] = 1;
+  Vector stencil{0, 1, 0, 0, 1};
 
-  typename Vector::iterator end =
-    thrust::remove_if(Policy{}, data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
   ASSERT_EQ(end - data.begin(), 3);
+  data.resize(end - data.begin());
 
-  ASSERT_EQ(data[0], 1);
-  ASSERT_EQ(data[1], 1);
-  ASSERT_EQ(data[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(data, ref);
 }
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-__host__ __device__ ForwardIterator
-remove_if(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+ForwardIterator remove_if(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -286,7 +258,7 @@ TEST(RemoveTests, TestRemoveIfStencilDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-__host__ __device__ ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+ForwardIterator remove_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -307,33 +279,25 @@ TEST(RemoveTests, TestRemoveIfStencilDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopyIfSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 2;
-  data[2] = 1;
-  data[3] = 3;
-  data[4] = 2;
+  Vector data{1, 2, 1, 3, 2};
 
   Vector result(5);
 
-  typename Vector::iterator end =
-    thrust::remove_copy_if(Policy{}, data.begin(), data.end(), result.begin(), is_even<T>());
+  typename Vector::iterator end = thrust::remove_copy_if(data.begin(), data.end(), result.begin(), is_even<T>());
 
   ASSERT_EQ(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQ(result[0], 1);
-  ASSERT_EQ(result[1], 1);
-  ASSERT_EQ(result[2], 3);
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(result, ref);
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__ InputIterator
-remove_copy_if(my_system& system, InputIterator first, InputIterator, OutputIterator, Predicate)
+InputIterator remove_copy_if(my_system& system, InputIterator first, InputIterator, OutputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -352,7 +316,7 @@ TEST(RemoveTests, TestRemoveCopyIfDispatchExplicit)
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__ InputIterator remove_copy_if(my_tag, InputIterator first, InputIterator, OutputIterator, Predicate)
+InputIterator remove_copy_if(my_tag, InputIterator first, InputIterator, OutputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -373,39 +337,28 @@ TEST(RemoveTests, TestRemoveCopyIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = T(1);
-  data[1] = T(2);
-  data[2] = T(1);
-  data[3] = T(3);
-  data[4] = T(2);
+  Vector data{1, 2, 1, 3, 2};
 
-  Vector stencil(5);
-  stencil[0] = T(0);
-  stencil[1] = T(1);
-  stencil[2] = T(0);
-  stencil[3] = T(0);
-  stencil[4] = T(1);
+  Vector stencil{0, 1, 0, 0, 1};
 
   Vector result(5);
 
   typename Vector::iterator end =
-    thrust::remove_copy_if(Policy{}, data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
+    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
 
   ASSERT_EQ(end - result.begin(), 3);
+  result.resize(end - result.begin());
 
-  ASSERT_EQ(result[0], T(1));
-  ASSERT_EQ(result[1], T(1));
-  ASSERT_EQ(result[2], T(3));
+  Vector ref{1, 1, 3};
+  ASSERT_EQ(result, ref);
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator
+OutputIterator
 remove_copy_if(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   system.validate_dispatch();
@@ -425,8 +378,7 @@ TEST(RemoveTests, TestRemoveCopyIfStencilDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator
-remove_copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
+OutputIterator remove_copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   *result = 13;
   return result;
@@ -464,7 +416,6 @@ TYPED_TEST(RemoveVariableTests, TestRemove)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
       size_t h_size = thrust::remove(h_data.begin(), h_data.end(), T(0)) - h_data.begin();
@@ -496,7 +447,6 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIf)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
       size_t h_size = thrust::remove_if(h_data.begin(), h_data.end(), is_true<T>()) - h_data.begin();
@@ -528,12 +478,11 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIfStencil)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
       thrust::host_vector<bool> h_stencil = get_random_data<bool>(
-        size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed + seed_value_addition);
-      thrust::device_vector<T> d_stencil = h_stencil;
+        size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
+      thrust::device_vector<bool> d_stencil = h_stencil;
 
       size_t h_size = thrust::remove_if(h_data.begin(), h_data.end(), h_stencil.begin(), is_true<T>()) - h_data.begin();
       size_t d_size = thrust::remove_if(d_data.begin(), d_data.end(), d_stencil.begin(), is_true<T>()) - d_data.begin();
@@ -564,7 +513,6 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopy)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
       thrust::host_vector<T> h_result(size);
@@ -575,10 +523,10 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopy)
 
       ASSERT_EQ(h_size, d_size);
 
-      h_data.resize(h_size);
-      d_data.resize(d_size);
+      h_result.resize(h_size);
+      d_result.resize(d_size);
 
-      ASSERT_EQ(h_data, d_data);
+      ASSERT_EQ(h_result, d_result);
     }
   }
 }
@@ -599,7 +547,6 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
       size_t num_zeros    = thrust::count(h_data.begin(), h_data.end(), T(0));
@@ -613,8 +560,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
 
       thrust::discard_iterator<> reference(num_nonzeros);
 
-      ASSERT_EQ(reference, h_result);
-      ASSERT_EQ(reference, d_result);
+      ASSERT_EQ_QUIET(reference, h_result);
+      ASSERT_EQ_QUIET(reference, d_result);
     }
   }
 }
@@ -758,8 +705,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      thrust::host_vector<bool> h_stencil =
-        get_random_data<bool>(size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
+      thrust::host_vector<bool> h_stencil = get_random_data<bool>(
+        size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
       thrust::host_vector<T> h_result(size);
@@ -801,7 +748,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
       thrust::device_vector<T> d_data = h_data;
 
       thrust::host_vector<bool> h_stencil = get_random_data<bool>(
-        size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed + seed_value_addition);
+        size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
       size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
@@ -816,44 +763,6 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
-    }
-  }
-}
-
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void RemoveKernel(int const N, int* array, int remove_value)
-{
-  if (threadIdx.x == 0)
-  {
-    thrust::device_ptr<int> begin(array);
-    thrust::device_ptr<int> end(array + N);
-    thrust::remove(thrust::hip::par, begin, end, remove_value) - begin;
-  }
-}
-
-TEST(RemoveTests, TestRemoveDevice)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  for (auto size : get_sizes())
-  {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-    for (auto seed : get_seeds())
-    {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-      thrust::host_vector<int> h_data   = get_random_data<int>(size, 0, size, seed);
-      thrust::device_vector<int> d_data = h_data;
-
-      int remove_value = get_random_data<int>(1, 0, size, seed)[0];
-      SCOPED_TRACE(testing::Message() << "with remove_value= " << remove_value);
-
-      thrust::remove(h_data.begin(), h_data.end(), remove_value);
-      hipLaunchKernelGGL(
-        RemoveKernel, dim3(1, 1, 1), dim3(128, 1, 1), 0, 0, size, thrust::raw_pointer_cast(&d_data[0]), remove_value);
-      HIP_CHECK(hipGetLastError());
-
-      ASSERT_EQ(h_data, d_data);
     }
   }
 }

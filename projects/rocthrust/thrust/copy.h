@@ -261,7 +261,7 @@ OutputIterator copy_n(InputIterator first, Size n, OutputIterator result);
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type. \tparam
+ * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's argument type. \tparam
  * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  * Iterator</a>. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -322,7 +322,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *          evaluated to \c true in the range <tt>[first, last)</tt>.
  *
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type. \tparam
+ * Iterator</a>, and \p InputIterator's \c value_type is convertible to \p Predicate's argument type. \tparam
  * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
  * Iterator</a>. \tparam Predicate is a model of <a
  * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
@@ -384,7 +384,7 @@ OutputIterator copy_if(InputIterator first, InputIterator last, OutputIterator r
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/OutputIterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
@@ -457,7 +457,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
  * Iterator</a>. \tparam InputIterator2 is a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator2's \c
- * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * value_type is convertible to \p Predicate's argument type. \tparam OutputIterator is a model of <a
  * href="https://en.cppreference.com/w/cpp/named_req/OutputIterator">Output Iterator</a>. \tparam Predicate is a model
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
