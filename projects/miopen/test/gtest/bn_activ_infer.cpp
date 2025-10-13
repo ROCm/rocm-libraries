@@ -25,15 +25,12 @@
  *******************************************************************************/
 
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "verify.hpp"
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
 
-#include "na.hpp"
-#include "perf_helper.hpp"
+#include "bn_infer_tester.hpp"
 
 #define PERF_ENABLE 0
 
@@ -116,7 +113,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIO_BN_GRP1", ylocalsize},
         {"MIO_BN_GRP2", zlocalsize},
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
-        {"MIOPEN_SBN_BOUNDS", static_cast<unsigned>(read_len / read_unit)},
+        {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_PREC_READ_TYPE", PREC_READ_TYPE},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_mode)},
@@ -219,206 +216,69 @@ template <typename XDataType,
           typename ScaleDataType,
           typename BiasDataType,
           typename MeanVarDataType>
-struct BatchNormActivInferTest
-    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNTestCase>>
+struct BatchNormActivInferTester
+    : public BatchNormInferTester<XDataType, YDataType, ScaleDataType, BiasDataType, MeanVarDataType>
 {
-
-    void SetUp() override
-    {
-        std::tie(activ_mode, bn_config) = GetParam();
-
-        // Create tensors
-        input              = tensor<XDataType>{bn_config.GetInput()};
-        output             = tensor<YDataType>{bn_config.GetInput()};
-        ref_out            = tensor<YDataType>{bn_config.GetInput()};
-        auto derivedBnDesc = miopen::TensorDescriptor{};
-        miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, bn_config.mode);
-        scale       = tensor<ScaleDataType>{derivedBnDesc.GetLengths()};
-        shift       = tensor<BiasDataType>{derivedBnDesc.GetLengths()};
-        estMean     = tensor<MeanVarDataType>{derivedBnDesc.GetLengths()};
-        estVariance = tensor<MeanVarDataType>{derivedBnDesc.GetLengths()};
-        // Fill tensors
-        auto gen_value = [](auto...) {
-            return prng::gen_descreet_uniform_sign<XDataType>(1e-2, 100);
-        };
-        input.generate(gen_value);
-
-        auto gen_scale = [](auto...) {
-            return prng::gen_descreet_uniform_sign<ScaleDataType>(1e-2, 100);
-        };
-        scale.generate(gen_scale);
-        shift.generate(gen_scale);
-        estMean.generate(gen_scale);
-
-        auto gen_var = [](auto...) {
-            return static_cast<MeanVarDataType>(1e-2 * (prng::gen_0_to_B(100) + 1));
-        };
-        estVariance.generate(gen_var);
-        // Write data to GPU
-        auto&& handle   = get_handle();
-        in_dev          = handle.Write(input.data);
-        scale_dev       = handle.Write(scale.data);
-        shift_dev       = handle.Write(shift.data);
-        estMean_dev     = handle.Write(estMean.data);
-        estVariance_dev = handle.Write(estVariance.data);
-
-        // Enable profiling and set number of runs for perf tests
 #if PERF_ENABLE
-        handle.EnableProfiling(true); // enable profiling
-        perf_helper.setWarmupRuns(NUM_WARMUP_RUNS_TEST);
-        perf_helper.setPerfRuns(NUM_PERF_RUNS_TEST);
-#endif
+    BatchNormActivInferTester()
+    {
+        this->perf_enable = static_cast<bool>(PERF_ENABLE);
+        this->perf_helper.setWarmupRuns(NUM_WARMUP_RUNS_TEST);
+        this->perf_helper.setPerfRuns(NUM_PERF_RUNS_TEST);
     }
+#endif
 
-    void RunTestGPU(bool hip_en = true)
+    void RunTestGPU(bool hip_en = true) override
     {
         auto&& handle    = get_handle();
-        auto& output_ref = hip_en ? output.data : ref_out.data;
+        auto& output_ref = hip_en ? this->output.data : this->ref_out.data;
         // Clear the output data
         std::fill(
             output_ref.begin(), output_ref.end(), std::numeric_limits<YDataType>::quiet_NaN());
-        out_dev = handle.Write(output_ref);
+        this->out_dev = handle.Write(output_ref);
         // Execute the implementation
         BatchNormInferenceGPU(handle,
-                              bn_config.mode,
-                              activ_mode,
-                              activ_alpha,
-                              activ_beta,
-                              activ_gamma,
-                              input.desc,
-                              in_dev.get(),
-                              output.desc,
-                              out_dev.get(),
-                              scale.desc,
-                              scale_dev.get(),
-                              shift_dev.get(),
-                              estMean_dev.get(),
-                              estVariance_dev.get(),
-                              epsilon,
-                              perf_helper,
+                              this->bn_config.mode,
+                              this->activ_mode,
+                              this->activ_alpha,
+                              this->activ_beta,
+                              this->activ_gamma,
+                              this->input.desc,
+                              this->in_dev.get(),
+                              this->output.desc,
+                              this->out_dev.get(),
+                              this->scale.desc,
+                              this->scale_dev.get(),
+                              this->shift_dev.get(),
+                              this->estMean_dev.get(),
+                              this->estVariance_dev.get(),
+                              this->epsilon,
+                              this->perf_helper,
                               hip_en);
         // Read the output
-        output_ref = handle.Read<YDataType>(out_dev, output.data.size());
+        output_ref = handle.Read<YDataType>(this->out_dev, this->output.data.size());
     }
-
-    void RunTestCPU()
-    { // Run the CPU implementation
-        if(bn_config.mode == miopenBNPerActivation)
-        {
-            batchNormPerActivHostInference(
-                input, ref_out, scale, shift, epsilon, estMean, estVariance);
-        }
-        else
-        {
-            batchNormSpatialHostInference(
-                input, ref_out, scale, shift, epsilon, estMean, estVariance);
-        }
-        activationHostInfer(
-            activ_mode, activ_gamma, activ_beta, activ_alpha, ref_out.data, ref_out.data);
-    }
-
-    void Verify()
-    { // Compare the outputs
-      // NOTE: Some small tensors during perf tests produce zero outputs which will result in
-      // non-fatal gtest failures. These can be safely ignored. In this situation both the referene
-      // and the gpu outputs will be zero. Observed them in relu, power and clippedrelu.
-        EXPECT_FALSE(miopen::range_zero(ref_out)) << "CPU/GPU data is all zeros";
-        EXPECT_FALSE(miopen::range_zero(output)) << "GPU data is all zeros";
-        EXPECT_FALSE(miopen::find_idx(output, miopen::not_finite) >= 0)
-            << "Non finite number found in the GPU data";
-        EXPECT_FALSE(miopen::find_idx(ref_out, miopen::not_finite) >= 0)
-            << "Non finite number found in the CPU/GPU data";
-        auto error         = miopen::rms_range(ref_out, output);
-        auto mantissa_bits = std::is_same<YDataType, float>::value              ? 23
-                             : std::is_same<YDataType, half_float::half>::value ? 10
-                                                                                : 7;
-        auto threshold =
-            std::max(2.0 * std::sqrt(input.data.size()) / (1 << 23), 1.0 / (1 << mantissa_bits));
-        EXPECT_LE(error, threshold);
-    }
-
-    void TearDown() override
-    {
-        if constexpr(PERF_ENABLE)
-        {
-            // get the kernel handle
-            auto&& handle = get_handle();
-
-            // get the input tensor size and store in a string with x in between
-            std::vector<size_t> in_dims = bn_config.GetInput();
-            std::string kernel_info     = std::to_string(in_dims[0]) + "x" +
-                                      std::to_string(in_dims[1]) + "x" +
-                                      std::to_string(in_dims[2]) + "x" + std::to_string(in_dims[3]);
-
-            std::unordered_map<miopenActivationMode_t, std::string> activation_map = {
-                {miopenActivationPASTHRU, "pasthru"},
-                {miopenActivationLOGISTIC, "logistic"},
-                {miopenActivationTANH, "tanh"},
-                {miopenActivationRELU, "relu"},
-                {miopenActivationSOFTRELU, "softrelu"},
-                {miopenActivationABS, "abs"},
-                {miopenActivationPOWER, "power"},
-                {miopenActivationCLIPPEDRELU, "clippedrelu"},
-                {miopenActivationLEAKYRELU, "leakyrelu"},
-                {miopenActivationELU, "elu"}};
-
-            auto it = activation_map.find(activ_mode);
-            if(it != activation_map.end())
-            {
-                kernel_info += "_" + it->second;
-            }
-
-            perf_helper.writeStatsToCSV(
-                "batch-norm-activ-infer-perf-" + handle.GetDeviceName() + ".csv",
-                "_" + kernel_info + "_" + (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
-        }
-    }
-
-    BNTestCase bn_config;      // Holds the test configuration
-    tensor<XDataType> input;   // Input tensor
-    tensor<YDataType> output;  // Output tensor from GPU
-    tensor<YDataType> ref_out; // Reference output tensor
-    tensor<ScaleDataType> scale;
-    tensor<BiasDataType> shift;
-    tensor<MeanVarDataType> estMean;
-    tensor<MeanVarDataType> estVariance;
-    miopen::Allocator::ManageDataPtr in_dev;          // GPU input data
-    miopen::Allocator::ManageDataPtr out_dev;         // GPU output data
-    miopen::Allocator::ManageDataPtr scale_dev;       // GPU scale data
-    miopen::Allocator::ManageDataPtr shift_dev;       // GPU shift data
-    miopen::Allocator::ManageDataPtr estMean_dev;     // GPU estimated mean data
-    miopen::Allocator::ManageDataPtr estVariance_dev; // GPU estimated variance data
-    miopenActivationMode_t activ_mode;                // Activation mode
-    const float activ_alpha = static_cast<float>(0.5f);
-    const float activ_beta  = static_cast<float>(0.5f);
-    const float activ_gamma = static_cast<float>(0.5f);
-    double epsilon          = 1.0e-5;
-    // GetKernelTime returns time in float
-    PerfHelper<float> perf_helper;
 };
 
-namespace BatchNormActivInfer {
-
-struct GPU_bn_activ_infer_spatial_FP32 : BatchNormActivInferTest<float, float, float, float, float>
+struct GPU_bn_activ_infer_spatial_FP32
+    : BatchNormActivInferTester<float, float, float, float, float>
 {
 };
 
-struct GPU_bn_activ_infer_per_act_FP32 : BatchNormActivInferTest<float, float, float, float, float>
+struct GPU_bn_activ_infer_per_act_FP32
+    : BatchNormActivInferTester<float, float, float, float, float>
 {
 };
 
 struct GPU_bn_activ_infer_spatial_FP16
-    : BatchNormActivInferTest<half_float::half, half_float::half, float, float, float>
+    : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
 };
 
 struct GPU_bn_activ_infer_per_act_FP16
-    : BatchNormActivInferTest<half_float::half, half_float::half, float, float, float>
+    : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
 };
-
-} // namespace BatchNormActivInfer
-using namespace BatchNormActivInfer;
 
 std::vector<miopenActivationMode_t> ActivationConfigs()
 {
@@ -432,38 +292,6 @@ std::vector<miopenActivationMode_t> ActivationConfigs()
             miopenActivationCLIPPEDRELU,
             miopenActivationLEAKYRELU,
             miopenActivationELU};
-}
-
-template <typename T>
-std::vector<BNTestCase> BNActivInferTestConfigs(miopenBatchNormMode_t mode)
-{
-    // create an array of input tensor shapes to test
-    int shapes_to_test[10][4] = {{64, 128, 56, 56},
-                                 {64, 2048, 7, 7},
-                                 {64, 256, 14, 14},
-                                 {64, 256, 28, 28},
-                                 {64, 256, 56, 56},
-                                 {64, 512, 14, 14},
-                                 {64, 512, 28, 28},
-                                 {64, 512, 7, 7},
-                                 {64, 64, 112, 112},
-                                 {64, 64, 56, 56}};
-
-    // return a vector of BNTestCase objects created using the above shapes
-    std::vector<BNTestCase> test_cases;
-    for(auto& shape : shapes_to_test)
-    {
-        test_cases.push_back(BNTestCase{shape[0],
-                                        shape[1],
-                                        shape[2],
-                                        shape[3],
-                                        mode,
-                                        miopen::batchnorm::Direction::ForwardInference,
-                                        0,
-                                        0});
-    }
-
-    return test_cases;
 }
 
 TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
@@ -530,21 +358,21 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNActivInferTestConfigs<float>(miopenBNSpatial))));
+                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_per_act_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNActivInferTestConfigs<float>(miopenBNPerActivation))));
+                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP16,
     testing::Combine(
         testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNActivInferTestConfigs<half_float::half>(miopenBNSpatial))));
+        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_per_act_FP16,
     testing::Combine(
         testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNActivInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation))));
