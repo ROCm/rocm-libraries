@@ -121,7 +121,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)}};
 
     std::string kernel_file =
-        (use_hip ? "MIOpenBatchNormActivInfer.cpp" : "MIOpenBatchNormActivInferOCL.cl");
+        (use_hip ? "MIOpenBatchNormActivInferHIP.cpp" : "MIOpenBatchNormActivInfer.cl");
     std::string kernel_name = "MIOpenBatchNormActivInfer";
 
     std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::OpenCL{})
