@@ -259,9 +259,7 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
     
     if kernel["ForceUnrollSubIter"]:
-        if ( kernel["UseF32XEmulation"]) :
-            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *3   # TF32
-        elif ( kernel["ProblemType"]["DataType"].isComplex()):
+        if ( kernel["ProblemType"]["DataType"].isComplex()):
             writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
