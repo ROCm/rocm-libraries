@@ -43,7 +43,6 @@
 
 #  include <thrust/advance.h>
 #  include <thrust/count.h>
-#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>

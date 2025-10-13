@@ -27,16 +27,10 @@
 
 #include <unittest/unittest.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#endif
 #include _THRUST_STD_INCLUDE(array)
-
-template <typename T>
-struct max_functor
-{
-  THRUST_HOST_DEVICE T operator()(T rhs, T lhs) const
-  {
-    return thrust::max(rhs, lhs);
-  }
-};
 
 template <class Vector>
 void TestScanSimple()
@@ -306,12 +300,12 @@ struct TestScanWithOperator
     thrust::host_vector<T> h_output(n);
     thrust::device_vector<T> d_output(n);
 
-    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), max_functor<T>());
-    thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), max_functor<T>());
+    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), ::internal::maximum<T>{});
+    thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), ::internal::maximum<T>{});
     ASSERT_EQUAL(d_output, h_output);
 
-    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), max_functor<T>());
-    thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), max_functor<T>());
+    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), ::internal::maximum<T>{});
+    thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), ::internal::maximum<T>{});
     ASSERT_EQUAL(d_output, h_output);
   }
 };
@@ -328,19 +322,19 @@ struct TestScanWithOperatorToDiscardIterator
     thrust::discard_iterator<> reference(n);
 
     thrust::discard_iterator<> h_result =
-      thrust::inclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::inclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
     thrust::discard_iterator<> d_result =
-      thrust::inclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::inclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
     ASSERT_EQUAL_QUIET(reference, h_result);
     ASSERT_EQUAL_QUIET(reference, d_result);
 
-    h_result =
-      thrust::exclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+    h_result = thrust::exclusive_scan(
+      h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
-    d_result =
-      thrust::exclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+    d_result = thrust::exclusive_scan(
+      d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
     ASSERT_EQUAL_QUIET(reference, h_result);
     ASSERT_EQUAL_QUIET(reference, d_result);

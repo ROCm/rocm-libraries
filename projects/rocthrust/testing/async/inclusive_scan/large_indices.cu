@@ -17,11 +17,12 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/device_free.h>
 #  include <thrust/device_malloc.h>
 #  include <thrust/device_ptr.h>
+#  include <thrust/functional.h>
 #  include <thrust/iterator/detail/device_system_tag.h>
 #  include <thrust/iterator/detail/iterator_facade_category.h>
 #  include <thrust/optional.h>
@@ -79,18 +80,18 @@ struct assert_sequence_iterator
     unexpected_value = nullptr;
   }
 
-  THRUST_HOST_DEVICE assert_sequence_iterator operator+(difference_type i) const
+  __host__ __device__ assert_sequence_iterator operator+(difference_type i) const
   {
     return clone(expected + i);
   }
 
-  THRUST_HOST_DEVICE reference operator[](difference_type i) const
+  __host__ __device__ reference operator[](difference_type i) const
   {
     return clone(expected + i);
   }
 
   // Some weirdness, this iterator acts like its own reference
-  THRUST_DEVICE assert_sequence_iterator operator=(value_type val)
+  __device__ assert_sequence_iterator operator=(value_type val)
   {
     if (val != expected)
     {
@@ -107,7 +108,7 @@ struct assert_sequence_iterator
   }
 
 private:
-  THRUST_HOST_DEVICE assert_sequence_iterator clone(value_type new_expected) const
+  __host__ __device__ assert_sequence_iterator clone(value_type new_expected) const
   {
     return {new_expected, max, found_max, unexpected_value};
   }
@@ -211,17 +212,17 @@ namespace
 {
 
 //------------------------------------------------------------------------------
-// Generate the output sequence using counting iterators and thrust::max<> for
+// Generate the output sequence using counting iterators and ::internal::maximum<> for
 // custom operator overloads.
 struct custom_bin_op_overloads
 {
   using postfix_args_type = std::tuple< // List any extra arg overloads:
-    std::tuple<thrust::maximum<>> // - custom binary op
+    std::tuple<::internal::maximum<>> // - custom binary op
     >;
 
   static postfix_args_type generate_postfix_args()
   {
-    return postfix_args_type{std::make_tuple(thrust::maximum<>{})};
+    return postfix_args_type{std::make_tuple(::internal::maximum<>{})};
   }
 };
 

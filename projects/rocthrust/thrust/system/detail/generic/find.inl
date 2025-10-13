@@ -26,13 +26,21 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/internal_functional.h>
-#include <thrust/detail/minmax.h>
 #include <thrust/find.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/tuple.h>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/detail/algorithm_wrapper.h>
+#endif
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+// clang-format on
+#endif
 
 // Contributed by Erich Elsen
 
@@ -61,7 +69,7 @@ struct find_if_functor
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
     {
-      return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+      return TupleType(true, (_THRUST_STD::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
     }
     else if (thrust::get<0>(lhs))
     {
@@ -94,7 +102,7 @@ find_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Inpu
 
   // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
   const difference_type interval_threshold = 1 << 20;
-  const difference_type interval_size      = (thrust::min)(interval_threshold, n);
+  const difference_type interval_size      = (_THRUST_STD::min)(interval_threshold, n);
 
   // force transform_iterator output to bool
   using XfrmIterator  = thrust::transform_iterator<Predicate, InputIterator, bool>;

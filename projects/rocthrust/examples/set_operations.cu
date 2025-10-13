@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 #include <thrust/device_vector.h>
+#include <thrust/extrema.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/merge.h>
 #include <thrust/set_operations.h>
@@ -153,7 +154,7 @@ void SetIntersectionSize(const Vector& A, const Vector& B)
   std::cout << "SetIntersectionSize(A,B) " << (C_end - C_begin) << std::endl;
 }
 
-int main(void)
+int main()
 {
   int a[] = {0, 2, 4, 5, 6, 8, 9};
   int b[] = {0, 1, 2, 3, 5, 7, 8};

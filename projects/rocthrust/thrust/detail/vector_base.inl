@@ -27,7 +27,6 @@
 #endif // no system header
 #include <thrust/advance.h>
 #include <thrust/detail/copy.h>
-#include <thrust/detail/minmax.h>
 #include <thrust/detail/overlapped_copy.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
@@ -36,6 +35,16 @@
 #include <thrust/equal.h>
 #include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/iterator_traits.h>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/detail/algorithm_wrapper.h>
+#endif
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+// clang-format on
+#endif
 
 #include <stdexcept>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
@@ -350,7 +359,7 @@ void vector_base<T, Alloc>::reserve(size_type n)
     size_type new_capacity = n;
 
     // do not exceed maximum storage
-    new_capacity = thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, max_size());
+    new_capacity = _THRUST_STD::min<size_type>(new_capacity, max_size());
 
     // create new storage
     storage_type new_storage(copy_allocator_t(), m_storage, new_capacity);
@@ -728,13 +737,14 @@ void vector_base<T, Alloc>::copy_insert(iterator position, ForwardIterator first
       const size_type old_size = size();
 
       // compute the new capacity after the allocation
-      size_type new_capacity = old_size + thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, num_new_elements);
+      size_type new_capacity =
+        old_size + _THRUST_STD::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, num_new_elements);
 
       // allocate exponentially larger new storage
-      new_capacity = thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, 2 * capacity());
+      new_capacity = _THRUST_STD::max<size_type>(new_capacity, 2 * capacity());
 
       // do not exceed maximum storage
-      new_capacity = thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, max_size());
+      new_capacity = _THRUST_STD::min<size_type>(new_capacity, max_size());
 
       if (new_capacity > max_size())
       {
@@ -799,13 +809,13 @@ void vector_base<T, Alloc>::append(size_type n)
       const size_type old_size = size();
 
       // compute the new capacity after the allocation
-      size_type new_capacity = old_size + thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, n);
+      size_type new_capacity = old_size + _THRUST_STD::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, n);
 
       // allocate exponentially larger new storage
-      new_capacity = thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, 2 * capacity());
+      new_capacity = _THRUST_STD::max<size_type>(new_capacity, 2 * capacity());
 
       // do not exceed maximum storage
-      new_capacity = thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, max_size());
+      new_capacity = _THRUST_STD::min<size_type>(new_capacity, max_size());
 
       // create new storage
       storage_type new_storage(copy_allocator_t(), m_storage, new_capacity);
@@ -894,13 +904,13 @@ void vector_base<T, Alloc>::fill_insert(iterator position, size_type n, const T&
       const size_type old_size = size();
 
       // compute the new capacity after the allocation
-      size_type new_capacity = old_size + thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, n);
+      size_type new_capacity = old_size + _THRUST_STD::max THRUST_PREVENT_MACRO_SUBSTITUTION(old_size, n);
 
       // allocate exponentially larger new storage
-      new_capacity = thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, 2 * capacity());
+      new_capacity = _THRUST_STD::max<size_type>(new_capacity, 2 * capacity());
 
       // do not exceed maximum storage
-      new_capacity = thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION<size_type>(new_capacity, max_size());
+      new_capacity = _THRUST_STD::min<size_type>(new_capacity, max_size());
 
       if (new_capacity > max_size())
       {
@@ -1074,10 +1084,10 @@ void vector_base<T, Alloc>::allocate_and_copy(
   } // end if
 
   // allocate exponentially larger new storage
-  size_type allocated_size = thrust::max<size_type>(requested_size, 2 * capacity());
+  size_type allocated_size = _THRUST_STD::max<size_type>(requested_size, 2 * capacity());
 
   // do not exceed maximum storage
-  allocated_size = thrust::min<size_type>(allocated_size, max_size());
+  allocated_size = _THRUST_STD::min<size_type>(allocated_size, max_size());
 
   if (requested_size > allocated_size)
   {

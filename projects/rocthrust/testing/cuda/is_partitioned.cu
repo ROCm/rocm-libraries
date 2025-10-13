@@ -32,7 +32,7 @@ is_partitioned_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Predi
 template <typename T>
 struct is_even
 {
-  THRUST_HOST_DEVICE bool operator()(T x) const
+  _CCCL_HOST_DEVICE bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -43,7 +43,7 @@ void TestIsPartitionedDevice(ExecutionPolicy exec)
 {
   size_t n = 1000;
 
-  n = thrust::max<size_t>(n, 2);
+  n = ::cuda::std::max<size_t>(n, 2);
 
   thrust::device_vector<int> v = unittest::random_integers<int>(n);
 

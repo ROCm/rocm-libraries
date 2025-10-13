@@ -38,7 +38,6 @@
 #endif // no system header
 
 #if THRUST_COMPILER(HIP)
-#  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/reduce.h>
 

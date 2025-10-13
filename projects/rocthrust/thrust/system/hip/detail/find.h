@@ -40,9 +40,11 @@
 #if THRUST_COMPILER(HIP)
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <thrust/detail/algorithm_wrapper.h>
+#  endif
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -80,7 +82,7 @@ struct functor
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
     {
-      return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+      return TupleType(true, (_THRUST_STD::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
     }
     else if (thrust::get<0>(lhs))
     {
@@ -114,7 +116,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 
   // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
   const Size interval_threshold = 1 << 20;
-  const Size interval_size      = (thrust::min)(interval_threshold, num_items);
+  const Size interval_size      = (_THRUST_STD::min)(interval_threshold, num_items);
 
   // force transform_iterator output to bool
   using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
