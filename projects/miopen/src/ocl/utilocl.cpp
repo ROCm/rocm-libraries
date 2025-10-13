@@ -379,9 +379,13 @@ float Im3d2ColGPU(const Handle& handle,
             256 * static_cast<std::size_t>(out_d * out_h * out_w * im_c * wei_d * wei_h * wei_w) /
                 8,
             static_cast<std::size_t>(256) * 1024);
-        const std::vector<size_t> vgd{global_threads, 1, 1};
         const size_t local_threads = std::min(global_threads, static_cast<std::size_t>(256));
+        if (global_threads % local_threads != 0){
+            global_threads = ((global_threads / local_threads) + 1) * local_threads;
+        }
         const std::vector<size_t> vld{local_threads, 1, 1};
+        const std::vector<size_t> vgd{global_threads, 1, 1};
+
 
         handle.AddKernel(
             "miopenIm3d2Col", network_config, program_name, kernel_name, vld, vgd, params)(
@@ -476,8 +480,12 @@ float Col2Im2dGPU(const Handle& handle,
         std::string params = GetDataTypeKernelParams(type);
 
         size_t global_threads = static_cast<size_t>(in_c) * in_h * in_w;
+        size_t local_threads = std::min(WG_SIZE, global_threads);
+        if (global_threads % local_threads != 0){
+            global_threads = ((global_threads / local_threads) + 1) * local_threads;
+        }
         const std::vector<size_t> vgd{global_threads, 1, 1};
-        const std::vector<size_t> vld{std::min(WG_SIZE, global_threads), 1, 1};
+        const std::vector<size_t> vld{local_threads, 1, 1};
 
         auto Is64BitIndexRequired = [&]() -> int {
             const auto im_ch_max     = global_threads / static_cast<size_t>(in_w * in_h);
@@ -599,8 +607,14 @@ float Col2Im3dGPU(const Handle& handle,
         params += use_64_bit_index ? " -DMIOPEN_USE_64BIT_INDEX=1" : " -DMIOPEN_USE_64BIT_INDEX=0";
 
         size_t global_threads = static_cast<size_t>(in_c) * in_d * in_h * in_w;
+        size_t local_threads = std::min(WG_SIZE, global_threads);
+        if(global_threads % local_threads != 0){
+           global_threads = ((global_threads / local_threads) + 1) * local_threads;
+        }
         const std::vector<size_t> vgd{global_threads, 1, 1};
-        const std::vector<size_t> vld{std::min(WG_SIZE, global_threads), 1, 1};
+        const std::vector<size_t> vld{local_threads, 1, 1};
+
+
 
         handle.AddKernel(
             "miopenCol2Im3d", network_config, program_name, kernel_name, vld, vgd, params)(
