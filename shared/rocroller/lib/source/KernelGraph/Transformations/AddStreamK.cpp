@@ -278,8 +278,9 @@ namespace rocRoller
                                               VariableType                     varType,
                                               LoopInfo const&                  loopInfo,
                                               ArgumentInfo const&              argInfo,
-                                              CommandParametersPtr             params,
-                                              ContextPtr                       context)
+                                              int                  forReceiveTileLoopCoord,
+                                              CommandParametersPtr params,
+                                              ContextPtr           context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -395,7 +396,8 @@ namespace rocRoller
 
             auto tileNumTag = graph.coordinates.addElement(
                 *graph.coordinates.get<MacroTileNumber>(nextTileNumTag)); // Copy existing
-            graph.coordinates.addElement(Split(), {nextTileNumTag}, {tileNumTag, plusOneTag});
+            graph.coordinates.addElement(
+                Split(), {nextTileNumTag}, {tileNumTag, plusOneTag, forReceiveTileLoopCoord});
 
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
             loadConnections.push_back(DC<User>(globalScratchTag));
@@ -1188,6 +1190,7 @@ namespace rocRoller
                                                             accumInfo.accumulatorVarType,
                                                             loopInfo,
                                                             argInfo,
+                                                            forReceiveTileLoopCoord,
                                                             params,
                                                             context);
 
