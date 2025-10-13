@@ -24,6 +24,7 @@
 
 import functools
 import math
+import operator
 import os
 import sys
 import time
@@ -269,8 +270,20 @@ def state(obj):
 
 
 def state_key_ordering(cls):
-    def tup(obj):
-        return tuple([getattr(obj, k) for k in cls.StateKeys])
+    # Use operator.attrgetter for efficiency if __slots__ is defined
+    if hasattr(cls, '__slots__'):
+        # attrgetter is faster for slotted classes
+        getter = operator.attrgetter(*cls.StateKeys)
+        if len(cls.StateKeys) == 1:
+            # attrgetter returns scalar for single key, we need tuple
+            def tup(obj):
+                return (getter(obj),)
+        else:
+            tup = getter
+    else:
+        # Fallback for regular classes
+        def tup(obj):
+            return tuple([getattr(obj, k) for k in cls.StateKeys])
 
     def lt(a, b):
         return tup(a) < tup(b)
