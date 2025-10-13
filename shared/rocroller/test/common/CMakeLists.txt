@@ -10,7 +10,7 @@ target_link_libraries(common-test-utilities
         roc::mxDataGenerator
         hip::host
         OpenMP::OpenMP_CXX
-        ${CBLAS_LIBRARIES}
+        ${BLAS_LIBRARIES}
 )
 
 if(ROCROLLER_ENABLE_ASAN)
