@@ -28,6 +28,10 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 * Added `generate_resource_spec.cpp` to the test directory. It is now built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
 
+### Removed
+
+* Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
+
 ### Changed
 
 * Updated the documentation on how to run hipCUB tests on multiple GPUs in parallel.

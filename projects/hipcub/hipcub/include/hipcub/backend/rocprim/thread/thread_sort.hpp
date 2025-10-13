@@ -36,18 +36,27 @@
 
 #include <rocprim/functional.hpp> // IWYU pragma: export
 
+#include <utility>
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/utility>
+#endif
+
 BEGIN_HIPCUB_NAMESPACE
 
 // Should be deprecated once hip::std::swap is available in this scope.
 template<typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void Swap(T& lhs, T& rhs)
+#if defined(__HIP_PLATFORM_NVIDIA__)
+HIPCUB_DEPRECATED_BECAUSE("Use cuda::std::swap")
+#else
+HIPCUB_DEPRECATED_BECAUSE("Use rocprim::swap")
+#endif
+HIPCUB_DEVICE HIPCUB_FORCEINLINE void Swap(T& lhs, T& rhs)
 {
   T temp = lhs;
   lhs    = rhs;
   rhs    = temp;
 }
-
 
 /**
  * @brief Sorts data using odd-even sort method
@@ -97,11 +106,17 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
     {
       if (compare_op(keys[j + 1], keys[j]))
       {
-        Swap(keys[j], keys[j + 1]);
-        if (!KEYS_ONLY)
-        {
-          Swap(items[j], items[j + 1]);
-        }
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+          using ::cuda::std::swap;
+#else
+          using ::rocprim::swap;
+#endif
+          swap(keys[j], keys[j + 1]);
+          if(!KEYS_ONLY)
+          {
+              swap(items[j], items[j + 1]);
+          }
       }
     } // inner loop
   }   // outer loop
