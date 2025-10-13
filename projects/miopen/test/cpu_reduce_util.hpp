@@ -293,6 +293,20 @@ static std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
 }
 
 template <typename T>
+static inline T
+linear_to_offset(size_t li, const std::vector<T>& lens, const std::vector<T>& strides)
+{
+    T off = 0;
+    for(int d = int(lens.size()) - 1; d >= 0; --d)
+    {
+        const T idx = li % lens[d];
+        li /= lens[d];
+        off += idx * strides[d];
+    }
+    return off;
+}
+
+template <typename T>
 static T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& index)
 {
     T offset = 0;
