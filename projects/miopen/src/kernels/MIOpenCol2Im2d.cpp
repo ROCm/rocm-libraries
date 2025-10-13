@@ -96,6 +96,6 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
 #if ACCUMULATOR_NEEDS_CONVERSION
     im_off[gid] = tmp > CVT_FLOAT2ACCUM(MAX_VAL) ? MAX_VAL : CVT_ACCUM2FLOAT(tmp);
 #else
-    im_off[gid] = CVT_ACCUM2FLOAT(tmp);
+    im_off[gid] = tmp;
 #endif
 }
