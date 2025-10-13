@@ -39,6 +39,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI
 #include <miopen/solver/problem_description_interpreter.hpp>
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <miopen/solver/ck_utility_common.hpp>
+#include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_scale.hpp>
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
@@ -48,7 +49,6 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI
 #include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #endif
-#include <miopen/solver/implicitgemm_ck_util.hpp>
 
 namespace miopen {
 namespace solver {
@@ -417,6 +417,12 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     default: break; // Unsupported data types - valid_kernels remains empty
     }
+}
+#else
+void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
+    const ::miopen::conv::ProblemDescription&)
+{
+    // No-op stub for non-CK builds
 }
 #endif
 
@@ -838,14 +844,6 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     return {};
 #endif
 }
-
-#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
-void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
-    const ::miopen::conv::ProblemDescription&)
-{
-    // No-op stub for non-CK builds
-}
-#endif
 
 } // namespace conv
 } // namespace solver
