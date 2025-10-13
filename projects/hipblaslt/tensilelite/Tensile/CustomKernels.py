@@ -24,7 +24,9 @@
 
 from . import CUSTOM_KERNEL_PATH
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
+from Tensile.CustomYamlLoader import DEFAULT_YAML_LOADER
 
+from functools import lru_cache
 import yaml
 
 import os
@@ -58,10 +60,13 @@ def getCustomKernelConfigAndAssembly(name, directory=CUSTOM_KERNEL_PATH):
 
     return (config, assembly)
 
+# getCustomKernelConfig will get called repeatedly on the same file
+# 20x logic loading speedup for aquavanjaram_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_HAS_SAB_SAV_freesize_custom_GSUs
+@lru_cache
 def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
     rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
     try:
-        return yaml.safe_load(rawConfig)["custom.config"]
+        return yaml.load(rawConfig, Loader=DEFAULT_YAML_LOADER)["custom.config"]
     except yaml.scanner.ScannerError as e:
         raise RuntimeError("Failed to read configuration for custom kernel: {0}\nDetails:\n{1}".format(name, e))
 
