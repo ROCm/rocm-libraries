@@ -28,6 +28,7 @@ import functools
 import glob
 import itertools
 import os
+import resource
 import shutil
 from pathlib import Path
 from timeit import default_timer as timer
@@ -76,6 +77,25 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
+
+
+def getMemoryUsage():
+    """Get peak and current memory usage in MB."""
+    rusage = resource.getrusage(resource.RUSAGE_SELF)
+    peak_memory_mb = rusage.ru_maxrss / 1024  # KB to MB on Linux
+
+    # Get current memory from /proc/self/status
+    current_memory_mb = 0
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    current_memory_mb = int(line.split()[1]) / 1024  # KB to MB
+                    break
+    except:
+        current_memory_mb = peak_memory_mb  # Fallback
+
+    return (peak_memory_mb, current_memory_mb)
 
 
 class KernelCodeGenResult(NamedTuple):
@@ -796,8 +816,11 @@ def run():
     print("")
 
     stop = timer()
+    peak_memory_mb, current_memory_mb = getMemoryUsage()
 
     print(f"Total time (s): {(stop-start):3.2f}")
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
     print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    print(f"Peak memory usage (MB): {peak_memory_mb:,.1f}")
+    print(f"Current memory usage (MB): {current_memory_mb:,.1f}")
