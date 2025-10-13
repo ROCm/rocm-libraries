@@ -225,9 +225,9 @@ namespace rocRoller
                      uint         numVGPRs)
         {
             auto lhsExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{accumMacTileTag, Register::Type::Vector, DataType::None});
+                Expression::DataFlowTag{destMacTileTag, Register::Type::Vector, dataType});
             auto rhsExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, DataType::None});
+                Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, dataType});
 
             auto addExpr = lhsExpr + rhsExpr;
             auto fixupTag
@@ -504,8 +504,8 @@ namespace rocRoller
          * Create send-tile block, which is roughly:
          *
          *     WaitZero()
-         *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *     if receiveTileExpr:
+         *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *       for (i = 0; i < numFixupsExpr; i++)
          *          nextWG = WG + 1 + i
          *          Assert nextWG < numScratch
@@ -531,6 +531,8 @@ namespace rocRoller
                              std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
                              ArgumentInfo const&                    argInfo,
+                             int                                    forReceiveTileLoopOp,
+                             int                                    forReceiveTileLoopCoord,
                              CommandParametersPtr                   params,
                              ContextPtr                             context)
         {
@@ -548,10 +550,6 @@ namespace rocRoller
             auto receiveTileTag
                 = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
 
-            // For loop that sums up all the partial result
-            auto [forLoopCoord, forLoopOp] = rangeFor(
-                graph, numFixupsExpr, rocRoller::RECEIVE, resultVariableType(numFixupsExpr));
-
             // Read flag
             auto plusOneTag    = graph.coordinates.addElement(Linear(one, one));
             auto setPlusOneTag = graph.control.addElement(SetCoordinate(one));
@@ -559,7 +557,7 @@ namespace rocRoller
 
             auto nextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
             graph.coordinates.addElement(
-                Split(), {nextWorkgroupTag}, {workgroup, plusOneTag, forLoopCoord});
+                Split(), {nextWorkgroupTag}, {workgroup, plusOneTag, forReceiveTileLoopCoord});
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
@@ -586,7 +584,12 @@ namespace rocRoller
             uint numRegisters    = accumulatorTile->elements()
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
                                    * loopInfo.yLoopSize);
-            auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
+
+            // auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
+            auto fullyAccumulatedTileTag
+                = createInternalTile(graph, dataType, scratchTileTag, params, context);
+            graph.coordinates.addElement(
+                DataFlow(), {accumulatorTileTag}, {fullyAccumulatedTileTag});
 
             // Read tile
             int loadAddForX = cloneForLoop(graph, loopInfo.xLoop);
@@ -608,6 +611,24 @@ namespace rocRoller
                 graph.coordinates.addElement(
                     PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(loadAddForY)});
 
+            // assign local accumulator partial tile to fully accumulated tile
+            int assignLocalTileForX = cloneForLoop(graph, loopInfo.xLoop);
+            int assignLocalTileForY = cloneForLoop(graph, loopInfo.yLoop);
+
+            auto localAccumulatorTileExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{accumulatorTileTag, Register::Type::Vector, dataType});
+            auto assignTile = graph.control.addElement(
+                Assign{Register::Type::Vector, localAccumulatorTileExpr, numRegisters});
+            graph.mapper.connect(assignTile, fullyAccumulatedTileTag, NaryArgument::DEST);
+
+            graph.control.addElement(Body(), {assignLocalTileForX}, {assignLocalTileForY});
+            graph.control.addElement(Body(), {assignLocalTileForY}, {assignTile});
+
+            std::cout << "(localAccumulatorTile, partileResultTile, fullyAccumulatedTile) "
+                      << accumulatorTileTag << ", " << scratchTileTag << ", "
+                      << fullyAccumulatedTileTag << std::endl;
+
+            // add fixup operations
             auto fixupTag = addFixup(graph,
                                      accumulatorTileTag,
                                      scratchTileTag,
@@ -647,7 +668,6 @@ namespace rocRoller
             // duplicate the forLoop for epilogue operations
             int epilogueForX = cloneForLoop(graph, *epilogueXLoop);
             int epilogueForY = cloneForLoop(graph, *epilogueYLoop);
-            graph.control.addElement(Sequence(), {forLoopOp}, {epilogueForX});
             graph.control.addElement(Body(), {epilogueForX}, {epilogueForY});
 
             AssertFatal(newEpilogueBody.size() == 1);
@@ -656,7 +676,7 @@ namespace rocRoller
                 // graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
                 graph.control.addElement(Body(), {epilogueForY}, {epilogueBody});
                 std::cout << "connect (fixupTag, epilogueBody) " << fixupTag << ", " << epilogueBody
-                          << std::endl;
+                          << ", " << epilogueForY << std::endl;
             }
 
             // Add to control
@@ -665,8 +685,13 @@ namespace rocRoller
 
             graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
 
-            graph.control.addElement(Body(), {receiveTileTag}, {forLoopOp});
-            graph.control.addElement(Body(), {forLoopOp}, {boundsCheckTag});
+            // graph.control.addElement(Body(), {receiveTileTag}, {assignTile});
+            // graph.control.addElement(Sequence(), {assignTile}, {forLoopOp});
+            // graph.control.addElement(Body(), {receiveTileTag}, {forLoopOp});
+            graph.control.addElement(Body(), {receiveTileTag}, {assignLocalTileForX});
+            graph.control.addElement(Sequence(), {assignLocalTileForX}, {forReceiveTileLoopOp});
+            graph.control.addElement(Body(), {forReceiveTileLoopOp}, {boundsCheckTag});
+            graph.control.addElement(Sequence(), {forReceiveTileLoopOp}, {epilogueForX});
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
@@ -1129,6 +1154,27 @@ namespace rocRoller
             int         postAccumulationCond;
             if(accumInfo.accumulatorTile != -1)
             {
+                auto accumTileIdxStart
+                    = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
+                auto accumTileIdxEnd
+                    = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
+                      % numAccumTiles;
+                auto remainAccumTiles = numAccumTiles - accumTileIdxEnd - one;
+                auto numRemainPartialResults
+                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
+
+                std::cout << "numAccumTiles: " << toString(numAccumTiles) << ", " << std::endl
+                          << "numSKTilesPerWG: " << toString(argInfo.numSKTilesPerWG) << ", "
+                          << std::endl
+                          << "numFixups: " << toString(numRemainPartialResults) << std::endl;
+
+                // For loop that sums up all the partial result
+                auto [forReceiveTileLoopCoord, forReceiveTileLoopOp]
+                    = rangeFor(graph,
+                               numRemainPartialResults,
+                               rocRoller::RECEIVE,
+                               resultVariableType(numRemainPartialResults));
+
                 // Create scratch space for flags
                 auto flagsScratch = newScratchCoordinate(argInfo.numWGs, DataType::UInt32, context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
@@ -1146,9 +1192,6 @@ namespace rocRoller
                                                             context);
 
                 // Add send
-                auto accumTileIdxStart
-                    = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
-
                 sendInfo = sendTile(graph,
                                     // if WG does not work on the first AccumTile, then sendTile
                                     accumTileIdxStart > zero,
@@ -1160,21 +1203,10 @@ namespace rocRoller
                                     context);
 
                 // Add receive
-                auto accumTileIdxEnd
-                    = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
-                      % numAccumTiles;
 
                 // auto numRemainPartialResults = numAccumTiles/ numAccumTiles;
                 // auto numRemainPartialResults = one;
-                // auto numRemainPartialResults = Expression::literal(62, DataType::UInt32);
-                auto remainAccumTiles = numAccumTiles - accumTileIdxEnd - one;
-                auto numRemainPartialResults
-                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
-
-                std::cout << "numAccumTiles: " << toString(numAccumTiles) << ", " << std::endl
-                          << "numSKTilesPerWG: " << toString(argInfo.numSKTilesPerWG) << ", "
-                          << std::endl
-                          << "numFixups: " << toString(numRemainPartialResults) << std::endl;
+                // auto numRemainPartialResults = Expression::literal(2, DataType::UInt32);
 
                 receiveInfo = receiveTile(
                     graph,
@@ -1190,6 +1222,8 @@ namespace rocRoller
                     epilogueOperations,
                     loopInfo,
                     argInfo,
+                    forReceiveTileLoopOp,
+                    forReceiveTileLoopCoord,
                     params,
                     context);
 

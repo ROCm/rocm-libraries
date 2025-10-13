@@ -632,6 +632,12 @@ namespace rocRoller
                 auto deferred = expressionHasNoneDT(assign.expression)
                                 && !m_context->registerTagManager()->hasRegister(dimTag);
 
+                if(tag == 154)
+                {
+                    std::cout << "Generate Assign operation "
+                              << "dest " << dimTag << " deferred " << deferred << std::endl;
+                }
+
                 Register::ValuePtr dest;
                 if(!deferred)
                 {
@@ -654,6 +660,11 @@ namespace rocRoller
                     if(assign.regType == Register::Type::Accumulator
                        || assign.regType == Register::Type::Vector)
                     {
+                        if(tag == 154)
+                        {
+                            std::cout << "regType is Vector || Accumulator" << std::endl;
+                            std::cout << "varType " << toString(varType) << std::endl;
+                        }
                         dest = m_context->registerTagManager()->getRegister(
                             dimTag,
                             assign.regType,
@@ -661,14 +672,26 @@ namespace rocRoller
                             valueCount,
                             Register::AllocationOptions{.contiguousChunkWidth
                                                         = static_cast<int>(valueCount)});
+                        if(tag == 154)
+                        {
+                            std::cout << "after get register" << std::endl;
+                        }
                     }
                     else
                     {
+                        if(tag == 154)
+                        {
+                            std::cout << "regType is other" << std::endl;
+                        }
                         dest = m_context->registerTagManager()->getRegister(
                             dimTag, assign.regType, varType, valueCount);
                     }
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
+                }
+                if(tag == 154)
+                {
+                    std::cout << "generate" << std::endl;
                 }
                 co_yield Expression::generate(dest, assign.expression, m_context);
 

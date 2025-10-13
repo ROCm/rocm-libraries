@@ -46,7 +46,7 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
 
     example.setTileSize(128, 256, 8);
     example.setMFMA(32, 32, 2, 1);
-    example.setUseLDS(true, true, true);
+    example.setUseLDS(false, false, false);
     example.setPrefetch(false, 0, 0, false);
     example.setStreamK(true);
 
