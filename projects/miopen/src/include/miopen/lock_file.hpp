@@ -52,22 +52,24 @@ namespace miopen {
 class FSLockFile
 {
 public:
-    FSLockFile(){}
+    FSLockFile() {}
     FSLockFile(const fs::path& path_) : path(path_)
     {
         lockfile_path = path.string() + ".fslock";
-        hardlink_path = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid());
+        hardlink_path = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." +
+                        std::to_string(getpid());
     }
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)
     {
-        auto now = boost::posix_time::second_clock::universal_time();
+        auto now      = boost::posix_time::second_clock::universal_time();
         bool acquired = false;
         while(!acquired && now < abs_time)
         {
-            now = boost::posix_time::second_clock::universal_time();
+            now      = boost::posix_time::second_clock::universal_time();
             acquired = try_lock_hardlink();
-            if(!acquired) {
+            if(!acquired)
+            {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -84,7 +86,8 @@ public:
         while(!acquired)
         {
             acquired = try_lock_hardlink();
-            if(!acquired) {
+            if(!acquired)
+            {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
@@ -96,7 +99,7 @@ public:
     bool try_lock()
     {
         bool acquired = false;
-        acquired = try_lock_hardlink();
+        acquired      = try_lock_hardlink();
         if(acquired)
             MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         return acquired;
@@ -181,7 +184,8 @@ public:
     }
     void lock()
     {
-        LockOperation("lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, flock, fs_lock); });
+        LockOperation(
+            "lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, flock, fs_lock); });
     }
 
     void lock_shared()
@@ -199,8 +203,9 @@ public:
 
     bool try_lock()
     {
-        return TryLockOperation(
-            "lock", MIOPEN_GET_FN_NAME, [&]() { return std::try_lock(access_mutex, flock, fs_lock) != 0; });
+        return TryLockOperation("lock", MIOPEN_GET_FN_NAME, [&]() {
+            return std::try_lock(access_mutex, flock, fs_lock) == -1;
+        });
     }
 
     bool try_lock_shared()
@@ -242,7 +247,7 @@ public:
                {
                    ack = fs_lock.timed_lock(ToPTime(duration));
                    if(!ack)
-                        flock.unlock();
+                       flock.unlock();
                }
                return ack;
            }))

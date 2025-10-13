@@ -264,7 +264,8 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             return false;
         }
 
-        const auto temp_name = filename.string() + "." + boost::asio::ip::host_name() + "." + std::to_string(getpid()) + ".temp";
+        const auto temp_name = filename.string() + "." + boost::asio::ip::host_name() + "." +
+                               std::to_string(getpid()) + ".temp";
         std::ofstream to(temp_name, std::ios::binary);
 
         if(!to)
