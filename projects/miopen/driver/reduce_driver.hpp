@@ -115,7 +115,7 @@ private:
     std::vector<int> outhost_indices;
 
     bool need_indices;
-    bool cpu_parallel;
+    bool multithreaded;
     std::size_t ws_sizeInBytes;
     std::size_t indices_sizeInBytes;
 
@@ -230,7 +230,7 @@ int ReduceDriver<Tgpu, Tref>::SetReduceTensorDescriptorFromCmdLineArgs()
         static_cast<miopenReduceTensorIndices_t>(inflags.GetValueInt("IndicesUsed"));
     miopenIndicesType_t indicesType = MIOPEN_32BIT_INDICES;
 
-    cpu_parallel = static_cast<bool>(inflags.GetValueInt("multithreaded"));
+    multithreaded = static_cast<bool>(inflags.GetValueInt("multithreaded"));
 
     // no other place is better to place this line of codes
     this->need_indices =
@@ -414,11 +414,7 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         beta  = 0.0f;
     };
 
-    if(cpu_parallel) {
-        hostReduction.Run<true>(alpha, in.data(), beta, outhost, outhost_indices.data());
-    }else {
-        hostReduction.Run<false>(alpha, in.data(), beta, outhost, outhost_indices.data());
-    }
+    hostReduction.Run(alpha, in.data(), beta, outhost, multithreaded, outhost_indices.data());
 
     auto error       = miopen::rms_range(outhost, out);
     double tolerance = 1.5e-4;

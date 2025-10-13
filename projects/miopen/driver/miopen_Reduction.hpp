@@ -34,8 +34,10 @@
 #include <cmath>
 
 #include "../test/cpu_reduce_util.hpp"
+#include "../test/verify.hpp"
 
 #include "tensor_driver.hpp"
+#include "timer.hpp"
 
 using float16 = half_float::half;
 
@@ -73,29 +75,29 @@ public:
         this->reduceAllDims = this->invariantDims.empty();
     };
 
-    template <bool parallel>
-    void
-    Run(float alpha, const Tgpu* in_data, float beta, std::vector<Tref>& out_data, int* indices)
-    ~miopenReductionHost(){};
-
-    void Run(float alpha, const Tgpu* in_data, float beta, Tref* out_data, int* indices)
+    void Run(float alpha,
+             const Tgpu* in_data,
+             float beta,
+             std::vector<Tref>& out_data,
+             bool parallel,
+             int* indices)
     {
         if(compTypeVal == miopenFloat)
         {
             if constexpr(std::is_same_v<Tref, double>)
-                RunImpl<double, parallel>(alpha, in_data, beta, out_data, indices);
+                RunImpl<double>(alpha, in_data, beta, out_data, parallel, indices);
             else
-                RunImpl<float, parallel>(alpha, in_data, beta, out_data, indices);
+                RunImpl<float>(alpha, in_data, beta, out_data, parallel, indices);
         }
         else if(compTypeVal == miopenHalf)
         {
             if constexpr(std::is_same_v<Tref, double> || std::is_same_v<Tref, float>)
-                RunImpl<Tref, parallel>(alpha, in_data, beta, out_data, indices);
+                RunImpl<Tref>(alpha, in_data, beta, out_data, parallel, indices);
             else
-                RunImpl<float16, parallel>(alpha, in_data, beta, out_data, indices);
+                RunImpl<float16>(alpha, in_data, beta, out_data, parallel, indices);
         }
         else if(compTypeVal == miopenDouble)
-            RunImpl<double, parallel>(alpha, in_data, beta, out_data, indices);
+            RunImpl<double>(alpha, in_data, beta, out_data, parallel, indices);
     };
 
 private:
@@ -118,26 +120,29 @@ private:
 
     bool reduceAllDims;
 
-    template <typename compType, bool parallel>
-    void RunImpl(
-        float alpha, const Tgpu* in_data, float beta, std::vector<Tref>& out_data, int* indices)
+    template <typename compType>
+    void RunImpl(float alpha,
+                 const Tgpu* in_data,
+                 float beta,
+                 std::vector<Tref>& out_data,
+                 bool parallel,
+                 int* indices)
     {
         bool need_indices =
             (indicesOpt == MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES) &&
             (reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
              reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
-        if(need_indices)
-            RunImpl_generic<compType, true, parallel>(alpha, in_data, beta, out_data, indices);
-        else
-            RunImpl_generic<compType, false, parallel>(alpha, in_data, beta, out_data);
+        RunImpl_generic<compType>(alpha, in_data, beta, out_data, parallel, need_indices, indices);
     };
 
-    template <typename compType, bool UseIdx, bool parallel>
+    template <typename compType>
     void RunImpl_generic(float alpha,
                          const Tgpu* in_data,
                          float beta,
                          std::vector<Tref>& out_data,
+                         bool parallel,
+                         bool useIdx,
                          [[maybe_unused]] int* indices = nullptr)
     {
         using reduce::binop_with_nan_check;
@@ -175,7 +180,7 @@ private:
                 auto currVal = convert_type<compType>(in_data[src_offset]);
                 PreUnaryOp(currVal);
 
-                if constexpr(UseIdx)
+                if(useIdx)
                 {
                     const int currIndex = get_flatten_offset(inLengths, src_index);
                     binop_with_nan_check2(
@@ -195,7 +200,7 @@ private:
                 accuVal += convert_type<compType>(out_data[0]) * convert_type<compType>(beta);
 
             out_data[0] = convert_type<Tref>(accuVal);
-            if constexpr(UseIdx)
+            if(useIdx)
             {
                 indices[0] = accuIndex;
             }
@@ -230,7 +235,7 @@ private:
                     auto currVal = convert_type<compType>(in_data[src_offset]);
                     PreUnaryOp(currVal);
 
-                    if constexpr(UseIdx)
+                    if(useIdx)
                     {
                         const int currIndex = get_flatten_offset(toReduceLengths, i2);
                         binop_with_nan_check2(
@@ -242,7 +247,7 @@ private:
                     }
                 }
 
-                if constexpr(!UseIdx)
+                if(!useIdx)
                 {
                     PosUnaryOp(accuVal);
                 }
@@ -254,13 +259,13 @@ private:
                         convert_type<compType>(out_data[dst_offset]) * convert_type<compType>(beta);
 
                 out_data[dst_offset] = convert_type<Tref>(accuVal);
-                if constexpr(UseIdx)
+                if(useIdx)
                 {
                     indices[dst_offset] = accuIndex;
                 }
             };
 
-            if constexpr(parallel)
+            if(parallel)
             {
                 const auto inv_size = inv_idx.size();
                 par_for(inv_size, [&](const int i) {
