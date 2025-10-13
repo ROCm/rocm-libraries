@@ -64,13 +64,13 @@ public:
     {
         auto now      = boost::posix_time::second_clock::universal_time();
         bool acquired = false;
+        MIOPEN_LOG_I2("Attempting Lock < " << lockfile_path.string());
         while(!acquired && now < abs_time)
         {
             now      = boost::posix_time::second_clock::universal_time();
             acquired = try_lock_hardlink();
             if(!acquired)
             {
-                MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
@@ -83,12 +83,12 @@ public:
     void lock()
     {
         bool acquired = false;
+        MIOPEN_LOG_I2("Attempting Lock < " << lockfile_path.string());
         while(!acquired)
         {
             acquired = try_lock_hardlink();
             if(!acquired)
             {
-                MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
             else
