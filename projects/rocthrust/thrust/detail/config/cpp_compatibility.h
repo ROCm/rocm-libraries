@@ -17,7 +17,11 @@
 
 #pragma once
 
-// Internal config header that is only included through thrust/detail/config/config.h
+#include <thrust/detail/config/libcxx.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
@@ -27,20 +31,17 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/config/cpp_dialect.h> // IWYU pragma: export
-#include <thrust/detail/config/device_system.h> // IWYU pragma: export
-#include <thrust/detail/config/execution_space.h> // IWYU pragma: export
-#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
-
-#include _THRUST_STD_INCLUDE(cstddef)
-
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-
 #  define THRUST_HAS_CPP_ATTRIBUTE(__x) _CCCL_HAS_CPP_ATTRIBUTE(__x)
-#  define THRUST_NODISCARD              _CCCL_NODISCARD
+// deprecated [Since 2.8.0]
+#  define THRUST_NODISCARD _CCCL_NODISCARD
+// deprecated [Since 2.8.0]
+#  define THRUST_INLINE_CONSTANT _CCCL_GLOBAL_CONSTANT
+#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
 
-#else // TODO(libhipcxx): remove the code in this path and replace THRUST_NODISCARD with _CCCL_NODISCARD in rocThrust
-      // once libhipcxx gets ready
+#  include <thrust/detail/config/compiler.h>
+#  include <thrust/detail/config/cpp_dialect.h>
+#  include <thrust/detail/config/execution_space.h>
 
 #  ifdef __has_cpp_attribute
 #    define THRUST_HAS_CPP_ATTRIBUTE(__x) __has_cpp_attribute(__x)
@@ -48,30 +49,25 @@
 #    define THRUST_HAS_CPP_ATTRIBUTE(__x) 0
 #  endif // !__has_cpp_attribute
 
+// deprecated [Since 2.8.0]
 #  if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) || (THRUST_COMPILER(MSVC) && THRUST_CPP_DIALECT >= 2017)
 #    define THRUST_NODISCARD [[nodiscard]]
 #  else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
 #    define THRUST_NODISCARD
 #  endif // no nodiscard
+
+#  if THRUST_CUDACC_BELOW(11, 3)
+#    define THRUST_CONSTEXPR_GLOBAL const
+#  else // ^^^ THRUST_CUDACC_BELOW(11, 3) ^^^ / vvv THRUST_CUDACC_BELOW(11, 3) vvv
+#    define THRUST_CONSTEXPR_GLOBAL constexpr
+#  endif // !THRUST_CUDACC_BELOW(11, 3)
+
+// deprecated [Since 2.8.0]
+#  if defined(__CUDA_ARCH__)
+#    define THRUST_INLINE_CONSTANT THRUST_DEVICE THRUST_CONSTEXPR_GLOBAL
+#  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv
+#    define THRUST_INLINE_CONSTANT inline constexpr
+#  endif // __CUDA_ARCH__
 #endif
-
-// FIXME: Combine THRUST_INLINE_CONSTANT and
-// THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT into one macro when NVCC properly
-// supports `constexpr` globals in host and device code.
-#if defined(__CUDA_ARCH__) || defined(_NVHPC_CUDA)
-// FIXME: Add this when NVCC supports inline variables.
-// #  if   THRUST_CPP_DIALECT >= 2017
-// #    define THRUST_INLINE_CONSTANT                 inline constexpr
-// #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  define THRUST_INLINE_CONSTANT                 static const THRUST_DEVICE
-#  define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-
-#else
-// FIXME: Add this when NVCC supports inline variables.
-// #  if   THRUST_CPP_DIALECT >= 2017
-// #    define THRUST_INLINE_CONSTANT                 inline constexpr
-// #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  define THRUST_INLINE_CONSTANT                 static constexpr
-#  define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-
-#endif
+// deprecated [Since 2.8.0]
+#define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
