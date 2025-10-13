@@ -168,31 +168,64 @@ private:
 
         if(reduceAllDims)
         {
-            const auto idx_all = get_all_indexes(inLengths);
+            const size_t N = std::accumulate(
+                inLengths.begin(), inLengths.end(), size_t{1}, std::multiplies<size_t>());
 
-            compType accuVal = ReduceOpZeroVal<compType>(this->reduceOp);
-            int accuIndex    = 0;
+            auto zeroVal   = ReduceOpZeroVal<compType>(this->reduceOp);
+            const size_t G = std::thread::hardware_concurrency();
+            const size_t P = std::max<size_t>(1, (N + G - 1) / G);
 
-            for(const auto& src_index : idx_all)
-            {
-                const int src_offset = get_offset_from_index(this->inStrides, src_index);
+            std::vector<compType> partial_val(P, zeroVal);
+            std::vector<int> partial_idx(P, 0);
 
-                auto currVal = convert_type<compType>(in_data[src_offset]);
-                PreUnaryOp(currVal);
+            auto worker = [&](int p) {
+                const size_t begin = size_t(p) * G;
+                const size_t end   = std::min(begin + G, N);
 
+                compType acc = zeroVal;
+                int acc_i    = 0;
+
+                for(size_t i = begin; i < end; ++i)
+                {
+                    const int src_off = linear_to_offset(i, inLengths, inStrides);
+
+                    auto v = convert_type<compType>(in_data[src_off]);
+                    PreUnaryOp(v);
+
+                    if(useIdx)
+                    {
+                        binop_with_nan_check2(nanOpt, opReduce_idx, acc, v, acc_i, static_cast<int>(i));
+                    }
+                    else
+                    {
+                        binop_with_nan_check(nanOpt, opReduce_val, acc, v);
+                    }
+                }
+                partial_val[p] = acc;
                 if(useIdx)
-                {
-                    const int currIndex = get_flatten_offset(inLengths, src_index);
+                    partial_idx[p] = acc_i;
+            };
+
+            if(parallel)
+                par_for(P, worker);
+            else
+                for(int p = 0; p < static_cast<int>(P); ++p)
+                    worker(p);
+
+            compType accuVal = zeroVal;
+            int accuIndex    = 0;
+            for(size_t p = 0; p < P; ++p)
+            {
+                if(useIdx)
                     binop_with_nan_check2(
-                        nanOpt, opReduce_idx, accuVal, currVal, accuIndex, currIndex);
-                }
+                        nanOpt, opReduce_idx, accuVal, partial_val[p], accuIndex, partial_idx[p]);
                 else
-                {
-                    binop_with_nan_check(nanOpt, opReduce_val, accuVal, currVal);
-                }
+                    binop_with_nan_check(nanOpt, opReduce_val, accuVal, partial_val[p]);
             }
 
-            PosUnaryOp(accuVal);
+            // Apply post op once (e.g., AVG division). Skip for index-returning ops.
+            if(!useIdx)
+                PosUnaryOp(accuVal);
 
             if(!float_equal_one(alpha))
                 accuVal *= convert_type<compType>(alpha);
@@ -201,9 +234,7 @@ private:
 
             out_data[0] = convert_type<Tref>(accuVal);
             if(useIdx)
-            {
                 indices[0] = accuIndex;
-            }
         }
         else
         {
