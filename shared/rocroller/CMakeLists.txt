@@ -200,24 +200,6 @@ if(ROCROLLER_ENABLE_YAML_CPP)
         set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         find_package(yaml-cpp 0.8.0 REQUIRED)
-=======
-    find_package(yaml-cpp)
-    if(NOT yaml-cpp_FOUND)
-        if(ROCROLLER_ENABLE_FETCH)
-            set(YAML_CPP_BUILD_TOOLS OFF)
-            set(YAML_BUILD_SHARED_LIBS OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            FetchContent_Declare(
-                yaml_cpp
-                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
-            )
-            FetchContent_MakeAvailable(yaml_cpp)
-            set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
-        else()
-            message(FATAL_ERROR "Failed to find yaml-cpp")
-        endif()
->>>>>>> Use yaml-cpp libraries variable for backwards compatibility
     endif()
     target_link_libraries(rocroller PUBLIC ${YAML_CPP_LIBRARIES})
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
