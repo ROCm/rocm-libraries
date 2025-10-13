@@ -53,56 +53,163 @@ struct verify_lrn_forward
         int n_batch, channels, height, width;
         std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
 
-        auto alpha       = lrn.GetAlpha();
-        auto beta        = lrn.GetBeta();
-        auto K           = lrn.GetK();
-        auto lrn_n       = lrn.GetN();
-        int radius_lower = static_cast<int>((lrn_n - 1) / 2);
-        int radius_upper = static_cast<int>(lrn_n / 2);
-        auto mode        = lrn.GetMode();
+        const auto alpha       = lrn.GetAlpha();
+        const auto beta        = lrn.GetBeta();
+        const auto K           = lrn.GetK();
+        const auto lrn_n       = lrn.GetN();
+        const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
+        const int radius_upper = static_cast<int>(lrn_n / 2);
+        const auto mode        = lrn.GetMode();
 
-        if(mode == miopenLRNCrossChannel)
+        if (mode == miopenLRNCrossChannel)
         {
-            auto alphaoverarea = alpha / lrn_n;
-            miopen::par_ford(n_batch, channels, height, width)([&](int b, int c, int h, int w) {
-                int start = c < radius_lower ? 0 : (c - radius_lower);
-                int end   = (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
+            const auto alphaoverarea = alpha / lrn_n;
 
-                double scale = 0;
-                for(int k = start; k < end; k++)
+            miopen::par_for(n_batch)([&](int b) {
+                for (int c = 0; c < channels; ++c)
                 {
-                    scale += std::pow(input(b, k, h, w), 2);
+                    const int start = c < radius_lower ? 0 : (c - radius_lower);
+                    const int end   = (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
+
+                    for (int h = 0; h < height; ++h)
+                    {
+                        for (int w = 0; w < width; ++w)
+                        {
+                            double scale = 0;
+                            for (int k = start; k < end; ++k)
+                            {
+                                scale += std::pow(input(b, k, h, w), 2);
+                            }
+
+                            scale *= alphaoverarea;
+                            scale += K;
+                            scale = std::pow(scale, -beta);
+
+                            output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
+                        }
+                    }
                 }
-
-                scale *= alphaoverarea;
-                scale += K;
-                scale = std::pow(scale, -beta);
-
-                output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
             });
         }
         else
         {
-            double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
-            miopen::par_ford(n_batch, channels, height, width)([&](int b, int c, int h, int w) {
-                double scale = 0;
-                int left     = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
-                int right    = (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
-                int top      = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
-                int bottom   = (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
+            const double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
 
-                for(int i = left; i < right; i++)
+            miopen::par_for(n_batch)([&](int b) {
+                for (int c = 0; c < channels; ++c)
                 {
-                    for(int j = top; j < bottom; j++)
+                    for (int h = 0; h < height; ++h)
                     {
-                        scale += std::pow(input(b, c, j, i), 2);
+                        const int top      = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
+                        const int bottom   = (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
+
+                        for (int w = 0; w < width; ++w)
+                        {
+                            const int left     = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
+                            const int right    = (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
+                            double scale = 0;
+
+                            for (int i = left; i < right; ++i)
+                            {
+                                for (int j = top; j < bottom; ++j)
+                                {
+                                    scale += std::pow(input(b, c, j, i), 2);
+                                }
+                            }
+
+                            scale *= alphaoverarea;
+                            scale += K;
+                            scale              = std::pow(scale, -beta);
+                            output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
+                        }
                     }
                 }
-                scale *= alphaoverarea;
-                scale += K;
-                scale              = std::pow(scale, -beta);
-                output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
             });
+        }
+
+        return output;
+    }
+
+    tensor<T> cpu_st() const
+    {
+        auto output = tensor<T>{input.desc.GetLengths()};
+        int n_batch, channels, height, width;
+        std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+
+        const auto alpha       = lrn.GetAlpha();
+        const auto beta        = lrn.GetBeta();
+        const auto K           = lrn.GetK();
+        const auto lrn_n       = lrn.GetN();
+        const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
+        const int radius_upper = static_cast<int>(lrn_n / 2);
+        const auto mode        = lrn.GetMode();
+
+        if (mode == miopenLRNCrossChannel)
+        {
+            const auto alphaoverarea = alpha / lrn_n;
+
+            for (int b = 0; b < n_batch; ++b)
+            {
+                for (int c = 0; c < channels; ++c)
+                {
+                    const int start = c < radius_lower ? 0 : (c - radius_lower);
+                    const int end   = (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
+
+                    for (int h = 0; h < height; ++h)
+                    {
+                        for (int w = 0; w < width; ++w)
+                        {
+                            double scale = 0;
+                            for (int k = start; k < end; ++k)
+                            {
+                                scale += std::pow(input(b, k, h, w), 2);
+                            }
+
+                            scale *= alphaoverarea;
+                            scale += K;
+                            scale = std::pow(scale, -beta);
+
+                            output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            const double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
+
+            for (int b = 0; b < n_batch; ++b)
+            {
+                for (int c = 0; c < channels; ++c)
+                {
+                    for (int h = 0; h < height; ++h)
+                    {
+                        const int top      = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
+                        const int bottom   = (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
+
+                        for (int w = 0; w < width; ++w)
+                        {
+                            const int left     = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
+                            const int right    = (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
+                            double scale = 0;
+
+                            for (int i = left; i < right; ++i)
+                            {
+                                for (int j = top; j < bottom; ++j)
+                                {
+                                    scale += std::pow(input(b, c, j, i), 2);
+                                }
+                            }
+
+                            scale *= alphaoverarea;
+                            scale += K;
+                            scale              = std::pow(scale, -beta);
+                            output(b, c, h, w) = static_cast<T>(scale * input(b, c, h, w));
+                        }
+                    }
+                }
+            }
         }
 
         return output;
@@ -159,6 +266,11 @@ struct verify_lrn_bwd
         inputDY = pdout;
         inputX  = pin;
         scale   = pscale;
+
+        int n_batch, channels, height, width;
+        std::tie(n_batch, channels, height, width) = miopen::tien<4>(inputY.desc.GetLengths());
+        const auto lrn_n = lrn.GetN();
+        const auto mode = lrn.GetMode();
     }
 
     tensor<T> cpu() const
@@ -167,58 +279,163 @@ struct verify_lrn_bwd
         int n_batch, channels, height, width;
         std::tie(n_batch, channels, height, width) = miopen::tien<4>(inputY.desc.GetLengths());
 
-        auto alpha       = lrn.GetAlpha();
-        auto beta        = lrn.GetBeta();
-        auto lrn_n       = lrn.GetN();
-        auto mode        = lrn.GetMode();
-        int radius_lower = static_cast<int>((lrn_n - 1) / 2);
-        int radius_upper = static_cast<int>(lrn_n / 2);
+        const auto alpha       = lrn.GetAlpha();
+        const auto beta        = lrn.GetBeta();
+        const auto lrn_n       = lrn.GetN();
+        const auto mode        = lrn.GetMode();
+        const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
+        const int radius_upper = static_cast<int>(lrn_n / 2);
 
-        if(mode == miopenLRNWithinChannel)
+        if (mode == miopenLRNWithinChannel)
         {
-            auto adjust_area       = lrn_n * lrn_n;
-            auto cache_ratio_value = 2 * alpha * beta / adjust_area;
+            const auto adjust_area       = lrn_n * lrn_n;
+            const auto cache_ratio_value = 2 * alpha * beta / adjust_area;
 
-            miopen::par_ford(n_batch, channels, height, width)([&](int b, int c, int h, int w) {
-                int left   = w < radius_upper ? 0 : (w - radius_upper);
-                int right  = (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
-                int top    = h < radius_upper ? 0 : (h - radius_upper);
-                int bottom = (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
-
-                double ydy = 0;
-                for(int i = left; i < right; i++)
+            miopen::par_for(n_batch)([&](int b) {
+                for (int c = 0; c < channels; ++c)
                 {
-                    for(int j = top; j < bottom; j++)
+                    for (int h = 0; h < height; ++h)
                     {
-                        ydy += (double(inputY(b, c, j, i) * inputDY(b, c, j, i)) /
-                                double(scale(b, c, j, i)));
+                        const int top    = h < radius_upper ? 0 : (h - radius_upper);
+                        const int bottom = (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
+
+                        for (int w = 0; w < width; ++w)
+                        {
+                            const int left   = w < radius_upper ? 0 : (w - radius_upper);
+                            const int right  = (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
+                            double ydy = 0;
+
+                            for (int i = left; i < right; i++)
+                            {
+                                for (int j = top; j < bottom; j++)
+                                {
+                                    ydy += (double(inputY(b, c, j, i) * inputDY(b, c, j, i)) /
+                                            double(scale(b, c, j, i)));
+                                }
+                            }
+            
+                            routputDX(b, c, h, w) = static_cast<T>(
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                cache_ratio_value * inputX(b, c, h, w) * ydy);
+                        }
                     }
                 }
-
-                routputDX(b, c, h, w) = static_cast<T>(
-                    std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
-                    cache_ratio_value * inputX(b, c, h, w) * ydy);
             });
         }
         else
         {
-            auto cache_ratio_value = 2 * alpha * beta / lrn_n;
+            const auto cache_ratio_value = 2 * alpha * beta / lrn_n;
 
-            miopen::par_ford(n_batch, channels, height, width)([&](int b, int c, int h, int w) {
-                int start = c < radius_upper ? 0 : (c - radius_upper);
-                int end   = (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
-
-                double ydy = 0;
-                for(auto k = start; k < end; k++)
+            miopen::par_for(n_batch)([&](int b) {
+                for (int c = 0; c < channels; ++c)
                 {
-                    ydy += (double(inputY(b, k, h, w) * inputDY(b, k, h, w)) /
-                            double(scale(b, k, h, w)));
-                }
+                    const int start = c < radius_upper ? 0 : (c - radius_upper);
+                    const int end   = (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
 
-                routputDX(b, c, h, w) = static_cast<T>(
-                    std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
-                    cache_ratio_value * inputX(b, c, h, w) * ydy);
+                    for (int h = 0; h < height; ++h)
+                    {
+                        for (int w = 0; w < width; ++w)
+                        {
+                            double ydy = 0;
+
+                            for (auto k = start; k < end; ++k)
+                            {
+                                ydy += (double(inputY(b, k, h, w) * inputDY(b, k, h, w)) /
+                                        double(scale(b, k, h, w)));
+                            }
+            
+                            routputDX(b, c, h, w) = static_cast<T>(
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                cache_ratio_value * inputX(b, c, h, w) * ydy);
+                        }
+                    }
+                }
             });
+        }
+
+        return routputDX;
+    }
+
+    tensor<T> cpu_st() const
+    {
+        auto routputDX = tensor<T>{inputX.desc.GetLengths()};
+        int n_batch, channels, height, width;
+        std::tie(n_batch, channels, height, width) = miopen::tien<4>(inputY.desc.GetLengths());
+
+        const auto alpha       = lrn.GetAlpha();
+        const auto beta        = lrn.GetBeta();
+        const auto lrn_n       = lrn.GetN();
+        const auto mode        = lrn.GetMode();
+        const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
+        const int radius_upper = static_cast<int>(lrn_n / 2);
+
+        if (mode == miopenLRNWithinChannel)
+        {
+            const auto adjust_area       = lrn_n * lrn_n;
+            const auto cache_ratio_value = 2 * alpha * beta / adjust_area;
+
+            for (int b = 0; b < n_batch; ++b)
+            {
+                for (int c = 0; c < channels; ++c)
+                {
+                    for (int h = 0; h < height; ++h)
+                    {
+                        const int top    = h < radius_upper ? 0 : (h - radius_upper);
+                        const int bottom = (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
+
+                        for (int w = 0; w < width; ++w)
+                        {
+                            const int left   = w < radius_upper ? 0 : (w - radius_upper);
+                            const int right  = (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
+                            double ydy = 0;
+
+                            for (int i = left; i < right; i++)
+                            {
+                                for (int j = top; j < bottom; j++)
+                                {
+                                    ydy += (double(inputY(b, c, j, i) * inputDY(b, c, j, i)) /
+                                            double(scale(b, c, j, i)));
+                                }
+                            }
+            
+                            routputDX(b, c, h, w) = static_cast<T>(
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                cache_ratio_value * inputX(b, c, h, w) * ydy);
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            const auto cache_ratio_value = 2 * alpha * beta / lrn_n;
+
+            for (int b = 0; b < n_batch; ++b)
+            {
+                for (int c = 0; c < channels; ++c)
+                {
+                    const int start = c < radius_upper ? 0 : (c - radius_upper);
+                    const int end   = (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
+
+                    for (int h = 0; h < height; ++h)
+                    {
+                        for (int w = 0; w < width; ++w)
+                        {
+                            double ydy = 0;
+
+                            for (auto k = start; k < end; ++k)
+                            {
+                                ydy += (double(inputY(b, k, h, w) * inputDY(b, k, h, w)) /
+                                        double(scale(b, k, h, w)));
+                            }
+            
+                            routputDX(b, c, h, w) = static_cast<T>(
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                cache_ratio_value * inputX(b, c, h, w) * ydy);
+                        }
+                    }
+                }
+            }
         }
 
         return routputDX;
@@ -317,8 +534,8 @@ public:
 
         std::size_t n_batch, channels, height, width;
         std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
-        size_t total_mem  = 5 * input.desc.GetNumBytes(); // estimate based on backward pass
-        size_t device_mem = get_handle().GetGlobalMemorySize();
+        const size_t total_mem  = 5 * input.desc.GetNumBytes(); // estimate based on backward pass
+        const size_t device_mem = get_handle().GetGlobalMemorySize();
         if(total_mem >= device_mem)
         {
             std::cout << "Config requires " << total_mem
@@ -342,7 +559,7 @@ public:
             [&](int b, int c, int h, int w) { scale(b, c, h, w) += 1; });
 
         VerifyLrnBwd(lrn, cpu_results, dout, input, scale);
-    };
+    }
 
     // we need cpu data for backward pass later, so return it from this function
     void VerifyLrnForward(const miopen::LRNDescriptor& plrnDesc, const tensor<T>& pinput)
@@ -364,27 +581,53 @@ public:
     template <class TDirection>
     void CompareResults(const TDirection& direction, double tolerance, bool saveCpuResults = false)
     {
-        const tensor<T> cpu = direction.cpu();
-        const tensor<T> gpu = direction.gpu();
-
-        double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-        double error     = miopen::rms_range(cpu, gpu);
-
-        if(saveCpuResults)
         {
-            cpu_results = std::move(cpu);
+            const tensor<T> cpu = direction.cpu();
+            const tensor<T> gpu = direction.gpu();
+
+            double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+            double error     = miopen::rms_range(cpu, gpu);
+    
+            if(saveCpuResults)
+            {
+                cpu_results = std::move(cpu);
+            }
+    
+            if(error > threshold)
+            {
+                direction.fail();
+            }
+    
+            ASSERT_LE(error, threshold) << "n: " << n << std::endl
+                                        << "alpha: " << alpha << std::endl
+                                        << "beta: " << beta << std::endl
+                                        << "k: " << k << std::endl
+                                        << "mode: " << mode << std::endl;
         }
 
-        if(error > threshold)
         {
-            direction.fail();
-        }
+            const tensor<T> cpu = direction.cpu_st();
+            const tensor<T> gpu = direction.gpu();
 
-        ASSERT_LE(error, threshold) << "n: " << n << std::endl
-                                    << "alpha: " << alpha << std::endl
-                                    << "beta: " << beta << std::endl
-                                    << "k: " << k << std::endl
-                                    << "mode: " << mode << std::endl;
+            double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+            double error     = miopen::rms_range(cpu, gpu);
+    
+            if(saveCpuResults)
+            {
+                cpu_results = std::move(cpu);
+            }
+    
+            if(error > threshold)
+            {
+                direction.fail();
+            }
+    
+            ASSERT_LE(error, threshold) << "n: " << n << std::endl
+                                        << "alpha: " << alpha << std::endl
+                                        << "beta: " << beta << std::endl
+                                        << "k: " << k << std::endl
+                                        << "mode: " << mode << std::endl;
+        }
     }
 
 private:
@@ -404,8 +647,15 @@ private:
 using GPU_Lrn_FP32 = LrnCommon<float>;
 using GPU_Lrn_FP16 = LrnCommon<half_float::half>;
 
-TEST_P(GPU_Lrn_FP32, TestFloat) { this->Run(); }
-TEST_P(GPU_Lrn_FP16, TestFloat16) { this->Run(); }
+TEST_P(GPU_Lrn_FP32, TestFloat)
+{
+    this->Run();
+}
+
+TEST_P(GPU_Lrn_FP16, TestFloat16)
+{
+    this->Run();
+}
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP32, GetCasesSmoke());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP32, GetCasesFull());
