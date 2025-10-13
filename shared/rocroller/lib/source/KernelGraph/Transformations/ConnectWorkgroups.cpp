@@ -56,7 +56,6 @@ namespace rocRoller
                     auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tag);
                     if(sizes[tileNum.dim] == nullptr && tileNum.size != nullptr)
                     {
-                        //sizes[tileNum.dim] = tileNum.size;
                         sizes[tileNum.dim] = convert(DataType::Int32, tileNum.size);
                     }
                 }
@@ -75,12 +74,13 @@ namespace rocRoller
                         auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
                         auto workgroupTag = kgraph.coordinates.addElement(
                             Workgroup(tileNum.dim, sizes[tileNum.dim]));
-                        Log::info("KernelGraph::ConnectWorkgroups: Adding PassThrough from tile {} "
-                                  "({}) to workgroup {},  dim = {}",
-                                  tileNumTag,
-                                  toString(sizes[tileNum.dim]),
-                                  workgroupTag,
-                                  tileNum.dim);
+                        Log::debug(
+                            "KernelGraph::ConnectWorkgroups: Adding PassThrough from tile {} "
+                            "({}) to workgroup {},  dim = {}",
+                            tileNumTag,
+                            toString(sizes[tileNum.dim]),
+                            workgroupTag,
+                            tileNum.dim);
                         kgraph.coordinates.addElement(PassThrough(), {tileNumTag}, {workgroupTag});
 
                         rv[{tileNum.dim, GD::Upstream}] = workgroupTag;
@@ -92,12 +92,12 @@ namespace rocRoller
                         auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
                         auto workgroupTag = kgraph.coordinates.addElement(
                             Workgroup(tileNum.dim, sizes[tileNum.dim]));
-                        Log::info("KernelGraph::ConnectWorkgroups: Adding PassThrough from "
-                                  "workgroup {} to tile {} ({}),  dim = {}",
-                                  workgroupTag,
-                                  tileNumTag,
-                                  toString(sizes[tileNum.dim]),
-                                  tileNum.dim);
+                        Log::debug("KernelGraph::ConnectWorkgroups: Adding PassThrough from "
+                                   "workgroup {} to tile {} ({}),  dim = {}",
+                                   workgroupTag,
+                                   tileNumTag,
+                                   toString(sizes[tileNum.dim]),
+                                   tileNum.dim);
                         kgraph.coordinates.addElement(PassThrough(), {workgroupTag}, {tileNumTag});
 
                         rv[{tileNum.dim, GD::Downstream}] = workgroupTag;
@@ -124,11 +124,6 @@ namespace rocRoller
                     Log::debug("remapWorkgroupXCC: workgroup {} has no size", workgroupTag);
                     return -1;
                 }
-
-                Log::info("RemapXCC gets a workgroup = {}, dim = {}, size = {}",
-                          workgroupTag,
-                          workgroup.dim,
-                          toString(workgroup.size));
 
                 using ExpressionPtr     = Expression::ExpressionPtr;
                 using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
@@ -157,22 +152,11 @@ namespace rocRoller
 
                 if(direction == GD::Upstream)
                 {
-                    // cu = CD(size / xcc)
-                    // strides = { CD(size / xcc),         1}
-                    // initial = {              0,    size % xcc}
-                    //
-                    // Condition: size % xcc >= PA(0)
-                    //    True  => xcc * CD(size / xcc) +  cu
-                    //    False => xcc * (size / xcc)   +  cu          + size % xcc
                     graph.coordinates.addElement(Tile(), {newWorkgroupTag}, {cu, xcc});
                     graph.coordinates.addElement(
                         PiecewiseAffineJoin(condition, strides, initialValues),
                         {xcc, cu},
                         {workgroupTag});
-
-                    Log::info("RemapXCC Tile connects new workgroup {} ->  workgroup {}",
-                              newWorkgroupTag,
-                              workgroupTag);
                 }
                 else
                 {
@@ -181,10 +165,6 @@ namespace rocRoller
                         {workgroupTag},
                         {xcc, cu});
                     graph.coordinates.addElement(Flatten(), {cu, xcc}, {newWorkgroupTag});
-
-                    Log::info("RemapXCC Flatten connects workgroup {} ->  new workgroup {}",
-                              workgroupTag,
-                              newWorkgroupTag);
                 }
 
                 return newWorkgroupTag;
@@ -208,21 +188,16 @@ namespace rocRoller
 
             if(m_workgroupRemapXCC.has_value())
             {
-                Log::info("================RemapXCC=================");
                 auto const& arch = m_context->targetArchitecture();
                 AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
                             "XCC-aware workgroup remapping not available on: ",
                             arch.target().toString());
 
-                Log::info("XCC value  = {}", m_workgroupRemapXCC.value());
                 remapWorkgroupXCC(kgraph, m_workgroupRemapXCC.value());
-                Log::info("================RemapXCC Done=================");
             }
             else
             {
-                Log::info("================ConnectWorkgroups=================");
                 connectWorkgroups(kgraph);
-                Log::info("================ConnectWorkgroups Done=================");
             }
 
             return kgraph;

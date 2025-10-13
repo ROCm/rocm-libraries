@@ -32,11 +32,11 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-     * @brief Perform workgroup mapping by connecting dangling
-     * MacroTileNumber dimensions with workgroup using
-     * PiecewiseAffineJoin edges.
-     *
-     */
+         * @brief Perform workgroup mapping by applying
+         * PiecewiseAffineJoin transformation on dangling
+         * MacroTileNumbers
+         *
+         */
         class RemapOutputTiles : public GraphTransform
         {
         public:

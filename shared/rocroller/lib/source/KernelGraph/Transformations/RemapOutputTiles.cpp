@@ -183,7 +183,6 @@ namespace rocRoller
                 // K to create a flattened tile space.
                 auto workgroup
                     = graph.coordinates.addElement(MacroTileNumber(0, totalSize, nullptr));
-                Log::info("RemapOutputTiles total workgroup tag = {}", workgroup);
 
                 // Downstream: Starting at workgroup looking down (forward transform)
                 // Upstream:   Starting at workgroup looking up (reverse transform)
@@ -221,11 +220,6 @@ namespace rocRoller
                 auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
                 auto perpendicular
                     = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
-
-                //auto parallel = graph.coordinates.addElement(
-                //    MacroTileNumber(dimension, parallelSize, nullptr));
-                //auto perpendicular = graph.coordinates.addElement(
-                //    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
 
                 // 0 argument is mainBlockNumber
                 auto condition
@@ -306,13 +300,9 @@ namespace rocRoller
 
             if(m_workgroupMappingDim.has_value())
             {
-                Log::info("=================RemapOutputTiles========================");
                 auto info = getTileSizeInfo(original);
-
                 connectWorkgroupsWithMapping(
                     info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
-
-                Log::info("=================RemapOutputTiles Done========================");
             }
 
             return kgraph;

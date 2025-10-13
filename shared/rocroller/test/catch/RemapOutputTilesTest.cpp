@@ -282,7 +282,7 @@ namespace RemapOutputTilesTest
         rocRoller::Expression::ExpressionPtr m_wgm, m_numTilesX, m_numTilesY;
     };
 
-    TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu][a123]")
+    TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu]")
     {
         auto remapDim = GENERATE(0, 1);
         {
