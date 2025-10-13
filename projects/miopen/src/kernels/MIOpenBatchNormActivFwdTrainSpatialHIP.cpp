@@ -34,274 +34,6 @@
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
 
-#if (MIO_BN_VARIANT == 0)
-
-#elif (MIO_BN_VARIANT == 1)
-
-// //===========
-
-// #if(MIO_BN_HW >= 4096)
-// #define MIO_MAX_READ 3
-// #else
-// #define MIO_MAX_READ 2
-// #endif
-// #define RD_BLK 1
-// #define GRPRD (MIO_BN_GRP0 * RD_BLK * 4)
-// #define MIO_BN_REM4 (MIO_BN_NHW - ((MIO_BN_NHW / GRPRD) * GRPRD))
-// #define MIO_BN_LESS4 (MIO_BN_NHW - MIO_BN_REM4)
-// #define MIO_BN_CHUNK4 (MIO_MAX_READ * GRPRD)
-// #define MIO_BN_REMOUT4 (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_CHUNK4) * MIO_BN_CHUNK4))
-// #define MIO_BN_LESSOUT4 (MIO_BN_NHW - MIO_BN_REMOUT4)
-// #define MIO_BN_REM (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_GRP0) * MIO_BN_GRP0))
-// #define MIO_BN_LESS (MIO_BN_NHW - MIO_BN_REM)
-// #define MIO_BN_CHUNK (MIO_MAX_READ * MIO_BN_GRP0)
-// #define MIO_BN_REMOUT (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_CHUNK) * MIO_BN_CHUNK))
-// #define MIO_BN_LESSOUT (MIO_BN_NHW - MIO_BN_REMOUT)
-
-// __attribute__((reqd_work_group_size(MIO_BN_GRP0, MIO_BN_GRP1, MIO_BN_GRP2))) __kernel void
-// MIOpenBatchNormActivFwdTrainSpatial(
-
-//     float INHW,
-//     const _FLOAT alpha,
-//     const _FLOAT beta,
-//     const _FLOAT gamma,
-//     double epsilon,
-// #if(MIO_RUNNING_RESULT == 1)
-//     double expAvgFactor,
-// #endif
-//     const __global _FLOAT* __restrict in,
-//     __global _FLOAT* __restrict out,
-//     __constant _FLOAT_PREC* __restrict bias,
-//     __constant _FLOAT_PREC* __restrict scale
-
-// #if(MIO_RUNNING_RESULT == 1)
-//     ,
-//     __global _FLOAT_PREC* __restrict runningMean,
-//     __global _FLOAT_PREC* __restrict runningVariance
-// #endif
-
-// #if(MIO_SAVE_MEAN_VARIANCE == 1)
-//     ,
-//     __global _FLOAT_PREC* __restrict savedInvVariance,
-//     __global _FLOAT_PREC* __restrict savedMean
-// #endif
-
-// )
-// {
-
-//     // SPATIAL
-
-//     _FLOAT_PREC mean        = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC variance    = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC invVariance = (_FLOAT_PREC)0.;
-//     _FLOAT_PREC pvscale, pvbias;
-//     _FLOAT_PREC bn_out, act_out;
-
-//     __local _FLOAT_PREC lcl_bias;
-//     __local _FLOAT_PREC lcl_scale;
-
-//     int index = 0;
-//     int lid   = get_local_id(0);
-//     int grpid = get_group_id(0);
-//     int chwid = grpid * MIO_BN_HW;
-//     int nidx  = 0;
-//     int hwidx = 0;
-
-//     if(lid == 0)
-//     {
-//         lcl_scale = *(scale + grpid);
-//         lcl_bias  = *(bias + grpid);
-//     }
-//     barrier(CLK_LOCAL_MEM_FENCE);
-
-// #if(MIO_BN_HW >= 4096)
-//     _FLOAT4 read4;
-//     __attribute__((opencl_unroll_hint(2))) for(unsigned int k = lid << 2; k < MIO_BN_LESS4;
-//                                                k += GRPRD)
-//     {
-//         nidx  = k / MIO_BN_HW;
-//         hwidx = k - (nidx * MIO_BN_HW);
-//         index = nidx * MIO_BN_CHW + chwid + hwidx;
-//         read4 = *((const global _FLOAT4*)(in + index));
-//         mean += FLOAT2FLOATPREC(read4.x);
-//         mean += FLOAT2FLOATPREC(read4.y);
-//         mean += FLOAT2FLOATPREC(read4.z);
-//         mean += FLOAT2FLOATPREC(read4.w);
-//         variance = mad(FLOAT2FLOATPREC(read4.x), FLOAT2FLOATPREC(read4.x), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.y), FLOAT2FLOATPREC(read4.y), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.z), FLOAT2FLOATPREC(read4.z), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.w), FLOAT2FLOATPREC(read4.w), variance);
-//     }
-
-// #if(MIO_BN_REM4)
-//     unsigned int remkey = (lid << 2) + MIO_BN_LESS4;
-//     nidx                = remkey / MIO_BN_HW;
-//     hwidx               = remkey - (nidx * MIO_BN_HW);
-//     index               = nidx * MIO_BN_CHW + chwid + hwidx;
-//     if(index < MIO_BN_NCHW)
-//     {
-//         read4 = *((const global _FLOAT4*)(in + index));
-//         mean += FLOAT2FLOATPREC(read4.x);
-//         mean += FLOAT2FLOATPREC(read4.y);
-//         mean += FLOAT2FLOATPREC(read4.z);
-//         mean += FLOAT2FLOATPREC(read4.w);
-//         variance = mad(FLOAT2FLOATPREC(read4.x), FLOAT2FLOATPREC(read4.x), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.y), FLOAT2FLOATPREC(read4.y), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.z), FLOAT2FLOATPREC(read4.z), variance);
-//         variance = mad(FLOAT2FLOATPREC(read4.w), FLOAT2FLOATPREC(read4.w), variance);
-//     }
-
-// #endif
-
-// #else
-//     __attribute__((opencl_unroll_hint(4))) for(unsigned int k = lid; k < MIO_BN_LESS;
-//                                                k += MIO_BN_GRP0)
-//     {
-//         nidx            = k / MIO_BN_HW;
-//         hwidx           = k - (nidx * MIO_BN_HW);
-//         index           = nidx * MIO_BN_CHW + chwid + hwidx;
-//         _FLOAT_PREC xin = FLOAT2FLOATPREC(*(in + index));
-//         mean += xin;
-//         variance = mad(xin, xin, variance);
-//     }
-// #if(MIO_BN_REM)
-//     if(lid < MIO_BN_REM)
-//     {
-//         unsigned int remkey = lid + MIO_BN_LESS;
-//         nidx                = remkey / MIO_BN_HW;
-//         hwidx               = remkey - (nidx * MIO_BN_HW);
-//         index               = nidx * MIO_BN_CHW + chwid + hwidx;
-//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) :
-//         (_FLOAT_PREC)0.; mean += xin; variance = mad(xin, xin, variance);
-//     }
-// #endif
-// #endif
-//     barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
-
-// // REDUCE MEAN AND VARIANCE -----------------------
-// #if !MIOPEN_USE_AMDGCN
-//     local _FLOAT_ACCUM lcl_data_x[MIO_BN_LDS_SIZE];
-//     local _FLOAT_ACCUM lcl_data_y[MIO_BN_LDS_SIZE];
-//     lds_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
-// #else
-//     local _FLOAT_ACCUM lcl_data_x[MIO_BN_LDSGCN_SIZE];
-//     local _FLOAT_ACCUM lcl_data_y[MIO_BN_LDSGCN_SIZE];
-//     gcn_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
-// #endif
-
-//     // REDUCTION COMPLETE ---------------------------
-//     variance    = mad(-mean, mean, variance);
-//     invVariance = rsqrt(variance + epsilon);
-
-//     pvscale = lcl_scale;
-//     pvbias  = lcl_bias;
-
-// #if(MIO_BN_REM == 0)
-//     __attribute__((opencl_unroll_hint(2))) for(unsigned int k = lid; k < MIO_BN_LESS;
-//                                                k += MIO_BN_GRP0)
-//     {
-//         nidx   = k / MIO_BN_HW;
-//         hwidx  = k - (nidx * MIO_BN_HW);
-//         index  = nidx * MIO_BN_CHW + chwid + hwidx;
-//         bn_out = mad(pvscale, (*(in + index) - mean) * invVariance, pvbias);
-//         ActivationFunction(1,
-//                            &act_out,
-//                            &bn_out,
-//                            FLOAT2FLOATPREC(gamma),
-//                            FLOAT2FLOATPREC(beta),
-//                            FLOAT2FLOATPREC(alpha));
-//         out[index] = FLOATPREC2FLOAT(act_out);
-
-//     } // end for
-// #else
-//     _FLOAT_PREC xhat[MIO_MAX_READ];
-//     __attribute__((opencl_unroll_hint(2))) for(unsigned int k = (MIO_MAX_READ * lid);
-//                                                k < MIO_BN_LESSOUT;
-//                                                k += MIO_BN_CHUNK)
-//     {
-//         for(unsigned int j = 0; j < MIO_MAX_READ; j++)
-//         {
-//             unsigned int l = k + j;
-//             nidx           = l / MIO_BN_HW;
-//             hwidx          = l - (nidx * MIO_BN_HW);
-//             index          = nidx * MIO_BN_CHW + chwid + hwidx;
-//             xhat[j]        = (FLOAT2FLOATPREC(*(in + index)) - mean) * invVariance;
-//         }
-//         barrier(CLK_GLOBAL_MEM_FENCE);
-//         for(unsigned int j = 0; j < MIO_MAX_READ; j++)
-//         {
-//             unsigned int l = k + j;
-//             nidx           = l / MIO_BN_HW;
-//             hwidx          = l - (nidx * MIO_BN_HW);
-//             index          = nidx * MIO_BN_CHW + chwid + hwidx;
-//             bn_out         = mad(pvscale, xhat[j], pvbias);
-//             ActivationFunction(1,
-//                                &act_out,
-//                                &bn_out,
-//                                FLOAT2FLOATPREC(gamma),
-//                                FLOAT2FLOATPREC(beta),
-//                                FLOAT2FLOATPREC(alpha));
-//             out[index] = FLOATPREC2FLOAT(act_out);
-//         }
-//     } // end for
-
-// #if(MIO_BN_REMOUT)
-//     unsigned int remkeyout = (MIO_MAX_READ * lid) + MIO_BN_LESSOUT;
-//     for(unsigned int j = 0; j < MIO_MAX_READ; j++)
-//     {
-//         unsigned int l  = remkeyout + j;
-//         nidx            = l / MIO_BN_HW;
-//         hwidx           = l - (nidx * MIO_BN_HW);
-//         index           = nidx * MIO_BN_CHW + chwid + hwidx;
-//         _FLOAT_PREC xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index)) :
-//         (_FLOAT_PREC)0.; xhat[j]         = (xin - mean) * invVariance;
-//     }
-//     barrier(CLK_GLOBAL_MEM_FENCE);
-//     for(unsigned int j = 0; j < MIO_MAX_READ; j++)
-//     {
-//         unsigned int l = remkeyout + j;
-//         nidx           = l / MIO_BN_HW;
-//         hwidx          = l - (nidx * MIO_BN_HW);
-//         index          = nidx * MIO_BN_CHW + chwid + hwidx;
-//         if(index < MIO_BN_NCHW)
-//         {
-//             bn_out = mad(pvscale, xhat[j], pvbias);
-//             ActivationFunction(1,
-//                                &act_out,
-//                                &bn_out,
-//                                FLOAT2FLOATPREC(gamma),
-//                                FLOAT2FLOATPREC(beta),
-//                                FLOAT2FLOATPREC(alpha));
-//             out[index] = FLOATPREC2FLOAT(act_out);
-//         }
-//     }
-// #endif
-// #endif
-
-//     if(lid == 0)
-//     {
-// #if(MIO_RUNNING_RESULT == 1)
-//         running_stash(runningMean, runningVariance, expAvgFactor, mean, variance, grpid);
-// #endif
-
-// #if(MIO_SAVE_MEAN_VARIANCE == 1)
-//         saved_stash(savedMean, savedInvVariance, mean, invVariance, grpid);
-// #endif
-//     }
-
-// } // end spatial norm
-
-#elif (MIO_BN_VARIANT == 2)
-// MULTI-KERNEL reduction for > 33M elements
-
-// TODO static assert not imlemented!
-
-#elif (MIO_BN_VARIANT == 3)
-
-// ported ...
-
-#endif
-
 // Load the configs to this file
 namespace /*anonymous*/ {
 using mio_config    = miopen::config;
@@ -316,6 +48,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl
 {
     static_assert(false, "This variant is not supported.");
 };
+
+// TODO: Without the macro guards the compiler fails on the constant expressions. Somehow these
+// definitions spill over to versions defined later in the source file.
+#if (MIO_BN_VARIANT == 0)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
@@ -458,9 +194,33 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
     }
 };
 
+#elif(MIO_BN_VARIANT == 1)
+
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 {
+    static constexpr unsigned int max_read =
+        mio_config::layout_nhwc ? 1 : (mio_bn_config::hw >= 4096 ? 3 : 2);
+    static constexpr unsigned int rd_blk = 1;
+    static constexpr unsigned int grprd  = mio_config::layout_nhwc
+                                               ? (mio_bn_config::launch_dim.grp0 * rd_blk)
+                                               : (mio_bn_config::launch_dim.grp0 * rd_blk * 4);
+    static constexpr unsigned int rem4 =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / grprd) * grprd);
+    static constexpr unsigned int less4  = mio_bn_config::nhw - rem4;
+    static constexpr unsigned int chunk4 = max_read * grprd;
+    static constexpr unsigned int remout4 =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / chunk4) * chunk4);
+    static constexpr unsigned int lessout4 = mio_bn_config::nhw - remout4;
+    static constexpr unsigned int rem =
+        mio_bn_config::nhw -
+        ((mio_bn_config::nhw / mio_bn_config::launch_dim.grp0) * mio_bn_config::launch_dim.grp0);
+    static constexpr unsigned int less  = mio_bn_config::nhw - rem;
+    static constexpr unsigned int chunk = max_read * mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int remout =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / chunk) * chunk);
+    static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
+
     constexpr __forceinline__ __device__ void operator()(FpPrecType& mean,
                                                          FpPrecType& variance,
                                                          FpPrecType& invVariance,
@@ -473,8 +233,212 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                                                          FpType* __restrict out,
                                                          const FpPrecType* __restrict bias,
                                                          const FpPrecType* __restrict scale)
-    {}
+    {
+        mean        = 0;
+        variance    = 0;
+        invVariance = 0;
+
+        FpPrecType bn_out, act_out;
+
+        unsigned int index = 0;
+        unsigned int nidx  = 0;
+        unsigned int hwidx = 0;
+
+        unsigned int lid   = threadIdx.x;
+        unsigned int grpid = blockIdx.x;
+        unsigned int chwid  = grpid * mio_bn_config::hw;
+        
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+        if(lid == 0)
+        {
+            lcl_scale = scale[grpid];
+            lcl_bias  = bias[grpid];
+        }
+
+        __syncthreads();
+
+        if constexpr(mio_bn_config::hw >= 4096)
+        {
+            using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
+            fp_type4 read4;
+
+            /*__attribute__((opencl_unroll_hint(2)))*/
+            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            {
+                nidx  = k / mio_bn_config::hw;
+                hwidx = k - (nidx * mio_bn_config::hw);
+                index = nidx * mio_bn_config::chw + chwid + hwidx;
+                read4 = *(reinterpret_cast<const fp_type4*>(in + index));
+                miopen::batchnorm::_accumulate4(mean, read4);
+                miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+            }
+
+            if constexpr(rem4 > 0u)
+            {
+                unsigned int remkey = (lid << 2) + less4;
+                nidx                = remkey / mio_bn_config::hw;
+                hwidx               = remkey - (nidx * mio_bn_config::hw);
+                index               = nidx * mio_bn_config::chw + chwid + hwidx;
+                if(index < mio_bn_config::nchw)
+                {
+                    read4 = *(reinterpret_cast<const fp_type4*>(in + index));
+                    miopen::batchnorm::_accumulate4(mean, read4);
+                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+                }
+            }
+        }
+        else
+        {
+            /*__attribute__((opencl_unroll_hint(4))) */
+            for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
+            {
+                nidx           = k / mio_bn_config::hw;
+                hwidx          = k - (nidx * mio_bn_config::hw);
+                index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                FpPrecType xin = cast<FpPrecType>(in[index]);
+                mean += xin;
+                variance = fma(xin, xin, variance);
+            }
+            if constexpr(rem > 0u)
+            {
+                if(lid < rem)
+                {
+                    unsigned int remkey = lid + less;
+                    nidx                = remkey / mio_bn_config::hw;
+                    hwidx               = remkey - (nidx * mio_bn_config::hw);
+                    index               = nidx * mio_bn_config::chw + chwid + hwidx;
+                    FpPrecType xin =
+                        (index < mio_bn_config::nchw) ? cast<FpPrecType>(in[index]) : 0;
+                    mean += xin;
+                    variance = fma(xin, xin, variance);
+                }
+            }
+        }
+
+        __syncthreads();
+
+        // REDUCE MEAN AND VARIANCE -----------------------
+        constexpr auto lcl_data_size =
+            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        if constexpr(mio_bn_config::use_amdgnc)
+        {
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+        else
+        {
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+
+        // REDUCTION COMPLETE ---------------------------
+        variance    = fma(-mean, mean, variance);
+        invVariance = rsqrt(variance + cast<FpPrecType>(epsilon));
+
+        FpPrecType pvscale = lcl_scale;
+        FpPrecType pvbias  = lcl_bias;
+
+        // TODO: Maybe unused
+        FpPrecType xhat[max_read];
+
+        if constexpr(mio_config::layout_nhwc || rem == 0)
+        {
+            /*__attribute__((opencl_unroll_hint(2)))*/
+            for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
+            {
+                nidx   = k / mio_bn_config::hw;
+                hwidx  = k - (nidx * mio_bn_config::hw);
+                index  = nidx * mio_bn_config::chw + chwid + hwidx;
+                bn_out = fma(pvscale, (in[index] - mean) * invVariance, pvbias);
+                ActivationFunction<FpPrecType>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                               *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                               cast<FpPrecType>(gamma),
+                                               cast<FpPrecType>(beta),
+                                               cast<FpPrecType>(alpha));
+                out[index] = cast<FpPrecType>(act_out);
+            }
+        }
+        else
+        {
+            /*__attribute__((opencl_unroll_hint(2)))*/
+            for(unsigned int k = max_read * lid; k < lessout; k += chunk)
+            {
+                for(unsigned int j = 0; j < max_read; j++)
+                {
+                    unsigned int l = k + j;
+                    nidx           = l / mio_bn_config::hw;
+                    hwidx          = l - (nidx * mio_bn_config::hw);
+                    index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                    xhat[j]        = (cast<FpPrecType>(in[index]) - mean) * invVariance;
+                }
+                __syncthreads();
+                for(unsigned int j = 0; j < max_read; j++)
+                {
+                    unsigned int l = k + j;
+                    nidx           = l / mio_bn_config::hw;
+                    hwidx          = l - (nidx * mio_bn_config::hw);
+                    index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                    bn_out         = fma(pvscale, xhat[j], pvbias);
+                    ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                                      *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                                      cast<FpPrecType>(gamma),
+                                                      cast<FpPrecType>(beta),
+                                                      cast<FpPrecType>(alpha));
+                    out[index] = cast<FpPrecType>(act_out);
+                }
+            }
+        }
+
+        if constexpr(remout > 0u)
+        {
+            unsigned int remkeyout = (max_read * lid) + lessout;
+            for(unsigned int j = 0; j < max_read; j++)
+            {
+                unsigned int l = remkeyout + j;
+                nidx           = l / mio_bn_config::hw;
+                hwidx          = l - (nidx * mio_bn_config::hw);
+                index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                FpPrecType xin = (index < mio_bn_config::nchw) ? cast<FpPrecType>(in[index]) : 0;
+                xhat[j]        = (xin - mean) * invVariance;
+            }
+
+            __syncthreads();
+
+            for(unsigned int j = 0; j < max_read; j++)
+            {
+                unsigned int l = remkeyout + j;
+                nidx           = l / mio_bn_config::hw;
+                hwidx          = l - (nidx * mio_bn_config::hw);
+                index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                if(index < mio_bn_config::nchw)
+                {
+                    bn_out = fma(pvscale, xhat[j], pvbias);
+                    ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
+                                                      *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
+                                                      cast<FpPrecType>(gamma),
+                                                      cast<FpPrecType>(beta),
+                                                      cast<FpPrecType>(alpha));
+                    out[index] = cast<FpPrecType>(act_out);
+                }
+            }
+        }
+    }
 };
+
+#elif(MIO_BN_VARIANT == 3)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
@@ -638,6 +602,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         } // end if
     }
 };
+
+#endif
 
 } // namespace batchnorm
 } // namespace miopen

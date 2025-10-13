@@ -175,15 +175,13 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"MIO_BN_GFX115X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx115"))},
             {"MIOPEN_YES_ACTIV", static_cast<int>(1)},
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
-            {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
+            {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)}, // TODO: FPMIX or FP16?
             {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
         if(bn_problem.GetMode() == miopenBNSpatial)
             kernel.comp_options += " -DSPATIAL_BN";
         else
             kernel.comp_options += " -DPERACT_BN";
-        if(input_desc.GetType() == miopenHalf)
-            kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
 
         result.construction_params.push_back(kernel);
     }
