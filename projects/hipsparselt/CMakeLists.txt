@@ -67,6 +67,7 @@ option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
+option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
 
 set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
     CACHE PATH "Path to hipblaslt directory."

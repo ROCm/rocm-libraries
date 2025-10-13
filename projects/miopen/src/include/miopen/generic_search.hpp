@@ -556,12 +556,9 @@ auto GenericSearch(const Solver s,
                 invoker = profile_h.PrepareInvoker(*current_solution.invoker_factory,
                                                    current_solution.construction_params);
 
-                // Warm-up run for first time invoker is used
-                if(n_current == 0)
-                {
-                    invoker(profile_h, invoke_ctx);
-                    profile_h.ResetKernelTime();
-                }
+                // Warm-up run for every configuration to eliminate cold-start bias
+                invoker(profile_h, invoke_ctx);
+                profile_h.ResetKernelTime();
 
                 invoker(profile_h, invoke_ctx);
                 elapsed_time = profile_h.GetKernelTime();
@@ -637,7 +634,6 @@ auto GenericSearch(const Solver s,
                             MIOPEN_LOG_I2("Mean is not better: " << elapsed_time
                                                                  << " >= " << best_time);
                         }
-
                     }
                 }
                 if(perf_sols)

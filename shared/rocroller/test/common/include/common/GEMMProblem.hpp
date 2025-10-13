@@ -80,6 +80,11 @@ struct GEMMProblem
 
     bool swizzleScale  = false;
     bool prefetchScale = false;
+    // Swizzle tile size
+    int swizzleM = 64;
+    int swizzleN = 64;
+    int swizzleK = 4;
+    int swizzleB = 1;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
