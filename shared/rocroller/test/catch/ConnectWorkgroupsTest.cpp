@@ -76,18 +76,18 @@ namespace ConnectWorkgroupsTest
         graph0.coordinates.addElement(Tile(), {middleLinear}, {tileNumAU, tileNumBU});
 
         /* coordinate graph is:
-     *
-     *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
-     *             \                                  /
-     *              ------------- Flatten ------------
-     *                               |
-     *                             Linear
-     *                               |
-     *              --------------- Tile -------------
-     *             /                                                \
-     *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
-     *
-     */
+         *
+         *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
+         *             \                                  /
+         *              ------------- Flatten ------------
+         *                               |
+         *                             Linear
+         *                               |
+         *              --------------- Tile -------------
+         *             /                                                \
+         *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
+         *
+         */
 
         auto graph     = graph0;
         auto remapping = connectWorkgroups(graph);

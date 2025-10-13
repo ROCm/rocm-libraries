@@ -78,18 +78,18 @@ namespace RemapOutputTilesTest
         graph0.coordinates.addElement(Tile(), {middleLinear}, {tileNumAU, tileNumBU});
 
         /* coordinate graph is:
-     *
-     *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
-     *             \                                  /
-     *              ------------- Flatten ------------
-     *                               |
-     *                             Linear
-     *                               |
-     *              --------------- Tile -------------
-     *             /                                                \
-     *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
-     *
-     */
+         *
+         *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
+         *             \                                  /
+         *              ------------- Flatten ------------
+         *                               |
+         *                             Linear
+         *                               |
+         *              --------------- Tile -------------
+         *             /                                                \
+         *    MacroTileNumber(0, size=vX)        MacroTileNumber(1, size=vY)
+         *
+         */
 
         auto info = getTileSizeInfo(graph0);
         CHECK_THAT(info.sizes[0], SimplifiesTo(literal(vX)));
