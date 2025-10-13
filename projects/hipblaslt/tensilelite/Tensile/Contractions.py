@@ -37,9 +37,60 @@ from Tensile.Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
+
+# Interning helpers to reduce memory usage by reusing identical objects
+_free_index_cache = {}
+def intern_free_index(isA, i=None, c=None, d=None, a=None, b=None):
+    key = (isA, i, c, d, a, b)
+    if key not in _free_index_cache:
+        obj = FreeIndex(isA, i, c, d)
+        obj.a = a
+        if b is not None:
+            obj.b = b
+        _free_index_cache[key] = obj
+    return _free_index_cache[key]
+
+_batch_index_cache = {}
+def intern_batch_index(a=None, b=None, c=None, d=None):
+    key = (a, b, c, d)
+    if key not in _batch_index_cache:
+        obj = BatchIndex(c=c, d=d)
+        obj.a = a
+        obj.b = b
+        _batch_index_cache[key] = obj
+    return _batch_index_cache[key]
+
+_bound_index_cache = {}
+def intern_bound_index(a=None, b=None, aMirror=False, bMirror=False):
+    key = (a, b, aMirror, bMirror)
+    if key not in _bound_index_cache:
+        obj = BoundIndex(aMirror=aMirror, bMirror=bMirror)
+        obj.a = a
+        obj.b = b
+        _bound_index_cache[key] = obj
+    return _bound_index_cache[key]
+
+_size_mapping_cache = {}
+def intern_size_mapping(size_mapping):
+    """Intern a SizeMapping instance to reduce redundancy."""
+    # Build hashable key from StateKeys, converting lists to tuples
+    key_parts = []
+    for attr in size_mapping.StateKeys:
+        val = getattr(size_mapping, attr)
+        # Convert lists to tuples for hashing
+        if isinstance(val, list):
+            val = tuple(val)
+        key_parts.append(val)
+    key = tuple(key_parts)
+
+    if key not in _size_mapping_cache:
+        _size_mapping_cache[key] = size_mapping
+    return _size_mapping_cache[key]
+
 @state_key_ordering
 class FreeIndex:
     StateKeys = ['isA', 'i', 'c', 'd']
+    __slots__ = ['isA', 'i', 'c', 'd', 'a', 'b']
 
     def __init__(self, isA, i=None, c=None, d=None):
         self.isA = isA
@@ -50,6 +101,7 @@ class FreeIndex:
 @state_key_ordering
 class BatchIndex:
     StateKeys = ['a', 'b', 'c', 'd']
+    __slots__ = ['a', 'b', 'c', 'd']
     def __init__(self, a=None, b=None, c=None, d=None):
         self.a = a
         self.b = b
@@ -59,6 +111,7 @@ class BatchIndex:
 @state_key_ordering
 class BoundIndex:
     StateKeys = ['a', 'b', 'aMirror', 'bMirror']
+    __slots__ = ['a', 'b', 'aMirror', 'bMirror']
     def __init__(self, a=None, b=None, aMirror=False, bMirror=False):
         self.a = a
         self.b = b
@@ -106,6 +159,23 @@ class ProblemType:
 
         for ib, ic in enumerate(d['IndexAssignmentsB']):
             indices[ic].b = ib
+
+        # Now intern all indices with their final state (including .a and .b)
+        for i, idx in enumerate(indices):
+            if isinstance(idx, FreeIndex):
+                indices[i] = intern_free_index(idx.isA, idx.i, idx.c, idx.d,
+                                              getattr(idx, 'a', None), getattr(idx, 'b', None))
+            elif isinstance(idx, BatchIndex):
+                indices[i] = intern_batch_index(getattr(idx, 'a', None), getattr(idx, 'b', None),
+                                               idx.c, idx.d)
+            elif isinstance(idx, BoundIndex):
+                indices[i] = intern_bound_index(getattr(idx, 'a', None), getattr(idx, 'b', None),
+                                               idx.aMirror, idx.bMirror)
+
+        # Update the lists with interned versions
+        freeIndices = [idx for idx in indices if isinstance(idx, FreeIndex)]
+        batchIndices = [idx for idx in indices if isinstance(idx, BatchIndex)]
+        boundIndices = [idx for idx in indices if isinstance(idx, BoundIndex)]
 
         for idx in indices:
             assert idx is not None
@@ -596,6 +666,7 @@ class SizeMapping:
                  'nonTemporalA',
                  'nonTemporalB',
                  ]
+    __slots__ = StateKeys
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -751,7 +822,7 @@ class Solution:
         info = cls.ReadOriginalInfo(d)
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
 
-        rv.sizeMapping = SizeMapping.FromOriginalState(d)
+        rv.sizeMapping = intern_size_mapping(SizeMapping.FromOriginalState(d))
 
         rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
 
