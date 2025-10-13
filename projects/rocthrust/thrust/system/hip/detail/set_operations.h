@@ -52,6 +52,16 @@
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <thrust/detail/algorithm_wrapper.h>
+#  endif
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#    include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#    include _THRUST_STD_INCLUDE(__algorithm/min.h)
+// clang-format on
+#  endif
 
 #  include <cstdint>
 
@@ -131,8 +141,8 @@ THRUST_HIP_DEVICE_FUNCTION Size merge_path(It1 a, Size aCount, It2 b, Size bCoun
 {
   using T = typename thrust::iterator_traits<It1>::value_type;
 
-  Size begin = thrust::max<Size>(0, diag - bCount);
-  Size end   = thrust::min<Size>(diag, aCount);
+  Size begin = _THRUST_STD::max<Size>(0, diag - bCount);
+  Size end   = _THRUST_STD::min<Size>(diag, aCount);
 
   while (begin < end)
   {
