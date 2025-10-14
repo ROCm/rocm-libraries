@@ -60,7 +60,11 @@ function( get_cblas cblas_libs cblas_inc cblas_defs )
 
       # get CBLAS from the same source as BLAS
       get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
-      find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+      if(BLA_STATIC)
+        find_library(CBLAS_LIBRARIES NAMES libcblas64.a PATHS BLAS_DIR)
+      else()
+        find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+      endif()
       if(CBLAS_LIBRARIES)
         list( PREPEND libs ${CBLAS_LIBRARIES} )
       endif()
