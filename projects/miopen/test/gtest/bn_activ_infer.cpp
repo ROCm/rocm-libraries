@@ -73,12 +73,8 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     {
         read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     }
-    // For vectorized r/rw of the input/output data of FP_TYPE
-    std::string READ_TYPE = (use_hip ? "FP_TYPE" : "_FLOAT");
-    READ_TYPE             = (read_unit == 1) ? READ_TYPE : READ_TYPE + std::to_string(read_unit);
-    // For vectorized r/rw of the other data of FP_TYPE_PREC
-    std::string PREC_READ_TYPE = (use_hip ? "FP_TYPE_PREC" : "_FLOAT_PREC");
-    PREC_READ_TYPE = (read_unit == 1) ? PREC_READ_TYPE : PREC_READ_TYPE + std::to_string(read_unit);
+    // For vectorized r/rw of the input/output data
+    std::string READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
     // Setup the kernel launch parameters
     size_t xlocalsize = 256;
     size_t xgridsize  = read_len / read_unit;
@@ -115,7 +111,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
         {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_READ_TYPE", READ_TYPE},
-        {"MIOPEN_PREC_READ_TYPE", PREC_READ_TYPE},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_mode)},
         {"MIOPEN_USE_FP16", static_cast<int>(xDesc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)}};

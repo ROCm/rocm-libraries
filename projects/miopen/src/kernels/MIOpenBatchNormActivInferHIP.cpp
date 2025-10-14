@@ -122,19 +122,19 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 
     unsigned int chw_i = tidx * MIOPEN_READ_UNIT;
 
-    // perform a vectorized load of the mean, variance, scale, and bias
+    // load the mean, variance, scale, and bias
     FLOAT_ACCUM pmean[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pvar[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pscale[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pbias[MIOPEN_READ_UNIT];
-    *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pmean)) =
-        *(reinterpret_cast<const MIOPEN_PREC_READ_TYPE*>(estimatedMean + chw_i));
-    *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pvar)) =
-        *(reinterpret_cast<const MIOPEN_PREC_READ_TYPE*>(estimatedVariance + chw_i));
-    *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pscale)) =
-        *(reinterpret_cast<const MIOPEN_PREC_READ_TYPE*>(scale + chw_i));
-    *(reinterpret_cast<MIOPEN_PREC_READ_TYPE*>(pbias)) =
-        *(reinterpret_cast<const MIOPEN_PREC_READ_TYPE*>(bias + chw_i));
+#pragma unroll
+    for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+    {
+        pmean[i] = estimatedMean[chw_i + i];
+        pvar[i]  = estimatedVariance[chw_i + i];
+        pscale[i] = scale[chw_i + i];
+        pbias[i]  = bias[chw_i + i];
+    }
 
     FLOAT data[MIOPEN_READ_UNIT];
     FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
