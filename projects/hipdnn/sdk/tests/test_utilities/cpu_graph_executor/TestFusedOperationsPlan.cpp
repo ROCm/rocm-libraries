@@ -106,6 +106,8 @@ TEST_F(TestFusedOperationsPlan, ConvAddMulFusedGraph)
         convOutputTensorAttr->set_uid(uid++);
     }
     convOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    convOutputTensorAttr->set_dim(yDims);
+    convOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
 
     // Step 2: POINTWISE ADD OPERATION (conv + 5.0)
     hipdnn_frontend::graph::PointwiseAttributes addAttrs;
@@ -120,6 +122,8 @@ TEST_F(TestFusedOperationsPlan, ConvAddMulFusedGraph)
         addOutputTensorAttr->set_uid(uid++);
     }
     addOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    addOutputTensorAttr->set_dim(yDims);
+    addOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
 
     // Step 3: POINTWISE MULTIPLY OPERATION ((conv + 5.0) * 2.0)
     hipdnn_frontend::graph::PointwiseAttributes multiplyAttrs;
@@ -134,6 +138,13 @@ TEST_F(TestFusedOperationsPlan, ConvAddMulFusedGraph)
         finalOutputTensorAttr->set_uid(uid++);
     }
     finalOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    finalOutputTensorAttr->set_dim(yDims);
+    finalOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
+
+    // Create intermediate tensors with known output dimensions
+    // (all operations preserve the output shape in this test)
+    Tensor<float> convOutputTensor(yDims, TensorLayout::NHWC);
+    Tensor<float> addOutputTensor(yDims, TensorLayout::NHWC);
 
     // Create variant pack directly
     std::unordered_map<int64_t, void*> variantPack;
@@ -141,6 +152,8 @@ TEST_F(TestFusedOperationsPlan, ConvAddMulFusedGraph)
     variantPack[wTensorAttr->get_uid()] = wTensor.memory().hostData();
     variantPack[addConstantTensorAttr->get_uid()] = addConstantTensor.memory().hostData();
     variantPack[multiplyConstantTensorAttr->get_uid()] = multiplyConstantTensor.memory().hostData();
+    variantPack[convOutputTensorAttr->get_uid()] = convOutputTensor.memory().hostData();
+    variantPack[addOutputTensorAttr->get_uid()] = addOutputTensor.memory().hostData();
     variantPack[finalOutputTensorAttr->get_uid()] = yTensor.memory().hostData();
 
     // Execute the graph using CPU graph executor
