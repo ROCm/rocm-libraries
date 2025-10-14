@@ -76,39 +76,31 @@ else()
     unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        set(FMT_SYSTEM_HEADERS ON)
-        FetchContent_Declare(
-            fmt
-            GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-            GIT_TAG 11.1.3
-        )
-        FetchContent_MakeAvailable(fmt)
-        set_property(DIRECTORY ${fmt_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
-    else()
-        message(FATAL_ERROR "Failed to find fmt")
-    endif()
+if(ROCROLLER_ENABLE_FETCH)
+    set(FMT_SYSTEM_HEADERS ON)
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG 11.1.3
+    )
+    FetchContent_MakeAvailable(fmt)
+    set_property(DIRECTORY ${fmt_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
+else()
+    find_package(fmt 11.1.3 REQUIRED)
 endif()
 
-find_package(spdlog QUIET)
-if(NOT spdlog_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            spdlog
-            GIT_REPOSITORY https://github.com/gabime/spdlog.git
-            GIT_TAG v1.x
-        )
-        FetchContent_MakeAvailable(spdlog)
-        set_property(DIRECTORY ${spdlog_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
-    else()
-        message(FATAL_ERROR "Failed to find spdlog")
-    endif()
+if(ROCROLLER_ENABLE_FETCH)
+    FetchContent_Declare(
+        spdlog
+        GIT_REPOSITORY https://github.com/gabime/spdlog.git
+        GIT_TAG v1.x
+    )
+    FetchContent_MakeAvailable(spdlog)
+    set_property(DIRECTORY ${spdlog_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
+else()
+    find_package(spdlog REQUIRED)
 endif()
 
-find_package(libdivide QUIET)
-if(NOT libdivide_FOUND)
 if(ROCROLLER_ENABLE_FETCH)
     FetchContent_Declare(
         libdivide
@@ -117,9 +109,8 @@ if(ROCROLLER_ENABLE_FETCH)
     )
     FetchContent_MakeAvailable(libdivide)
     set_property(DIRECTORY ${libdivide_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
-    else()
-        message(FATAL_ERROR "Failed to find libdivide")
-    endif()
+else()
+    find_package(libdivide REQUIRED)
 endif()
 
 find_package(msgpack-cxx CONFIG)
@@ -201,10 +192,7 @@ if(ROCROLLER_ENABLE_YAML_CPP)
     else()
         find_package(yaml-cpp 0.8.0 REQUIRED)
     endif()
-    if(NOT DEFINED YAML_CPP_LIBRARIES OR YAML_CPP_LIBRARIES STREQUAL "")
-        set(YAML_CPP_LIBRARIES  yaml-cpp::yaml-cpp)
-    endif()
-    target_link_libraries(rocroller PUBLIC ${YAML_CPP_LIBRARIES})
+    target_link_libraries(rocroller PUBLIC yaml-cpp::yaml-cpp)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
 endif()
 
