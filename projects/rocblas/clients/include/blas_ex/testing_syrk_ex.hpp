@@ -26,7 +26,7 @@
 #include "testing_common.hpp"
 
 /* ============================================================================================ */
-template <typename Ti, typename To, typename Tc>
+template <typename Ti, typename To, typename Tex>
 void testing_syrk_ex_bad_arg(const Arguments& arg)
 {
     for(auto pointer_mode : {rocblas_pointer_mode_host, rocblas_pointer_mode_device})
@@ -49,17 +49,17 @@ void testing_syrk_ex_bad_arg(const Arguments& arg)
         rocblas_datatype c_type       = arg.c_type;
         rocblas_datatype compute_type = arg.compute_type;
 
-        DEVICE_MEMCHECK(device_vector<Tc>, alpha_d, (1));
-        DEVICE_MEMCHECK(device_vector<Tc>, beta_d, (1));
-        DEVICE_MEMCHECK(device_vector<Tc>, one_d, (1));
-        DEVICE_MEMCHECK(device_vector<Tc>, zero_d, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, alpha_d, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, beta_d, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, one_d, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, zero_d, (1));
 
-        const Tc alpha_h(1), beta_h(2), one_h(1), zero_h(0);
+        const Tex alpha_h(1), beta_h(2), one_h(1), zero_h(0);
 
-        const Tc* alpha = &alpha_h;
-        const Tc* beta  = &beta_h;
-        const Tc* one   = &one_h;
-        const Tc* zero  = &zero_h;
+        const Tex* alpha = &alpha_h;
+        const Tex* beta  = &beta_h;
+        const Tex* one   = &one_h;
+        const Tex* zero  = &zero_h;
 
         if(pointer_mode == rocblas_pointer_mode_device)
         {
@@ -159,7 +159,7 @@ nullptr, a_type, lda, beta, dC, c_type, ldc, compute_type));
     }
 }
 
-template <typename Ti, typename To, typename Tc>
+template <typename Ti, typename To, typename Tex>
 void testing_syrk_ex(const Arguments& arg)
 {
     auto rocblas_syrk_ex_fn = arg.api & c_API_FORTRAN ? rocblas_syrk_ex : rocblas_syrk_ex_fortran;
@@ -168,15 +168,15 @@ void testing_syrk_ex(const Arguments& arg)
     //auto rocblas_syrk_ex_fn_64
     //    = arg.api & c_API_FORTRAN ? rocblas_syrk_ex_64_fortran : rocblas_syrk_ex_64;
 
-    bool alpha_isnan = arg.alpha_isnan<Tc>();
-    bool beta_isnan  = arg.beta_isnan<Tc>();
+    bool alpha_isnan = arg.alpha_isnan<Tex>();
+    bool beta_isnan  = arg.beta_isnan<Tex>();
     if(!std::is_same_v<
            To,
            float> && !std::is_same_v<To, double> && !std::is_same_v<To, rocblas_half> && !rocblas_is_complex<To> && (alpha_isnan || beta_isnan))
         return; // Exclude integers or other types which don't support NaN
 
-    Tc h_alpha_Tc = arg.get_alpha<Tc>();
-    Tc h_beta_Tc  = arg.get_beta<Tc>();
+    Tex h_alpha_Tc = arg.get_alpha<Tex>();
+    Tex h_beta_Tc  = arg.get_beta<Tex>();
 
     double cpu_time_used;
     double error_host   = 0.0;
@@ -212,8 +212,8 @@ void testing_syrk_ex(const Arguments& arg)
     }
 
     // Allocate device memory
-    DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_Tc, (1));
-    DEVICE_MEMCHECK(device_vector<Tc>, d_beta_Tc, (1));
+    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha_Tc, (1));
+    DEVICE_MEMCHECK(device_vector<Tex>, d_beta_Tc, (1));
 
     // Allocate host memory
     HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
@@ -225,8 +225,8 @@ void testing_syrk_ex(const Arguments& arg)
         // Allocate device memory
         DEVICE_MEMCHECK(device_matrix<Ti>, dA, (A_row, A_col, lda));
         DEVICE_MEMCHECK(device_matrix<To>, dC, (N, N, ldc));
-        DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_Tc, (1));
-        DEVICE_MEMCHECK(device_vector<Tc>, d_beta_Tc, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, d_alpha_Tc, (1));
+        DEVICE_MEMCHECK(device_vector<Tex>, d_beta_Tc, (1));
 
         // Initialize data on host memory
         rocblas_init_matrix(
@@ -273,8 +273,8 @@ void testing_syrk_ex(const Arguments& arg)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
             CHECK_HIP_ERROR(dC.transfer_from(hC_orig));
-            CHECK_HIP_ERROR(hipMemcpy(d_alpha_Tc, &h_alpha_Tc, sizeof(Tc), hipMemcpyHostToDevice));
-            CHECK_HIP_ERROR(hipMemcpy(d_beta_Tc, &h_beta_Tc, sizeof(Tc), hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(d_alpha_Tc, &h_alpha_Tc, sizeof(Tex), hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(d_beta_Tc, &h_beta_Tc, sizeof(Tex), hipMemcpyHostToDevice));
             DAPI_CHECK(rocblas_syrk_ex_fn,
                        (handle,
                         uplo,
@@ -311,8 +311,8 @@ void testing_syrk_ex(const Arguments& arg)
                     //Allocate device memory in new device
                     DEVICE_MEMCHECK(device_matrix<Ti>, dA_copy, (A_row, A_col, lda));
                     DEVICE_MEMCHECK(device_matrix<To>, dC_copy, (N, N, ldc));
-                    DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_copy, (1));
-                    DEVICE_MEMCHECK(device_vector<Tc>, d_beta_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<Tex>, d_alpha_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<Tex>, d_beta_copy, (1));
 
                     // copy data from CPU to device
                     CHECK_HIP_ERROR(dA_copy.transfer_from(hA));
@@ -352,7 +352,7 @@ void testing_syrk_ex(const Arguments& arg)
         // CPU BLAS
         cpu_time_used = get_time_us_no_sync();
 
-        ref_syrk_ex<Ti, To_hpa, Tc>(
+        ref_syrk_ex<Ti, To_hpa, Tex>(
             uplo, transA, N, K, h_alpha_Tc, hA, lda, h_beta_Tc, hC_gold, ldc);
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
@@ -364,7 +364,8 @@ void testing_syrk_ex(const Arguments& arg)
                                   || (sizeof(To) < 4 && ((K > 1000) || (rocblas_is_complex<To>)));
                 if(near_check)
                 {
-                    const double tol = 4 * K * sum_error_tolerance<To>;
+                    const double tol
+                        = 4 * K * sum_error_tolerance<Ti>; // reference is computed on floats
                     near_check_general<To, To_hpa>(N, N, ldc, hC_gold, hC, tol);
                 }
                 else
