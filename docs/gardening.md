@@ -85,7 +85,7 @@ TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/t
 
 ## Gardener Rotation
 
-[Confluence doc for Gardener Rotation](https://amd.atlassian.net/wiki/spaces/SHARK/pages/1168419322/ROCm+Libraries+Gardener+Rotation)
+[Confluence doc for Gardener Rotation](http://u.amd.com/rocm-libraries-gardeners)
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 
@@ -96,7 +96,7 @@ organization and tracking is not expected from all members, seeing the incident
 history and actions taken in one location can be useful. However, for bugs that you can't immediately address
 please file a new GH issue and label it with the "gardener" label.
 
-You can see current list of [gardener known bugs](http://u.amd.com/rocm-libraries-gardeners)
+You can see current list of [gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
 
 Date | Library | Issue overview | Link to details | Resolved?
 ---- | ------- | -------------- | --------------- | ---------
