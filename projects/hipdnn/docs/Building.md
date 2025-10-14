@@ -147,11 +147,6 @@ ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Custom Installation Path
-```bash
-cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
-```
-
 ### Building Specific Components
 ```bash
 # Build without plugins
@@ -164,9 +159,7 @@ cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
 cmake -GNinja -DHIP_DNN_BUILD_SAMPLES=OFF ..
 ```
 
-## CMake Configuration Reference
-
-### ROCM_PATH vs CMAKE_INSTALL_PREFIX
+### ROCM_PATH & CMAKE_INSTALL_PREFIX
 
 - **`ROCM_PATH`**: Specifies where the build system looks for ROCm dependencies (default: `/opt/rocm`)
 - **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH`)
