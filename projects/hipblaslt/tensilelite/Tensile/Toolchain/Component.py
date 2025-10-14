@@ -355,6 +355,7 @@ class Linker(Component):
         when invoking the linker, LLVM allows the provision of arguments via a "response file"
         Reference: https://llvm.org/docs/CommandLine.html#response-files
         """
+        # FIXME: this prevents threading as clang_args.txt is overwritten
         with open(Path.cwd() / "clang_args.txt", "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
         return [*(self.default_args), "-o", destPath, "@clang_args.txt"]
