@@ -5,7 +5,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## (Unreleased) MIOpen <upcoming_release_number> for ROCm <upcoming_release_number>
 ### Optimized
 
-* [Conv] Improve Composable Kernel (CK) kernel selection during tuning
+* [Conv] Improve Composable Kernel (CK) kernel selection during tuning.
 
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added
