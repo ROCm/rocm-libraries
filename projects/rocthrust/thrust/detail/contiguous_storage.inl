@@ -26,7 +26,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/allocator/allocator_traits.h>
+
 #include <thrust/detail/allocator/copy_construct_range.h>
 #include <thrust/detail/allocator/destroy_range.h>
 #include <thrust/detail/allocator/fill_construct_range.h>
@@ -34,24 +34,12 @@
 #include <thrust/detail/contiguous_storage.h>
 #include <thrust/detail/nv_target.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
-#endif
-
 #include <stdexcept> // for std::runtime_error
 
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-class allocator_mismatch_on_swap : public std::runtime_error
-{
-public:
-  allocator_mismatch_on_swap()
-      : std::runtime_error("swap called on containers with allocators that propagate on swap, but compare non-equal")
-  {}
-};
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename Alloc>
@@ -192,29 +180,6 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::deallocate() noexcept
   } // end if
 } // end contiguous_storage::deallocate()
 
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap(contiguous_storage& x)
-{
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  using _THRUST_STD::swap;
-  swap(m_begin, x.m_begin);
-  swap(m_size, x.m_size);
-#else
-  thrust::swap(m_begin, x.m_begin);
-  thrust::swap(m_size, x.m_size);
-#endif
-
-  // FIXME(bgruber): swap_allocators already swaps m_allocator, so we are swapping twice here !!
-  swap_allocators(integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_swap::value>(),
-                  x.m_allocator);
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  swap(m_allocator, x.m_allocator);
-#else
-  thrust::swap(m_allocator, x.m_allocator);
-#endif
-} // end contiguous_storage::swap()
-
 template <typename T, typename Alloc>
 THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::value_initialize_n(iterator first, size_type n)
 {
@@ -272,24 +237,6 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::destroy(iterator first, it
   destroy_range(m_allocator, first.base(), last - first);
 } // end contiguous_storage::destroy()
 
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void
-contiguous_storage<T, Alloc>::deallocate_on_allocator_mismatch(const contiguous_storage& other) noexcept
-{
-  integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_copy_assignment::value> c;
-
-  deallocate_on_allocator_mismatch_dispatch(c, other);
-} // end contiguous_storage::deallocate_on_allocator_mismatch
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::destroy_on_allocator_mismatch(
-  const contiguous_storage& other, iterator first, iterator last) noexcept
-{
-  integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_copy_assignment::value> c;
-
-  destroy_on_allocator_mismatch_dispatch(c, other, first, last);
-} // end contiguous_storage::destroy_on_allocator_mismatch
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename Alloc>
 THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::set_allocator(const Alloc& alloc)
@@ -297,36 +244,7 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::set_allocator(const Alloc&
   m_allocator = alloc;
 } // end contiguous_storage::set_allocator()
 
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE bool contiguous_storage<T, Alloc>::is_allocator_not_equal(const Alloc& alloc) const
-{
-  return is_allocator_not_equal_dispatch(
-    integral_constant<bool, allocator_traits<Alloc>::is_always_equal::value>(), alloc);
-} // end contiguous_storage::is_allocator_not_equal()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE bool
-contiguous_storage<T, Alloc>::is_allocator_not_equal(const contiguous_storage<T, Alloc>& other) const
-{
-  return is_allocator_not_equal(m_allocator, other.m_allocator);
-} // end contiguous_storage::is_allocator_not_equal()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::propagate_allocator(const contiguous_storage& other)
-{
-  integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_copy_assignment::value> c;
-
-  propagate_allocator_dispatch(c, other);
-} // end contiguous_storage::propagate_allocator()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::propagate_allocator(contiguous_storage& other)
-{
-  integral_constant<bool, allocator_traits<Alloc>::propagate_on_container_move_assignment::value> c;
-
-  propagate_allocator_dispatch(c, other);
-} // end contiguous_storage::propagate_allocator()
-
+THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename Alloc>
 THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::operator=(contiguous_storage&& other)
 {
@@ -334,7 +252,11 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
   {
     deallocate();
   }
-  propagate_allocator(other);
+  THRUST_IF_CONSTEXPR (allocator_traits<Alloc>::propagate_on_container_move_assignment::value)
+  {
+    m_allocator = _THRUST_STD::move(other.m_allocator);
+  }
+
   m_begin = std::move(other.m_begin);
   m_size  = std::move(other.m_size);
 
@@ -342,100 +264,7 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
   other.m_size  = 0;
 
   return *this;
-} // end contiguous_storage::propagate_allocator()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap_allocators(true_type, const Alloc&)
-{} // end contiguous_storage::swap_allocators()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap_allocators(false_type, Alloc& other)
-{
-  // FIXME(bgruber): it is really concerning, that swapping an allocator can throw. swap() should be noexcept in
-  // general.
-  NV_IF_TARGET(NV_IS_DEVICE,
-               (
-                 // allocators must be equal when swapping containers with allocators that propagate on swap
-                 assert(!is_allocator_not_equal(other));),
-               (if (is_allocator_not_equal(other)) { throw allocator_mismatch_on_swap(); }));
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  using _THRUST_STD::swap;
-  swap(m_allocator, other);
-#else
-  thrust::swap(m_allocator, other);
-#endif
-} // end contiguous_storage::swap_allocators()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE bool
-contiguous_storage<T, Alloc>::is_allocator_not_equal_dispatch(true_type /*is_always_equal*/, const Alloc&) const
-{
-  return false;
-} // end contiguous_storage::is_allocator_not_equal_dispatch()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE bool
-contiguous_storage<T, Alloc>::is_allocator_not_equal_dispatch(false_type /*!is_always_equal*/, const Alloc& other) const
-{
-  return m_allocator != other;
-} // end contiguous_storage::is_allocator_not_equal_dispatch()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::deallocate_on_allocator_mismatch_dispatch(
-  true_type, const contiguous_storage& other) noexcept
-{
-  if (m_allocator != other.m_allocator)
-  {
-    deallocate();
-  }
-} // end contiguous_storage::deallocate_on_allocator_mismatch()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void
-contiguous_storage<T, Alloc>::deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage&) noexcept
-{} // end contiguous_storage::deallocate_on_allocator_mismatch()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::destroy_on_allocator_mismatch_dispatch(
-  true_type, const contiguous_storage& other, iterator first, iterator last) noexcept
-{
-  if (m_allocator != other.m_allocator)
-  {
-    destroy(first, last);
-  }
-} // end contiguous_storage::destroy_on_allocator_mismatch()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::destroy_on_allocator_mismatch_dispatch(
-  false_type, const contiguous_storage&, iterator, iterator) noexcept
-{} // end contiguous_storage::destroy_on_allocator_mismatch()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void
-contiguous_storage<T, Alloc>::propagate_allocator_dispatch(true_type, const contiguous_storage& other)
-{
-  m_allocator = other.m_allocator;
-} // end contiguous_storage::propagate_allocator()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::propagate_allocator_dispatch(false_type, const contiguous_storage&)
-{} // end contiguous_storage::propagate_allocator()
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::propagate_allocator_dispatch(true_type, contiguous_storage& other)
-{
-  m_allocator = std::move(other.m_allocator);
-} // end contiguous_storage::propagate_allocator()
-
-template <typename T, typename Alloc>
-THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::propagate_allocator_dispatch(false_type, contiguous_storage&)
-{} // end contiguous_storage::propagate_allocator()
+}
 
 } // namespace detail
 
