@@ -31,8 +31,9 @@ struct lstm_dropout_driver : lstm_basic_driver<T>
 {
     lstm_dropout_driver() : lstm_basic_driver<T>()
     {
-        //std::vector<int> modes = {0,1};
-        //std::vector<int> defaultBS(1);
+        std::vector<int> modes(2, 0);
+        modes[1] = 1;
+        std::vector<int> defaultBS(1);
 
         this->add(this->batchSize, "batch-size", this->generate_data({17}));
         this->add(this->seqLength, "seq-len", this->generate_data({25}));
@@ -58,10 +59,10 @@ struct lstm_dropout_driver : lstm_basic_driver<T>
 #else
         this->add(this->inputMode, "in-mode", this->generate_data({0}));
         this->add(this->biasMode, "bias-mode", this->generate_data({1}));
-        this->add(this->dirMode, "dir-mode", this->generate_data(/*modes*/std::vector<int>{0,1}));
+        this->add(this->dirMode, "dir-mode", this->generate_data(modes));
         this->add(this->algoMode, "algo-mode", this->generate_data({0}));
 #endif
-        this->add(this->batchSeq, "batch-seq", this->generate_data(/*defaultBS*/{0}));
+        this->add(this->batchSeq, "batch-seq", this->generate_data(defaultBS));
     }
 };
 

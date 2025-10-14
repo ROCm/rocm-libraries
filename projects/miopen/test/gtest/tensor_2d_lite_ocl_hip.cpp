@@ -48,13 +48,13 @@ std::vector<TensorsConfig> TensorsConfigs()
     std::vector<TensorsConfig> configs;
 #define MiB (1024ul * 1024ul)
 
-    #if PERF_ENABLE
+#if PERF_ENABLE
     for(int N = (1 * MiB); N <= (1024 * MiB); N *= 2)
     {
         configs.push_back({{1, 1, N}, {N, N, 1}, {1, 1, N}, {N, N, 1}});
     }
     return configs;
-    #else
+#else
     int C = 4;
     int N = 20 * 1024;
     configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
@@ -66,7 +66,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     N = 1024 * MiB;
     configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
     return configs;
-    #endif
+#endif
 }
 
 template <typename T>
@@ -164,18 +164,18 @@ protected:
                          "Op2dTensorLite",
                          vld,
                          vgd,
-                         paramsOCL)(tensA_dev.get(), /* a */
-                                    tensorsConfig.acstrides[0], /* a_nstride */
-                                    tensB_dev.get(), /* b */
-                                    tensorsConfig.bstrides[0], //b_nstride */
-                                    tensC_dev.get(), /* c */
-                                    tensorsConfig.acstrides[0], /* c_nstride */
+                         paramsOCL)(tensA_dev.get(), //a
+                                    tensorsConfig.acstrides[0], //a_nstride
+                                    tensB_dev.get(), //b
+                                    tensorsConfig.bstrides[0], //b_nstride
+                                    tensC_dev.get(), //c
+                                    tensorsConfig.acstrides[0], //c_nstride
                                     alpha0,
                                     alpha1,
                                     beta,
-                                    uint64_t(0), /* Aoffset */
-                                    uint64_t(0), /* Boffset */
-                                    uint64_t(0), /* Coffset */
+                                    uint64_t(0), //Aoffset
+                                    uint64_t(0), //Boffset
+                                    uint64_t(0), //Coffset
                                     total_work,
                                     total_work2,
                                     use_beta,
