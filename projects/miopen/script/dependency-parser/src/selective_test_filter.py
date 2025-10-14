@@ -20,6 +20,7 @@ Options:
   --all           Include all executables (default)
   --test-prefix   Only include executables starting with "test_"
   --output        Output JSON file (default: tests-to-run.json)
+  --folder        Relative path to comparing folder
 """
 
 import sys
@@ -27,11 +28,13 @@ import subprocess
 import json
 import os
 
-def get_changed_files(ref1, ref2):
+def get_changed_files(ref1, ref2, path_to_folder):
     """Return a set of files changed between two git refs."""
+    if path_to_folder:
+        path_to_folder = "-- " + path_to_folder
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2],
+            ["git", "diff", "--name-only", ref1, ref2, path_to_folder],
             capture_output=True, text=True, check=True
         )
         files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
@@ -97,7 +100,7 @@ def main():
         sys.exit(0)
 
     if len(sys.argv) < 4:
-        print("Usage: python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>]")
+        print("Usage: python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>] [--folder <path_to_folder>]")
         sys.exit(1)
 
     depmap_json = sys.argv[1]
@@ -105,6 +108,7 @@ def main():
     ref2 = sys.argv[3]
     filter_mode = "all"
     output_json = "tests-to-run.json"
+    path_to_folder = ""
 
     if "--test-prefix" in sys.argv:
         filter_mode = "test_prefix"
@@ -114,12 +118,16 @@ def main():
         idx = sys.argv.index("--output")
         if idx + 1 < len(sys.argv):
             output_json = sys.argv[idx + 1]
+    if "--folder" in sys.argv:
+        idx = sys.argv.index("--folder")
+        if idx + 1 < len(sys.argv):
+            path_to_folder = sys.argv[idx + 1]
 
     if not os.path.exists(depmap_json):
         print(f"Dependency map JSON not found: {depmap_json}")
         sys.exit(1)
 
-    changed_files = get_changed_files(ref1, ref2)
+    changed_files = get_changed_files(ref1, ref2, path_to_folder)
     if not changed_files:
         print("No changed files detected.")
         tests = []

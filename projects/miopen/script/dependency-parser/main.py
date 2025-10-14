@@ -41,6 +41,7 @@ def main():
     parser_test.add_argument("--all", action="store_true", help="Include all executables")
     parser_test.add_argument("--test-prefix", action="store_true", help="Only include executables starting with 'test_'")
     parser_test.add_argument("--output", help="Output JSON file", default="tests-to-run.json")
+    parser_test.add_argument("--folder", help="Relative path to comparing folder", default="projects/miopen")
 
     # Code auditing
     parser_audit = subparsers.add_parser("audit", help="List all files and their dependent executables")
@@ -66,6 +67,8 @@ def main():
             filter_args.append("--all")
         if args.output:
             filter_args += ["--output", args.output]
+        if args.folder:
+            filter_args += ["--folder", args.folder]
         run_selective_test_filter(filter_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])

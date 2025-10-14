@@ -180,8 +180,8 @@ class EnhancedNinjaDependencyParser:
         """Determine if a file is part of the project (not system files)."""
         # Include files that are clearly part of the project
         if any(file_path.startswith(prefix) for prefix in [
-            'include/', 'library/', 'test/', 'example/', 'src/', 'profiler/',
-            'build-ninja/include/', 'build-ninja/_deps/gtest'
+            'addkernels/', 'driver/', 'include/', 'samples/',
+            'speedtests/', 'test/', 'src/', 'tools/'
         ]):
             return True
             
@@ -192,7 +192,7 @@ class EnhancedNinjaDependencyParser:
             return False
             
         # Include files with common source/header extensions
-        if file_path.endswith(('.cpp', '.hpp', '.h', '.c', '.cc', '.cxx', '.cu', '.hip')):
+        if file_path.endswith(('.cpp', '.hpp', '.h')):
             return True
             
         return False
