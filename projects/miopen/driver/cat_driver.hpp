@@ -102,8 +102,8 @@ int32_t mloCatForwardRunHost(std::vector<miopenTensorDescriptor_t> inputDescs,
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloCatForwardRunHost_upd(std::vector<miopenTensorDescriptor_t> inputDescs,
-                             std::vector<Tgpu*> inputs,
+int32_t mloCatForwardRunHost_upd(const std::vector<miopenTensorDescriptor_t>& inputDescs,
+                             const std::vector<Tgpu*>& inputs,
                              miopenTensorDescriptor_t outputDesc,
                              Tcheck* outputhost,
                              uint32_t dim)
@@ -127,7 +127,7 @@ int32_t mloCatForwardRunHost_upd(std::vector<miopenTensorDescriptor_t> inputDesc
     size_t output_start_offset = 0;
     const size_t inner_size_by_output_dim_size = inner_size * output_dim_size;
 
-    for(size_t i = 0; i < inputs.size(); i++)
+    for(size_t i = 0; i < inputs.size(); ++i)
     {
         const auto input       = inputs[i];
         const size_t dim_size  = miopen::deref(inputDescs[i]).GetLengths()[dim];
@@ -136,10 +136,7 @@ int32_t mloCatForwardRunHost_upd(std::vector<miopenTensorDescriptor_t> inputDesc
         {
             const size_t copy_size_by_o = copy_size * o;
             const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
-            for(size_t j = 0; j < copy_size; j++)
-            {
-                outputhost[output_offset + j] = input[copy_size_by_o + j];
-            }
+            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
         }
         output_start_offset += copy_size;
     }
@@ -156,8 +153,8 @@ int32_t mloCatForwardRunHost_upd(std::vector<miopenTensorDescriptor_t> inputDesc
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloCatForwardRunHost_upd_mt(std::vector<miopenTensorDescriptor_t> inputDescs,
-                             std::vector<Tgpu*> inputs,
+int32_t mloCatForwardRunHost_upd_mt(const std::vector<miopenTensorDescriptor_t>& inputDescs,
+                             const std::vector<Tgpu*>& inputs,
                              miopenTensorDescriptor_t outputDesc,
                              Tcheck* outputhost,
                              uint32_t dim)
@@ -188,10 +185,7 @@ int32_t mloCatForwardRunHost_upd_mt(std::vector<miopenTensorDescriptor_t> inputD
         par_ford(outer_size)([&](size_t o){
             const size_t copy_size_by_o = copy_size * o;
             const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
-            for(size_t j = 0; j < copy_size; j++)
-            {
-                outputhost[output_offset + j] = input[copy_size_by_o + j];
-            }            
+            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
         });
         output_start_offset += copy_size;
     });
@@ -202,6 +196,56 @@ int32_t mloCatForwardRunHost_upd_mt(std::vector<miopenTensorDescriptor_t> inputD
     std::cout << "Updated multi-threaded CPU CAT solver: " << ns << "ns (" << (double(ns) / 1000000000.0) << " sec)" << std::endl;
 
     std::fstream of("/data/Dev/mloCatForwardRunHost_upd_mt.txt", std::ofstream::app);
+    of << ns << std::endl;
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloCatForwardRunHost_upd_mt_2(const std::vector<miopenTensorDescriptor_t>& inputDescs,
+                             const std::vector<Tgpu*>& inputs,
+                             miopenTensorDescriptor_t outputDesc,
+                             Tcheck* outputhost,
+                             uint32_t dim)
+{
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto& shape               = miopen::deref(outputDesc).GetLengths();
+    size_t outer_size               = 1;
+    size_t inner_size               = 1;
+    const size_t output_dim_size    = shape[dim];
+    for(size_t i = 0; i < dim; i++)
+    {
+        outer_size *= shape[i];
+    }
+
+    for(size_t i = dim + 1; i < shape.size(); i++)
+    {
+        inner_size *= shape[i];
+    }
+
+    int32_t ret                = 0;
+    size_t output_start_offset = 0;
+    const size_t inner_size_by_output_dim_size = inner_size * output_dim_size;
+
+    par_ford(inputs.size())([&](size_t i){
+        const auto input       = inputs[i];
+        const size_t dim_size  = miopen::deref(inputDescs[i]).GetLengths()[dim];
+        const size_t copy_size = inner_size * dim_size;
+        for (size_t o = 0; o < outer_size; ++o)
+        {
+            const size_t copy_size_by_o = copy_size * o;
+            const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
+            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
+        }
+        output_start_offset += copy_size;
+    });
+
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+
+    std::cout << "Updated multi-threaded CPU CAT solver [2]: " << ns << "ns (" << (double(ns) / 1000000000.0) << " sec)" << std::endl;
+
+    std::fstream of("/data/Dev/mloCatForwardRunHost_upd_mt_2.txt", std::ofstream::app);
     of << ns << std::endl;
 
     return ret;
@@ -261,6 +305,7 @@ private:
 
     std::vector<Tref> outhost_upd;
     std::vector<Tref> outhost_upd_mt;
+    std::vector<Tref> outhost_upd_mt_2;
 
     std::vector<void*> in_devs_ptr;
     std::vector<Tgpu*> ins_ptr;
@@ -369,6 +414,7 @@ int CatDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     outhost_upd = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     outhost_upd_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    outhost_upd_mt_2 = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
     if(out_dev->ToGPU(GetStream(), out.data()) != 0)
         std::cerr << "Error copying (out) to GPU, size: " << out_dev->GetSize() << std::endl;
@@ -429,6 +475,8 @@ int CatDriver<Tgpu, Tref>::RunForwardCPU()
 
     mloCatForwardRunHost_upd_mt<Tgpu, Tref>(inputDescs, ins_ptr, outputDesc, outhost_upd_mt.data(), dim);
 
+    mloCatForwardRunHost_upd_mt_2<Tgpu, Tref>(inputDescs, ins_ptr, outputDesc, outhost_upd_mt_2.data(), dim);
+
     return miopenStatusSuccess;
 }
 
@@ -442,9 +490,10 @@ template <typename Tgpu, typename Tref>
 int CatDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
-    auto error = miopen::rms_range(outhost, out);
-    auto error_upd = miopen::rms_range(outhost_upd, out);
-    auto error_upd_mt = miopen::rms_range(outhost_upd_mt, out);
+    const auto error = miopen::rms_range(outhost, out);
+    const auto error_upd = miopen::rms_range(outhost_upd, out);
+    const auto error_upd_mt = miopen::rms_range(outhost_upd_mt, out);
+    const auto error_upd_mt_2 = miopen::rms_range(outhost_upd_mt_2, out);
 
     if(!std::isfinite(error) || error != 0)
     {
@@ -474,6 +523,16 @@ int CatDriver<Tgpu, Tref>::VerifyForward()
     else
     {
         std::cout << "Forward Cat Verifies OK on updated multi-threaded CPU reference" << std::endl;
+    }
+
+    if(!std::isfinite(error_upd_mt_2) || error_upd_mt_2 != 0)
+    {
+        std::cout << "Forward Cat FAILED against updated multi-threaded CPU reference [2]: " << error_upd_mt_2 << " > 0" << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Forward Cat Verifies OK on updated multi-threaded CPU reference [2]" << std::endl;
     }
 
     return miopenStatusSuccess;

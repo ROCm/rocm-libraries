@@ -98,12 +98,12 @@ void cpu_cat_forward_upd(std::vector<tensor<T>> inputs, tensor<T>& ref_output, i
     const size_t inner_size_on_output_dim_size = inner_size / output_dim_size;
     size_t output_start_offset = 0;
 
-    par_ford(inputs.size())([&](int32_t i) {
+    par_ford(inputs.size())([&](size_t i) {
         const auto& input       = inputs[i];
         const size_t dim_size   = inputs[i].desc.GetLengths()[dim];
         const size_t copy_size  = inner_size_on_output_dim_size * dim_size;
         const size_t input_size = outer_size * copy_size;
-        ford(input_size)([&](int32_t o) {
+        ford(input_size)([&](size_t o) {
             const size_t outer_idx = o / copy_size;
             const size_t copy_idx  = o % copy_size;
             ref_output[output_start_offset + (outer_idx * inner_size) + copy_idx] =
