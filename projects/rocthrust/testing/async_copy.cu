@@ -27,6 +27,8 @@
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #  define DEFINE_ASYNC_COPY_CALLABLE(name, ...)                                                \
     struct THRUST_PP_CAT2(name, _fn)                                                           \
     {                                                                                          \

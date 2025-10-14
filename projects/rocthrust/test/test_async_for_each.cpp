@@ -17,7 +17,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/for_each.h>
 #  include <thrust/device_vector.h>
@@ -25,6 +25,8 @@
 
 #  include "test_param_fixtures.hpp"
 #  include "test_utils.hpp"
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 #  define DEFINE_ASYNC_FOR_EACH_CALLABLE(name, ...)                                            \
     struct THRUST_PP_CAT2(name, _fn)                                                           \
@@ -39,7 +41,6 @@
     /**/
 
 DEFINE_ASYNC_FOR_EACH_CALLABLE(invoke_async_for_each);
-
 DEFINE_ASYNC_FOR_EACH_CALLABLE(invoke_async_for_each_device, thrust::device);
 
 #  undef DEFINE_ASYNC_FOR_EACH_CALLABLE

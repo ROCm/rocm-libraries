@@ -50,7 +50,7 @@ namespace unimplemented
 {
 
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
-THRUST_HOST event<FromPolicy> async_copy(
+THRUST_DEPRECATED THRUST_HOST event<FromPolicy> async_copy(
   thrust::execution_policy<FromPolicy>& /*from_exec*/,
   thrust::execution_policy<ToPolicy>& /*to_exec*/,
   ForwardIt /*first*/,
@@ -72,7 +72,7 @@ using thrust::async::unimplemented::async_copy;
 struct copy_fn final
 {
   template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
-  THRUST_HOST static auto
+  THRUST_HOST THRUST_SUPPRESS_DEPRECATED_PUSH static auto
   call(thrust::detail::execution_policy_base<FromPolicy> const& from_exec,
        thrust::detail::execution_policy_base<ToPolicy> const& to_exec,
        ForwardIt&& first,
@@ -84,39 +84,42 @@ struct copy_fn final
       thrust::detail::derived_cast(thrust::detail::strip_const(to_exec)),
       THRUST_FWD(first),
       THRUST_FWD(last),
-      THRUST_FWD(output)))
+      THRUST_FWD(output))) THRUST_SUPPRESS_DEPRECATED_POP
 
-      template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
-      THRUST_HOST static auto call(thrust::detail::execution_policy_base<DerivedPolicy> const& exec,
-                                   ForwardIt&& first,
-                                   Sentinel&& last,
-                                   OutputIt&& output)
-        THRUST_RETURNS(copy_fn::call(
-          thrust::detail::derived_cast(thrust::detail::strip_const(exec))
-          // Synthesize a suitable new execution policy, because we don't want to
-          // try and extract twice from the one we were passed.
-          ,
-          typename remove_cvref_t<decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))>::tag_type{},
-          THRUST_FWD(first),
-          THRUST_FWD(last),
-          THRUST_FWD(output)))
+    template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
+    THRUST_HOST static auto call(thrust::detail::execution_policy_base<DerivedPolicy> const& exec,
+                                 ForwardIt&& first,
+                                 Sentinel&& last,
+                                 OutputIt&& output)
+      THRUST_RETURNS(copy_fn::call(
+        thrust::detail::derived_cast(thrust::detail::strip_const(exec))
+        // Synthesize a suitable new execution policy, because we don't want to
+        // try and extract twice from the one we were passed.
+        ,
+        typename remove_cvref_t<decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))>::tag_type{},
+        THRUST_FWD(first),
+        THRUST_FWD(last),
+        THRUST_FWD(output)))
 
-          template <typename ForwardIt, typename Sentinel, typename OutputIt>
-          THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output)
-            THRUST_RETURNS(copy_fn::call(
-              thrust::detail::select_system(typename thrust::iterator_system<remove_cvref_t<ForwardIt>>::type{}),
-              thrust::detail::select_system(typename thrust::iterator_system<remove_cvref_t<OutputIt>>::type{}),
-              THRUST_FWD(first),
-              THRUST_FWD(last),
-              THRUST_FWD(output)))
+        template <typename ForwardIt, typename Sentinel, typename OutputIt>
+        THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output)
+          THRUST_RETURNS(copy_fn::call(
+            thrust::detail::select_system(typename thrust::iterator_system<remove_cvref_t<ForwardIt>>::type{}),
+            thrust::detail::select_system(typename thrust::iterator_system<remove_cvref_t<OutputIt>>::type{}),
+            THRUST_FWD(first),
+            THRUST_FWD(last),
+            THRUST_FWD(output)))
 
-              template <typename... Args>
-              THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const
+            template <typename... Args>
+            THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const
     THRUST_RETURNS(call(THRUST_FWD(args)...))
 };
 
 } // namespace copy_detail
 
+// note: cannot add a THRUST_DEPRECATED here because the global variable is emitted into cudafe1.stub.c and we cannot
+// suppress the warning there
+//! deprecated [Since 2.8.0]
 THRUST_INLINE_CONSTANT copy_detail::copy_fn copy{};
 
 /*! \endcond

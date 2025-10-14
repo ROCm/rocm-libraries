@@ -19,7 +19,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/scan.h>
 #  include <thrust/scan.h>
@@ -110,12 +110,14 @@ struct simple
     PostfixArgTuple&& postfix_tuple,
     std::index_sequence<PostfixArgIndices...>)
   {
+    THRUST_SUPPRESS_DEPRECATED_PUSH
     auto e = thrust::async::exclusive_scan(
       std::get<PrefixArgIndices>(THRUST_FWD(prefix_tuple))...,
       input.cbegin(),
       input.cend(),
       output.begin(),
       std::get<PostfixArgIndices>(THRUST_FWD(postfix_tuple))...);
+    THRUST_SUPPRESS_DEPRECATED_POP
     return e;
   }
 };
