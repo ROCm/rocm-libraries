@@ -30,6 +30,7 @@ public:
         std::set<hipdnn_sdk::data_objects::NodeAttributes> supportedAttributes) const
         = 0;
     virtual const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
+    virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
     virtual const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
@@ -106,7 +107,7 @@ public:
         return *nodes->Get(index);
     }
 
-    const INodeWrapper& getNodeWrapper(uint32_t index) const
+    const INodeWrapper& getNodeWrapper(uint32_t index) const override
     {
         throwIfNotValid();
 
