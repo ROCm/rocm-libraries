@@ -30,8 +30,6 @@
 #include <cmath>
 #include <iomanip>
 
-#include <chrono>
-#include <iostream>
 #include "../test/ford.hpp"
 
 ////////////////////////////////////////////////////////////

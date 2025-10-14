@@ -47,8 +47,6 @@
 #include <numeric>
 #include <vector>
 
-#include <fstream>
-
 template <typename Tgpu, typename Tref>
 class LRNDriver : public Driver
 {

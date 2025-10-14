@@ -647,15 +647,8 @@ private:
 using GPU_Lrn_FP32 = LrnCommon<float>;
 using GPU_Lrn_FP16 = LrnCommon<half_float::half>;
 
-TEST_P(GPU_Lrn_FP32, TestFloat)
-{
-    this->Run();
-}
-
-TEST_P(GPU_Lrn_FP16, TestFloat16)
-{
-    this->Run();
-}
+TEST_P(GPU_Lrn_FP32, TestFloat) { this->Run(); }
+TEST_P(GPU_Lrn_FP16, TestFloat16) { this->Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP32, GetCasesSmoke());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP32, GetCasesFull());
