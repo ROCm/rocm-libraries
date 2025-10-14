@@ -28,36 +28,6 @@ TEST(TestFillTensorFromFile, PathToDirectory)
     EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
-struct TestTensorFile
-{
-    std::filesystem::path filename;
-    TestTensorFile(std::filesystem::path inFilename)
-        : filename(std::move(inFilename))
-    {
-        if(std::filesystem::exists(filename))
-        {
-            throw std::runtime_error("File already exists");
-        }
-
-        std::ofstream f(filename, std::ios_base::binary);
-        if(!f.good())
-        {
-            throw std::runtime_error("Could not open file");
-        }
-        std::vector<int> values = {0, 1, 2, 3};
-        f.write(reinterpret_cast<char*>(values.data()),
-                static_cast<std::streamsize>(values.size() * sizeof(int)));
-    }
-
-    ~TestTensorFile()
-    {
-        if(std::filesystem::exists(filename))
-        {
-            std::filesystem::remove(filename);
-        }
-    }
-};
-
 template <class T>
 void writeVectorToFile(std::filesystem::path const& filename, std::vector<T> const& values)
 {
