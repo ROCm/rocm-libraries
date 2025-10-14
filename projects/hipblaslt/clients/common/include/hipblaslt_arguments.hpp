@@ -157,6 +157,7 @@ struct Arguments
     bool                     norm_check_assert;
     bool                     swizzle_a;
     bool                     swizzle_b;
+    bool                     dump_matrix;
 
     uint32_t scaleABlockRowSize;
     uint32_t scaleABlockColSize;
@@ -266,6 +267,7 @@ struct Arguments
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
     OPER(swizzle_b) SEP              \
+    OPER(dump_matrix) SEP            \
     OPER(scaleABlockRowSize) SEP     \
     OPER(scaleABlockColSize) SEP     \
     OPER(scaleBBlockRowSize) SEP     \

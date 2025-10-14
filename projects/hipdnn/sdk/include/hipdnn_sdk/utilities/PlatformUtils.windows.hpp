@@ -60,6 +60,18 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
     std::transform(B.begin(), B.end(), B.begin(), ::towlower);
     return A == B;
 }
+
+inline std::filesystem::path getCurrentExecutableDirectory()
+{
+    wchar_t result[MAX_PATH];
+    DWORD length = GetModuleFileNameW(nullptr, result, MAX_PATH);
+    if(length == 0 || length == MAX_PATH)
+    {
+        throw std::runtime_error("Failed to get executable path");
+    }
+    return std::filesystem::path(result).parent_path();
+}
+
 }
 
 #else

@@ -29,7 +29,7 @@ jobs:
         --group-add video
         --device /dev/kfd
         --device /dev/dri
-        --group-add 992
+        --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
     strategy:
       fail-fast: false
@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 21b40919154d8bc44bbbc0f951df7e0c45bda6fb # 2025-10-06 commit
+          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
