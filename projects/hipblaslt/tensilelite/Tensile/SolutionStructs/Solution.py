@@ -416,9 +416,6 @@ class Solution(collections.abc.Mapping):
     state["SwapGlobalReadOrder"] = False
     state["MfmaInitCVgprs"] = False
 
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
-
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -1003,6 +1000,7 @@ class Solution(collections.abc.Mapping):
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
+      state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
 
     computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
@@ -1450,6 +1448,7 @@ class Solution(collections.abc.Mapping):
         "StreamK": not state["StreamK"],
         "StreamKAtomic": not state["StreamKAtomic"],
         "StreamKXCCMapping": not state["StreamKXCCMapping"],
+        "StreamKFixupTreeReduction": not state["StreamKFixupTreeReduction"],
         "DebugStreamK": not state["DebugStreamK"],
         "WorkGroupReduction": not state["WorkGroupReduction"],
         "ConvertAfterDS": not state["ConvertAfterDS"],
@@ -3299,6 +3298,9 @@ class Solution(collections.abc.Mapping):
           not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
+
+    hasCMS,_ = hasCustomSchedule(state)
+    state["UseCustomMainLoopSchedule"] = hasCMS
 
 
   ########################################

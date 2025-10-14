@@ -7,8 +7,6 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
-        type: string
 
 
 permissions:
@@ -40,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 9b736076099e591f7835119aa22f99b244a68639 # 2025-09-30 commit
+          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
 
       - name: Install python deps
         run: |
@@ -76,7 +74,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py

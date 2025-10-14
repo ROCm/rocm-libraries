@@ -86,7 +86,6 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
-      subtree_checkout: ${{ matrix.projects.subtree_checkout }}
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.project_to_test }})
@@ -104,7 +103,6 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
-      subtree_checkout: ${{ matrix.projects.subtree_checkout }}
 
   therock_ci_summary:
     name: TheRock CI Summary

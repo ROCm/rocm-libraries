@@ -67,6 +67,22 @@ namespace origami
             return math::safe_ceil_div(iters_per_tile, iters_per_cta);
         }
 
+    const char* rtype_to_string(streamk::reduction_type r)
+    {
+        switch(r)
+        {
+        case streamk::reduction_type::Tree:
+            return "Tree";
+        case streamk::reduction_type::Parallel:
+            return "Parallel";
+        case streamk::reduction_type::None:
+            return "None";
+        default:
+            return "Unknown";
+        }
+    }
+
+
         std::tuple<double, size_t, size_t> predicted_runtime(size_t BLK_M,
             size_t BLK_N,
             size_t BLK_K,

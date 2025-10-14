@@ -79,6 +79,13 @@ BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
 {
 }
 
+size_t BatchnormBwdPlan::getWorkspaceSize(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+{
+    // No workspace needed for batchnorm backward
+    return 0;
+}
+
 void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,

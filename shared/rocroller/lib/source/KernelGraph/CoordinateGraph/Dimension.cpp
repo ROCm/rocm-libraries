@@ -209,6 +209,7 @@ namespace rocRoller
             , layoutType(LayoutType::None)
             , subTileSizes(subTileSizes)
             , miTileSizes(subTileSizes)
+            , swizzleTileSizes(subTileSizes)
         {
         }
 
@@ -216,7 +217,8 @@ namespace rocRoller
                              LayoutType              layoutType,
                              std::vector<int> const& subTileSizes,
                              MemoryType              memoryType,
-                             std::vector<int> const& miTileSizes)
+                             std::vector<int> const& miTileSizes,
+                             std::vector<int> const& swizzleTileSizes)
             : BaseDimension()
             , rank(sizes.size())
             , sizes(sizes)
@@ -224,6 +226,7 @@ namespace rocRoller
             , layoutType(layoutType)
             , subTileSizes(subTileSizes)
             , miTileSizes{miTileSizes.empty() ? subTileSizes : miTileSizes}
+            , swizzleTileSizes{swizzleTileSizes.empty() ? subTileSizes : swizzleTileSizes}
         {
             if(this->memoryType == MemoryType::LDS)
                 this->memoryType = MemoryType::WAVE_LDS;

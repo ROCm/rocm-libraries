@@ -129,3 +129,20 @@ TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
     EXPECT_EQ(tensorMap.at(1)->uid(), 1);
     EXPECT_EQ(tensorMap.at(2)->uid(), 2);
 }
+
+TEST(TestGraphWrapper, GetNodeWrapper)
+{
+    flatbuffers::FlatBufferBuilder builder
+        = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphWrapper wrapper(serializedGraph.data(), serializedGraph.size());
+    ASSERT_TRUE(wrapper.isValid());
+    ASSERT_EQ(wrapper.nodeCount(), 1);
+
+    const auto& nodeWrapper = wrapper.getNodeWrapper(0);
+
+    EXPECT_EQ(nodeWrapper.attributesType(),
+              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+    EXPECT_THROW(wrapper.getNodeWrapper(1), std::out_of_range);
+}
