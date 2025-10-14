@@ -24,12 +24,6 @@
  *
  *******************************************************************************/
 
-#define MIOPEN_USE_AMDGCN 0
-#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X)
-#undef MIOPEN_USE_AMDGCN
-#define MIOPEN_USE_AMDGCN 1
-#endif
-
 #include "batchnorm_functions.hpp"
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
@@ -49,8 +43,9 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl
     static_assert(false, "This variant is not supported.");
 };
 
-// TODO: Without the macro guards the compiler fails on the constant expressions. Somehow these
-// definitions spill over to versions defined later in the source file.
+// Without the macro guards the compiler fails on the constant expressions. Somehow these
+// definitions spill over to versions defined later in the source file causing weird errors.
+// TODO: Find a way to remove them.
 #if (MIO_BN_VARIANT == 0)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
@@ -82,18 +77,17 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
         variance    = 0;
         invVariance = 0;
 
-        FpPrecType pvscale = 0;
-        FpPrecType pvbias  = 0;
         FpPrecType batchvalues[nloop];
 
-        unsigned int index  = 0;
         unsigned int lid    = threadIdx.x;
         unsigned int grpid  = blockIdx.x;
         unsigned int chwid  = grpid * mio_bn_config::hw + (lid % mio_bn_config::hw);
         unsigned int lidihw = lid / mio_bn_config::hw;
         unsigned int nid    = 0;
-        FpPrecType bn_out   = 0.;
-        FpPrecType act_out  = 0.;
+        unsigned int index  = 0;
+
+        FpPrecType bn_out  = 0.;
+        FpPrecType act_out = 0.;
 
         __shared__ FpPrecType lcl_bias;
         __shared__ FpPrecType lcl_scale;
@@ -107,9 +101,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
 
         if(lid < segment)
         {
-            // #if(MIOPEN_USE_FP16 == 0)
-            //         __attribute__((opencl_unroll_hint(2)))
-            // #endif
             for(unsigned int n = 0; n < nloopm; ++n)
             {
                 nid            = n * segihw + lidihw;
@@ -152,10 +143,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
                 lid);
         }
 
-        variance    = fma(-mean, mean, variance);
-        invVariance = rsqrt(variance + cast<FpPrecType>(epsilon));
-        pvscale     = lcl_scale;
-        pvbias      = lcl_bias;
+        variance           = fma(-mean, mean, variance);
+        invVariance        = rsqrt(variance + cast<FpPrecType>(epsilon));
+        FpPrecType pvscale = lcl_scale;
+        FpPrecType pvbias  = lcl_bias;
 
         if(lid < segment)
         {
@@ -164,10 +155,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
             // Apply normalization
             for(unsigned int n = 0; n < nloopm; n++)
             {
-                inhat  = (batchvalues[n] - mean) * invVariance;
-                nid    = n * segihw + lidihw;
-                index  = nid * mio_bn_config::chw + chwid;
-                bn_out = fma(pvscale, inhat, pvbias);
+                inhat             = (batchvalues[n] - mean) * invVariance;
+                nid               = n * segihw + lidihw;
+                index             = nid * mio_bn_config::chw + chwid;
+                FpPrecType bn_out = fma(pvscale, inhat, pvbias);
                 ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
                                                   *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
                                                   cast<FpPrecType>(gamma),
@@ -182,7 +173,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
             index = nid * mio_bn_config::chw + chwid;
             if(index < mio_bn_config::nchw)
             {
-                bn_out = fma(pvscale, inhat, pvbias);
+                FpPrecType bn_out = fma(pvscale, inhat, pvbias);
                 ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
                                                   *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
                                                   cast<FpPrecType>(gamma),
@@ -194,7 +185,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
     }
 };
 
-#elif(MIO_BN_VARIANT == 1)
+#elif (MIO_BN_VARIANT == 1)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
@@ -246,8 +237,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
 
         unsigned int lid   = threadIdx.x;
         unsigned int grpid = blockIdx.x;
-        unsigned int chwid  = grpid * mio_bn_config::hw;
-        
+        unsigned int chwid = grpid * mio_bn_config::hw;
+
         __shared__ FpPrecType lcl_bias;
         __shared__ FpPrecType lcl_scale;
         if(lid == 0)
@@ -264,6 +255,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
             fp_type4 read4;
 
             /*__attribute__((opencl_unroll_hint(2)))*/
+            // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid << 2; k < less4; k += grprd)
             {
                 nidx  = k / mio_bn_config::hw;
@@ -291,6 +283,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         else
         {
             /*__attribute__((opencl_unroll_hint(4))) */
+            // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
                 nidx           = k / mio_bn_config::hw;
@@ -357,6 +350,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         if constexpr(mio_config::layout_nhwc || rem == 0)
         {
             /*__attribute__((opencl_unroll_hint(2)))*/
+            // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
                 nidx   = k / mio_bn_config::hw;
@@ -374,6 +368,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         else
         {
             /*__attribute__((opencl_unroll_hint(2)))*/
+            // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = max_read * lid; k < lessout; k += chunk)
             {
                 for(unsigned int j = 0; j < max_read; j++)
@@ -438,7 +433,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
     }
 };
 
-#elif(MIO_BN_VARIANT == 3)
+#elif (MIO_BN_VARIANT == 3)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
@@ -496,74 +491,30 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
 
         __syncthreads();
 
-        if constexpr(mio_config::use_amdgnc)
+        // REDUCE MEAN AND VARIANCE -----------------------
+        constexpr auto lcl_data_size =
+            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        if constexpr(mio_bn_config::use_amdgnc)
         {
-            __shared__ FpAccumType lcl_data_x2[MIO_BN_LDSGCN_SIZE];
-            __shared__ FpAccumType lcl_data_y2[MIO_BN_LDSGCN_SIZE];
-            miopen::reduction::gcn_reduce2<FpAccumType, MIO_BN_LDSGCN_SIZE>(
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
                 reinterpret_cast<FpAccumType&>(variance),
                 static_cast<FpAccumType>(INHW),
-                lcl_data_x2,
-                lcl_data_y2,
+                lcl_data_x,
+                lcl_data_y,
                 lid);
         }
         else
         {
-#if MIOPEN_USE_FP16 == 1
-            //     local float lcl_data[MIO_BN_LDS_SIZE];
-            //     lcl_data[lid] = (float)mean;
-            //     barrier(CLK_LOCAL_MEM_FENCE);
-            //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-            //     {
-            //         if(lid < red)
-            //             lcl_data[lid] += lcl_data[lid + red];
-            //         barrier(CLK_LOCAL_MEM_FENCE);
-            //     }
-            //     float temp_mean = (float)mean;
-            //     regLDSreduce(&temp_mean, lcl_data, lid, (float)INHW);
-            //     mean = (_FLOAT_PREC)temp_mean;
-            //     barrier(CLK_LOCAL_MEM_FENCE);
-            //     lcl_data[lid] = (float)variance;
-            //     barrier(CLK_LOCAL_MEM_FENCE);
-
-            //     for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-            //     {
-            //         if(lid < red)
-            //             lcl_data[lid] += lcl_data[lid + red];
-            //         barrier(CLK_LOCAL_MEM_FENCE);
-            //     }
-            //     float temp_variance = (float)variance;
-            //     regLDSreduce(&temp_variance, lcl_data, lid, (float)INHW);
-            //     variance = (_FLOAT_PREC)temp_variance;
-#else
-            FpPrecType lcl_data[MIO_BN_LDS_SIZE];
-
-            // Reduce mean
-            lcl_data[lid] = mean;
-            __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-            for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-            {
-                if(lid < red)
-                {
-                    lcl_data[lid] += lcl_data[lid + red];
-                }
-                __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-            }
-            regLDSreduce(&mean, lcl_data, lid, static_cast<FpPrecType>(INHW));
-            __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-
-            // Reduce variance
-            lcl_data[lid] = variance;
-            __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-            for(unsigned int red = (MIO_BN_GRP0 >> 1); red > 256; red >>= 1)
-            {
-                if(lid < red)
-                    lcl_data[lid] += lcl_data[lid + red];
-                __syncthreads(); // barrier(CLK_LOCAL_MEM_FENCE);
-            }
-            regLDSreduce(&variance, lcl_data, lid, static_cast<FpPrecType>(INHW));
-#endif
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
         }
 
         __syncthreads();
@@ -598,8 +549,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
                                                   miopen::batchnorm::cast<FpPrecType>(beta),
                                                   miopen::batchnorm::cast<FpPrecType>(alpha));
                 out[index] = miopen::batchnorm::cast<FpPrecType>(act_out);
-            } // end for
-        } // end if
+            }
+        }
     }
 };
 
