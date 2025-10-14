@@ -3,11 +3,15 @@
 
 #pragma once
 
-#include "PointwiseTensorBundles.hpp"
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+
+#include "PointwiseTensorBundles.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
@@ -16,23 +20,31 @@ using namespace hipdnn_sdk::utilities;
 namespace hipdnn_sdk_test_utils
 {
 
-template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+                  PointwiseUnaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
-    buildPointwiseUnaryGraph(PointwiseUnaryTensorBundle<InputType>& tensorBundle,
+    buildPointwiseUnaryGraph(const std::vector<int64_t>& inputDims,
+                             const std::vector<int64_t>& outputDims,
                              hipdnn_sdk::data_objects::DataType input0DataType,
                              hipdnn_sdk::data_objects::DataType accumulatorDataType,
                              hipdnn_sdk::data_objects::DataType outputDataType,
-                             hipdnn_frontend::PointwiseMode operation)
+                             hipdnn_frontend::PointwiseMode operation,
+                             unsigned int seed = 1,
+                             const TensorLayout& layout = TensorLayout::NCHW)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseUnaryTest");
     graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
 
     int64_t uid = 1;
-    auto inputAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input", hipdnn_frontend::fromSdkType(input0DataType), tensorBundle.inputTensor);
-    inputAttr.set_uid(uid++);
+
+    // Create input tensor attribute
+    auto inputAttr = hipdnn_frontend::graph::TensorAttributes();
+    inputAttr.set_name("Input")
+        .set_data_type(hipdnn_frontend::fromSdkType(input0DataType))
+        .set_dim(inputDims)
+        .set_stride(generateStrides(inputDims, layout.strideOrder))
+        .set_uid(uid++);
     auto inputTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(inputAttr));
 
@@ -46,38 +58,57 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         outputTensorAttr->set_uid(uid++);
     }
-
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
+    outputTensorAttr->set_dim(outputDims);
+    outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
 
-    auto variantPack = tensorBundle.createVariantPack(*inputTensorAttr, *outputTensorAttr);
+    // Serialize graph and create tensor bundle
+    auto serializedGraph = graph->buildFlatbufferOperationGraph();
+    auto graphWrap = hipdnn_plugin::GraphWrapper(serializedGraph.data(), serializedGraph.size());
+    auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
-    return std::make_tuple(graph, variantPack);
+    PointwiseUnaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
+    auto variantPack = tensorBundle.toVariantPack();
+
+    return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
 
-template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+                  PointwiseBinaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
-    buildPointwiseBinaryGraph(PointwiseBinaryTensorBundle<InputType>& tensorBundle,
+    buildPointwiseBinaryGraph(const std::vector<int64_t>& input1Dims,
+                              const std::vector<int64_t>& input2Dims,
+                              const std::vector<int64_t>& outputDims,
                               hipdnn_sdk::data_objects::DataType input0DataType,
                               hipdnn_sdk::data_objects::DataType input1DataType,
                               hipdnn_sdk::data_objects::DataType accumulatorDataType,
                               hipdnn_sdk::data_objects::DataType outputDataType,
-                              hipdnn_frontend::PointwiseMode operation)
+                              hipdnn_frontend::PointwiseMode operation,
+                              unsigned int seed = 1,
+                              const TensorLayout& layout = TensorLayout::NCHW)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseBinaryTest");
     graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
 
     int64_t uid = 1;
-    auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input1", hipdnn_frontend::fromSdkType(input0DataType), tensorBundle.input1Tensor);
-    input1Attr.set_uid(uid++);
+
+    // Create input tensor attributes
+    auto input1Attr = hipdnn_frontend::graph::TensorAttributes();
+    input1Attr.set_name("Input1")
+        .set_data_type(hipdnn_frontend::fromSdkType(input0DataType))
+        .set_dim(input1Dims)
+        .set_stride(generateStrides(input1Dims, layout.strideOrder))
+        .set_uid(uid++);
     auto input1TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
 
-    auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
-        "Input2", hipdnn_frontend::fromSdkType(input1DataType), tensorBundle.input2Tensor);
-    input2Attr.set_uid(uid++);
+    auto input2Attr = hipdnn_frontend::graph::TensorAttributes();
+    input2Attr.set_name("Input2")
+        .set_data_type(hipdnn_frontend::fromSdkType(input1DataType))
+        .set_dim(input2Dims)
+        .set_stride(generateStrides(input2Dims, layout.strideOrder))
+        .set_uid(uid++);
     auto input2TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input2Attr));
 
@@ -91,13 +122,19 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         outputTensorAttr->set_uid(uid++);
     }
-
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
+    outputTensorAttr->set_dim(outputDims);
+    outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
 
-    auto variantPack
-        = tensorBundle.createVariantPack(*input1TensorAttr, *input2TensorAttr, *outputTensorAttr);
+    // Serialize graph and create tensor bundle
+    auto serializedGraph = graph->buildFlatbufferOperationGraph();
+    auto graphWrap = hipdnn_plugin::GraphWrapper(serializedGraph.data(), serializedGraph.size());
+    auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
-    return std::make_tuple(graph, variantPack);
+    PointwiseBinaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
+    auto variantPack = tensorBundle.toVariantPack();
+
+    return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
 
 }

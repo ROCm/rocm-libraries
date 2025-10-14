@@ -204,27 +204,27 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStrideSizesValid
     // 2D tensor (3x4)
     auto functor2D = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{3, 4});
-    EXPECT_EQ(functor2D._totalElements, 12);
-    EXPECT_EQ(functor2D._strides[0], 4); // stride for first dimension
-    EXPECT_EQ(functor2D._strides[1], 1); // stride for second dimension
+    EXPECT_EQ(functor2D.totalElements, 12);
+    EXPECT_EQ(functor2D.strides[0], 4); // stride for first dimension
+    EXPECT_EQ(functor2D.strides[1], 1); // stride for second dimension
 
     // 3D tensor (2x3x4)
     auto functor3D = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{2, 3, 4});
-    EXPECT_EQ(functor3D._totalElements, 24);
-    EXPECT_EQ(functor3D._strides[0], 12); // stride for first dimension
-    EXPECT_EQ(functor3D._strides[1], 4); // stride for second dimension
-    EXPECT_EQ(functor3D._strides[2], 1); // stride for third dimension
+    EXPECT_EQ(functor3D.totalElements, 24);
+    EXPECT_EQ(functor3D.strides[0], 12); // stride for first dimension
+    EXPECT_EQ(functor3D.strides[1], 4); // stride for second dimension
+    EXPECT_EQ(functor3D.strides[2], 1); // stride for third dimension
 
     // 4D tensor (2x2x3x4)
     auto functor4D
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 3, 4});
-    EXPECT_EQ(functor4D._totalElements, 48);
-    EXPECT_EQ(functor4D._strides[0], 24); // stride for first dimension
-    EXPECT_EQ(functor4D._strides[1], 12); // stride for second dimension
-    EXPECT_EQ(functor4D._strides[2], 4); // stride for third dimension
-    EXPECT_EQ(functor4D._strides[3], 1); // stride for fourth dimension
+    EXPECT_EQ(functor4D.totalElements, 48);
+    EXPECT_EQ(functor4D.strides[0], 24); // stride for first dimension
+    EXPECT_EQ(functor4D.strides[1], 12); // stride for second dimension
+    EXPECT_EQ(functor4D.strides[2], 4); // stride for third dimension
+    EXPECT_EQ(functor4D.strides[3], 1); // stride for fourth dimension
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicEdgeCases)

@@ -84,15 +84,15 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
     std::vector<int64_t> inputDims = {1, 3, 4, 4};
     std::vector<int64_t> outputDims = {1, 3, 4, 4};
 
-    PointwiseUnaryTensorBundle<float> tensorBundle(inputDims, outputDims, 1, TensorLayout::NCHW);
-
-    auto graphTuple = buildPointwiseUnaryGraph(tensorBundle,
-                                               DataType::FLOAT,
-                                               DataType::FLOAT,
-                                               DataType::FLOAT,
-                                               hipdnn_frontend::PointwiseMode::RELU_FWD);
-
-    auto& graph = std::get<0>(graphTuple);
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(inputDims,
+                                   outputDims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::RELU_FWD,
+                                   1,
+                                   TensorLayout::NCHW);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
@@ -121,17 +121,17 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
 
-    PointwiseBinaryTensorBundle<half> tensorBundle(
-        input1Dims, input2Dims, outputDims, 1, TensorLayout::NCHW);
-
-    auto graphTuple = buildPointwiseBinaryGraph(tensorBundle,
-                                                DataType::HALF,
-                                                DataType::HALF,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                hipdnn_frontend::PointwiseMode::ADD);
-
-    auto& graph = std::get<0>(graphTuple);
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(input1Dims,
+                                    input2Dims,
+                                    outputDims,
+                                    DataType::HALF,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());

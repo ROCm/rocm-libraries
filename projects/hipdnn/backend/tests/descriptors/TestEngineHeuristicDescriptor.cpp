@@ -30,13 +30,6 @@ using ::testing::Return;
 class TestEngineHeuristicDescriptor : public ::testing::Test
 {
 public:
-    std::unique_ptr<HipdnnBackendDescriptor> _engineHeuristicWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphBadTypeWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
-    std::unique_ptr<MockHandle> _mockHandle = nullptr;
-    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
-
     std::shared_ptr<EngineHeuristicDescriptor> getEngineHeuristicDescriptor() const
     {
         return _engineHeuristicWrapper->asDescriptor<EngineHeuristicDescriptor>();
@@ -89,6 +82,13 @@ public:
     }
 
 protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _engineHeuristicWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphBadTypeWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
+    std::unique_ptr<MockHandle> _mockHandle = nullptr;
+    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
+
     void SetUp() override
     {
         _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();

@@ -78,7 +78,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -98,7 +98,7 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -132,7 +132,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -169,7 +169,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -189,7 +189,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 10});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -210,7 +210,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
                               0); // e² - e
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -231,7 +231,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -259,7 +259,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(10)), 3);
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -301,7 +301,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -336,7 +336,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -372,7 +372,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -423,7 +423,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -477,7 +477,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -541,7 +541,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -587,7 +587,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -664,7 +664,7 @@ protected:
                               1,
                               1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -719,7 +719,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(upperClip), 0, 1, 1, 0); // 4.0 (at boundary)
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -803,7 +803,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -869,7 +869,7 @@ protected:
                               1,
                               1); // sigmoid(1.5)
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -927,7 +927,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -968,7 +968,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1024,7 +1024,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1065,7 +1065,7 @@ protected:
         expected.setHostValue(
             static_cast<OutputType>(std::abs(-TEST_VALUE_4)), 0, 1, 1, 1); // |-4| = 4
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1099,7 +1099,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1127,7 +1127,7 @@ protected:
         expected.setHostValue(static_cast<OutputType>(1.0f), 3); // max(0, 1) = 1
         expected.setHostValue(static_cast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1161,7 +1161,7 @@ protected:
             }
         }
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1180,7 +1180,7 @@ protected:
         Tensor<OutputType> expected({2, 3, 4});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_2_5));
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
@@ -1199,7 +1199,7 @@ protected:
         Tensor<OutputType> expected({1, 1, 1, 1});
         expected.setHostValue(static_cast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
-        auto tolerance = this->getMixedTypeTolerance();
+        auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }

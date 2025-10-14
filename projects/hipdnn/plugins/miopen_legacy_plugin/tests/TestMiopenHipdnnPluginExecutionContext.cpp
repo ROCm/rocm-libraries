@@ -7,6 +7,7 @@
 #include "mocks/MockPlan.hpp"
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
+#include "HipdnnEnginePluginHandle.hpp"
 
 using namespace miopen_legacy_plugin;
 
@@ -40,4 +41,16 @@ TEST(TestMiopenHipdnnEnginePluginExecutionContext, GetPlanThrowsIfNotSet)
     HipdnnEnginePluginExecutionContext ctx;
 
     EXPECT_THROW(ctx.plan(), hipdnn_plugin::HipdnnPluginException);
+}
+
+TEST(TestMiopenHipdnnEnginePluginExecutionContext, GetWorkspaceSize)
+{
+    HipdnnEnginePluginExecutionContext ctx;
+
+    auto mockPlan = std::make_unique<miopen_legacy_plugin::MockPlan>();
+    EXPECT_CALL(*mockPlan, getWorkspaceSize(::testing::_)).WillOnce(testing::Return(42));
+    ctx.setPlan(std::move(mockPlan));
+
+    HipdnnEnginePluginHandle dummyHandle;
+    EXPECT_EQ(ctx.plan().getWorkspaceSize(dummyHandle), 42);
 }
