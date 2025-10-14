@@ -15,7 +15,7 @@ The process of hipBLASLt GEMM tuning includes the followings
 ## Quick Start
 To run GEMM tuning with hipblaslt-bench on Qwen3-32B model.
 ```bash
-nohup python gemm_tuning.py --input_file example/Qwen3-32B_ali_hipblaslt.log --output_path test_tuning --requested_solution 128 > output.log 2>&1 &
+nohup python gemm_tuning.py --input_file example/Qwen3-32B_hipblaslt.log --output_path test_tuning --requested_solution 128 > output.log 2>&1 &
 ```
 
 The tuning generates some output files located at the output path "test_tuning".
@@ -23,7 +23,7 @@ The tuning generates some output files located at the output path "test_tuning".
         |testing_tuning
         |----> baseline_reproduce_commands.log       # logs that records commands to reproduce baseline result
         |----> tuning_reproduce_commands.log         # logs that records commands to reproduce tuning result
-        |----> unique_Qwen3-32B_ali_hipblaslt.log    # hipblaslt log without duplicate lines
+        |----> unique_Qwen3-32B_hipblaslt.log        # hipblaslt log without duplicate lines
         |----> tuning.txt                            # (optional) tuning result, if HIPBLASLT_TUNING_FILE is not defined
         |----> tuning_result.csv                     # includes info of each GEMM and the summary of both baseline and tuning data.
 
