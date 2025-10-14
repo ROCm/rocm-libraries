@@ -140,8 +140,8 @@ protected:
             // float use tf32 compute which share same mantissa bits
             epsilon_ = std::numeric_limits<half>::epsilon();
         }
-        double threshold       = epsilon_ * tolerance;
-        auto error             = miopen::rms_range(ref_out, output);
+        double threshold = epsilon_ * tolerance;
+        auto error       = miopen::rms_range(ref_out, output);
 
         EXPECT_FALSE(miopen::find_idx(ref_out, miopen::not_finite) >= 0)
             << "Non finite number found in the CPU data";
