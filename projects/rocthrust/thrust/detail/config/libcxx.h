@@ -49,6 +49,7 @@
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
 #    define _THRUST_LIBCXX                ::cuda
+#    define _THRUST_STD_NOVERSION         _CUDA_VSTD_NOVERSION
 #    define _THRUST_STD                   _CUDA_VSTD
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
@@ -67,6 +68,7 @@
 // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
 #    define _THRUST_LIBCXX                ::hip
 // In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
+#    define _THRUST_STD_NOVERSION         ::hip::std
 #    define _THRUST_STD                   _CUDA_VSTD
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
@@ -81,6 +83,7 @@
 #  define _THRUST_LIBCXX_INCLUDE(LIB)
 #  define _THRUST_STD_INCLUDE(LIB) <LIB>
 #  define _THRUST_LIBCXX
+#  define _THRUST_STD_NOVERSION         ::std
 #  define _THRUST_STD                   ::std
 #  define _THRUST_HAS_DEVICE_SYSTEM_STD 0
 #  define _THRUST_STD_NAMESPACE_BEGIN \
