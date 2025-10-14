@@ -31,7 +31,7 @@ set(BASE_ARCHITECTURES)
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
-if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For address sanitizer builds, "all" is just the architectures that
     # support xnack+.
     set(BASE_ARCHITECTURES
