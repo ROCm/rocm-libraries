@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <miopen/miopen.h>
 
@@ -15,6 +16,8 @@ public:
     MiopenConvDescriptor() = default;
     MiopenConvDescriptor(size_t spatialDimCount,
                          const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes);
+    MiopenConvDescriptor(size_t spatialDimCount,
+                         const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes);
 
     MiopenConvDescriptor(const MiopenConvDescriptor&) = delete;
     MiopenConvDescriptor& operator=(const MiopenConvDescriptor&) = delete;
@@ -28,6 +31,13 @@ public:
 
 private:
     miopenConvolutionDescriptor_t _descriptor = nullptr;
+
+    void createDescriptorInternal(size_t spatialDimCount,
+                                  const flatbuffers::Vector<int64_t>* attrPrePadding,
+                                  const flatbuffers::Vector<int64_t>* attrPostPadding,
+                                  const flatbuffers::Vector<int64_t>* attrStride,
+                                  const flatbuffers::Vector<int64_t>* attrDilation,
+                                  hipdnn_sdk::data_objects::ConvMode convMode);
 };
 
 }

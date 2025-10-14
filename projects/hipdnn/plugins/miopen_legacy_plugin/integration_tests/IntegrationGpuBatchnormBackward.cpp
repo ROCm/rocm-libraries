@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -15,6 +16,7 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -126,7 +128,10 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        const std::array<const char*, 1> paths = {PLUGIN_PATH};
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
@@ -221,6 +226,8 @@ protected:
             dxTensorAttr->set_uid(uid++);
         }
         dxTensorAttr->set_data_type(inputDataType);
+        dxTensorAttr->set_dim(graphTensorBundle.dxTensor.dims());
+        dxTensorAttr->set_stride(graphTensorBundle.dxTensor.strides());
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];
         if(!dscaleTensorAttr->has_uid())

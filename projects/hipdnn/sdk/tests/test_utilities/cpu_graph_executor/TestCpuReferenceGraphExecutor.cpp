@@ -25,29 +25,30 @@ using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
+using namespace hipdnn_plugin;
 
 class TestCpuReferenceGraphExecutor
 {
 public:
-    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
     static void runBatchnormFwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType)
     {
+        unsigned int seed = std::random_device{}();
         std::vector<int64_t> dims = {1, 3, 14, 14};
-        BatchnormFwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
-            dims, 1, TensorLayout::NCHW);
-
-        auto graphTuple = buildBatchnormFwdInferenceGraph(
-            tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType);
-
-        auto& graph = std::get<0>(graphTuple);
-        auto& variantPack = std::get<1>(graphTuple);
+        auto graph = buildBatchnormFwdInferenceGraph(
+            inputDataType, scaleBiasDataType, meanVarianceDataType, dims, TensorLayout::NCHW, true);
 
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+
+        BatchnormFwdTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toVariantPack();
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
@@ -158,29 +159,29 @@ public:
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllFloats)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, float, float>(
+    TestCpuReferenceGraphExecutor::runBatchnormFwdTest(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllHalfs)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormFwdTest<half, half, half>(
+    TestCpuReferenceGraphExecutor::runBatchnormFwdTest(
         DataType::HALF, DataType::HALF, DataType::HALF);
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllBFloats)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormFwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+    TestCpuReferenceGraphExecutor::runBatchnormFwdTest(
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
 
 TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
 {
-    EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, half>(
+    EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest(
                      DataType::FLOAT, DataType::HALF, DataType::HALF)),
                  std::runtime_error);
 
-    EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, float>(
+    EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest(
                      DataType::FLOAT, DataType::HALF, DataType::FLOAT)),
                  std::runtime_error);
 }
