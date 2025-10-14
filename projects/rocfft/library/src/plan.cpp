@@ -2687,7 +2687,6 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     auto lengthsWithBatch = lengths;
     lengthsWithBatch.push_back(batch);
 
-#ifdef ROCFFT_MPI_ENABLE
     // track which dimensions have already been FFTed
     std::vector<int> fft_done(rank, 0);
     for(auto d : contiguousInputDims)
@@ -2831,7 +2830,6 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     }
     // default general decomposition without sub-communicators
     else
-#endif
     {
         // transpose non-contiguous dims to be contiguous and
         // transform them too
