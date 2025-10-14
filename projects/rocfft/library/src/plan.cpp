@@ -2730,6 +2730,11 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     // using MPI sub-communicators for optimized pencil-to-pencil
     if(pencil_to_pencil)
     {
+        // This vector holds leases from an earlier iteration of the
+        // loop below, and is cleared when we are sure the leases can
+        // be reused.
+        std::vector<TempBufferLease> prevTempLeases;
+
         // plan global transposes and local FFTs
         for(size_t i = 0; i < transpose_sequence.size(); ++i)
         {
@@ -2806,6 +2811,11 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
             currentField       = nextField;
             currentBufs        = tempBufs;
             currentAntecedents = transposeItems;
+
+            // leases allocated in this iteration need to live
+            // through next loop iteration, since they will be passed
+            // as input to the next GlobalTranspose.
+            prevTempLeases.swap(tempLeases);
 
             // once data is transposed, plan intermediate FFT
             std::vector<size_t> fftItems;
