@@ -154,7 +154,6 @@ struct verify_reduce_with_indices
     tensor<float> gpu() const
     {
         using reduce::convert_type;
-
         std::tuple<tensor<T>, tensor<int>> results;
 
         results = gpuImpl();
@@ -701,7 +700,7 @@ struct verify_reduce_no_indices
 
     tensor<T> gpuImpl() const
     {
-        auto&& handle   = get_handle();
+        auto&& handle = get_handle();
         auto input_dev  = handle.Write(input.data);
         auto output_dev = handle.Write(output.data);
 
