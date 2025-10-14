@@ -49,6 +49,10 @@ public:
                 destroyExecutionContext,
                 (int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext),
                 (const, override));
+    MOCK_METHOD(size_t,
+                getWorkspaceSize,
+                (int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext),
+                (const, override));
 };
 
 }

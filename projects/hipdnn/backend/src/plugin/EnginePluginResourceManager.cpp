@@ -351,6 +351,25 @@ std::shared_ptr<const EngineExecutionContextWrapper>
     return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, engineConfig, graphDesc);
 }
 
+size_t EnginePluginResourceManager::getWorkspaceSize(
+    int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
+{
+    THROW_IF_NULL(
+        executionContext, HIPDNN_STATUS_INTERNAL_ERROR, "Execution context cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    return plugin->getWorkspaceSize(handle, executionContext);
+}
+
 void EnginePluginResourceManager::executeOpGraph(
     int64_t engineId,
     hipdnnEnginePluginExecutionContext_t executionContext,

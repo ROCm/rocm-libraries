@@ -148,8 +148,8 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        if(control < 0 || coordinate < 0)
-            return;
+        AssertFatal(control > 0 && coordinate > 0);
+
         m_trace.push_back({control, coordinate, rw});
 
         if(m_graph.coordinates.getElementType(coordinate) == Graph::ElementType::Node)
@@ -571,8 +571,7 @@ namespace rocRoller::KernelGraph
         auto src = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, src, ReadWrite::READ);
 
-        auto dst
-            = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+        auto dst = m_graph.mapper.get(tag, NaryArgument::DEST);
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 

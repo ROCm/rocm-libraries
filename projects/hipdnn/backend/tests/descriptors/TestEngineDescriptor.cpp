@@ -26,13 +26,6 @@ using ::testing::Return;
 class TestEngineDescriptor : public ::testing::Test
 {
 public:
-    std::unique_ptr<HipdnnBackendDescriptor> _engineWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphBadTypeWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
-    std::unique_ptr<MockHandle> _mockHandle = nullptr;
-    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
-
     std::shared_ptr<EngineDescriptor> getEngineDescriptor() const
     {
         return _engineWrapper->asDescriptor<EngineDescriptor>();
@@ -83,6 +76,13 @@ public:
     }
 
 protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _engineWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphBadTypeWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
+    std::unique_ptr<MockHandle> _mockHandle = nullptr;
+    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
+
     void SetUp() override
     {
         _engineWrapper = hipdnn_sdk::test_utilities::createDescriptor<EngineDescriptor>();
