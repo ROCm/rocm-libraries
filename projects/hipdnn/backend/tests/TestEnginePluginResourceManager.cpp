@@ -483,6 +483,28 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSize)
     }
 }
 
+TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContext)
+{
+    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(reinterpret_cast<hipdnnEnginePluginHandle_t>(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
+    EXPECT_CALL(*mockPlugin, getWorkspaceSize(_, _)).WillOnce(::testing::Return(size_t(4096)));
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    EnginePluginResourceManager resourceManager(pluginManager);
+
+    auto workspaceSize = resourceManager.getWorkspaceSize(
+        100, reinterpret_cast<hipdnnEnginePluginExecutionContext_t>(0x12345678));
+    EXPECT_EQ(workspaceSize, 4096);
+}
+
 TEST(TestEnginePluginResourceManager, GetEngineDetails)
 {
     std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
@@ -951,35 +973,6 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeNullEngineConfig)
     }
 }
 
-TEST(TestEnginePluginResourceManager, GetWorkspaceSizeInvalidEngineId)
-{
-    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
-    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
-    std::shared_ptr<MockEnginePluginManager> pluginManager
-        = std::make_shared<MockEnginePluginManager>();
-
-    MockGraphDescriptor mockGraphDesc;
-    hipdnnPluginConstData_t fakeEngineConfig = {
-        reinterpret_cast<const void*>("fake_config"),
-        11 // length of "fake_config"
-    };
-
-    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
-    EXPECT_CALL(*mockPlugin, createHandle())
-        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
-    EXPECT_CALL(*mockPlugin, getAllEngineIds())
-        .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
-    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
-
-    {
-        EnginePluginResourceManager resourceManager(pluginManager);
-
-        ASSERT_THROW_HIPDNN_STATUS(
-            resourceManager.getWorkspaceSize(999999, &fakeEngineConfig, &mockGraphDesc),
-            HIPDNN_STATUS_INTERNAL_ERROR);
-    }
-}
-
 TEST(TestEnginePluginResourceManager, GetWorkspaceSizeThrowsExceptionForInvalidEngineId)
 {
     std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
@@ -998,17 +991,58 @@ TEST(TestEnginePluginResourceManager, GetWorkspaceSizeThrowsExceptionForInvalidE
         .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*mockPlugin, getAllEngineIds())
         .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
-
     EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
 
     {
         EnginePluginResourceManager resourceManager(pluginManager);
 
-        // Test with an engine ID that is not in the list of available engines
         ASSERT_THROW_HIPDNN_STATUS(
             resourceManager.getWorkspaceSize(200, &fakeEngineConfig, &mockGraphDesc),
             HIPDNN_STATUS_INTERNAL_ERROR);
     }
+}
+
+TEST(TestEnginePluginResourceManager, GetWorkspaceSizeFromExecutionContextNullExecutionContext)
+{
+    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(reinterpret_cast<hipdnnEnginePluginHandle_t>(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    EnginePluginResourceManager resourceManager(pluginManager);
+
+    ASSERT_THROW_HIPDNN_STATUS(resourceManager.getWorkspaceSize(100, nullptr),
+                               HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+TEST(TestEnginePluginResourceManager,
+     GetWorkspaceSizeFromExecutionContextThrowsExceptionForInvalidEngineId)
+{
+    std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(reinterpret_cast<hipdnnEnginePluginHandle_t>(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100, 101, 102}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(_));
+
+    EnginePluginResourceManager resourceManager(pluginManager);
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        resourceManager.getWorkspaceSize(
+            200, reinterpret_cast<hipdnnEnginePluginExecutionContext_t>(0x12345678)),
+        HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST(TestEnginePluginResourceManager, SetPluginPathsWithActiveResourceManager)
