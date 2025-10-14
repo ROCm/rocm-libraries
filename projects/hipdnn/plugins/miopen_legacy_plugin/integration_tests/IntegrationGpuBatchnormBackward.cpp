@@ -226,6 +226,8 @@ protected:
             dxTensorAttr->set_uid(uid++);
         }
         dxTensorAttr->set_data_type(inputDataType);
+        dxTensorAttr->set_dim(graphTensorBundle.dxTensor.dims());
+        dxTensorAttr->set_stride(graphTensorBundle.dxTensor.strides());
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];
         if(!dscaleTensorAttr->has_uid())

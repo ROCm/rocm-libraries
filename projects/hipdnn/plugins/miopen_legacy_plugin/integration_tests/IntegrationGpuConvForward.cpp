@@ -134,6 +134,8 @@ protected:
         }
         yTensorAttr->set_output(true);
         yTensorAttr->set_data_type(dataType);
+        yTensorAttr->set_dim(graphTensorBundle.yTensor.dims());
+        yTensorAttr->set_stride(graphTensorBundle.yTensor.strides());
 
         auto result = graphObj->validate();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

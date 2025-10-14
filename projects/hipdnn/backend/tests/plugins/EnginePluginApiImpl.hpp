@@ -23,6 +23,8 @@ void destroyEngineDetails(hipdnnEnginePluginHandle_t handle,
 size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                         const hipdnnPluginConstData_t* engineConfig,
                         const hipdnnPluginConstData_t* opGraph);
+size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                        hipdnnEnginePluginExecutionContext_t executionContext);
 hipdnnEnginePluginExecutionContext_t
     createExecutionContext(hipdnnEnginePluginHandle_t handle,
                            const hipdnnPluginConstData_t* engineConfig,

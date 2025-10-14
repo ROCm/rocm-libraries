@@ -223,6 +223,8 @@ protected:
         }
 
         yTensorAttr->set_data_type(inputDataType);
+        yTensorAttr->set_dim(graphTensorBundle.yTensor.dims());
+        yTensorAttr->set_stride(graphTensorBundle.yTensor.strides());
 
         // Validate and build graph
         auto result = graph->validate();
