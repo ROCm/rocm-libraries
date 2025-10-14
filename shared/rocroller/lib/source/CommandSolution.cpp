@@ -402,7 +402,8 @@ namespace rocRoller
                 m_context));
         }
 
-        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::WorkgroupRemapXCC>(
             m_context, m_commandParameters->workgroupRemapXCC));
 
         transforms.push_back(

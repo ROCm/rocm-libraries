@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,21 +25,36 @@
  *******************************************************************************/
 
 #pragma once
-#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace ConnectWorkgroupsDetail
+        /**
+         * @brief  Remap Workgroup to be more cache friendly
+         * (consecutive workgroups land within the same XCC).
+         *
+         */
+        class WorkgroupRemapXCC : public GraphTransform
         {
-            /**
-             * @brief Connect dangling MacroTileNumber coordinate to
-             * matching Workgroup coordinates.
-             *
-             */
-            std::map<std::pair<int, rocRoller::Graph::Direction>, int>
-                connectWorkgroups(KernelGraph& kgraph);
-        }
+
+        public:
+            WorkgroupRemapXCC(ContextPtr context, std::optional<int> workgroupRemapXCC)
+                : m_context(context)
+                , m_workgroupRemapXCC(workgroupRemapXCC)
+            {
+            }
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "WorkgroupRemapXCC";
+            }
+
+        private:
+            ContextPtr         m_context;
+            std::optional<int> m_workgroupRemapXCC;
+        };
     }
 }

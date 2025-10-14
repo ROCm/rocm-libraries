@@ -63,3 +63,4 @@
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
+#include <rocRoller/KernelGraph/Transforms/WorkgroupRemapXCC.hpp>

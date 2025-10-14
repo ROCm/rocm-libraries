@@ -43,9 +43,8 @@ namespace rocRoller
         {
 
         public:
-            ConnectWorkgroups(ContextPtr context, std::optional<int> workgroupRemapXCC)
+            ConnectWorkgroups(ContextPtr context)
                 : m_context(context)
-                , m_workgroupRemapXCC(workgroupRemapXCC)
             {
             }
 
@@ -56,8 +55,7 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr         m_context;
-            std::optional<int> m_workgroupRemapXCC;
+            ContextPtr m_context;
         };
     }
 }
