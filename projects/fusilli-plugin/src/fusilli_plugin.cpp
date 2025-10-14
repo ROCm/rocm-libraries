@@ -150,7 +150,7 @@ hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t *handle) {
   // instance creation is thread safe, so this should be thread safe.
   // TODO(#2335): handle multiple architectures
   auto fusilliHandle =
-      FUSILLI_PLUGIN_TRY(fusilli::Handle::create(fusilli::Backend::GFX942));
+      FUSILLI_PLUGIN_TRY(fusilli::Handle::create(fusilli::Backend::AMDGPU));
   *handle = new HipdnnEnginePluginHandle(std::move(fusilliHandle));
 
   LOG_API_SUCCESS_AUTO("createdHandle={:p}", static_cast<void *>(*handle));
