@@ -43,8 +43,13 @@ namespace rocRoller
          * Parses ELF as a string into a T.
          */
         template <typename T>
-        T fromELF(std::string const& elf);
+        T fromELFFile(std::string const& filename);
 
+        template <typename T>
+        T fromELFData(amd_comgr_metadata_node_t metadata);
+
+        template <typename T>
+        T fromELF(std::string const& filename);
     }
 }
 

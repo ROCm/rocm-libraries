@@ -27,6 +27,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <fstream>
 #include <rocRoller/Serialization/ELF.hpp>
 #include <rocRoller/Serialization/comgr/comgr.hpp>
 #include <amd_comgr/amd_comgr.h>
@@ -36,29 +38,58 @@ namespace rocRoller
     namespace Serialization
     {
         template <typename T>
-        T fromELF(std::string const& elf)
+        T fromELFData(amd_comgr_metadata_node_t metadataNode)
         {
             T rv;
-            
-            amd_comgr_data_t elfData;
-            amd_comgr_metadata_node_t metadataNode;
-            
-            auto status = amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &elfData);
-            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to create COMGR data object");
-            
-            status = amd_comgr_set_data(elfData, elf.size(), elf.data());
-            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data");
-            
-            status = amd_comgr_get_data_metadata(elfData, &metadataNode);
-            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to extract metadata from ELF");
-            
+          
             Serialization::ComgrNodeInput comgrNodeInput(metadataNode, nullptr);
             comgrNodeInput.input(metadataNode, rv);
-            
             amd_comgr_destroy_metadata(metadataNode);
-            amd_comgr_release_data(elfData);
             
             return rv;
+        }
+
+        template <typename T>
+        T fromELFFile (std::string const& filename)
+        {
+            amd_comgr_data_t data;
+            amd_comgr_metadata_node_t node;
+            std::vector<char> buffer;
+
+            std::ifstream file(filename, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                throw std::runtime_error("Failed to open ELF file: " + filename);
+            }
+            
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+            
+            buffer.resize(size);
+            if (!file.read(buffer.data(), size)) {
+                throw std::runtime_error("Failed to read ELF file: " + filename);
+            }
+            file.close();
+
+            auto status = amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &data);
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to create COMGR data object");
+            
+            status = amd_comgr_set_data(data, buffer.size(), buffer.data());
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data");
+
+            status = amd_comgr_set_data_name(data, NULL);
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to set ELF data name");
+
+            status = amd_comgr_get_data_metadata(data, &node);
+            AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get ELF metadata");
+
+            try {
+                return fromELFData<T>(node);
+            } catch (...) {
+                std::cerr << "Error processing ELF file: " << filename << std::endl;
+                amd_comgr_release_data(data);
+                amd_comgr_destroy_metadata(node);
+                throw;
+            }
         }
     } // namespace Serialization
 } // namespace rocRoller

@@ -52,8 +52,8 @@ namespace rocRoller
         return Serialization::fromYAML<AssemblyKernels>(str);
     }
 
-    AssemblyKernels AssemblyKernels::fromELF(std::string const& str)
+    AssemblyKernels AssemblyKernels::fromELF(std::string const& filename)
     {
-        return Serialization::fromELF<AssemblyKernels>(str);
+        return Serialization::fromELFFile<AssemblyKernels>(filename);
     }
 }
