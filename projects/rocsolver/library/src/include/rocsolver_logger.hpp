@@ -277,10 +277,7 @@ public:
     // check environment variable
     static bool check_env_variable()
     {
-        const char* env;
-        if((env = std::getenv("ROCSOLVER_LOGGING_ENABLED")) != nullptr)
-            return true;
-        return false;
+        return (std::getenv("ROCSOLVER_LOGGING_ENABLED") != nullptr)
     }
 
     // check environment variable, checking if it is cached already
