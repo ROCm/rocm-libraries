@@ -629,23 +629,22 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
 #endif // USE_4D_TENSOR_LITE
 
 #ifdef USE_2D_TENSOR_LITE
-extern "C" __global__ void Op2dTensorLite(
-                            const MIOPEN_TYPE* a,
-                            const int a_nstride,
-                            const MIOPEN_TYPE* b,
-                            const int b_nstride,
-                            MIOPEN_TYPE* c,
-                            const int c_nstride,
-                            const MIOPEN_TYPE alpha0,
-                            const MIOPEN_TYPE alpha1,
-                            const MIOPEN_TYPE beta,
-                            const uint64_t Aoffset,
-                            const uint64_t Boffset,
-                            const uint64_t Coffset,
-                            const long total_work,
-                            const long total_work2,
-                            const int use_beta,
-                            const int use_bias)
+extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
+                                          const int a_nstride,
+                                          const MIOPEN_TYPE* b,
+                                          const int b_nstride,
+                                          MIOPEN_TYPE* c,
+                                          const int c_nstride,
+                                          const MIOPEN_TYPE alpha0,
+                                          const MIOPEN_TYPE alpha1,
+                                          const MIOPEN_TYPE beta,
+                                          const uint64_t Aoffset,
+                                          const uint64_t Boffset,
+                                          const uint64_t Coffset,
+                                          const long total_work,
+                                          const long total_work2,
+                                          const int use_beta,
+                                          const int use_bias)
 {
     int gid0 = blockIdx.x * blockDim.x + threadIdx.x;
     int gid1 = blockIdx.y * blockDim.y + threadIdx.y;
@@ -658,7 +657,7 @@ extern "C" __global__ void Op2dTensorLite(
     {
         if(use_bias == 1)
         {
-            int b_index = gid0 * RD_BLCK;
+            int b_index          = gid0 * RD_BLCK;
             *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
         }
 
@@ -685,7 +684,7 @@ extern "C" __global__ void Op2dTensorLite(
 
                 if(use_bias == 0)
                 {
-                    int b_index = gid1 * b_nstride + gid0 * RD_BLCK;
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
                     *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
                 }
 
@@ -721,7 +720,7 @@ extern "C" __global__ void Op2dTensorLite(
 
                 if(use_bias == 0)
                 {
-                    int b_index = gid1 * b_nstride + gid0 * RD_BLCK;
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
                     *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
                 }
 

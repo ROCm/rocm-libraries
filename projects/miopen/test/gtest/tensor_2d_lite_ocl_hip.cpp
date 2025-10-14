@@ -48,25 +48,25 @@ std::vector<TensorsConfig> TensorsConfigs()
     std::vector<TensorsConfig> configs;
 #define MiB (1024ul * 1024ul)
 
-#if PERF_ENABLE
+    #if PERF_ENABLE
     for(int N = (1 * MiB); N <= (1024 * MiB); N *= 2)
     {
-        configs.push_back({{1,1,N}, {N,N,1}, {1,1,N}, {N,N,1}});
+        configs.push_back({{1, 1, N}, {N, N, 1}, {1, 1, N}, {N, N, 1}});
     }
     return configs;
-#else
+    #else
     int C = 4;
     int N = 20 * 1024;
-    configs.push_back({{1,C,N}, {N*C,N,1}, {1,C,N}, {N*C,N,1}});
+    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
     C = 1;
     N = 64 * MiB;
-    configs.push_back({{1,C,N}, {N*C,N,1}, {1,C,N}, {N*C,N,1}});
+    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
     N = 256 * MiB;
-    configs.push_back({{1,C,N}, {N*C,N,1}, {1,C,N}, {N*C,N,1}});
+    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
     N = 1024 * MiB;
-    configs.push_back({{1,C,N}, {N*C,N,1}, {1,C,N}, {N*C,N,1}});
+    configs.push_back({{1, C, N}, {N * C, N, 1}, {1, C, N}, {N * C, N, 1}});
     return configs;
-#endif
+    #endif
 }
 
 template <typename T>
@@ -76,15 +76,18 @@ struct Op2dTensorLiteTest
 protected:
     void SetUp() override
     {
-        auto&& handle = get_handle();
+        auto&& handle                                 = get_handle();
         std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         data_type = miopen_type<T>{};
 
         // Generate elements in tensors
-        tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(tensor_elem_gen_integer{17});
-        tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(tensor_elem_gen_integer{17});
-        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate([](auto...) { return 1; });
+        tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            tensor_elem_gen_integer{17});
+        tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
+            tensor_elem_gen_integer{17});
+        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            [](auto...) { return 1; });
 
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
@@ -100,8 +103,8 @@ protected:
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
 
         int num_wg = first_not_one != tensorsConfig.blens.rend()
-                        ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
-                        : 1;
+                         ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
+                         : 1;
         for(int i = (d - 2); i >= 0; i--)
         {
             if(tensorsConfig.blens[i] != 1)
@@ -111,28 +114,29 @@ protected:
         }
 
         long max_num_wg = 4096;
-        num_wg = num_wg > max_num_wg ? max_num_wg : num_wg;
+        num_wg          = num_wg > max_num_wg ? max_num_wg : num_wg;
 
-        auto len = tensorsConfig.aclens[2];
+        auto len     = tensorsConfig.aclens[2];
         auto RD_BLCK = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
         const std::string MIOPEN_TYPE = miopen::GetDataType(data_type);
-        const std::string READ_TYPE = (RD_BLCK == 1) ? MIOPEN_TYPE : MIOPEN_TYPE + std::to_string(RD_BLCK);
+        const std::string READ_TYPE   = (RD_BLCK == 1) ? MIOPEN_TYPE : MIOPEN_TYPE + std::to_string(RD_BLCK);
+
         params = " -DMIOPEN_TYPE=" + MIOPEN_TYPE +
                  " -DREAD_TYPE=" + READ_TYPE +
                  " -DRD_BLCK=" + std::to_string(RD_BLCK);
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_2D_TENSOR_LITE";
 
-        total_work = std::max(len/RD_BLCK, 1);
+        total_work         = std::max(len/RD_BLCK, 1);
         long local_threads = 256;
-        long grp_sz = (total_work + local_threads - 1) / local_threads;
-        grp_sz = std::min(max_num_wg, grp_sz);
-        long glb_sz = local_threads * grp_sz;
+        long grp_sz        = (total_work + local_threads - 1) / local_threads;
+        grp_sz             = std::min(max_num_wg, grp_sz);
+        long glb_sz        = local_threads * grp_sz;
 
-        total_work2 = tensorsConfig.aclens[1];
+        total_work2         = tensorsConfig.aclens[1];
         long local_threads2 = 64;
-        long grp_sz2 = (total_work2 + local_threads2 - 1) / local_threads2;
-        grp_sz2 = std::min((max_num_wg / grp_sz), grp_sz2);
-        long glb_sz2 = local_threads2 * grp_sz2;
+        long grp_sz2        = (total_work2 + local_threads2 - 1) / local_threads2;
+        grp_sz2             = std::min((max_num_wg / grp_sz), grp_sz2);
+        long glb_sz2        = local_threads2 * grp_sz2;
 
         vld = {local_threads, 1, 1};
         vgd = {glb_sz, glb_sz2, 1};
@@ -151,7 +155,7 @@ protected:
 
         std::string paramsOCL = params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
 
-        std::string program_name = "MIOpenTensorKernels.cl";
+        std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("Op2dTensorLite",
@@ -160,18 +164,18 @@ protected:
                          "Op2dTensorLite",
                          vld,
                          vgd,
-                         paramsOCL)(tensA_dev.get(), //a
-                                    tensorsConfig.acstrides[0], //a_nstride
-                                    tensB_dev.get(), //b
-                                    tensorsConfig.bstrides[0], //b_nstride
-                                    tensC_dev.get(), //c
-                                    tensorsConfig.acstrides[0], //c_nstride
+                         paramsOCL)(tensA_dev.get(), /* a */
+                                    tensorsConfig.acstrides[0], /* a_nstride */
+                                    tensB_dev.get(), /* b */
+                                    tensorsConfig.bstrides[0], //b_nstride */
+                                    tensC_dev.get(), /* c */
+                                    tensorsConfig.acstrides[0], /* c_nstride */
                                     alpha0,
                                     alpha1,
                                     beta,
-                                    uint64_t(0), //Aoffset
-                                    uint64_t(0), //Boffset
-                                    uint64_t(0), //Coffset
+                                    uint64_t(0), /* Aoffset */
+                                    uint64_t(0), /* Boffset */
+                                    uint64_t(0), /* Coffset */
                                     total_work,
                                     total_work2,
                                     use_beta,
@@ -209,7 +213,7 @@ protected:
 
         std::string paramsHIP = params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
 
-        std::string program_name = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel("Op2dTensorLite",
@@ -218,18 +222,18 @@ protected:
                          "Op2dTensorLite",
                          vld,
                          vgd,
-                         paramsHIP)(tensA_dev.get(), //a
-                                    tensorsConfig.acstrides[0], //a_nstride
-                                    tensB_dev.get(), //b
-                                    tensorsConfig.bstrides[0], //b_nstride
-                                    tensC_dev.get(), //c
-                                    tensorsConfig.acstrides[0], //c_nstride
+                         paramsHIP)(tensA_dev.get(), /* a */
+                                    tensorsConfig.acstrides[0], /* a_nstride */
+                                    tensB_dev.get(), /* b */
+                                    tensorsConfig.bstrides[0], /* b_nstride */
+                                    tensC_dev.get(), /* c */
+                                    tensorsConfig.acstrides[0], /* c_nstride */
                                     alpha0,
                                     alpha1,
                                     beta,
-                                    uint64_t(0), //Aoffset
-                                    uint64_t(0), //Boffset
-                                    uint64_t(0), //Coffset
+                                    uint64_t(0), /* Aoffset */
+                                    uint64_t(0), /* Boffset */
+                                    uint64_t(0), /* Coffset */
                                     total_work,
                                     total_work2,
                                     use_beta,
