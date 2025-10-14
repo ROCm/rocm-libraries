@@ -37,9 +37,21 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
 #include <thrust/system/hip/detail/util.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__exception/terminate.h)
+// clang-format on
+#else
+#  include <thrust/detail/nv_target.h>
+#endif
+
 #include <cstdio>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstdlib>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -48,21 +60,19 @@ namespace hip
 {
 namespace detail
 {
-
-inline THRUST_DEVICE void terminate()
-{
-  thrust::hip_rocprim::terminate();
-}
-
 inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
   THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0
   THRUST_UNUSED_VAR(message);
 #endif
-  thrust::hip_rocprim::terminate();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  _THRUST_STD_NOVERSION::terminate();
+#else
+  NV_IF_TARGET(NV_IS_HOST, (::std::exit(-1);), (__builtin_trap();));
+  __builtin_unreachable();
+#endif
 }
-
 } // namespace detail
 } // namespace hip
 } // namespace system
