@@ -111,6 +111,18 @@ struct GraphAndTensorMap
         }
         return deviceBuffers;
     }
+
+    std::unordered_map<int64_t, void*> hostBufferMap()
+    {
+        std::unordered_map<int64_t, void*> bufferMap;
+        for(auto& [uid, tensorVariant] : tensorMap)
+        {
+            bufferMap[uid] = std::visit(
+                [](auto& tensor) -> void* { return tensor->memory().hostData(); }, tensorVariant);
+        }
+
+        return bufferMap;
+    }
 };
 
 inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)

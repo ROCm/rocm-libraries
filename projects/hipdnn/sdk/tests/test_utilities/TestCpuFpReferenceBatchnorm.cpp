@@ -7,6 +7,7 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
@@ -22,71 +23,73 @@ using namespace hipdnn_sdk::utilities;
 
 namespace fs = std::filesystem;
 
-// class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
-// {
-// public:
-//     hipdnn_sdk::json::GraphAndTensorMap graphAndTensors;
+class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
+{
+protected:
+    hipdnn_sdk::json::GraphAndTensorMap _graphAndTensors;
 
-// protected:
-//     // NOLINTNEXTLINE(readability-identifier-naming)
-//     void SetUp() override
-//     {
-//         auto const& path = GetParam();
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void SetUp() override
+    {
+        auto const& path = GetParam();
 
-//         graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
-//     }
-// };
+        _graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
+    }
+};
 
-// TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
-// {
-//     auto const& graph = graphAndTensors.graph();
-//     ASSERT_EQ(graph.nodes()->size(), 1);
+TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
+{
+    auto const& graph = _graphAndTensors.graph();
+    ASSERT_EQ(graph.nodes()->size(), 1);
 
-//     ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
-//               hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+    ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
+              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
 
-//     auto const& attributes = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
+    auto const& batchnormInferenceNode
+        = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
 
-//     int64_t inputUid = attributes.x_tensor_uid();
-//     int64_t meanUid = attributes.mean_tensor_uid();
-//     int64_t invVarianceUid = attributes.inv_variance_tensor_uid();
-//     int64_t biasUid = attributes.bias_tensor_uid();
-//     int64_t scaleUid = attributes.scale_tensor_uid();
-//     int64_t outputUid = attributes.y_tensor_uid();
+    int64_t yIndex = batchnormInferenceNode.y_tensor_uid();
+    hipdnn_sdk::json::TensorVariant& yTensorVariant = _graphAndTensors.tensorMap.at(yIndex);
 
-//     EXPECT_EQ(graphAndTensors.deviceBuffers().size(), 6);
+    auto yTensorReferenceVariant = std::visit(
+        [](auto& yTensor) -> hipdnn_sdk::json::TensorVariant {
+            using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
+            auto ret = std::make_unique<hipdnn_sdk::utilities::Tensor<DataType>>(
+                std::move(yTensor->copy()));
+            yTensor->fillWithValue(static_cast<DataType>(0.f));
+            return ret;
+        },
+        yTensorVariant);
 
-//     std::visit(
-//         Visitor{[&](auto& tensorMap) {
-//                     using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
+    auto tensorMap = _graphAndTensors.hostBufferMap();
+    EXPECT_EQ(tensorMap.size(), 6);
 
-//                     Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
+    CpuReferenceGraphExecutor().execute(
+        _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
 
-//                     Tensor<DataType> cpuOutput(referenceOutput.dims(), referenceOutput.strides());
+    auto validateResults = hipdnn_sdk::utilities::Visitor{
+        [](std::unique_ptr<hipdnn_sdk::utilities::Tensor<int>>&) { FAIL(); },
+        [&](auto& yTensor) {
+            using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
 
-//                     CpuFpReferenceBatchnormImpl<DataType, DataType>::batchnormFwdInference(
-//                         *tensorMap.at(inputUid),
-//                         *tensorMap.at(scaleUid),
-//                         *tensorMap.at(biasUid),
-//                         *tensorMap.at(meanUid),
-//                         *tensorMap.at(invVarianceUid),
-//                         cpuOutput,
-//                         1e-5);
-//                     auto tolerance
-//                         = hipdnn_sdk::test_utilities::batchnorm::getToleranceInference<DataType>();
-//                     auto validator
-//                         = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<DataType>(tolerance);
-//                     EXPECT_TRUE(validator.allClose(cpuOutput.memory(), referenceOutput.memory()));
-//                 },
-//                 [&](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }},
-//         graphAndTensors.tensorMap);
-// }
+            CpuFpReferenceValidation<DataType> cpuRefValidation(static_cast<DataType>(0.02f),
+                                                                static_cast<DataType>(0.02f));
+            yTensor->memory().markDeviceModified();
+            auto& yTensorReference
+                = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<DataType>>>(
+                    yTensorReferenceVariant);
+            EXPECT_TRUE(cpuRefValidation.allClose(yTensorReference->memory(), yTensor->memory()));
+        }};
 
-// INSTANTIATE_TEST_SUITE_P(,
-//                          TestCpuFpReferenceBatchnormFwdInference,
-//                          testing::ValuesIn(filesInDirectoryWithExt(
-//                              hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/reference_data/",
-//                              ".json")));
+    std::visit(validateResults, yTensorVariant);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestCpuFpReferenceBatchnormFwdInference,
+    testing::ValuesIn(filesInDirectoryWithExt(hipdnn_sdk::utilities::getCurrentExecutableDirectory()
+                                                  / "../lib/reference_data/",
+                                              ".json")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {
