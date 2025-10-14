@@ -35,10 +35,8 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 # Set HIP flags
@@ -200,10 +198,6 @@ add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVIC
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
-endif()
-
-if(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 if (WIN32)
