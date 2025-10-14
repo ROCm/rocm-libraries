@@ -113,11 +113,12 @@ TEST_P(TestBatchnormFwdInferenceExecuteGraphGoldenReference, Correctness)
     goldenReferenceTestSuite();
 }
 
-INSTANTIATE_TEST_SUITE_P(,
-                         TestBatchnormFwdInferenceExecuteGraphGoldenReference,
-                         testing::ValuesIn(filesInDirectoryWithExt(
-                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
-                             ".json")));
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestBatchnormFwdInferenceExecuteGraphGoldenReference,
+    testing::ValuesIn(filesInDirectoryWithExt(hipdnn_sdk::utilities::getCurrentExecutableDirectory()
+                                                  / "../lib/reference_data/",
+                                              ".json")));
 
 template <typename InputType, typename IntermediateType>
 class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<Batchnorm2dTestCase>

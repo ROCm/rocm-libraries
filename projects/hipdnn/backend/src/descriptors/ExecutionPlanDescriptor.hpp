@@ -21,6 +21,7 @@ class ExecutionPlanDescriptor : public HipdnnBackendDescriptorImpl<ExecutionPlan
 private:
     std::shared_ptr<const EngineConfigDescriptor> _engineConfig;
     std::shared_ptr<const plugin::EngineExecutionContextWrapper> _executionContext;
+    int64_t _workspaceSize = INVALID_WORKSPACE_SIZE;
 
     void getWorkspaceSize(hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
@@ -61,6 +62,8 @@ public:
     virtual hipdnnEnginePluginExecutionContext_t getExecutionContext() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
 };
 
 } // namespace hipdnn_backend

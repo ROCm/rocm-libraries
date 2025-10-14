@@ -928,23 +928,32 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 #ifdef ROCFFT_MPI_ENABLE
     auto mpi_comm = ActiveMPIComm(plan);
 
-    const auto  elem_size = element_size(precision, arrayType);
-    MPI_Request request;
-    const int   local_comm_rank = plan->get_local_comm_rank();
+    MPI_Request  request;
+    MPI_Datatype elem_type       = rocfft_type_to_mpi_type(precision, arrayType);
+    const int    local_comm_rank = plan->get_local_comm_rank();
 
     if(uniform_counts)
     {
         if(LOG_PLAN_ENABLED())
             log_plan("Using MPI_Ialltoall\n");
 
-        const int send_count_bytes = static_cast<int>(sendCounts[0] * elem_size);
+        size_t send_count_elems = sendCounts[0];
+        if(send_count_elems > static_cast<size_t>(std::numeric_limits<int>::max()))
+        {
+            comm_status   = COMM_MPI_ERROR;
+            error_message = "send count too large to fit in MPI int on rank "
+                            + std::to_string(local_comm_rank);
+            return;
+        }
+
+        const int send_count = static_cast<int>(send_count_elems);
 
         const auto mpiret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
+                                          send_count,
+                                          elem_type,
                                           recvBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
+                                          send_count,
+                                          elem_type,
                                           mpi_comm,
                                           &request);
 
@@ -968,29 +977,43 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
         // non-uniform exchange case (default)
 
-        // MPI takes ints for everything, convert our size_t elements to int bytes
-        auto convertToInt = [](const std::vector<size_t>& src, std::vector<int>& dest) {
+        // MPI takes ints for everything, safely convert our size_t elements to int bytes
+        // prevent overflow for large batched transforms
+        auto convertToInt = [&](const std::vector<size_t>& src, std::vector<int>& dest) -> bool {
+            dest.clear();
             dest.reserve(src.size());
-            std::copy(src.begin(), src.end(), std::back_inserter(dest));
+            for(size_t v : src)
+            {
+                if(v > static_cast<size_t>(std::numeric_limits<int>::max()))
+                    return false; // overflow
+                dest.push_back(static_cast<int>(v));
+            }
+            return true;
         };
 
         std::vector<int> intSendOffsets;
         std::vector<int> intSendCounts;
         std::vector<int> intRecvOffsets;
         std::vector<int> intRecvCounts;
-        convertToInt(sendOffsets, intSendOffsets);
-        convertToInt(sendCounts, intSendCounts);
-        convertToInt(recvOffsets, intRecvOffsets);
-        convertToInt(recvCounts, intRecvCounts);
+
+        if(!convertToInt(sendOffsets, intSendOffsets) || !convertToInt(sendCounts, intSendCounts)
+           || !convertToInt(recvOffsets, intRecvOffsets)
+           || !convertToInt(recvCounts, intRecvCounts))
+        {
+            comm_status   = COMM_MPI_ERROR;
+            error_message = "send/recv counts or offsets too large to fit in MPI int on rank "
+                            + std::to_string(local_comm_rank);
+            return;
+        }
 
         const auto mpiret = MPI_Ialltoallv(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
                                            intSendCounts.data(),
                                            intSendOffsets.data(),
-                                           rocfft_type_to_mpi_type(precision, arrayType),
+                                           elem_type,
                                            recvBuf.get(in_buffer, out_buffer, local_comm_rank),
                                            intRecvCounts.data(),
                                            intRecvOffsets.data(),
-                                           rocfft_type_to_mpi_type(precision, arrayType),
+                                           elem_type,
                                            mpi_comm,
                                            &request);
 

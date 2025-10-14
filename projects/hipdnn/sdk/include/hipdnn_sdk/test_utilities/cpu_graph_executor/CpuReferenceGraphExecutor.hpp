@@ -13,6 +13,7 @@ namespace hipdnn_sdk::test_utilities
 
 class CpuReferenceGraphExecutor
 {
+
 public:
     CpuReferenceGraphExecutor() = default;
 
@@ -24,28 +25,45 @@ public:
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
-        // todo future, we need to build the DAG and process it to produce a topological sequential order to execute nodes.
-        // this is currently incorrect but works for single node graphs.
+        //The graph in graphBuffer is guaranteed to be topologically sorted.
         for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
         {
-
             auto& node = graphWrap.getNode(i);
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        // todo future, look through the graphs Tensor map and look for virtual tensors.
-        // for each virtual tensor, create a instace of MigratableMemory(or make a host only memory class).
-        // Add each new memory instance to a copy of the variant pack.
-        // its not worth doing this before we know we can handle the full graph as we dont want to alloc memory
-        // we dont need.
+        std::vector<std::unique_ptr<ITensor>> virtualTensors;
+        std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
+            = populateVariantPackWithMissingVirtualTensors(
+                variantPack, graphWrap.getTensorMap(), virtualTensors);
 
         for(auto& executor : planExecutors)
         {
-            executor->execute(variantPack);
+            executor->execute(variantPackWithVirtualTensorsAdded);
         }
     }
 
 private:
+    static std::unordered_map<int64_t, void*> populateVariantPackWithMissingVirtualTensors(
+        const std::unordered_map<int64_t, void*>& variantPack,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap,
+        std::vector<std::unique_ptr<ITensor>>& virtualTensors)
+    {
+        std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
+
+        for(const auto& [id, attr] : tensorMap)
+        {
+            if(attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
+            {
+                auto tensor = createTensorFromAttribute(*attr);
+                virtualTensors.push_back(std::move(tensor));
+                updatedVariantPack[id] = virtualTensors.back()->rawHostData();
+            }
+        }
+        return updatedVariantPack;
+    }
+
     std::unique_ptr<IGraphNodePlanExecutor>
         buildPlanForNode(const hipdnn_plugin::IGraph& graph,
                          const hipdnn_sdk::data_objects::Node& node)
@@ -88,5 +106,4 @@ private:
 
     PlanBuilderRegistry _planRegistry;
 };
-
 }

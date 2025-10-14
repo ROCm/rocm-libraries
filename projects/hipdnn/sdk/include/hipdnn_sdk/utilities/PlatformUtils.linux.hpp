@@ -5,8 +5,9 @@
 
 #if defined(__linux__)
 #include <array>
+#include <climits>
 #include <filesystem>
-#include <limits.h>
+#include <stdexcept>
 #include <unistd.h>
 namespace hipdnn_sdk
 {
@@ -49,16 +50,18 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
     return a.native() == b.native();
 }
 
+inline std::filesystem::path getCurrentExecutableDirectory()
+{
+    std::array<char, PATH_MAX + 1> result{}; // +1 for trailing null termination
+    ssize_t count = readlink("/proc/self/exe", result.data(), PATH_MAX);
+    if(count == -1)
+    {
+        throw std::runtime_error("Failed to get executable path");
+    }
+    return std::filesystem::path(std::string(result.data(), static_cast<size_t>(count)))
+        .parent_path();
 }
 
-namespace detail
-{
-inline std::filesystem::path getExecutablePath()
-{
-    std::array<char, PATH_MAX + 1> buffer{}; // +1 for null termination
-    readlink("/proc/self/exe", buffer.data(), PATH_MAX);
-    return buffer.data();
-}
 }
 }
 

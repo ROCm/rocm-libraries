@@ -34,9 +34,5 @@ inline std::string getExecutableName(const char* executableBaseName)
     return std::string(executableBaseName) + EXECUTABLE_EXT;
 }
 
-inline std::filesystem::path getBinaryDir()
-{
-    return detail::getExecutablePath().parent_path();
-}
 }
 }

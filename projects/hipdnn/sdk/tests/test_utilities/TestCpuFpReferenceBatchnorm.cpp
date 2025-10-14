@@ -85,7 +85,7 @@ namespace fs = std::filesystem;
 // INSTANTIATE_TEST_SUITE_P(,
 //                          TestCpuFpReferenceBatchnormFwdInference,
 //                          testing::ValuesIn(filesInDirectoryWithExt(
-//                              hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
+//                              hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/reference_data/",
 //                              ".json")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
