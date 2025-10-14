@@ -149,8 +149,16 @@ if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
-    # For standalone builds we need to install the ctest files
     if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+        create_test_name_validation_target()
+        
+        finalize_custom_check_target()
+        finalize_unit_check_target()
+        finalize_integration_check_target()
+        
+        add_dependencies(check validate_test_names)
+        add_dependencies(check_ctest validate_test_names)
+        
         install_miopen_legacy_plugin_ctest_files()
     endif()
 endif()

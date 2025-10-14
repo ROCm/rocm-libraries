@@ -53,4 +53,4 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_tests)
 endif()
 
-add_target_to_check_targets(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_unit_test_target(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
