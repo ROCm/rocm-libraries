@@ -12,10 +12,7 @@ The following improvements span across all hipDNN components and represent found
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Repository Migration**: Migrating to [https://github.com/ROCm/rocm-libraries](https://github.com/ROCm/rocm-libraries) for better integration with the ROCm ecosystem
-- **Build Platform Integration**: Integration into [https://github.com/ROCm/TheRock](https://github.com/ROCm/TheRock) build platform
-- **Code Style Updates**: Updating class naming conventions to improve consistency across the codebase
-- **Test Standardization**: Standardizing test naming conventions and updating test implementations
+- **Build Platform Integration**: Ongoing integration into [https://github.com/ROCm/TheRock](https://github.com/ROCm/TheRock) build platform
 - **Version Management**: Implementing consistent version numbering support across SDK and Backend components
 
 ### Future Roadmap
@@ -30,8 +27,7 @@ The Frontend provides the user-facing C++ API for hipDNN, focusing on ease of us
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Convolution Support**: Adding operation support for Convolution operations
-- **Pointwise Operations**: Reviewing and finalizing Pointwise operation support
+- **Fusion Support**: Adding operation support for Convolution & BatchNorm Fusions
 - **Backend Selection**: Adding API to select preferred backend engines
 
 ### Future Roadmap
@@ -43,6 +39,7 @@ The Frontend provides the user-facing C++ API for hipDNN, focusing on ease of us
 - **Dynamic Loading**: Supporting runtime loading of hipDNN backend libraries
 - **Filtering engines**: Adding API to control filtering of engines based off behavorial notes
 - **Configurable engines**: Adding API to configure tunable settings provided by engines
+- **Specify compute type**: Allow users to specify the accumulator compute types for plugins to use
 
 ## Backend
 
@@ -54,10 +51,10 @@ The Backend serves as the core engine of hipDNN, managing plugins and orchestrat
 ### Future Roadmap
 *The following items are longer-term goals that are not yet scheduled:*
 
-- **Unique Engine IDs**: Mechanism to improve or ensure the global uniqueness of engine IDs 
+- **Unique Engine IDs**: Mechanism to improve or ensure the global uniqueness of engine IDs
 - **API Extensions**: Adding support for behavioral notes and tunable knobs
 - **Improved Logging**: Enhancing logging capabilities for better debugging and monitoring
-- **Plugin Systems**: 
+- **Plugin Systems**:
   - Benchmarking and tuning plugin system (see [Design.md](./Design.md#high-level-architecture) for architecture details)
   - Heuristic plugin system (see [Design.md](./Design.md#high-level-architecture) for architecture details)
 - **Persistence**: Implementing functionality to save and load graphs and execution plans
@@ -71,17 +68,12 @@ The SDK provides shared utilities and interfaces that ensure compatibility betwe
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Convolution Support**: Adding Convolution operations to data objects schema
-- **Reference Implementations**: 
-  - Adding reference implementations for Convolution
-  - Adding additional reference implementations for Batch Normalization
-  - Adding golden data support for verifying reference implementations
-- **Fusion Support**: Adding reference fusion support for Pointwise operations
+- **Fusion Support**: Validating the reference fusion support for Pointwise operations
 
 ### Future Roadmap
 *The following items are longer-term goals that are not yet scheduled:*
 
-The SDK may be split into more focused sub-projects:
+The SDK may eventually be split into more focused sub-projects:
   - Core plugin interfaces
   - Graph manipulation utilities
   - Reference implementations
@@ -102,9 +94,9 @@ Plugins extend hipDNN's capabilities by providing computational implementations.
 #### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Convolution Integration**: Adding integration to support Convolution operations
-- **Batch Normalization**: Adding integration to support remaining batchnorm operations
-- **Fusion Support**: Adding integration to support existing fusions
+- **Convolution Integration**: Adding integration to support the remaining Convolution WRW operation
+- **Batch Normalization**: Adding integration to support the remaining BatchNorm training operation
+- **Fusion Support**: Adding integration to support Convolution and BatchNorm fusions
 
 ### General Plugin Ecosystem
 
@@ -113,7 +105,7 @@ Plugins extend hipDNN's capabilities by providing computational implementations.
 
 - **Extended Plugin Support**: Developing additional plugins to extend graph support
 - **MIOpen Plugin Completion**: Finishing MIOpen plugin integration
-- **Advanced Features**: 
+- **Advanced Features**:
   - Adding support for behavioral notes and tunable knobs
   - Implementing heuristic plugins (see [Design.md](./Design.md#high-level-architecture) for details)
   - Implementing tuning and benchmarking plugins (see [Design.md](./Design.md#high-level-architecture) for details)
@@ -125,12 +117,10 @@ This section covers testing infrastructure improvements and performance benchmar
 ### What's Next
 *The following items are current priorities but are subject to change:*
 
-- **Test Standardization**: Create standardized naming conventions for tests
-- **Golden Reference Data**: Add golden reference data to use for unit testing at plugin level & to verify reference implementations
-- **Documentation**: Document best practices, patterns, and requirements for new tests
+- **Golden Reference Data**: Leverage our golden reference data exhaustively in unit testing at plugin level & to verify reference implementations
 - **CI Platform**: Swap to leverage TheRock for CI
 - **ASAN Integration**: Add ASAN as an automatic step to CI
-- **Testing Artifacts**: Add installable testing artifacts
+- **Samples**: Run [samples](../samples/README.md) in CI to validate the installation.
 
 ### Future Roadmap
 *The following items are longer-term goals that are not yet scheduled:*

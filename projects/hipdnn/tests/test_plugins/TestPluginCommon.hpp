@@ -329,6 +329,35 @@ public:
     }
 
     static hipdnnPluginStatus_t
+        enginePluginGetWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                                     hipdnnEnginePluginExecutionContext_t executionContext,
+                                     size_t* workspaceSize)
+    {
+        LOG_API_ENTRY("handle={:p}, executionContext={:p}, workspaceSize={:p}",
+                      static_cast<void*>(handle),
+                      static_cast<const void*>(executionContext),
+                      static_cast<void*>(workspaceSize));
+
+        return hipdnn_plugin::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin::throwIfNull(handle);
+            hipdnn_plugin::throwIfNull(executionContext);
+            hipdnn_plugin::throwIfNull(workspaceSize);
+            hipdnn_plugin::throwIfNull(getInstance());
+
+            if(!getInstance()->supportsEngineOperations())
+            {
+                throw hipdnn_plugin::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "No engines available - cannot get workspace size");
+            }
+
+            *workspaceSize = 2048;
+
+            LOG_API_SUCCESS(apiName, "workspaceSize={}", *workspaceSize);
+        });
+    }
+
+    static hipdnnPluginStatus_t
         enginePluginCreateExecutionContext(hipdnnEnginePluginHandle_t handle,
                                            const hipdnnPluginConstData_t* engineConfig,
                                            const hipdnnPluginConstData_t* opGraph,
@@ -515,6 +544,15 @@ private:
     {                                                                                             \
         return TestPluginBase::enginePluginGetWorkspaceSize(                                      \
             handle, engineConfig, opGraph, workspaceSize);                                        \
+    }                                                                                             \
+                                                                                                  \
+    hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(                  \
+        hipdnnEnginePluginHandle_t handle,                                                        \
+        hipdnnEnginePluginExecutionContext_t executionContext,                                    \
+        size_t* workspaceSize)                                                                    \
+    {                                                                                             \
+        return TestPluginBase::enginePluginGetWorkspaceSize(                                      \
+            handle, executionContext, workspaceSize);                                             \
     }                                                                                             \
                                                                                                   \
     hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContext(                                \
