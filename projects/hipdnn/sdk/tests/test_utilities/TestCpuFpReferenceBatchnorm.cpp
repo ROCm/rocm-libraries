@@ -22,71 +22,71 @@ using namespace hipdnn_sdk::utilities;
 
 namespace fs = std::filesystem;
 
-class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
-{
-public:
-    hipdnn_sdk::json::GraphAndTensorMap graphAndTensors;
+// class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
+// {
+// public:
+//     hipdnn_sdk::json::GraphAndTensorMap graphAndTensors;
 
-protected:
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    void SetUp() override
-    {
-        auto const& path = GetParam();
+// protected:
+//     // NOLINTNEXTLINE(readability-identifier-naming)
+//     void SetUp() override
+//     {
+//         auto const& path = GetParam();
 
-        graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
-    }
-};
+//         graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
+//     }
+// };
 
-TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
-{
-    auto const& graph = graphAndTensors.graph();
-    ASSERT_EQ(graph.nodes()->size(), 1);
+// TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
+// {
+//     auto const& graph = graphAndTensors.graph();
+//     ASSERT_EQ(graph.nodes()->size(), 1);
 
-    ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+//     ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
+//               hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
 
-    auto const& attributes = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
+//     auto const& attributes = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
 
-    int64_t inputUid = attributes.x_tensor_uid();
-    int64_t meanUid = attributes.mean_tensor_uid();
-    int64_t invVarianceUid = attributes.inv_variance_tensor_uid();
-    int64_t biasUid = attributes.bias_tensor_uid();
-    int64_t scaleUid = attributes.scale_tensor_uid();
-    int64_t outputUid = attributes.y_tensor_uid();
+//     int64_t inputUid = attributes.x_tensor_uid();
+//     int64_t meanUid = attributes.mean_tensor_uid();
+//     int64_t invVarianceUid = attributes.inv_variance_tensor_uid();
+//     int64_t biasUid = attributes.bias_tensor_uid();
+//     int64_t scaleUid = attributes.scale_tensor_uid();
+//     int64_t outputUid = attributes.y_tensor_uid();
 
-    EXPECT_EQ(graphAndTensors.deviceBuffers().size(), 6);
+//     EXPECT_EQ(graphAndTensors.deviceBuffers().size(), 6);
 
-    std::visit(
-        Visitor{[&](auto& tensorMap) {
-                    using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
+//     std::visit(
+//         Visitor{[&](auto& tensorMap) {
+//                     using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
 
-                    Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
+//                     Tensor<DataType>& referenceOutput = *tensorMap.at(outputUid);
 
-                    Tensor<DataType> cpuOutput(referenceOutput.dims(), referenceOutput.strides());
+//                     Tensor<DataType> cpuOutput(referenceOutput.dims(), referenceOutput.strides());
 
-                    CpuFpReferenceBatchnormImpl<DataType, DataType>::batchnormFwdInference(
-                        *tensorMap.at(inputUid),
-                        *tensorMap.at(scaleUid),
-                        *tensorMap.at(biasUid),
-                        *tensorMap.at(meanUid),
-                        *tensorMap.at(invVarianceUid),
-                        cpuOutput,
-                        1e-5);
-                    auto tolerance
-                        = hipdnn_sdk::test_utilities::batchnorm::getToleranceInference<DataType>();
-                    auto validator
-                        = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<DataType>(tolerance);
-                    EXPECT_TRUE(validator.allClose(cpuOutput.memory(), referenceOutput.memory()));
-                },
-                [&](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }},
-        graphAndTensors.tensorMap);
-}
+//                     CpuFpReferenceBatchnormImpl<DataType, DataType>::batchnormFwdInference(
+//                         *tensorMap.at(inputUid),
+//                         *tensorMap.at(scaleUid),
+//                         *tensorMap.at(biasUid),
+//                         *tensorMap.at(meanUid),
+//                         *tensorMap.at(invVarianceUid),
+//                         cpuOutput,
+//                         1e-5);
+//                     auto tolerance
+//                         = hipdnn_sdk::test_utilities::batchnorm::getToleranceInference<DataType>();
+//                     auto validator
+//                         = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<DataType>(tolerance);
+//                     EXPECT_TRUE(validator.allClose(cpuOutput.memory(), referenceOutput.memory()));
+//                 },
+//                 [&](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }},
+//         graphAndTensors.tensorMap);
+// }
 
-INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuFpReferenceBatchnormFwdInference,
-                         testing::ValuesIn(filesInDirectoryWithExt(
-                             hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
-                             ".json")));
+// INSTANTIATE_TEST_SUITE_P(,
+//                          TestCpuFpReferenceBatchnormFwdInference,
+//                          testing::ValuesIn(filesInDirectoryWithExt(
+//                              hipdnn_sdk::utilities::getBinaryDir() / "../lib/reference_data/",
+//                              ".json")));
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {

@@ -100,11 +100,6 @@ TEST(TestLoadGraphAndTensors, Valid)
     EXPECT_EQ(res.graph().nodes()->size(), 1);
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 
-    using ExpectedType = std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<float>>>;
-
-    ASSERT_TRUE(std::holds_alternative<ExpectedType>(res.tensorMap));
-    const ExpectedType& tensorMap = std::get<ExpectedType>(res.tensorMap);
-
     std::unordered_map<int64_t, std::vector<int64_t>> expectedAttributes;
     expectedAttributes[0] = {2, 3, 4, 5}; // x
     expectedAttributes[1] = {1, 3, 1, 1}; // mean
@@ -113,16 +108,19 @@ TEST(TestLoadGraphAndTensors, Valid)
     expectedAttributes[4] = {1, 3, 1, 1}; // bias
     expectedAttributes[5] = {2, 3, 4, 5}; // y
 
-    for(const auto& [uid, value] : tensorMap)
+    for(const auto& [uid, value] : res.tensorMap)
     {
-        EXPECT_EQ(expectedAttributes[uid], value->dims());
+        auto& tensor = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<float>>>(value);
+        EXPECT_EQ(expectedAttributes[uid], tensor->dims());
     }
 
     auto deviceBuffers = res.deviceBuffers();
-    EXPECT_EQ(deviceBuffers.size(), tensorMap.size());
+    EXPECT_EQ(deviceBuffers.size(), res.tensorMap.size());
     for(auto db : deviceBuffers)
     {
-        EXPECT_EQ(tensorMap.at(db.uid)->memory().deviceData(), db.ptr);
+        auto& tensor = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<float>>>(
+            res.tensorMap.at(db.uid));
+        EXPECT_EQ(tensor->memory().deviceData(), db.ptr);
     }
 }
 }

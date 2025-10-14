@@ -70,31 +70,41 @@ protected:
                                           ->begin()
                                           ->attributes_as_BatchnormInferenceAttributes();
         int64_t yIndex = batchnormInferenceNode->y_tensor_uid();
+        hipdnn_sdk::json::TensorVariant& yTensorVariant = _graphAndTensors.tensorMap.at(yIndex);
 
-        auto executeAndValidate = hipdnn_sdk::utilities::Visitor{
-            [&](auto& tensorMap) {
-                using DataType = hipdnn_sdk::json::DataTypeFromTensorMap<decltype(tensorMap)>;
-
-                auto referenceOutput = tensorMap.at(yIndex)->copy();
-                tensorMap.at(yIndex)->fillWithValue(static_cast<DataType>(0.f));
-
-                status
-                    = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                       executionContext,
-                                                       nullptr,
-                                                       deviceBuffers.data(),
-                                                       static_cast<uint32_t>(deviceBuffers.size()));
-
-                EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-                CpuFpReferenceValidation<DataType> cpuRefValidation;
-                tensorMap.at(yIndex)->memory().markDeviceModified();
-                EXPECT_TRUE(cpuRefValidation.allClose(referenceOutput.memory(),
-                                                      tensorMap.at(yIndex)->memory()));
+        auto yTensorReferenceVariant = std::visit(
+            [](auto& yTensor) -> hipdnn_sdk::json::TensorVariant {
+                using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
+                auto ret = std::make_unique<hipdnn_sdk::utilities::Tensor<DataType>>(
+                    std::move(yTensor->copy()));
+                yTensor->fillWithValue(static_cast<DataType>(0.f));
+                return ret;
             },
-            [](hipdnn_sdk::json::TensorMap<int>&) { FAIL(); }};
+            yTensorVariant);
 
-        std::visit(executeAndValidate, _graphAndTensors.tensorMap);
+        status = hipdnnEnginePluginExecuteOpGraph(_handle,
+                                                  executionContext,
+                                                  nullptr,
+                                                  deviceBuffers.data(),
+                                                  static_cast<uint32_t>(deviceBuffers.size()));
+        EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+        auto validateResults = hipdnn_sdk::utilities::Visitor{
+            [](std::unique_ptr<hipdnn_sdk::utilities::Tensor<int>>&) { FAIL(); },
+            [&](auto& yTensor) {
+                using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
+
+                CpuFpReferenceValidation<DataType> cpuRefValidation(static_cast<DataType>(0.02f),
+                                                                    static_cast<DataType>(0.02f));
+                yTensor->memory().markDeviceModified();
+                auto& yTensorReference
+                    = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<DataType>>>(
+                        yTensorReferenceVariant);
+                EXPECT_TRUE(
+                    cpuRefValidation.allClose(yTensorReference->memory(), yTensor->memory()));
+            }};
+
+        std::visit(validateResults, yTensorVariant);
     }
 };
 

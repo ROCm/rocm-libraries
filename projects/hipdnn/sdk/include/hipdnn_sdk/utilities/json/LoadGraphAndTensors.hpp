@@ -29,6 +29,12 @@ struct TensorMapVariant
     using Type = std::variant<TensorMap<Ts>...>;
 };
 
+template <class... Ts>
+struct TensorVariant
+{
+    using Type = std::variant<std::unique_ptr<hipdnn_sdk::utilities::Tensor<Ts>>...>;
+};
+
 template <class T>
 struct DataTypeFromTensorMap
 {
@@ -37,6 +43,17 @@ struct DataTypeFromTensorMap
 template <class T>
 struct DataTypeFromTensorMap<
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<T>>>>
+{
+    using Type = T;
+};
+
+template <class T>
+struct DatatypeFromTensor
+{
+};
+
+template <class T>
+struct DatatypeFromTensor<hipdnn_sdk::utilities::Tensor<T>>
 {
     using Type = T;
 };
@@ -72,6 +89,8 @@ std::unique_ptr<utilities::Tensor<T>>
 }
 }
 
+using TensorVariant = detail::TensorVariant<float, double, half, hip_bfloat16, int32_t>::Type;
+
 using TensorMapVariant =
     typename detail::TensorMapVariant<float, double, half, hip_bfloat16, int32_t>::Type;
 // using TensorMapVariant = std::variant<
@@ -81,14 +100,42 @@ using TensorMapVariant =
 //     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<hip_bfloat16>>>,
 //     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::Tensor<int32_t>>>>;
 
+using TensorVariantMap = std::unordered_map<int64_t, TensorVariant>;
+
 template <class T>
 using DataTypeFromTensorMap =
     typename detail::DataTypeFromTensorMap<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
 
+template <class T>
+using DataTypeFromTensor =
+    typename detail::DatatypeFromTensor<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
+
+inline TensorVariant
+    tensorFromFileAndAttributes(std::filesystem::path const& filepath,
+                                hipdnn_sdk::data_objects::TensorAttributes const& attributes)
+{
+    std::vector<int64_t> dims(attributes.dims()->begin(), attributes.dims()->end());
+    std::vector<int64_t> strides(attributes.strides()->begin(), attributes.strides()->end());
+
+    auto createTensor = [&](auto dataType) -> TensorVariant {
+        using DataType = std::remove_const_t<decltype(dataType)>;
+
+        auto tensor = std::make_unique<utilities::Tensor<DataType>>(dims, strides);
+
+        detail::fillTensorFromFile(*tensor, filepath);
+
+        return std::move(tensor);
+    };
+
+    return std::visit(createTensor,
+                      test_utilities::datatypeToNativeVariant(attributes.data_type()));
+}
+
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    TensorMapVariant tensorMap;
+    TensorVariantMap tensorMap;
+    std::vector<int64_t> outputTensorUids;
 
     const data_objects::Graph& graph() const
     {
@@ -97,24 +144,42 @@ struct GraphAndTensorMap
 
     std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers()
     {
-        return std::visit(
-            []([[maybe_unused]] auto const& tensorMapIn) {
-                std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
-                // Iterating over this loop triggers the portability-template-virtual-member-function tidy for Allocator
-                // Need to figure out why
-                for(auto& [uid, tensor] : tensorMapIn)
-                {
-                    hipdnnPluginDeviceBuffer_t deviceBuffer;
-                    deviceBuffer.uid = uid;
-                    deviceBuffer.ptr = tensor->memory().deviceData();
-                    deviceBuffers.push_back(deviceBuffer);
-                }
-                return deviceBuffers;
-            },
-            tensorMap);
+        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
+
+        // Iterating over this loop triggers the portability-template-virtual-member-function tidy for Allocator
+        // Need to figure out why
+        for(auto& [uid, tensorVariant] : tensorMap)
+        {
+            hipdnnPluginDeviceBuffer_t deviceBuffer;
+            deviceBuffer.uid = uid;
+            std::visit([&](auto& tensor) { deviceBuffer.ptr = tensor->memory().deviceData(); },
+                       tensorVariant);
+            deviceBuffers.push_back(deviceBuffer);
+        }
+        return deviceBuffers;
     }
 };
+
+inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
+{
+    std::vector<int64_t> outputTensorUids;
+
+    for(auto const& node : graph.at("nodes"))
+    {
+        for(auto& [name, value] : node.at("outputs").items())
+        {
+            if(name.find("_tensor_uid") == std::string::npos)
+            {
+                continue;
+            }
+
+            outputTensorUids.push_back(value.get<int64_t>());
+        }
+    }
+
+    return outputTensorUids;
+}
 
 inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path)
 {
@@ -138,23 +203,16 @@ inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path)
 
     auto graph = data_objects::GetGraph(graphBuilder.GetBufferPointer());
 
-    auto ioType = graph->io_type();
-    auto ret = std::visit(
-        [&](auto type) -> TensorMapVariant {
-            using DataType = decltype(type);
-            std::unordered_map<int64_t, std::unique_ptr<utilities::Tensor<DataType>>> tensorMap;
-            for(auto attributes : *graph->tensors())
-            {
-                auto tensorPath
-                    = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
-                tensorMap[attributes->uid()]
-                    = detail::tensorFromFileAndAttributes<DataType>(tensorPath, *attributes);
-            }
+    auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
-            return tensorMap;
-        },
-        hipdnn_sdk::test_utilities::datatypeToNativeVariant(ioType));
+    std::unordered_map<int64_t, TensorVariant> tensorMap;
+    for(auto attributes : *graph->tensors())
+    {
+        auto tensorPath
+            = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
+        tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
+    }
 
-    return {graphBuilder.Release(), std::move(ret)};
+    return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};
 }
 }
