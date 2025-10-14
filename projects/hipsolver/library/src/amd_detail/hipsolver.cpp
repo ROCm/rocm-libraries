@@ -563,7 +563,7 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_HANDLE_IS_NULLPTR;
 
-    if (std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
         rocsolver_log_begin();
     }
@@ -579,7 +579,7 @@ catch(...)
 hipsolverStatus_t hipsolverDestroy(hipsolverHandle_t handle)
 try
 {
-    if (std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
         rocsolver_log_end();
     }

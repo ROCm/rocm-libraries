@@ -375,7 +375,7 @@ try
 
     *handle = sp;
 
-    if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    if(std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
         rocsolver_log_begin();
     }
@@ -401,7 +401,7 @@ try
     cholmod_finish(&sp->c_handle);
     delete sp;
 
-    if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    if(std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
         rocsolver_log_end();
     }
