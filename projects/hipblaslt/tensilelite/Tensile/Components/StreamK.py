@@ -25,7 +25,7 @@ from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
-    SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
+    SCmpGtU32, SCmpLeU32, SCmpLtU32, SCmpGeU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCvtBF16toFP32
@@ -339,80 +339,189 @@ class StreamK(Component):
         if kernel["StreamKAtomic"]:
             return module
 
-        skFixupLabel = Label(label=writer.labels.getNameInc("SK_Fixup"), comment="")
         skStoreLabel = Label(label=writer.labels.getNameInc("SK_Store"), comment="")
 
-        # StreamK store branches
-        # if we're doing parallel reduction, jump to global write
-        # module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        # module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if using parallel reduction, go to regular store code"))
+        if kernel["StreamKFixupTreeReduction"] == 1:
+            skFixupTreeLabel = Label(label=writer.labels.getNameInc("SK_Fixup_Tree"), comment="")
+            skFixupTreeLoopStart = Label(label=writer.labels.getNameInc("SK_Fixup_TreeLoop_Start"), comment="")
+            skFixupWaitForFlag = Label(label=writer.labels.getNameInc("SK_Fixup_Wait_Flag"), comment="")
+            endFixupLoop = Label(label=writer.labels.getNameInc("endFixupLoop"), comment="")
+            skFixupCalcPartialIdx = Label(label=writer.labels.getNameInc("SK_Fixup_CalcPartialIdx"), comment="")
 
-        tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements", preventOverflow=False)
-        # if we did not start the tile, store partials
-        # branch to beta == 0 store path
-        module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
-        module.add(writer.longBranchScc0(skPartialsLabel, posNeg=1))
-        # module.add(SCBranchSCC0(labelName=skPartialsLabel.getLabelName(), comment="Branch if not start tile, store partials"))
+            # sIter = writer.sgprPool.checkOut(2, "SKIter", preventOverflow=False)
+            sPartialIdx = writer.sgprPool.checkOut(1, "SK_Fixup_Partial_idx", preventOverflow=False)
 
-        if kernel["DebugStreamK"] & 1 == 0:
-            # if we started and finished the tile, regular store code
-            # branch to regular store code, skip fixup step
+            sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters", preventOverflow=False)
+            tmpSgpr = writer.sgprPool.checkOut(1, "tmpSgpr", preventOverflow=False)
+            module.add(self.skExtraIters(writer, kernel, sSkExtraIters, tmpSgpr))
+            writer.sgprPool.checkIn(tmpSgpr)
+
+            # Skip to global write if WG started and finished tile
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            module.add(SCBranchSCC0(labelName=skFixupTreeLabel.getLabelName(), comment="If we didn't start the tile, always to SK Tree fixup"))
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="does wg finish tile?"))
             module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if started and finished tile, go to regular store code"))
 
-            # if we started the tile but did not finish it, fix up step
-            # run fixup code before regular store code
-            sCtaIdx = writer.sgprPool.checkOut(1, "CtaIdx", preventOverflow=False) # self.defineSgpr("CtaIdx", 1)
-            module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr("StreamKIdx"), src1=1, comment="input partial tile index"))
+            # Start Tree Fixup
+            module.add(skFixupTreeLabel)
 
-            sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd", preventOverflow=False) # self.defineSgpr("CtaEnd", 1)
-            module.add(sMagicDiv2(sgpr(tmpSgpr), sgpr(tmpSgpr+1), sgpr("StreamKIterEnd"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
-            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr("ItersPerTile"), comment="start iteration of partial tile"))
-            module.add(SSubU32(dst=sgpr(sFixupEnd), src0=sgpr("StreamKIterEnd"), src1=sgpr(tmpSgpr), comment="calc iterations completed by this WG"))
+            # Calculate partialIdx
+            tmpVgpr = writer.vgprPool.checkOut(2, "div")
+            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
 
-            module.add(skFixupLabel)
+            # Get Iter of the start of the tile
+            tmpSgpr = writer.sgprPool.checkOut(3, "tmpSgpr", preventOverflow=False)
+            module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKIter"), src1=1, comment="StreamKIter-1 to get Iter in current tile"))
+            module.add(sMagicDiv2(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr(tmpSgpr+1), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
+            module.add(SMulI32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+0), src1=sgpr("ItersPerTile"), comment="tileStart=tileIdx * ItersPerTile"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr("SKItersPerWG"), src1=1, comment="ItersPerWG w/ extraIter"))
+            module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr+2, dReg=tmpSgpr+1, divReg=tmpSgpr+0, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgCount = tileStart / (itersPerWG+1)"))
+            module.add(SCmpLtU32(src0=sgpr(tmpSgpr+2), src1=sgpr(sSkExtraIters), comment="find co-op group start"))
+            module.add(SCBranchSCC1(labelName=skFixupCalcPartialIdx.getLabelName(), comment="All WG have extra iter so far, skip following calcs"))
+            module.add(SSubU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+1), src1=sgpr(sSkExtraIters), comment="tileStart - extraIters"))
+            module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr+2, dReg=tmpSgpr+0, divReg="SKItersPerWG", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="wgExtraIters = (tileStart - extraIters) / itersPerWG"))
+            module.add(skFixupCalcPartialIdx)
+            module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr("StreamKIdx"), src1=sgpr(tmpSgpr+2), comment="partialIdx = streamkidx - coopGroupStart"))
 
-            # Check flag
-            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
+            tmpVgprRes = None
+            writer.vgprPool.checkIn(tmpVgpr)
 
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
-            if kernel["DebugStreamK"] & 2 == 0:
-                module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
-                module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
+            sFlagIdx = writer.sgprPool.checkOut(1, "FlagIdx", preventOverflow=False)
+            sIdxOffset = writer.sgprPool.checkOut(1, "IdxOffset", preventOverflow=False)
+            module.add(SMovB32(dst=sgpr(sIdxOffset), src=1, comment="Init IdxOffset=1"))
 
-            # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
-            module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
-            skipFlagReset = Label(label=writer.labels.getNameInc("SK_SkipFlagReset"), comment="")
-            module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
-            module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
-            # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
-            module.add(skipFlagReset)
+            module.add(skFixupTreeLoopStart) # start tree fixup loop
+
+            # First, jump to partial write if (partialIdx//2)*2 != partialIdx, i.e. branch if last bit is 1
+            module.add(SAndB32(dst=sgpr(tmpSgpr+0), src0=sgpr(sPartialIdx), src1=1))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+0), src1=1, comment="partialIdx&1==1?"))
+            module.add(writer.longBranchScc1(skPartialsLabel, posNeg=1))
+            module.add(SLShiftRightB32(dst=sgpr(sPartialIdx), src=sgpr(sPartialIdx), shiftHex=log2(2), comment="sPartialIdx // 2"))
+            module.add(SAddU32(dst=sgpr(sFlagIdx), src0=sgpr("StreamKIdx"), src1=sgpr(sIdxOffset), comment="flagIdx=StreamKIdx+IdxOffset"))
+
+            # If the flag we're waiting for is past this tile we can finish the fixup step
+            # LocalEnd + 1 + (sIdxOffset-1) * SKItersPerWG + (Extras)
+            module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr(sIdxOffset), src1=1, comment="Starting on next WG so offset-1"))
+            module.add(SMulI32(dst=sgpr(tmpSgpr+2), src0=sgpr("SKItersPerWG"), src1=sgpr(tmpSgpr+1), comment="Before extra iters"))
+
+            module.add(SSubU32(dst=sgpr(tmpSgpr+0), src0=sgpr(sFlagIdx), src1=sgpr(sSkExtraIters), comment="TargetWG-ExtraIters"))
+            module.add(SMinU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+1), comment="min of above and (offset-1)"))
+            module.add(SCmpLtU32(src0=sgpr(sFlagIdx), src1=sgpr(sSkExtraIters), comment="TargetWG < extraIters?"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr+0), src0=0, src1=sgpr(tmpSgpr+0), comment="If True, don't sub any iters"))
+            module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+0), comment="extras = (offset-1) - (possible extras)"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr+2), src0=sgpr(tmpSgpr+2), src1=sgpr(tmpSgpr+1), comment="Add possible extra iters"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr("StreamKLocalEnd"), src1=1, comment="Start of next wg"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr+2), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2)))
+            module.add(SCmpGtU32(src0=sgpr(tmpSgpr+2), src1=sgpr("ItersPerTile")))
+            module.add(SCBranchSCC1(labelName=endFixupLoop.getLabelName()))
             writer.sgprPool.checkIn(tmpSgpr)
 
-            fixupEdge = [False] # Test no edge variant
-            module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+            # check flag
+            tmpSgpr = writer.sgprPool.checkOut(2, "globalWriteElements", preventOverflow=False)
+            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sFlagIdx), shiftHex=log2(4), comment="flag offset based on wg index"))
 
-            if kernel["StreamK"] >= 2:
-                sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters", preventOverflow=False)
-                sIterCount = writer.sgprPool.checkOut(1, "iterCount", preventOverflow=False)
-                module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIterCount)) # sIterCount is a temp register
-                module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr("SKItersPerWG"), src1=1, comment="Add extra iter"))
-                module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters), comment="Check if next WG had an extra iteration"))
-                module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr("SKItersPerWG"), comment="Select correct number of iterations for next WG"))
-                module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sFixupEnd), src1=sgpr(sIterCount), comment="next partial tile iteration"))
-                writer.sgprPool.checkIn(sSkExtraIters)
-                writer.sgprPool.checkIn(sIterCount)
-            module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr(sCtaIdx), src1=1, comment="next partial tile index"))
-            if kernel["StreamK"] == 1:
-                module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sFixupEnd), src1=sgpr("SKItersPerWG"), comment="next partial tile iteration"))
-            module.add(SCmpLtU32(src0=sgpr(sFixupEnd), src1=sgpr("ItersPerTile"), comment="done loading partial tiles?"))
-            module.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(), comment="Branch to continue fixup loop"))
+            module.add(skFixupWaitForFlag) # loop to wait for flag
+            module.add(SLoadB32(dst=sgpr(tmpSgpr+1), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
 
-            writer.sgprPool.checkIn(sFixupEnd)
-            writer.sgprPool.checkIn(sCtaIdx)
+            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+            if kernel["DebugStreamK"] & 2 == 0: # Don't wait for partials if not being written
+                module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=1, comment="check if ready"))
+                module.add(SCBranchSCC0(labelName=skFixupWaitForFlag.getLabelName(), comment="if flag not set, wait and check again"))
+
+            writer.sgprPool.checkIn(tmpSgpr)
+
+            # fixup step
+            if kernel["DebugStreamK"] & 1 == 0: # Skip fixup reads if set, need to do the loop if partial writes are enabled
+                fixupEdge = [False] # Test no edge variant
+                module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sFlagIdx))
+
+            # Could branch if our new offset puts us off the tile, but we essentially do that when calculating if our target wg is off the tile earlier
+            module.add(SLShiftLeftB32(dst=sgpr(sIdxOffset), src=sgpr(sIdxOffset), shiftHex=log2(2), comment="IdxOffset *= 2 for Tree reduction"))
+            module.add(SBranch(labelName=skFixupTreeLoopStart.getLabelName(), comment="Branch to continue fixup loop"))
+
+            # Done fixup loop
+            writer.sgprPool.checkIn(sIdxOffset)
+            writer.sgprPool.checkIn(sFlagIdx)
+
+            # If we started the tile, we reduced the partial results to that WG, so global write
+            # Otherwise, partial write
+            module.add(endFixupLoop)
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            module.add(writer.longBranchScc0(skPartialsLabel, posNeg=1))
+        else: # linear reduction
+            skFixupLabel = Label(label=writer.labels.getNameInc("SK_Fixup"), comment="")
+
+            # StreamK store branches
+            # if we're doing parallel reduction, jump to global write
+            # module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            # module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if using parallel reduction, go to regular store code"))
+
+            tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements", preventOverflow=False)
+            # if we did not start the tile, store partials
+            # branch to beta == 0 store path
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            module.add(writer.longBranchScc0(skPartialsLabel, posNeg=1))
+            # module.add(SCBranchSCC0(labelName=skPartialsLabel.getLabelName(), comment="Branch if not start tile, store partials"))
+
+            if kernel["DebugStreamK"] & 1 == 0:
+                # if we started and finished the tile, regular store code
+                # branch to regular store code, skip fixup step
+                module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="does wg finish tile?"))
+                module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if started and finished tile, go to regular store code"))
+
+                # if we started the tile but did not finish it, fix up step
+                # run fixup code before regular store code
+                sCtaIdx = writer.sgprPool.checkOut(1, "CtaIdx", preventOverflow=False) # self.defineSgpr("CtaIdx", 1)
+                module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr("StreamKIdx"), src1=1, comment="input partial tile index"))
+
+                sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd", preventOverflow=False) # self.defineSgpr("CtaEnd", 1)
+                module.add(sMagicDiv2(sgpr(tmpSgpr), sgpr(tmpSgpr+1), sgpr("StreamKIterEnd"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
+                module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr("ItersPerTile"), comment="start iteration of partial tile"))
+                module.add(SSubU32(dst=sgpr(sFixupEnd), src0=sgpr("StreamKIterEnd"), src1=sgpr(tmpSgpr), comment="calc iterations completed by this WG"))
+
+                module.add(skFixupLabel)
+
+                # Check flag
+                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
+                module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
+
+                module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+                if kernel["DebugStreamK"] & 2 == 0:
+                    module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
+                    module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
+
+                # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
+                module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
+                skipFlagReset = Label(label=writer.labels.getNameInc("SK_SkipFlagReset"), comment="")
+                module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr+2), src=vgpr("Serial"), comment="Wave 0 updates flags"))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
+                module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
+                # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
+                module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
+                module.add(skipFlagReset)
+                writer.sgprPool.checkIn(tmpSgpr)
+
+                fixupEdge = [False] # Test no edge variant
+                module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
+
+                if kernel["StreamK"] >= 2:
+                    sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters", preventOverflow=False)
+                    sIterCount = writer.sgprPool.checkOut(1, "iterCount", preventOverflow=False)
+                    module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIterCount)) # sIterCount is a temp register
+                    module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr("SKItersPerWG"), src1=1, comment="Add extra iter"))
+                    module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters), comment="Check if next WG had an extra iteration"))
+                    module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr("SKItersPerWG"), comment="Select correct number of iterations for next WG"))
+                    module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sFixupEnd), src1=sgpr(sIterCount), comment="next partial tile iteration"))
+                    writer.sgprPool.checkIn(sSkExtraIters)
+                    writer.sgprPool.checkIn(sIterCount)
+                module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr(sCtaIdx), src1=1, comment="next partial tile index"))
+                if kernel["StreamK"] == 1:
+                    module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sFixupEnd), src1=sgpr("SKItersPerWG"), comment="next partial tile iteration"))
+                module.add(SCmpLtU32(src0=sgpr(sFixupEnd), src1=sgpr("ItersPerTile"), comment="done loading partial tiles?"))
+                module.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(), comment="Branch to continue fixup loop"))
+
+                writer.sgprPool.checkIn(sFixupEnd)
+                writer.sgprPool.checkIn(sCtaIdx)
 
         module.add(skStoreLabel)
 

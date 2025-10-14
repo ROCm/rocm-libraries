@@ -18,7 +18,7 @@ namespace graph
 class INode
 {
 public:
-    GraphAttributes graph_attributes;
+    GraphAttributes graph_attributes; // NOLINT(readability-identifier-naming)
     INode(GraphAttributes attributes)
         : graph_attributes(std::move(attributes))
     {
