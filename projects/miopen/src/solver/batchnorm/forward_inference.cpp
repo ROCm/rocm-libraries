@@ -98,23 +98,30 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         size_t vectorsize    = problem.IsLayoutNHWC()
                                    ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
                                    : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
-        ;
+
         if(problem.GetXDesc().GetLayout_t() == miopenTensorNHWC)
         {
             xlocalsize = std::min(size_t{c / vectorsize}, max_localsize);
-            xgridsize  = xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
+            xgridsize = AlignUp(size_t{c / vectorsize}, xlocalsize);
+
             ylocalsize = max_localsize / xlocalsize;
-            ygridsize  = ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
+            ygridsize  = AlignUp(size_t{in_cstride}, ylocalsize);
         }
         else
         {
             xlocalsize = 1;
-            xgridsize  = c;
+            xgridsize  = AlignUp(size_t{c}, xlocalsize);
+
             ylocalsize = max_localsize;
-            ygridsize  = ylocalsize * ((in_cstride / vectorsize + ylocalsize - 1) / ylocalsize);
+            ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
         zlocalsize = 1;
         zgridsize  = 1;
+
+        // HIP runtime does not support non-uniform blocks
+        // Adjust the global worker sizes accordingly
+        xgridsize = AlignUp(xgridsize, xlocalsize);
+        ygridsize = AlignUp(ygridsize, ylocalsize);
 
         auto kernel = KernelInfo{};
 

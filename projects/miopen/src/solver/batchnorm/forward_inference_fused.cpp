@@ -97,6 +97,31 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
     READ_TYPE             = (read_unit == 1) ? READ_TYPE : READ_TYPE + std::to_string(read_unit);
     std::string PREC_READ_TYPE = "FP_TYPE_PREC";
     PREC_READ_TYPE = (read_unit == 1) ? PREC_READ_TYPE : PREC_READ_TYPE + std::to_string(read_unit);
+
+    size_t xlocalsize = 256;
+    size_t xgridsize = read_len / read_unit;
+    size_t ygridsize = (mode == miopenBNSpatial) ? size_t(c) : 1;
+    size_t zgridsize = 1;
+
+    // HIP runtime does not support non-uniform blocks
+    // Adjust the xlocalsize and xgridsize accordingly
+    if(xgridsize < xlocalsize)
+    {
+        // round up the xlocalsize to the nearest wavefront size
+        xlocalsize = AlignUp(xgridsize, 32);
+        // launch only one block
+        xgridsize = xlocalsize;
+    }
+    else
+    {
+        xgridsize = AlignUp(xgridsize, xlocalsize);
+    }
+    kernel.l_wk[0] = xlocalsize;
+
+    kernel.g_wk.push_back(xgridsize);
+    kernel.g_wk.push_back(ygridsize);
+    kernel.g_wk.push_back(zgridsize);
+
     const auto& activ_op =
         dynamic_cast<ActivFwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
     const auto build_params = KernelBuildParameters{
@@ -120,13 +145,6 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
         kernel.comp_options += " -DPERACT_BN";
     if(input_desc.GetType() == miopenHalf)
         kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
-    size_t xgridsize = read_len / read_unit;
-    size_t ygridsize = (mode == miopenBNSpatial) ? size_t(c) : 1;
-    size_t zgridsize = 1;
-
-    kernel.g_wk.push_back(xgridsize);
-    kernel.g_wk.push_back(ygridsize);
-    kernel.g_wk.push_back(zgridsize);
 
     result.construction_params.push_back(kernel);
 
