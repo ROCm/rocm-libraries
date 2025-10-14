@@ -46,6 +46,7 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
         // Only include operations with implemented functors in ReferencePointwiseBase
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::ADD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::SUB));
+        bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::MUL));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD));

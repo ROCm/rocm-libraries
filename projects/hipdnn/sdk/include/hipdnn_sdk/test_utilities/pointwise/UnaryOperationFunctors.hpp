@@ -37,40 +37,18 @@ struct ReluForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        if constexpr(std::is_same_v<ComputeType, X>)
-        {
-            // Same precision: compute directly in target type
-            auto xVal = x;
-            if(xVal <= lowerClip)
-            {
-                ComputeType result = (lowerSlope * (xVal - lowerClip)) + lowerClip;
-                return result;
-            }
-            if(xVal >= upperClip)
-            {
-                return upperClip;
-            }
-            return xVal;
-        }
-        else
-        {
-            // Mixed precision: explicit casting with clear intent
-            auto xCompute = static_cast<ComputeType>(x);
+        auto xCompute = static_cast<ComputeType>(x);
 
-            if(xCompute <= lowerClip)
-            {
-                ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
-                X output = safeConvert<X>(result);
-                return output;
-            }
-            if(xCompute >= upperClip)
-            {
-                X output = safeConvert<X>(upperClip);
-                return output;
-            }
-            X output = safeConvert<X>(xCompute);
-            return output;
+        if(xCompute <= lowerClip)
+        {
+            ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
+            return safeConvert<X>(result);
         }
+        if(xCompute >= upperClip)
+        {
+            return safeConvert<X>(upperClip);
+        }
+        return safeConvert<X>(xCompute);
     }
 };
 
@@ -80,20 +58,9 @@ struct SigmoidForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        if constexpr(std::is_same_v<ComputeType, X>)
-        {
-            // Same precision: compute directly in target type
-            auto xVal = x;
-            return ComputeType{1} / (ComputeType{1} + std::exp(-xVal));
-        }
-        else
-        {
-            // Mixed precision: explicit casting with clear intent
-            auto xCompute = static_cast<ComputeType>(x);
-            ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
-            X output = safeConvert<X>(result);
-            return output;
-        }
+        auto xCompute = static_cast<ComputeType>(x);
+        ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
+        return safeConvert<X>(result);
     }
 };
 
@@ -103,20 +70,9 @@ struct TanhForward
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        if constexpr(std::is_same_v<ComputeType, X>)
-        {
-            // Same precision: compute directly in target type
-            auto xVal = x;
-            return std::tanh(xVal);
-        }
-        else
-        {
-            // Mixed precision: explicit casting with clear intent
-            auto xCompute = static_cast<ComputeType>(x);
-            ComputeType result = std::tanh(xCompute);
-            X output = safeConvert<X>(result);
-            return output;
-        }
+        auto xCompute = static_cast<ComputeType>(x);
+        ComputeType result = std::tanh(xCompute);
+        return safeConvert<X>(result);
     }
 };
 
