@@ -276,7 +276,6 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
     for(auto& kv : m)
     {
         rocsolver_profile_entry& entry = kv.second;
-        entry.total_time = 0;
         for(auto& pair : entry.events)
         {
             float ms = 0;

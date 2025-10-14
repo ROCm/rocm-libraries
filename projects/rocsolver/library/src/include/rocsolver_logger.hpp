@@ -159,8 +159,8 @@ struct rocsolver_profile_entry
     double total_time; // stores accumulated elapsed time in microseconds
 #if ROCSOLVER_USE_ASYNC_LOGGER
     std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
-    std::unique_ptr<rocsolver_profile_map> internal_calls;
 #endif
+    std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
         : level(0)
