@@ -52,7 +52,15 @@ struct ConvolutionDescriptorParams
     miopen::ConvolutionDescriptor GetConvolutionDescriptor() const
     {
         const auto trans_output_pads = std::vector<int>(pads.size(), 0);
-        return {pads, strides, dilations, trans_output_pads, group_count, deterministic};
+        auto desc =
+            miopen::ConvolutionDescriptor{pads, strides, dilations, trans_output_pads, group_count};
+
+        // SET DETERMINISTIC ATTRIBUTE
+        if(deterministic)
+        {
+            desc.attribute.deterministic.value = 1;
+        }
+        return desc;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const ConvolutionDescriptorParams& cp)
