@@ -20,7 +20,6 @@
 #include <thrust/detail/event_error.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
-#include <thrust/limits.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/random.h>
 
@@ -40,6 +39,8 @@
 // clang-format on
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
+
+#  include <limits>
 #endif
 
 #define TEST_EVENT_WAIT(e) test_event_wait(e)
@@ -751,7 +752,7 @@ template <typename T>
 typename thrust::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return _THRUST_STD::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
+  return _THRUST_STD::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max()));
 }
 
 // TODO: This probably won't work for `half`.
@@ -759,7 +760,7 @@ template <typename T>
 typename _THRUST_STD::enable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return _THRUST_STD::min<T>(n, thrust::numeric_limits<T>::max());
+  return _THRUST_STD::min<T>(n, _THRUST_STD::numeric_limits<T>::max());
 }
 
 enum threw_status

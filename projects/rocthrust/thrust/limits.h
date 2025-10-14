@@ -24,7 +24,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename T>
-struct numeric_limits : std::numeric_limits<T>
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::numeric_limits") numeric_limits : std::numeric_limits<T>
 {};
 
 THRUST_NAMESPACE_END
