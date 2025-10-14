@@ -265,6 +265,9 @@ namespace rocRoller
                         auto        aIdx = graphIndices[a];
                         auto        bIdx = graphIndices[b];
 
+                        if(aRec.control == bRec.control)
+                            continue;
+
                         auto order = kgraph.control.compareNodes(
                             rocRoller::UpdateCache, aRec.control, bRec.control);
 

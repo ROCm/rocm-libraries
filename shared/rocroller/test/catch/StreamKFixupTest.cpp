@@ -91,18 +91,39 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
 
     outFile0 << kgraph.toDOT();
 
-    // graph = graph.transform(std::make_shared<LoadPacked>(context.get()));
-    kgraph = kgraph.transform(std::make_shared<AddStreamK>(params->loopOverOutputTilesDimensions,
-                                                           rocRoller::XLOOP,
-                                                           rocRoller::KLOOP,
-                                                           false,
-                                                           numWGsExpr,
-                                                           params,
-                                                           context.get()));
+    SECTION("Basic StreamK Multiple Fixups")
+    {
+        kgraph
+            = kgraph.transform(std::make_shared<AddStreamK>(params->loopOverOutputTilesDimensions,
+                                                            rocRoller::XLOOP,
+                                                            rocRoller::KLOOP,
+                                                            false,
+                                                            numWGsExpr,
+                                                            params,
+                                                            context.get()));
 
-    std::ofstream outFile1("graph1.dot"); // Create and open a file
-    outFile1 << kgraph.toDOT();
+        std::ofstream outFile1("graph1.dot"); // Create and open a file
+        outFile1 << kgraph.toDOT();
 
-    std::ofstream outFile2("graph2-mapper.dot"); // Create and open a file
-    outFile2 << kgraph.toDOT(true);
+        std::ofstream outFile2("graph2-mapper.dot"); // Create and open a file
+        outFile2 << kgraph.toDOT(true);
+    }
+
+    SECTION("TwoTile StreamK Multiple Fixups")
+    {
+        kgraph
+            = kgraph.transform(std::make_shared<AddStreamK>(params->loopOverOutputTilesDimensions,
+                                                            rocRoller::XLOOP,
+                                                            rocRoller::KLOOP,
+                                                            true,
+                                                            numWGsExpr,
+                                                            params,
+                                                            context.get()));
+
+        std::ofstream outFile1("graph3.dot"); // Create and open a file
+        outFile1 << kgraph.toDOT();
+
+        std::ofstream outFile2("graph4-mapper.dot"); // Create and open a file
+        outFile2 << kgraph.toDOT(true);
+    }
 }
