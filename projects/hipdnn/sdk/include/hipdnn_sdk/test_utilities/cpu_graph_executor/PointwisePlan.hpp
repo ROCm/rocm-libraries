@@ -24,15 +24,15 @@ struct PointwiseParams
     PointwiseParams() = default;
     PointwiseParams(const hipdnn_sdk::data_objects::PointwiseMode pointwiseMode,
                     const hipdnn_sdk::data_objects::TensorAttributes& in0Attributes,
-                    const hipdnn_sdk::data_objects::TensorAttributes* in1Attributes,
+                    const hipdnn_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
                     const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes)
         : in0Tensor(unpackTensorAttributes(in0Attributes))
         , out0Tensor(unpackTensorAttributes(out0Attributes))
         , mode(pointwiseMode)
     {
-        if(in1Attributes != nullptr)
+        if(optionalIn1Attributes != nullptr)
         {
-            in1Tensor = unpackTensorAttributes(*in1Attributes);
+            in1Tensor = unpackTensorAttributes(*optionalIn1Attributes);
         }
     }
 
@@ -132,12 +132,8 @@ public:
         // Check optional tensors based on operation mode
         if(isBinaryPointwiseMode(mode))
         {
-            if(!nodeAttributes->in_1_tensor_uid() || *nodeAttributes->in_1_tensor_uid() == 0)
-            {
-                return false; // Binary operations require in1 tensor
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, *nodeAttributes->in_1_tensor_uid());
-            CHECK_TENSOR_TYPE(tensorMap, *nodeAttributes->in_1_tensor_uid(), DataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_1_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap, nodeAttributes->in_1_tensor_uid(), DataTypeEnum);
         }
 
         return true;

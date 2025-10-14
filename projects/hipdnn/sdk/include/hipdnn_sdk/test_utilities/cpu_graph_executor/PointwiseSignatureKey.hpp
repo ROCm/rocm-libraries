@@ -20,7 +20,8 @@ struct PointwiseSignatureKey
     hipdnn_sdk::data_objects::PointwiseMode operation;
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
-    hipdnn_sdk::data_objects::DataType input1DataType; // For binary ops
+    hipdnn_sdk::data_objects::DataType input1DataType
+        = hipdnn_sdk::data_objects::DataType::UNSET; // For binary ops
 
     PointwiseSignatureKey() = default;
     constexpr PointwiseSignatureKey(hipdnn_sdk::data_objects::PointwiseMode op,
@@ -81,10 +82,6 @@ struct PointwiseSignatureKey
             {
                 throw std::runtime_error("Binary operation missing second input tensor");
             }
-        }
-        else
-        {
-            input1DataType = hipdnn_sdk::data_objects::DataType::UNSET;
         }
     }
 
