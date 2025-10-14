@@ -158,7 +158,8 @@ if(NOT HIP_DNN_SKIP_TESTS)
         
         add_dependencies(check validate_test_names)
         add_dependencies(check_ctest validate_test_names)
-        
+       
+        # For standalone builds we need to install the ctest files
         install_miopen_legacy_plugin_ctest_files()
     endif()
 endif()
