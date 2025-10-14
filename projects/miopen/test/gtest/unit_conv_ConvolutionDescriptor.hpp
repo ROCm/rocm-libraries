@@ -36,7 +36,7 @@ struct ConvolutionDescriptorParams
     ConvolutionDescriptorParams(std::vector<int>&& pads_in,
                                 std::vector<int>&& strides_in,
                                 std::vector<int>&& dilations_in,
-                                int group_count_in = 1,
+                                int group_count_in    = 1,
                                 bool deterministic_in = false)
         : pads(std::move(pads_in)),
           strides(std::move(strides_in)),

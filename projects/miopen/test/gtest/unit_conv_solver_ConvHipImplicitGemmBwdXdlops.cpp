@@ -125,7 +125,8 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDevApplicability_FP16, SOLVER_
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmBwdXdlops{});
 };
 
-TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsApplicability_Deterministic, ConvHipImplicitGemmBwdXdlops)
+TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsApplicability_Deterministic,
+       ConvHipImplicitGemmBwdXdlops)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmBwdXdlops{});
 };
