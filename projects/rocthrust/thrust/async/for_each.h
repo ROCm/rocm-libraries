@@ -34,9 +34,9 @@
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/for_each.h>
-#  include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -82,7 +82,7 @@ struct for_each_fn final
     template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
     THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
       THRUST_RETURNS(for_each_fn::call(
-        thrust::detail::select_system(typename iterator_system<remove_cvref_t<ForwardIt>>::type{}),
+        thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
         THRUST_FWD(first),
         THRUST_FWD(last),
         THRUST_FWD(f)))

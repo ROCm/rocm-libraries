@@ -56,7 +56,7 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
   // Use the transformed input iterator's value type per https://wg21.link/P0571
   using input_type  = typename thrust::iterator_value<InputIt>::type;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
-  using value_type  = thrust::remove_cvref_t<result_type>;
+  using value_type  = ::internal::remove_cvref_t<result_type>;
 
   using size_type              = typename iterator_traits<InputIt>::difference_type;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
@@ -77,7 +77,7 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
 {
   using input_type  = typename thrust::iterator_value<InputIt>::type;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
-  using value_type  = thrust::remove_cvref_t<result_type>;
+  using value_type  = ::internal::remove_cvref_t<result_type>;
 
   using size_type              = typename iterator_traits<InputIt>::difference_type;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
@@ -98,7 +98,7 @@ OutputIt THRUST_HOST_DEVICE transform_exclusive_scan(
   ScanOp scan_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-  using result_type = thrust::remove_cvref_t<InitialValueType>;
+  using result_type = ::internal::remove_cvref_t<InitialValueType>;
 
   using size_type              = typename iterator_traits<InputIt>::difference_type;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));

@@ -19,6 +19,8 @@
 
 #if THRUST_CPP_DIALECT >= 2014
 
+#  include <thrust/detail/type_traits.h>
+
 #  include <async/exclusive_scan/mixin.h>
 #  include <async/test_policy_overloads.h>
 
@@ -46,7 +48,7 @@ struct adl_host_synchronous
     thrust::host_vector<input_value_type> host_input(input.cbegin(), input.cend());
     thrust::host_vector<output_value_type> host_output(host_input.size());
 
-    using OutIter = thrust::remove_cvref_t<decltype(host_output.begin())>;
+    using OutIter = ::internal::remove_cvref_t<decltype(host_output.begin())>;
 
     // ADL should resolve this to the synchronous `thrust::` algorithm.
     // This is checked by ensuring that the call returns an output iterator.

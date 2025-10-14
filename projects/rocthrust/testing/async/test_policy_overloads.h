@@ -19,8 +19,9 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/device_allocator.h>
 #  include <thrust/future.h>
 
@@ -117,23 +118,13 @@ private:
   {
     // When a policy uses the default stream, the algorithm implementation
     // should spawn a new stream in the returned event:
-#  if THRUST_COMPILER(HIP)
     auto using_default_stream = [](auto& e) {
       ASSERT_NOT_EQUAL(thrust::hip_rocprim::default_stream(), e.stream().native_handle());
     };
-#  else
-    auto using_default_stream = [](auto& e) {
-      ASSERT_NOT_EQUAL(thrust::cuda_cub::default_stream(), e.stream().native_handle());
-    };
-#  endif
+
     // When a policy uses a non-default stream, the implementation should pass
     // the stream through to the output:
-
-#  if THRUST_COMPILER(HIP)
     thrust::system::hip::detail::unique_stream test_stream{};
-#  else
-    thrust::system::cuda::detail::unique_stream test_stream{};
-#  endif
     auto using_test_stream = [&test_stream](auto& e) {
       ASSERT_EQUAL(test_stream.native_handle(), e.stream().native_handle());
     };
@@ -174,7 +165,7 @@ private:
   {
     // Sink the prefix tuple into a const local so it can be safely passed to
     // multiple invocations without worrying about potential modifications.
-    using prefix_tuple_type              = thrust::remove_cvref_t<PrefixArgTuple>;
+    using prefix_tuple_type              = ::internal::remove_cvref_t<PrefixArgTuple>;
     prefix_tuple_type const prefix_tuple = THRUST_FWD(prefix_tuple_ref);
 
     using postfix_tuple_type               = std::tuple_element_t<PostfixIdx, postfix_args_type>;
@@ -231,9 +222,9 @@ private:
     // debugging:
     using overload_t = std::tuple_element_t<PostfixIdx, postfix_args_type>;
 
-    std::string const overload_desc = unittest::demangle(typeid(overload_t).name());
-    std::string const input_desc    = unittest::demangle(typeid(input_type).name());
-    std::string const output_desc   = unittest::demangle(typeid(output_type).name());
+    std::string const overload_desc = unittest::type_name<overload_t>();
+    std::string const input_desc    = unittest::type_name<input_type>();
+    std::string const output_desc   = unittest::type_name<output_type>();
 
     exc
       << "\n"
@@ -283,11 +274,8 @@ private:
     auto const stream_a = e_a.stream().native_handle();
 
     // Execution on default stream should create a new stream in the result:
-#  if THRUST_COMPILER(HIP)
     ASSERT_NOT_EQUAL_QUIET(thrust::hip_rocprim::default_stream(), stream_a);
-#  else
-    ASSERT_NOT_EQUAL_QUIET(thrust::cuda_cub::default_stream(), stream_a);
-#  endif
+
     //--------------------------------------------------------------------------
     // Test event consumption when the event is an rvalue.
     //--------------------------------------------------------------------------

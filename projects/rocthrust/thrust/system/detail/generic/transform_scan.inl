@@ -30,7 +30,6 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/scan.h>
 #include <thrust/system/detail/generic/transform_scan.h>
-#include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -56,7 +55,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
   // Use the input iterator's value type per https://wg21.link/P0571
   using InputType  = typename thrust::iterator_value<InputIterator>::type;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-  using ValueType  = thrust::remove_cvref_t<ResultType>;
+  using ValueType  = ::internal::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -81,7 +80,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
 {
   using InputType  = typename thrust::iterator_value<InputIterator>::type;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-  using ValueType  = thrust::remove_cvref_t<ResultType>;
+  using ValueType  = ::internal::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -105,7 +104,7 @@ THRUST_HOST_DEVICE OutputIterator transform_exclusive_scan(
   AssociativeOperator binary_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-  using ValueType = thrust::remove_cvref_t<InitialValueType>;
+  using ValueType = ::internal::remove_cvref_t<InitialValueType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);

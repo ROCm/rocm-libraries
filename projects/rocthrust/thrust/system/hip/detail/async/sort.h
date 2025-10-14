@@ -47,6 +47,7 @@
 
 #    include <thrust/detail/alignment.h>
 #    include <thrust/detail/static_assert.h>
+#    include <thrust/detail/type_traits.h>
 #    include <thrust/distance.h>
 #    include <thrust/iterator/iterator_traits.h>
 #    include <thrust/system/hip/detail/async/copy.h>
@@ -90,7 +91,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
 
   // Synthesize a suitable new execution policy, because we don't want to
   // try and extract twice from the one we were passed.
-  typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+  typename ::internal::remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
 
   // Copy from the input into the buffer.
 
@@ -291,7 +292,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
 
   // Synthesize a suitable new execution policy, because we don't want to
   // try and extract twice from the one we were passed.
-  typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+  typename ::internal::remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
 
   using return_future = decltype(e);
   return return_future(
