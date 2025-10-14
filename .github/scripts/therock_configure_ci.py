@@ -10,7 +10,7 @@ import json
 import logging
 import subprocess
 import sys
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -105,17 +105,7 @@ def retrieve_projects(args):
         if related_to_therock_ci:
             subtrees = list(subtree_to_project_map.keys())
 
-    projects = set()
-    # collect the associated subtree to project
-    for subtree in subtrees:
-        if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
-
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
-    project_to_run = []
-    for project in projects:
-        if project in project_map:
-            project_to_run.append(project_map.get(project))
+    project_to_run = collect_projects_to_run(subtrees)
 
     return project_to_run
 
