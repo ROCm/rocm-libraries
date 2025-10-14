@@ -36,11 +36,13 @@ struct ConvolutionDescriptorParams
     ConvolutionDescriptorParams(std::vector<int>&& pads_in,
                                 std::vector<int>&& strides_in,
                                 std::vector<int>&& dilations_in,
-                                int group_count_in = 1)
+                                int group_count_in = 1,
+                                bool deterministic_in = false)
         : pads(std::move(pads_in)),
           strides(std::move(strides_in)),
           dilations(std::move(dilations_in)),
-          group_count(group_count_in)
+          group_count(group_count_in),
+          deterministic(deterministic_in)
     {
     }
 
@@ -50,7 +52,7 @@ struct ConvolutionDescriptorParams
     miopen::ConvolutionDescriptor GetConvolutionDescriptor() const
     {
         const auto trans_output_pads = std::vector<int>(pads.size(), 0);
-        return {pads, strides, dilations, trans_output_pads, group_count};
+        return {pads, strides, dilations, trans_output_pads, group_count, deterministic};
     }
 
     friend std::ostream& operator<<(std::ostream& os, const ConvolutionDescriptorParams& cp)
@@ -67,6 +69,7 @@ private:
     std::vector<int> strides;
     std::vector<int> dilations;
     int group_count;
+    bool deterministic;
 };
 
 } // namespace unit_tests
