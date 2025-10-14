@@ -176,6 +176,7 @@ else()
           set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
           # Builds tensilelite's device libraries (.co/.dat)
           set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_ASAN ${BUILD_ADDRESS_SANITIZER} CACHE BOOL "" FORCE)
           # Builds tensilelite::tensilelite-host target
           set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
           if( Tensile_NO_LAZY_LIBRARY_LOADING )
