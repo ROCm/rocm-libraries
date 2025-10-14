@@ -585,19 +585,19 @@ public:
             const tensor<T> cpu = direction.cpu();
             const tensor<T> gpu = direction.gpu();
 
-            double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-            double error     = miopen::rms_range(cpu, gpu);
-    
+            const double threshold  = std::numeric_limits<T>::epsilon() * tolerance;
+            const double error      = miopen::rms_range(cpu, gpu);
+
             if(saveCpuResults)
             {
                 cpu_results = std::move(cpu);
             }
-    
+
             if(error > threshold)
             {
                 direction.fail();
             }
-    
+
             ASSERT_LE(error, threshold) << "n: " << n << std::endl
                                         << "alpha: " << alpha << std::endl
                                         << "beta: " << beta << std::endl
@@ -609,19 +609,19 @@ public:
             const tensor<T> cpu = direction.cpu_st();
             const tensor<T> gpu = direction.gpu();
 
-            double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-            double error     = miopen::rms_range(cpu, gpu);
-    
+            const double threshold  = std::numeric_limits<T>::epsilon() * tolerance;
+            const double error      = miopen::rms_range(cpu, gpu);
+
             if(saveCpuResults)
             {
                 cpu_results = std::move(cpu);
             }
-    
+
             if(error > threshold)
             {
                 direction.fail();
             }
-    
+
             ASSERT_LE(error, threshold) << "n: " << n << std::endl
                                         << "alpha: " << alpha << std::endl
                                         << "beta: " << beta << std::endl
