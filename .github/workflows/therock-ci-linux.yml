@@ -7,8 +7,6 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
-        type: string
 
 
 permissions:
@@ -40,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: dc05d637054ad197c84b00e24b6262af0ec797c6 # 2025-10-03 commit
+          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
 
       - name: Install python deps
         run: |

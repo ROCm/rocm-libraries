@@ -279,6 +279,74 @@ constexpr auto hipsparse_sddmmalg2string(hipsparseSDDMMAlg_t alg)
 #endif
 
 #if(!defined(CUDART_VERSION))
+constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPGEMM_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPGEMM_CSR_ALG_DETERMINISTIC:
+        return "deterministic";
+    case HIPSPARSE_SPGEMM_CSR_ALG_NONDETERMINISTIC:
+        return "nondeterministic";
+    case HIPSPARSE_SPGEMM_ALG1:
+        return "alg1";
+    case HIPSPARSE_SPGEMM_ALG2:
+        return "alg2";
+    case HIPSPARSE_SPGEMM_ALG3:
+        return "alg3";
+    }
+    return "invalid";
+}
+#else
+#if(CUDART_VERSION >= 12000)
+constexpr auto hipsparse_spgemmalg2string(hipsparseSpGEMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPGEMM_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPGEMM_CSR_ALG_DETERMINISTIC:
+        return "deterministic";
+    case HIPSPARSE_SPGEMM_CSR_ALG_NONDETERMINISTIC:
+        return "nondeterministic";
+    case HIPSPARSE_SPGEMM_ALG1:
+        return "alg1";
+    case HIPSPARSE_SPGEMM_ALG2:
+        return "alg2";
+    case HIPSPARSE_SPGEMM_ALG3:
+        return "alg3";
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPGEMM_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPGEMM_CSR_ALG_DETERMINISTIC:
+        return "deterministic";
+    case HIPSPARSE_SPGEMM_CSR_ALG_NONDETERMINISTIC:
+        return "nondeterministic";
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 11000)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpGEMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPGEMM_DEFAULT:
+        return "default";
+    }
+    return "invalid";
+}
+#endif
+#endif
+
+#if(!defined(CUDART_VERSION))
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -522,4 +590,46 @@ constexpr auto hipsparse_densetosparsealg2string(hipsparseDenseToSparseAlg_t alg
     }
     return "invalid";
 }
+#endif
+
+#if(!defined(CUDART_VERSION))
+constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_CSR2CSC_ALG_DEFAULT:
+        return "default";
+    case HIPSPARSE_CSR2CSC_ALG1:
+        return "alg1";
+    case HIPSPARSE_CSR2CSC_ALG2:
+        return "alg2";
+    }
+    return "invalid";
+}
+#else
+#if(CUDART_VERSION >= 12000)
+constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_CSR2CSC_ALG_DEFAULT:
+        return "default";
+    case HIPSPARSE_CSR2CSC_ALG1:
+        return "alg1";
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+constexpr auto hipsparse_csr2cscalg2string(hipsparseCsr2CscAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_CSR2CSC_ALG1:
+        return "alg1";
+    case HIPSPARSE_CSR2CSC_ALG2:
+        return "alg2";
+    }
+    return "invalid";
+}
+#endif
 #endif

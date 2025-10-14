@@ -15,18 +15,10 @@ if(NOT GTest_FOUND)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    find_package(mxDataGenerator QUIET)
-    if(NOT mxDataGenerator_FOUND)
-        if(ROCROLLER_ENABLE_FETCH)
-            FetchContent_Declare(
-                mxDataGenerator
-                GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
-                GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
-            )
-            FetchContent_MakeAvailable(mxDataGenerator)
-        else()
-            message(FATAL_ERROR "Failed to find mxDataGenerator")
-        endif()
+    if(ROCROLLER_ENABLE_THEROCK)
+        find_package(mxDataGenerator REQUIRED)
+    else()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
     endif()
 endif()
 

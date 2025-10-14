@@ -71,14 +71,9 @@ TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
     BatchnormFwdInferenceSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     std::vector<int64_t> dims = {1, 1, 1, 1};
-    BatchnormFwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
-
-    auto graphTuple = buildBatchnormFwdInferenceGraph(
-        tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
-
-    auto& graph = std::get<0>(graphTuple);
+    auto graph = buildBatchnormFwdInferenceGraph(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
