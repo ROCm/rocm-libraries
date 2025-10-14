@@ -45,6 +45,17 @@ class ConvBackwardWeights : public ::testing::TestWithParam<ConvTestCase>
             dwTensor.fillWithValue(static_cast<DataType>(0.0));
         }
 
+        std::unordered_map<int64_t, void*>
+            createVariantPack(int64_t xTensorUid, int64_t dwTensorUid, int64_t dyTensorUid)
+        {
+            std::unordered_map<int64_t, void*> variantPack;
+            variantPack[xTensorUid] = xTensor.memory().deviceData();
+            variantPack[dwTensorUid] = dwTensor.memory().deviceData();
+            variantPack[dyTensorUid] = dyTensor.memory().deviceData();
+
+            return variantPack;
+        }
+
         PinnedTensor<DataType> xTensor;
         PinnedTensor<DataType> dwTensor;
         PinnedTensor<DataType> dyTensor;
@@ -81,20 +92,6 @@ protected:
         {
             ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
         }
-    }
-
-    std::unordered_map<int64_t, void*>
-        createVariantPack(const graph::TensorAttributes& xTensorAttr,
-                          const graph::TensorAttributes& dwTensorAttr,
-                          const graph::TensorAttributes& dyTensorAttr,
-                          ConvTensorBundle& tensorBundle)
-    {
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr.get_uid()] = tensorBundle.xTensor.memory().deviceData();
-        variantPack[dwTensorAttr.get_uid()] = tensorBundle.dwTensor.memory().deviceData();
-        variantPack[dyTensorAttr.get_uid()] = tensorBundle.dyTensor.memory().deviceData();
-
-        return variantPack;
     }
 
     void runMiopenConvWrwData(const ConvTestCase& testCase,
@@ -154,8 +151,8 @@ protected:
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        auto variantPack
-            = createVariantPack(*xTensorAttr, *dwTensorAttr, *dyTensorAttr, graphTensorBundle);
+        auto variantPack = graphTensorBundle.createVariantPack(
+            xTensorAttr->get_uid(), dwTensorAttr->get_uid(), dyTensorAttr->get_uid());
 
         result = graphObj->execute(_handle, variantPack, workspace.get());
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;

@@ -23,6 +23,11 @@ ConvWrwParams::ConvWrwParams(
     , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
     , _conv(_spatialDimCount, attributes)
 {
+    const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
+    const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
+    const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
+
+    _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
 
 const MiopenTensor& ConvWrwParams::x() const
@@ -43,6 +48,11 @@ const MiopenTensor& ConvWrwParams::dy() const
 const MiopenConvDescriptor& ConvWrwParams::conv() const
 {
     return _conv;
+}
+
+bool ConvWrwParams::validTensors() const
+{
+    return _tensorsValid;
 }
 
 ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&& params)
@@ -68,23 +78,20 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
     THROW_ON_MIOPEN_FAILURE(
         miopenFindSolutions(handle.miopenHandle, problem, nullptr, &solution, &numSolutions, 1));
 
-    if(solution != nullptr)
-    {
-        _solution = hipdnn_sdk::utilities::ScopedResource<miopenSolution_t>(
-            solution, [](miopenSolution_t s) {
-                auto status = miopenDestroySolution(s);
-                if(status != miopenStatusSuccess)
-                {
-                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
-                }
-            });
-    }
-
-    if(numSolutions != 1)
+    if(solution == nullptr || numSolutions != 1)
     {
         throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                    "miopenFindSolutions returned no solutions");
     }
+
+    _solution
+        = hipdnn_sdk::utilities::ScopedResource<miopenSolution_t>(solution, [](miopenSolution_t s) {
+              auto status = miopenDestroySolution(s);
+              if(status != miopenStatusSuccess)
+              {
+                  HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
+              }
+          });
 
     THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
 }

@@ -32,22 +32,26 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
 
-    // Check tensor attributes
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrX = miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
-    const auto& tensorAttrY = miopen_utils::findTensorAttributes(tensorMap, attr.y_tensor_uid());
-
-    if(tensorAttrX.virtual_() || tensorAttrW.virtual_() || tensorAttrY.virtual_())
-    {
-        HIPDNN_LOG_WARN("All tensors must be non-virtual");
-        return false;
-    }
-
-    size_t spatialDimCount;
+    size_t solutionCount = 0;
     try
     {
-        spatialDimCount = miopen_utils::getSpatialDimCount(tensorAttrX);
+        ConvFwdParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                               params.w().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.y().tensorDescriptor(),
+                                                               &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
@@ -55,34 +59,6 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
         return false;
     }
 
-    // Create MIOpen tensor descriptors
-    const MiopenTensor tensorX(tensorAttrX);
-    const MiopenTensor tensorW(tensorAttrW);
-    const MiopenTensor tensorY(tensorAttrY);
-
-    // Create MIOpen convolution descriptor
-    MiopenConvDescriptor convDesc;
-    try
-    {
-        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
-    }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
-    {
-        HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    size_t solutionCount;
-    auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
-                                                           tensorW.tensorDescriptor(),
-                                                           tensorX.tensorDescriptor(),
-                                                           convDesc.convDescriptor(),
-                                                           tensorY.tensorDescriptor(),
-                                                           &solutionCount);
-    if(status != miopenStatusSuccess)
-    {
-        return false;
-    }
     return solutionCount != 0;
 }
 
@@ -91,56 +67,30 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
 
-    // Check tensor attributes
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrDX = miopen_utils::findTensorAttributes(tensorMap, attr.dx_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
-    const auto& tensorAttrDY = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
-
-    if(tensorAttrDX.virtual_() || tensorAttrW.virtual_() || tensorAttrDY.virtual_())
-    {
-        HIPDNN_LOG_WARN("All tensors must be non-virtual");
-        return false;
-    }
-
-    size_t spatialDimCount;
+    size_t solutionCount = 0;
     try
     {
-        spatialDimCount = miopen_utils::getSpatialDimCount(tensorAttrDX);
+        ConvBwdParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                                    params.dy().tensorDescriptor(),
+                                                                    params.w().tensorDescriptor(),
+                                                                    params.conv().convDescriptor(),
+                                                                    params.dx().tensorDescriptor(),
+                                                                    &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
         HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    // Create MIOpen tensor descriptors
-    const MiopenTensor tensorDX(tensorAttrDX);
-    const MiopenTensor tensorW(tensorAttrW);
-    const MiopenTensor tensorDY(tensorAttrDY);
-
-    // Create MIOpen convolution descriptor
-    MiopenConvDescriptor convDesc;
-    try
-    {
-        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
-    }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
-    {
-        HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    size_t solutionCount;
-    auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
-                                                                tensorDY.tensorDescriptor(),
-                                                                tensorW.tensorDescriptor(),
-                                                                convDesc.convDescriptor(),
-                                                                tensorDX.tensorDescriptor(),
-                                                                &solutionCount);
-
-    if(status != miopenStatusSuccess)
-    {
         return false;
     }
 
@@ -152,56 +102,31 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
 
-    // Check tensor attributes
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrX = miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid());
-    const auto& tensorAttrDW = miopen_utils::findTensorAttributes(tensorMap, attr.dw_tensor_uid());
-    const auto& tensorAttrDY = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
-
-    if(tensorAttrX.virtual_() || tensorAttrDW.virtual_() || tensorAttrDY.virtual_())
-    {
-        HIPDNN_LOG_WARN("All tensors must be non-virtual");
-        return false;
-    }
-
-    size_t spatialDimCount;
+    size_t solutionCount = 0;
     try
     {
-        spatialDimCount = miopen_utils::getSpatialDimCount(tensorAttrX);
+        ConvWrwParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status
+            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                               params.dy().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.dw().tensorDescriptor(),
+                                                               &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
         HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    // Create MIOpen tensor descriptors
-    const MiopenTensor tensorX(tensorAttrX);
-    const MiopenTensor tensorDW(tensorAttrDW);
-    const MiopenTensor tensorDY(tensorAttrDY);
-
-    // Create MIOpen convolution descriptor
-    MiopenConvDescriptor convDesc;
-    try
-    {
-        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
-    }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
-    {
-        HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    size_t solutionCount;
-    auto status = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
-                                                                   tensorDY.tensorDescriptor(),
-                                                                   tensorX.tensorDescriptor(),
-                                                                   convDesc.convDescriptor(),
-                                                                   tensorDW.tensorDescriptor(),
-                                                                   &solutionCount);
-
-    if(status != miopenStatusSuccess)
-    {
         return false;
     }
 

@@ -23,6 +23,11 @@ ConvFwdParams::ConvFwdParams(
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
     , _conv(_spatialDimCount, attributes)
 {
+    const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
+    const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
+    const auto& attrY = miopen_utils::findTensorAttributes(tensorMap, _y.uid());
+
+    _tensorsValid = (!attrX.virtual_() && !attrW.virtual_() && !attrY.virtual_());
 }
 
 const MiopenTensor& ConvFwdParams::x() const
@@ -43,6 +48,11 @@ const MiopenTensor& ConvFwdParams::y() const
 const MiopenConvDescriptor& ConvFwdParams::conv() const
 {
     return _conv;
+}
+
+bool ConvFwdParams::validTensors() const
+{
+    return _tensorsValid;
 }
 
 ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle, ConvFwdParams&& params)
