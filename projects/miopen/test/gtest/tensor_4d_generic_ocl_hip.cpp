@@ -100,10 +100,6 @@ std::vector<TensorsConfig> TensorsConfigs()
         {
             maxTotalSize = 16; // twice the 8MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
-        {
-            maxTotalSize = 4; // twice the 2MB L2
-        }
         else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
                 miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
         {

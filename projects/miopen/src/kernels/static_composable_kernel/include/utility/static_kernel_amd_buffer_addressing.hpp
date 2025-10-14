@@ -5,7 +5,7 @@
 namespace ck {
 
 // buffer resourse flags
-/*#if defined(CK_AMD_GPU_GFX803) || defined(CK_AMD_GPU_GFX900) || defined(CK_AMD_GPU_GFX906) || \
+/*#if defined(CK_AMD_GPU_GFX900) || defined(CK_AMD_GPU_GFX906) || \
     defined(CK_AMD_GPU_GFX942) || defined(CK_AMD_GPU_GFX908) || defined(CK_AMD_GPU_GFX90A) || \
     defined(CK_AMD_GPU_GFX950)*/
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000

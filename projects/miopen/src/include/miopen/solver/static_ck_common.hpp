@@ -53,9 +53,7 @@ namespace static_ck {
 /// \todo Check which devices are currently supported
 static inline bool IsComposableKernelSupportedHardware(const ExecutionContext& c)
 {
-    return (c.GetStream().GetDeviceName() == "gfx803" &&
-            c.GetStream().GetMaxComputeUnits() == 64) ||
-           c.GetStream().GetDeviceName() == "gfx900" || c.GetStream().GetDeviceName() == "gfx906" ||
+    return c.GetStream().GetDeviceName() == "gfx900" || c.GetStream().GetDeviceName() == "gfx906" ||
            c.GetStream().GetDeviceName() == "gfx908" || c.GetStream().GetDeviceName() == "gfx90a" ||
            c.GetStream().GetDeviceName() == "gfx942" || StartsWith(c.GetStream().GetDeviceName(), "gfx95") ||
            StartsWith(c.GetStream().GetDeviceName(), "gfx103");

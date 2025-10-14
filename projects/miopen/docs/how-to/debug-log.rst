@@ -213,7 +213,6 @@ Some of the solutions have individual controls, which affect both find and immed
   * ``MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_EXPEREMENTAL_FP16_TRANSFORM`` --
     ``ConvMPBidirectWinograd*``, FWD/BWD FP16 experimental mode (use at your own risk). Disabled
     by default.
-  * ``MIOPEN_DEBUG_AMD_FUSED_WINOGRAD`` -- Fused ``FP32`` F(3,3) Winograd, variable filter size.
 
 Implicit GEMM solutions:
 

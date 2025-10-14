@@ -343,7 +343,7 @@ bool PerformanceConfigConvAsmBwdWrW1x1::IsValid(const ExecutionContext& ctx,
     int bfp16_convert = 0;
 
     const std::string name = ctx.GetStream().GetDeviceName();
-    if(name.find("gfx8") == std::string::npos && name.find("gfx9") == std::string::npos)
+    if(name.find("gfx9") == std::string::npos)
     {
         bfp16_convert = 0;
     }
@@ -478,7 +478,7 @@ bool ConvAsmBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1))
         return false;
     const std::string name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90")))
+    if(!StartsWith(name, "gfx90"))
         return false;
     if(!ctx.use_asm_kernels)
         return false;

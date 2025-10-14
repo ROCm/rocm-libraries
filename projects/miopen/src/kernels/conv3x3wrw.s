@@ -202,9 +202,7 @@ static_assert(partial_lanes_mask <= 0xffffffff)
 input_buffer_size = input_stack_size * batch_size
 output_buffer_size = output_stack_size * batch_size
 
-.if (.option.machine_version_major == 8)
-   .set max_hw_vctn, 15
-.elseif (.option.machine_version_major == 9)
+.if (.option.machine_version_major == 9)
    .set max_hw_vctn, 63
 .endif
 max_hw_lcnt = 15
@@ -303,7 +301,7 @@ miopenGcnAsmConv3x3WrW:
 
 
    // fill format and size fields of buffer descriptors
-   static_assert ((.option.machine_version_major == 8) || (.option.machine_version_major == 9))
+   static_assert (.option.machine_version_major == 9)
    s_mov_b32 s[desc_in+2], input_buffer_size
    s_mov_b32 s[desc_in+3], 0x00027000
    s_mov_b32 s[desc_wei+2], filters_size

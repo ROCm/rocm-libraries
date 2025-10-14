@@ -72,8 +72,7 @@ bool ConvAsm7x7c3h224w224k64u2v2p3q3f1::IsApplicable(const ExecutionContext& ctx
     if(name == "gfx90a")
         return false;
 #endif
-    if(!(name == "gfx800" || name == "gfx802" || name == "gfx803" || name == "gfx804" ||
-         name == "gfx900" || name == "gfx904" || name == "gfx906" || name == "gfx908"))
+    if(!(name == "gfx900" || name == "gfx904" || name == "gfx906" || name == "gfx908"))
         return false;
     if(!problem.IsDirectionForward())
         return false;

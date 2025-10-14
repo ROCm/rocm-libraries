@@ -1039,7 +1039,7 @@ bool ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm::IsApplicable(
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R4_PADDED_GEMM_XDLOPS))
         return false;
     const std::string name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
+    if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
 
     if(problem.GetConv().attribute.deterministic)

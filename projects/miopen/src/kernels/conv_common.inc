@@ -73,9 +73,7 @@ TYPE_INT4  = 8
     .endr
 .endm
 
-.if (.option.machine_version_major == 8)
-    .set max_hw_vctn, 15
-.elseif (.option.machine_version_major == 9)
+if (.option.machine_version_major == 9)
     .set max_hw_vctn, 63
 .endif
 max_hw_lcnt = 15

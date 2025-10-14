@@ -401,22 +401,6 @@ private:
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
-struct ConvBinWinogradRxSFused final : FusionSolverBase
-{
-    const std::string& SolverDbId() const override
-    {
-        return GetSolverDbId<ConvBinWinogradRxSFused>();
-    }
-
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& context,
-                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution GetSolution(
-        const FusionContext& context, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT float GetWti(const FusionContext&,
-                                         const FusionDescription&) const override;
-};
-
 struct ConvBinWinogradRxSf2x3g1Fused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override

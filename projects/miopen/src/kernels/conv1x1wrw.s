@@ -107,7 +107,7 @@ static_assert (chunk_size == 1 || c_per_gpr * chunk_size <= 16) // todo: remove 
 static_assert (c_per_gpr * n_per_gpr * hw_per_gpr * chunk_size == wave_size)
 static_assert (k_per_gpr * n_per_gpr * hw_per_gpr * chunk_size <= wave_size)
 
-static_assert ((.option.machine_version_major == 8) || (.option.machine_version_major == 9))
+static_assert (.option.machine_version_major == 9)
 static_assert (filter_c_stride < maxU24)
 static_assert (filter_k_stride < maxU24)
 static_assert (input_c_stride < maxU24)
@@ -1109,11 +1109,7 @@ loop_exit:
                     .if b == 0
                         _v_add_nc_u32 v[voffset_wei], v[k_off_masked], v[c_off_masked]
                     .else
-                        .if (.option.machine_version_major == 8) // workaround for asm
-                            _v_add_nc_u32_ror voffset_wei, k_off_masked, c_off_masked, b
-                        .else
-                            _v_add_nc_u32 v[voffset_wei], v[k_off_masked], v[c_off_masked] row_ror:b
-                        .endif
+                        _v_add_nc_u32 v[voffset_wei], v[k_off_masked], v[c_off_masked] row_ror:b
                     .endif
 
                     acc = accums + k_per_gpr * (cx * k_mult + kx) + k_ds * k_dpp_rotates

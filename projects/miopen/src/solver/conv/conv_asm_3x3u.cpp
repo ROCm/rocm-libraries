@@ -176,7 +176,7 @@ bool ConvAsm3x3U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_ASM_3X3U))
         return false;
     const std::string name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90")))
+    if(!StartsWith(name, "gfx90"))
         return false;
     if(!ctx.use_asm_kernels)
         return false;

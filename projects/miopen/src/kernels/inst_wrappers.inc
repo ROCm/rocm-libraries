@@ -29,9 +29,9 @@
 // Also these allow for unifying source text when different
 // ISA versions require different assembler syntax (mostly mnemonics).
 
-.if ((.option.machine_version_major == 8) || (.option.machine_version_major == 9))
+.if (.option.machine_version_major == 9)
 .else
-    .error "Only Gfx8 and Gfx9 ISA is supported"
+    .error "Only Gfx9 ISA is supported"
     .end
 .endif
 
@@ -42,54 +42,44 @@
 // Let's use Gfx10-like naming conventions for wrapper macros.
 // ADD_NC
 .macro _v_add_nc_u32 dst, src0, src1, dpp=
-    .if (.option.machine_version_major == 8)
-        // None No-Carry instruction in Gfx8, modifies VCC.
-        v_add_u32 \dst, vcc, \src0, \src1 \dpp
-    .else
-        v_add_u32 \dst, \src0, \src1 \dpp
-    .endif
+    v_add_u32 \dst, \src0, \src1 \dpp
 .endm
 
 // SUB_NC
 .macro _v_sub_nc_u32 dst, src0, src1, dpp=
-    .if (.option.machine_version_major == 8)
-        // None No-Carry instruction in Gfx8, modifies VCC.
-        v_sub_u32 \dst, vcc, \src0, \src1 \dpp
-    .else
-        v_sub_u32 \dst, \src0, \src1 \dpp
-    .endif
+    v_sub_u32 \dst, \src0, \src1 \dpp
 .endm
 
-// ADD_CO (gfx8 add)
+// ADD_CO (gfx9 workaround add)
 .macro _v_add_co_u32 dst, co, src0, src1, dpp=
-    .if ((.option.machine_version_major == 8) || ((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
+    .if (((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
         v_add_u32 \dst, \co, \src0, \src1 \dpp
     .else
         v_add_co_u32 \dst, \co, \src0, \src1 \dpp
     .endif
 .endm
 
-// ADD_CO_CI (gfx8 addc)
+// ADD_CO_CI (gfx9 workaround addc)
 .macro _v_add_co_ci_u32 dst, co, src0, src1, ci, dpp=
-    .if ((.option.machine_version_major == 8) || ((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
+    .if (((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
 		v_addc_u32 \dst, \co, \src0, \src1, \ci \dpp
     .else
 		v_addc_co_u32 \dst, \co, \src0, \src1, \ci \dpp
     .endif
 .endm
 
-// SUB_CO (gfx8 sub)
+// SUB_CO (gfx9 workaround sub)
 .macro _v_sub_co_u32 dst, co, src0, src1, dpp=
-    .if ((.option.machine_version_major == 8) || ((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
+    .if (((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
         v_sub_u32 \dst, \co, \src0, \src1 \dpp
     .else
         v_sub_co_u32 \dst, \co, \src0, \src1 \dpp
     .endif
 .endm
 
-// SUBREV_CO (gfx8 subrev)
+// SUBREV_CO (gfx9 workaround subrev)
 .macro _v_subrev_co_u32 dst, co, src0, src1, dpp=
-    .if ((.option.machine_version_major == 8) || ((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
+    .if (((.option.machine_version_major == 9) && (WORKAROUND_BUG_34765 == 1)))
         v_subrev_u32 \dst, \co, \src0, \src1 \dpp
     .else
         v_subrev_co_u32 \dst, \co, \src0, \src1 \dpp

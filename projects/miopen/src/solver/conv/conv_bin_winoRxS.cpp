@@ -269,7 +269,7 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         }
         else
         {
-            if(!(name == "gfx803" || name == "gfx900" || name == "gfx906" || name == "gfx908"))
+            if(!(name == "gfx900" || name == "gfx906" || name == "gfx908"))
                 return false;
         }
     }

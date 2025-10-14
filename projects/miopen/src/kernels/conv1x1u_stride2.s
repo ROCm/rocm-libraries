@@ -295,7 +295,7 @@ miopenGcnAsmConv1x1U_stride2:
     s_mov_b32 exec_hi, active_mask_hi
 
     // fill format and size fields of buffer descriptors
-    static_assert ((.option.machine_version_major == 8) || (.option.machine_version_major == 9))
+    static_assert (.option.machine_version_major == 9)
     s_mov_b32 s[desc_in+2], input_buffer_size
     s_mov_b32 s[desc_in+3], 0x00027000
     s_mov_b32 s[desc_wei+2], filter_buffer_size

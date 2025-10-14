@@ -111,11 +111,6 @@ struct InTransform
         const size_t chw_step       = tiles_per_wave
             * ctx.GetStream().GetMaxComputeUnits()
             * ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::GetGroupCountMult();
-        const std::string name = ctx.GetStream().GetDeviceName();
-        if(name.find("gfx8") != std::string::npos)
-        {
-            return false;
-        }
 
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
@@ -219,10 +214,7 @@ struct FilterTransform
             * ctx.GetStream().GetMaxComputeUnits()
             * ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::GetGroupCountMult();
         const std::string name = ctx.GetStream().GetDeviceName();
-        if(name.find("gfx8") != std::string::npos)
-        {
-            return false;
-        }
+        
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
                 && H < u16limit
@@ -487,8 +479,7 @@ bool ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>
                                                                                        problem)))
         return false;
 
-    if(!(StartsWith(name, "gfx8") || name == "gfx900" || name == "gfx906" || name == "gfx908" ||
-         name == "gfx90a"))
+    if(!(name == "gfx900" || name == "gfx906" || name == "gfx908" || name == "gfx90a"))
         return false;
     if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
