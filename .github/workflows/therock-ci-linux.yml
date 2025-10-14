@@ -38,7 +38,9 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
+          # TEST COMMIT
+          ref: users/geomin12/add-hipsparse-data
+          # ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
 
       - name: Install python deps
         run: |
