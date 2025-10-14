@@ -377,7 +377,7 @@ try
 
     if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
-        rocsolver_log_begin()
+        rocsolver_log_begin();
     }
 
     return HIPSOLVER_STATUS_SUCCESS;
@@ -403,7 +403,7 @@ try
 
     if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
     {
-        rocsolver_log_end()
+        rocsolver_log_end();
     }
 
     return HIPSOLVER_STATUS_SUCCESS;
