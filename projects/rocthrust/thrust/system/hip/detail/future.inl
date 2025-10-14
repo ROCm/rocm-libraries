@@ -315,7 +315,9 @@ struct unique_eager_future_promise_pair final
   weak_promise<X, XPointer> promise;
 };
 
-struct acquired_stream final
+THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional
+
+  struct acquired_stream final
 {
   unique_stream stream;
   optional<std::size_t> const acquired_from;
@@ -344,6 +346,8 @@ inline THRUST_HOST optional<unique_stream> try_acquire_stream(int device, unique
 // Precondition: `device` is the current HIP device.
 template <typename X>
 THRUST_HOST optional<unique_stream> try_acquire_stream(int device, unique_eager_future<X>& parent) noexcept;
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 template <typename... Dependencies>
 THRUST_HOST acquired_stream acquire_stream(int device, Dependencies&... deps) noexcept;
@@ -748,8 +752,10 @@ public:
     stream().wait();
   }
 
-  friend THRUST_HOST optional<detail::unique_stream>
-  thrust::system::hip::detail::try_acquire_stream(int device_id, unique_eager_event& parent) noexcept;
+  THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional
+    friend THRUST_HOST optional<detail::unique_stream>
+    thrust::system::hip::detail::try_acquire_stream(int device_id, unique_eager_event& parent) noexcept;
+  THRUST_SUPPRESS_DEPRECATED_POP
 
   template <typename... Dependencies>
   friend THRUST_HOST unique_eager_event
@@ -906,9 +912,11 @@ public:
   }
 #  endif
 
-  template <typename X>
-  friend THRUST_HOST optional<detail::unique_stream>
-  thrust::system::hip::detail::try_acquire_stream(int device_id, unique_eager_future<X>& parent) noexcept;
+  THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional
+    template <typename X>
+    friend THRUST_HOST optional<detail::unique_stream>
+    thrust::system::hip::detail::try_acquire_stream(int device_id, unique_eager_future<X>& parent) noexcept;
+  THRUST_SUPPRESS_DEPRECATED_POP
 
   template <typename X, typename XPointer, typename ComputeContent, typename... Dependencies>
   friend THRUST_HOST detail::unique_eager_future_promise_pair<X, XPointer>
@@ -921,9 +929,10 @@ public:
 
 namespace detail
 {
+THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional
 
-template <typename X, typename Deleter>
-THRUST_HOST optional<unique_stream> try_acquire_stream(int, std::unique_ptr<X, Deleter>&) noexcept
+  template <typename X, typename Deleter>
+  THRUST_HOST optional<unique_stream> try_acquire_stream(int, std::unique_ptr<X, Deleter>&) noexcept
 {
   // There's no stream to acquire!
   return {};
@@ -978,6 +987,8 @@ THRUST_HOST optional<unique_stream> try_acquire_stream(int device_id, unique_eag
   return {};
 }
 
+THRUST_SUPPRESS_DEPRECATED_POP
+
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename... Dependencies>
@@ -992,7 +1003,8 @@ template <typename... Dependencies, std::size_t I0, std::size_t... Is>
 THRUST_HOST acquired_stream
 acquire_stream_impl(int device_id, std::tuple<Dependencies...>& deps, index_sequence<I0, Is...>) noexcept
 {
-  auto tr = try_acquire_stream(device_id, std::get<I0>(deps));
+  THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional (MSVC warnings here)
+    auto tr = try_acquire_stream(device_id, std::get<I0>(deps));
 
   if (tr)
   {
@@ -1002,6 +1014,7 @@ acquire_stream_impl(int device_id, std::tuple<Dependencies...>& deps, index_sequ
   {
     return acquire_stream_impl(device_id, deps, index_sequence<Is...>{});
   }
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 template <typename... Dependencies>
@@ -1048,10 +1061,12 @@ create_dependencies_impl(acquired_stream& as, std::tuple<Dependencies...>& deps,
 {
   // We only need to wait on the current dependency if we didn't steal our
   // stream from it.
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   if (!as.acquired_from || *as.acquired_from != I0)
   {
     create_dependency(as.stream, std::get<I0>(deps));
   }
+  THRUST_SUPPRESS_DEPRECATED_POP
 
   create_dependencies_impl(as, deps, index_sequence<Is...>{});
 }
