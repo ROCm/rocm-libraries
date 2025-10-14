@@ -93,9 +93,9 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
     {
         read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     }
-    std::string READ_TYPE = "FP_TYPE";
+    std::string READ_TYPE = "FLOAT";
     READ_TYPE             = (read_unit == 1) ? READ_TYPE : READ_TYPE + std::to_string(read_unit);
-    std::string PREC_READ_TYPE = "FP_TYPE_PREC";
+    std::string PREC_READ_TYPE = "FLOAT_ACCUM";
     PREC_READ_TYPE = (read_unit == 1) ? PREC_READ_TYPE : PREC_READ_TYPE + std::to_string(read_unit);
 
     size_t xlocalsize = 256;
