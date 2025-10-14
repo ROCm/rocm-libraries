@@ -19,7 +19,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/copy.h>
 #  include <thrust/async/reduce.h>
@@ -28,6 +28,8 @@
 
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <typename T>
 struct custom_plus
@@ -91,14 +93,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -111,14 +112,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -144,14 +144,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -165,14 +164,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -205,14 +203,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init_plus
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -227,14 +224,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init_plus
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -273,14 +269,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init_custom_plus
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -295,14 +290,13 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init_custom_plus
   // Members.
   ,
-  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  hipStream_t stream_;
   // Constructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
-    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
   // Destructor.
   ,
-  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream_));
   // `validate_event` member.
   ,
   ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -568,12 +562,16 @@ struct test_async_reduce_using
     // When you import the customization points into the global namespace,
     // they should be selected instead of the synchronous algorithms.
     {
+      THRUST_SUPPRESS_DEPRECATED_PUSH
       using namespace thrust::async;
       f0a = reduce(d0a.begin(), d0a.end());
+      THRUST_SUPPRESS_DEPRECATED_POP
     }
     {
+      THRUST_SUPPRESS_DEPRECATED_PUSH
       using thrust::async::reduce;
       f0b = reduce(d0b.begin(), d0b.end());
+      THRUST_SUPPRESS_DEPRECATED_POP
     }
 
     // ADL should find the synchronous algorithms.
@@ -651,9 +649,8 @@ struct test_async_reduce_on_then_after
 
     ASSERT_EQUAL(h0, d0);
 
-    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream;
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
-      StreamCreateWithFlags)(&stream, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+    hipStream_t stream;
+    thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
 
     auto f0 = thrust::async::reduce(thrust::device.on(stream), d0.begin(), d0.end());
 
@@ -684,7 +681,7 @@ struct test_async_reduce_on_then_after
 
     ASSERT_EQUAL(r0, r1);
 
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream));
+    thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream));
   }
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_async_reduce_on_then_after, NumericTypes);
@@ -701,13 +698,11 @@ struct test_async_reduce_allocator_on_then_after
 
     ASSERT_EQUAL(h0, d0);
 
-    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream0;
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
-      StreamCreateWithFlags)(&stream0, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+    hipStream_t stream0;
+    thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream0, hipStreamNonBlocking));
 
-    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream1;
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
-      StreamCreateWithFlags)(&stream1, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+    hipStream_t stream1;
+    thrust::hip_rocprim::throw_on_error(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
 
     auto f0 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).on(stream0), d0.begin(), d0.end());
 
@@ -728,7 +723,7 @@ struct test_async_reduce_allocator_on_then_after
                           thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
                         THRUST_UNUSED_VAR(x), thrust::event_error, thrust::event_error(thrust::event_errc::no_state));
 
-    KNOWN_FAILURE;
+    // KNOWN_FAILURE;
     // FIXME: The below fails because you can't combine allocator attachment,
     // `.on`, and `.after`.
     // The `#if 0` can be removed once the KNOWN_FAILURE is resolved.
@@ -742,8 +737,8 @@ struct test_async_reduce_allocator_on_then_after
 
     ASSERT_EQUAL(r0, r1);
 
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream0));
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream1));
+    thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream0));
+    thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream1));
 #  endif
   }
 };

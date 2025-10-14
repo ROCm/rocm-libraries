@@ -50,7 +50,7 @@ namespace unimplemented
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>
-THRUST_HOST event<DerivedPolicy> async_transform(
+THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy> async_transform(
   thrust::execution_policy<DerivedPolicy>& /*exec*/,
   ForwardIt /*first*/,
   Sentinel /*last*/,
@@ -78,6 +78,7 @@ struct transform_fn final
   , typename UnaryOperation
   >
   THRUST_HOST
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   static auto
   call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
@@ -94,6 +95,7 @@ struct transform_fn final
     , THRUST_FWD(op)
     )
   )
+  THRUST_SUPPRESS_DEPRECATED_POP
 
   template <
     typename ForwardIt, typename Sentinel, typename OutputIt
@@ -118,8 +120,8 @@ struct transform_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD THRUST_HOST
-  auto operator()(Args&&... args) const
+  THRUST_DEPRECATED THRUST_NODISCARD THRUST_HOST
+ auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
@@ -128,6 +130,9 @@ struct transform_fn final
 
 } // namespace transform_detail
 
+// note: cannot add a THRUST_DEPRECATED here because the global variable is emitted into cudafe1.stub.c and we cannot
+// suppress the warning there
+//! deprecated [Since 2.8.0]
 THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 
 /*! \endcond
