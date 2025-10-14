@@ -374,6 +374,12 @@ try
     }
 
     *handle = sp;
+
+    if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_begin()
+    }
+
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -394,6 +400,11 @@ try
     rocsolver_destroy_rfinfo(sp->rfinfo);
     cholmod_finish(&sp->c_handle);
     delete sp;
+
+    if (std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_end()
+    }
 
     return HIPSOLVER_STATUS_SUCCESS;
 }

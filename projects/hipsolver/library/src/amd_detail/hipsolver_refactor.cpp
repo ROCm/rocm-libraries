@@ -285,6 +285,12 @@ try
     }
 
     *handle = rf;
+
+    if (std::getenv("HIPSOLVER_REFACTOR_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_begin()
+    }
+
     return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
@@ -303,6 +309,11 @@ try
     rocsolver_destroy_rfinfo(rf->rfinfo);
     rocblas_destroy_handle(rf->handle);
     delete rf;
+
+    if (std::getenv("HIPSOLVER_REFACTOR_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_end()
+    }
 
     return HIPSOLVER_STATUS_SUCCESS;
 }

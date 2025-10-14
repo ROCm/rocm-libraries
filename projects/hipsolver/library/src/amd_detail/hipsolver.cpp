@@ -563,6 +563,11 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_HANDLE_IS_NULLPTR;
 
+    if (std::getenv("HIPSOLVER_ENABLED_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_begin()
+    }
+
     // Create the rocBLAS handle
     return hipsolver::rocblas2hip_status(rocblas_create_handle((rocblas_handle*)handle));
 }
@@ -574,6 +579,11 @@ catch(...)
 hipsolverStatus_t hipsolverDestroy(hipsolverHandle_t handle)
 try
 {
+    if (std::getenv("HIPSOLVER_ENABLED_ROCSOLVER_LOGGING") != nullptr)
+    {
+        rocsolver_log_end()
+    }
+
     return hipsolver::rocblas2hip_status(rocblas_destroy_handle((rocblas_handle)handle));
 }
 catch(...)
