@@ -126,8 +126,8 @@ namespace rocRoller
                 auto totalSize = totalNumberOfWorkgroups(info);
                 auto numDims   = workgroupDimensions(info);
 
-                AssertFatal(numDims == 2);
-                AssertFatal(dimension == 0 || dimension == 1);
+                AssertFatal(numDims == 2, ShowValue(numDims));
+                AssertFatal(dimension == 0 || dimension == 1, ShowValue(dimension));
 
                 for(auto direction : {GD::Downstream, GD::Upstream})
                 {

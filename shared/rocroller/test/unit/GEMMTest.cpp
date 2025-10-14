@@ -963,6 +963,14 @@ namespace GEMMDriverTest
     {
     };
 
+    class GEMMTestStreamKWGMGPU
+        : public BaseGEMMContextFixture<std::tuple<int, /* workgroupMapping dim */
+                                                   int, /* workgroupMapping value */
+                                                   bool, /* workgroupRemapXCC */
+                                                   StreamKMode>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -1266,7 +1274,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping_D123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1279,8 +1287,6 @@ namespace GEMMDriverTest
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
         gemm.numWGs = deviceProperties.multiProcessorCount;
 
-        Log::info("numWGs = {}", gemm.numWGs);
-
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
@@ -1288,24 +1294,13 @@ namespace GEMMDriverTest
 
         gemm.k = gemm.macK * 8;
 
-        for(auto workgroupMappingDim : {0, 1})
-        {
-            for(auto workgroupMappingValue : {1, 2, 6})
-            {
-                for(auto workgroupRemapXCC : {true, false})
-                {
-                    for(auto streamKMode :
-                        {StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst})
-                    {
-                        gemm.workgroupMappingDim   = workgroupMappingDim;
-                        gemm.workgroupMappingValue = workgroupMappingValue;
-                        gemm.workgroupRemapXCC     = workgroupRemapXCC;
-                        gemm.streamK               = streamKMode;
-                        basicGEMM<float>(gemm);
-                    }
-                }
-            }
-        }
+        std::tie(gemm.workgroupMappingDim,
+                 gemm.workgroupMappingValue,
+                 gemm.workgroupRemapXCC,
+                 gemm.streamK)
+            = std::get<1>(GetParam());
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
@@ -4153,4 +4148,17 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamKWGM,
+        GEMMTestStreamKWGMGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(0, 1), /* workgroupMapping dim */
+                               ::testing::Values(1, 2, 6), /* workgroupMapping value */
+                               ::testing::Values(true, false), /* remapWorkgroupXCC */
+                               ::testing::Values(StreamKMode::Standard,
+                                                 StreamKMode::TwoTile,
+                                                 StreamKMode::TwoTileDPFirst))));
+
 }
