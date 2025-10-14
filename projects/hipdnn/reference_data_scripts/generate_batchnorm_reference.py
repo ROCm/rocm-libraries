@@ -16,7 +16,9 @@ def save_batchnorm_inference_execution(x_size: list[int],
                                        max_val, 
                                        base_filename: str):
     channel_idx = 1
-    derived_sizes = [1, x_size[channel_idx], 1, 1]
+    derived_sizes = [1 for _ in x_size]
+    derived_sizes[channel_idx] = x_size[channel_idx]
+
 
     x            = TensorAttributes.random(min_val, max_val, io_type, x_size)
     mean         = TensorAttributes.random(min_val, max_val, intermediate_type, derived_sizes)
