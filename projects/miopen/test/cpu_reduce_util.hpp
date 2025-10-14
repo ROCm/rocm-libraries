@@ -28,6 +28,7 @@
 
 #include "miopen/reducetensor.hpp"
 #include "tensor_holder.hpp"
+#include <cstddef>
 #include <half/half.hpp>
 #include <limits>
 #include <cmath>
@@ -301,14 +302,17 @@ static std::vector<std::vector<T>> get_all_indexes(const std::vector<T>& lens)
     assert(D > 0);
 
     std::size_t N = 1;
-    for(const auto L : lens) N *= static_cast<std::size_t>(L);
+    for(const auto L : lens)
+        N *= static_cast<std::size_t>(L);
 
     std::vector<std::vector<T>> out;
     out.resize(N);
-    for(auto& row : out) row.resize(D);
+    for(auto& row : out)
+        row.resize(D);
 
     std::vector<std::size_t> stride(D, 1);
-    for(std::size_t d = D; d-- > 1;) stride[d - 1] = stride[d] * static_cast<std::size_t>(lens[d]);
+    for(std::size_t d = D; d-- > 1;)
+        stride[d - 1] = stride[d] * static_cast<std::size_t>(lens[d]);
 
     for(std::size_t r = 0; r < N; ++r)
     {
@@ -374,10 +378,10 @@ struct Reducer
 {
     compType acc;
     bool withIdx;
-    int      idx; // meaningful only when WithIdx==true
+    int idx; // meaningful only when WithIdx==true
     miopenNanPropagation_t nanOpt;
     // functors for reduction
-    decltype(reduce::ReduceOpFn<compType>(MIOPEN_REDUCE_TENSOR_ADD))  opNoIdx;
+    decltype(reduce::ReduceOpFn<compType>(MIOPEN_REDUCE_TENSOR_ADD)) opNoIdx;
     decltype(reduce::ReduceOpFn2<compType>(MIOPEN_REDUCE_TENSOR_ADD)) opWithIdx;
 
     Reducer(miopenNanPropagation_t n, miopenReduceTensorOp_t rop, compType zero, bool useIdx)
@@ -387,11 +391,12 @@ struct Reducer
           nanOpt(n),
           opNoIdx(reduce::ReduceOpFn<compType>(rop)),
           opWithIdx(reduce::ReduceOpFn2<compType>(rop))
-    {}
+    {
+    }
 
     inline void step(compType v, int flat_i)
     {
-        if (withIdx)
+        if(withIdx)
             reduce::binop_with_nan_check2(nanOpt, opWithIdx, acc, v, idx, flat_i);
         else
             reduce::binop_with_nan_check(nanOpt, opNoIdx, acc, v);
@@ -399,7 +404,7 @@ struct Reducer
 
     inline void combine(const Reducer& other)
     {
-        if (withIdx)
+        if(withIdx)
             reduce::binop_with_nan_check2(nanOpt, opWithIdx, acc, other.acc, idx, other.idx);
         else
             reduce::binop_with_nan_check(nanOpt, opNoIdx, acc, other.acc);
@@ -409,19 +414,19 @@ struct Reducer
 template <typename T, typename compType>
 static std::tuple<tensor<T>, tensor<int>>
 reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
-                  const tensor<T>& input,
-                  const tensor<T>& output,
+                  const std::vector<std::size_t>& inLengths,
+                  const std::vector<std::size_t>& outLengths,
+                  const std::vector<T>& input,
+                  const std::vector<std::size_t>& inStrides,
+                  const std::vector<T>& output,
+                  const std::vector<std::size_t>& outStrides,
                   float alpha,
                   float beta,
+                  bool parallel,
                   bool withIdx)
 {
     using reduce::convert_type;
     using reduce::ReduceOpZeroVal;
-
-    auto inLengths  = input.desc.GetLengths();
-    auto outLengths = output.desc.GetLengths();
-    auto inStrides  = input.desc.GetStrides();
-    auto outStrides = output.desc.GetStrides();
 
     // Partition dims
     std::vector<int> invariantDims, toReduceDims;
@@ -446,24 +451,27 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
     const bool reduceAllDims = invariantDims.empty();
 
     // unary ops & zero vals
-    const auto reduceOp = reduceDesc.reduceTensorOp_;
-    const auto nanOpt   = reduceDesc.reduceTensorNanOpt_;
+    const auto reduceOp  = reduceDesc.reduceTensorOp_;
+    const auto nanOpt    = reduceDesc.reduceTensorNanOpt_;
     const compType zeroV = ReduceOpZeroVal<compType>(reduceOp);
 
     // divider = Π reduced dims (or N if reduce-all)
     std::size_t divider = 1;
     if(reduceAllDims)
-        divider = std::accumulate(inLengths.begin(), inLengths.end(), std::size_t{1}, std::multiplies<>());
+        divider = std::accumulate(
+            inLengths.begin(), inLengths.end(), std::size_t{1}, std::multiplies<>());
     else
-        divider = std::accumulate(redLens.begin(), redLens.end(), std::size_t{1}, std::multiplies<>());
+        divider =
+            std::accumulate(redLens.begin(), redLens.end(), std::size_t{1}, std::multiplies<>());
 
     auto PreUnaryOp = reduce::PreUnaryOpFn<compType>(reduceOp, divider);
     auto PosUnaryOp = reduce::PosUnaryOpFn<compType>(reduceOp, divider);
 
     // outputs
-    auto res         = output;
-    auto res_indices = tensor<int>{output.desc.GetLengths()};
-    if (withIdx)
+    auto res         = tensor<T>{outLengths};
+    res.data = output;
+    auto res_indices = tensor<int>{outLengths};
+    if(withIdx)
         std::fill(res_indices.begin(), res_indices.end(), 0);
 
     if(reduceAllDims)
@@ -474,8 +482,7 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
         reduce::build_radix(inLengths, lens_radix);
 
         // parallel chunking
-        std::size_t hw = std::thread::hardware_concurrency();
-        if(hw == 0) hw = 1;
+        std::size_t hw = std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
         const std::size_t P     = std::min(N, hw * 4ul);
         const std::size_t chunk = (N + P - 1) / P;
 
@@ -484,31 +491,48 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
         for(std::size_t p = 0; p < P; ++p)
             partial.emplace_back(nanOpt, reduceOp, zeroV, withIdx);
 
-        par_for(static_cast<int>(P), [&](int p) {
+        auto worker = [&](int p) {
             const std::size_t begin = std::size_t(p) * chunk;
             const std::size_t end   = std::min(begin + chunk, N);
 
             auto& r = partial[p];
             for(std::size_t i = begin; i < end; ++i)
             {
-                const auto off = reduce::linear_to_offset_by_lens_strides(i, inLengths, lens_radix, inStrides);
-                auto v = convert_type<compType>(input.data[off]);
+                const auto off =
+                    reduce::linear_to_offset_by_lens_strides(i, inLengths, lens_radix, inStrides);
+                auto v = convert_type<compType>(input[off]);
                 PreUnaryOp(v);
                 r.step(v, static_cast<int>(i)); // flat index across whole tensor
             }
-        });
+        };
+
+        if(parallel)
+        {
+            par_for(static_cast<int>(P), worker);
+        }
+        else
+        {
+            for(int p = 0; p < P; ++p)
+            {
+                worker(p);
+            }
+        }
 
         // combine
         Reducer<compType> R(nanOpt, reduceOp, zeroV, withIdx);
-        for(std::size_t p = 0; p < P; ++p) R.combine(partial[p]);
+        for(std::size_t p = 0; p < P; ++p)
+            R.combine(partial[p]);
 
         // post
         PosUnaryOp(R.acc);
-        if(alpha != 1.0f) R.acc *= convert_type<compType>(alpha);
-        if(beta  != 0.0f) R.acc += convert_type<compType>(output.data[0]) * convert_type<compType>(beta);
+        if(alpha != 1.0f)
+            R.acc *= convert_type<compType>(alpha);
+        if(beta != 0.0f)
+            R.acc += convert_type<compType>(output[0]) * convert_type<compType>(beta);
 
         res.data[0] = convert_type<T>(R.acc);
-        if (withIdx) res_indices.data[0] = R.idx;
+        if(withIdx)
+            res_indices.data[0] = R.idx;
     }
     else
     {
@@ -517,15 +541,15 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
         reduce::build_radix(invLens, invRad);
         reduce::build_radix(redLens, redRad);
 
-        const std::size_t INV = std::accumulate(invLens.begin(), invLens.end(), std::size_t{1}, std::multiplies<>());
-        const std::size_t TR  = divider;
+        const std::size_t INV =
+            std::accumulate(invLens.begin(), invLens.end(), std::size_t{1}, std::multiplies<>());
+        const std::size_t TR = divider;
 
-        std::size_t hw = std::thread::hardware_concurrency();
-        if(hw == 0) hw = 1;
+        std::size_t hw = std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
         const std::size_t Te    = std::min(hw * 4ul, std::max<std::size_t>(1, INV));
         const std::size_t chunk = (INV + Te - 1) / Te;
 
-        par_for(static_cast<int>(Te), [&](int t) {
+        auto worker = [&](int t) {
             const std::size_t row0 = std::size_t(t) * chunk;
             const std::size_t row1 = std::min(row0 + chunk, INV);
 
@@ -538,7 +562,7 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                 for(std::size_t k = 0; k < invLens.size(); ++k)
                 {
                     const std::size_t idx = (tmp / invRad[k]) % invLens[k];
-                    base_in_off  += idx * invStrides_v[k];
+                    base_in_off += idx * invStrides_v[k];
                     base_out_off += idx * outStrides[invariantDims[k]];
                 }
 
@@ -547,7 +571,7 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                 // iterate reduced subspace
                 for(std::size_t i = 0; i < TR; ++i)
                 {
-                    std::size_t tmp2 = i;
+                    std::size_t tmp2    = i;
                     std::size_t red_off = 0;
                     for(std::size_t k = 0; k < redLens.size(); ++k)
                     {
@@ -555,23 +579,66 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                         red_off += idx * redStrides_v[k];
                     }
 
-                    auto v = convert_type<compType>(input.data[base_in_off + red_off]);
+                    auto v = convert_type<compType>(input[base_in_off + red_off]);
                     PreUnaryOp(v);
                     R.step(v, static_cast<int>(i)); // flat index inside reduced subspace
                 }
 
                 PosUnaryOp(R.acc);
-                if(alpha != 1.0f) R.acc *= convert_type<compType>(alpha);
-                if(beta  != 0.0f)
-                    R.acc += convert_type<compType>(output.data[base_out_off]) * convert_type<compType>(beta);
+                if(alpha != 1.0f)
+                    R.acc *= convert_type<compType>(alpha);
+                if(beta != 0.0f)
+                    R.acc += convert_type<compType>(output[base_out_off]) *
+                             convert_type<compType>(beta);
 
                 res.data[base_out_off] = convert_type<T>(R.acc);
-                if (withIdx) res_indices.data[base_out_off] = R.idx;
+                if(withIdx)
+                    res_indices.data[base_out_off] = R.idx;
             }
-        });
+        };
+
+        if(parallel)
+        {
+            par_for(static_cast<int>(Te), worker);
+        }
+        else
+        {
+            for(int te = 0; te < Te; ++te)
+            {
+                worker(te);
+            }
+        }
     }
 
     return {res, res_indices};
+}
+
+template <typename T, typename compType>
+static std::tuple<tensor<T>, tensor<int>>
+reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
+                  const tensor<T>& input,
+                  const tensor<T>& output,
+                  float alpha,
+                  float beta,
+                  bool parallel,
+                  bool withIdx)
+{
+    auto inLengths  = input.desc.GetLengths();
+    auto outLengths = output.desc.GetLengths();
+    auto inStrides  = input.desc.GetStrides();
+    auto outStrides = output.desc.GetStrides();
+
+    return reduce_cpu_common<T, compType>(reduceDesc,
+                                          inLengths,
+                                          outLengths,
+                                          input.data,
+                                          inStrides,
+                                          output.data,
+                                          outStrides,
+                                          alpha,
+                                          beta,
+                                          parallel,
+                                          withIdx);
 }
 
 #endif

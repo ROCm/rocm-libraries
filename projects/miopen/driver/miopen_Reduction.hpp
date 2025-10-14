@@ -26,18 +26,14 @@
 #ifndef GUARD_MIOPEN_REDUCTION_HOST_HPP_
 #define GUARD_MIOPEN_REDUCTION_HOST_HPP_
 
-#include <functional>
-#include <numeric>
 #include <vector>
 #include <type_traits>
 #include <cassert>
 #include <cmath>
 
 #include "../test/cpu_reduce_util.hpp"
-#include "../test/verify.hpp"
 
 #include "tensor_driver.hpp"
-#include "timer.hpp"
 
 using float16 = half_float::half;
 
@@ -46,15 +42,16 @@ class miopenReductionHost
 {
 public:
     miopenReductionHost() = default;
-    miopenReductionHost(const miopenReduceTensorDescriptor_t reduceDesc,
+    miopenReductionHost(const miopenReduceTensorDescriptor_t reduceDesc_,
                         miopenTensorDescriptor_t inDesc,
                         miopenTensorDescriptor_t outDesc,
                         const std::vector<int>& invariantDims_,
                         const std::vector<int>& toReduceDims_)
     {
         miopenGetReduceTensorDescriptor(
-            reduceDesc, &reduceOp, &compTypeVal, &nanOpt, &indicesOpt, &indicesType);
+            reduceDesc_, &reduceOp, &compTypeVal, &nanOpt, &indicesOpt, &indicesType);
 
+        this->reduceDesc = reduceDesc_;
         this->inLengths  = GetTensorLengths(inDesc);
         this->outLengths = GetTensorLengths(outDesc);
         this->inStrides  = GetTensorStrides(inDesc);
@@ -80,7 +77,7 @@ public:
              float beta,
              std::vector<Tref>& out_data,
              bool parallel,
-             int* indices)
+             std::vector<int>& indices)
     {
         if(compTypeVal == miopenFloat)
         {
@@ -101,16 +98,17 @@ public:
     };
 
 private:
+    miopenReduceTensorDescriptor_t reduceDesc;
     miopenReduceTensorOp_t reduceOp;
     miopenDataType_t compTypeVal;
     miopenNanPropagation_t nanOpt;
     miopenReduceTensorIndices_t indicesOpt;
     miopenIndicesType_t indicesType;
 
-    std::vector<int> inLengths;
-    std::vector<int> outLengths;
-    std::vector<int> inStrides;
-    std::vector<int> outStrides;
+    std::vector<std::size_t> inLengths;
+    std::vector<std::size_t> outLengths;
+    std::vector<std::size_t> inStrides;
+    std::vector<std::size_t> outStrides;
 
     std::vector<int> invariantLengths;
     std::vector<int> toReduceLengths;
@@ -126,193 +124,28 @@ private:
                  float beta,
                  std::vector<Tref>& out_data,
                  bool parallel,
-                 int* indices)
+                 std::vector<int>& indices)
     {
         bool need_indices =
             (indicesOpt == MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES) &&
             (reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
              reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
-        RunImpl_generic<compType>(alpha, in_data, beta, out_data, parallel, need_indices, indices);
+        auto& [out_data_, indices_] = reduce_cpu_common<Tgpu, compType>(reduceDesc,
+                                          inLengths,
+                                          outLengths,
+                                          in_data,
+                                          inStrides,
+                                          out_data,
+                                          outStrides,
+                                          alpha,
+                                          beta,
+                                          parallel,
+                                          need_indices);
+
+        out_data = std::move(out_data_.data);
+        indices = std::move(indices_.data);
     };
-
-    template <typename compType>
-    void RunImpl_generic(float alpha,
-                         const Tgpu* in_data,
-                         float beta,
-                         std::vector<Tref>& out_data,
-                         bool parallel,
-                         bool useIdx,
-                         [[maybe_unused]] int* indices = nullptr)
-    {
-        using reduce::binop_with_nan_check;
-        using reduce::binop_with_nan_check2;
-        using reduce::convert_type;
-        using reduce::float_equal_one;
-        using reduce::float_equal_zero;
-        using reduce::PosUnaryOpFn;
-        using reduce::PreUnaryOpFn;
-        using reduce::ReduceOpFn;
-        using reduce::ReduceOpFn2;
-        using reduce::ReduceOpZeroVal;
-
-        const auto divider = std::accumulate(
-            toReduceLengths.begin(), toReduceLengths.end(), 1, std::multiplies<int>());
-
-        auto PreUnaryOp = PreUnaryOpFn<compType>(reduceOp, divider);
-        auto PosUnaryOp = PosUnaryOpFn<compType>(reduceOp, divider);
-
-        // Select reducer
-        [[maybe_unused]] auto opReduce_val = ReduceOpFn<compType>(this->reduceOp);
-        [[maybe_unused]] auto opReduce_idx = ReduceOpFn2<compType>(this->reduceOp);
-
-        if(reduceAllDims)
-        {
-            const size_t N = std::accumulate(
-                inLengths.begin(), inLengths.end(), size_t{1}, std::multiplies<size_t>());
-
-            auto zeroVal   = ReduceOpZeroVal<compType>(this->reduceOp);
-            const size_t G = std::thread::hardware_concurrency();
-            const size_t P = std::max<size_t>(1, (N + G - 1) / G);
-
-            std::vector<compType> partial_val(P, zeroVal);
-            std::vector<int> partial_idx(P, 0);
-
-            auto worker = [&](int p) {
-                const size_t begin = size_t(p) * G;
-                const size_t end   = std::min(begin + G, N);
-
-                compType acc = zeroVal;
-                int acc_i    = 0;
-
-                for(size_t i = begin; i < end; ++i)
-                {
-                    const int src_off = linear_to_offset(i, inLengths, inStrides);
-
-                    auto v = convert_type<compType>(in_data[src_off]);
-                    PreUnaryOp(v);
-
-                    if(useIdx)
-                    {
-                        binop_with_nan_check2(nanOpt, opReduce_idx, acc, v, acc_i, static_cast<int>(i));
-                    }
-                    else
-                    {
-                        binop_with_nan_check(nanOpt, opReduce_val, acc, v);
-                    }
-                }
-                partial_val[p] = acc;
-                if(useIdx)
-                    partial_idx[p] = acc_i;
-            };
-
-            if(parallel)
-                par_for(P, worker);
-            else
-                for(int p = 0; p < static_cast<int>(P); ++p)
-                    worker(p);
-
-            compType accuVal = zeroVal;
-            int accuIndex    = 0;
-            for(size_t p = 0; p < P; ++p)
-            {
-                if(useIdx)
-                    binop_with_nan_check2(
-                        nanOpt, opReduce_idx, accuVal, partial_val[p], accuIndex, partial_idx[p]);
-                else
-                    binop_with_nan_check(nanOpt, opReduce_val, accuVal, partial_val[p]);
-            }
-
-            // Apply post op once (e.g., AVG division). Skip for index-returning ops.
-            if(!useIdx)
-                PosUnaryOp(accuVal);
-
-            if(!float_equal_one(alpha))
-                accuVal *= convert_type<compType>(alpha);
-            if(!float_equal_zero(beta))
-                accuVal += convert_type<compType>(out_data[0]) * convert_type<compType>(beta);
-
-            out_data[0] = convert_type<Tref>(accuVal);
-            if(useIdx)
-                indices[0] = accuIndex;
-        }
-        else
-        {
-            const auto inv_idx = get_all_indexes(this->invariantLengths);
-            const auto red_idx = get_all_indexes(this->toReduceLengths);
-
-            auto work_iter = [&](const std::vector<int>& i1) {
-                std::vector<int> src_index(this->inLengths.size(), 0);
-                std::vector<int> dst_index(this->inLengths.size(), 0);
-
-                for(int k = 0; k < invariantDims.size(); ++k)
-                    dst_index[invariantDims[k]] = i1[k];
-
-                const int dst_offset = get_offset_from_index(this->outStrides, dst_index);
-
-                for(int k = 0; k < invariantDims.size(); ++k)
-                    src_index[invariantDims[k]] = i1[k];
-
-                compType accuVal = ReduceOpZeroVal<compType>(this->reduceOp);
-                int accuIndex    = 0;
-
-                for(const auto& i2 : red_idx)
-                {
-                    for(int k = 0; k < toReduceDims.size(); ++k)
-                        src_index[toReduceDims[k]] = i2[k];
-
-                    const int src_offset = get_offset_from_index(this->inStrides, src_index);
-
-                    auto currVal = convert_type<compType>(in_data[src_offset]);
-                    PreUnaryOp(currVal);
-
-                    if(useIdx)
-                    {
-                        const int currIndex = get_flatten_offset(toReduceLengths, i2);
-                        binop_with_nan_check2(
-                            nanOpt, opReduce_idx, accuVal, currVal, accuIndex, currIndex);
-                    }
-                    else
-                    {
-                        binop_with_nan_check(nanOpt, opReduce_val, accuVal, currVal);
-                    }
-                }
-
-                if(!useIdx)
-                {
-                    PosUnaryOp(accuVal);
-                }
-
-                if(!float_equal_one(alpha))
-                    accuVal *= convert_type<compType>(alpha);
-                if(!float_equal_zero(beta))
-                    accuVal +=
-                        convert_type<compType>(out_data[dst_offset]) * convert_type<compType>(beta);
-
-                out_data[dst_offset] = convert_type<Tref>(accuVal);
-                if(useIdx)
-                {
-                    indices[dst_offset] = accuIndex;
-                }
-            };
-
-            if(parallel)
-            {
-                const auto inv_size = inv_idx.size();
-                par_for(inv_size, [&](const int i) {
-                    const auto& i1 = inv_idx[i];
-                    work_iter(i1);
-                });
-            }
-            else
-            {
-                for(const auto& i1 : inv_idx)
-                {
-                    work_iter(i1);
-                }
-            }
-        }
-    }
 };
 
 #endif

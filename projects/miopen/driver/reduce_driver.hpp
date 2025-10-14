@@ -414,7 +414,7 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         beta  = 0.0f;
     };
 
-    hostReduction.Run(alpha, in.data(), beta, outhost, multithreaded, outhost_indices.data());
+    hostReduction.Run(alpha, in.data(), beta, outhost, multithreaded, outhost_indices);
 
     auto error       = miopen::rms_range(outhost, out);
     double tolerance = 1.5e-4;
