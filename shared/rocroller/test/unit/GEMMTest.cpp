@@ -817,26 +817,77 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(debuggable && !res.ok)
-                {
-                    for(size_t i = 0; i < M; i++)
-                    {
-                        for(size_t j = 0; j < N; j++)
-                        {
-                            auto a = d_result[i * N + j];
-                            auto b = h_result[i * N + j];
-                            if((a - b) * (a - b) / (b * b)
-                               > res.acceptableError.relativeL2Tolerance)
-                            {
-                                std::cout << std::setw(8) << i << std::setw(8) << j //
-                                          << std::setw(16) << std::scientific << a //
-                                          << std::setw(16) << std::scientific << b //
-                                          << std::setw(16) << std::scientific << a - b //
-                                          << std::endl;
-                            }
-                        }
-                    }
-                }
+                // if(!res.ok)
+                // {
+                //     std::cout << "host result" << std::endl;
+                //     for(size_t i = 0; i < M; i++)
+                //     {
+                //         for(size_t j = 0; j < N; j++)
+                //         {
+                //             auto a = d_result[i * N + j];
+                //             auto b = h_result[i * N + j];
+                //             // if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
+                //             // {
+                //             //    std::cout << std::setw(8) << i << std::setw(8) << j  << std::endl;
+                //             // }
+                //             //    > res.acceptableError.relativeL2Tolerance)
+                //             // {
+                //                 std::cout
+                //                 // << std::setw(8) << i << std::setw(8) << j //
+                //                         //   << std::setw(16) << std::scientific << a //
+                //                           << std::setw(16) << std::scientific << b; //
+                //                         //   << std::setw(16) << std::scientific << a - b //
+                //                         //   << std::endl;
+                //             // }
+                //         }
+                //         std::cout << std::endl;
+                //     }
+
+                //     std::cout << "device result" << std::endl;
+                //     for(size_t i = 0; i < M; i++)
+                //     {
+                //         for(size_t j = 0; j < N; j++)
+                //         {
+                //             auto a = d_result[i * N + j];
+                //             auto b = h_result[i * N + j];
+                //             // if((a - b) * (a - b) / (b * b)
+                //             //    > res.acceptableError.relativeL2Tolerance)
+                //             // {
+                //                 std::cout
+                //                 // << std::setw(8) << i << std::setw(8) << j //
+                //                           << std::setw(16) << std::scientific << a; //
+                //                         //   << std::setw(16) << std::scientific << b; //
+                //                         //   << std::setw(16) << std::scientific << a - b //
+                //                         //   << std::endl;
+                //             // }
+                //         }
+                //         std::cout << std::endl;
+                //     }
+
+                //     std::cout << "diff" << std::endl;
+                //     for(size_t i = 0; i < M; i++)
+                //     {
+                //         for(size_t j = 0; j < N; j++)
+                //         {
+                //             auto a = d_result[i * N + j];
+                //             auto b = h_result[i * N + j];
+                //             if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
+                //             {
+                //                std::cout << std::setw(8) << i << std::setw(8) << j  << std::endl;
+                //             }
+                //             //    > res.acceptableError.relativeL2Tolerance)
+                //             // {
+                //                 // std::cout
+                //                 // // << std::setw(8) << i << std::setw(8) << j //
+                //                 //         //   << std::setw(16) << std::scientific << a //
+                //                 //           << std::setw(16) << std::scientific << b; //
+                //                         //   << std::setw(16) << std::scientific << a - b //
+                //                         //   << std::endl;
+                //             // }
+                //         }
+                //         std::cout << std::endl;
+                //     }
+                // }
                 EXPECT_TRUE(res.ok) << res.message();
             }
         }
@@ -956,6 +1007,14 @@ namespace GEMMDriverTest
     };
 
     class GEMMTestLargeMacroTileGPU : public BaseGEMMContextFixture<>
+    {
+    };
+
+    class GEMMTestStreamKGPU
+        : public BaseGEMMContextFixture<std::tuple<bool, /* enable TwoTileStreamK */
+                                                   bool, /* ldsA */
+                                                   bool, /* ldsB */
+                                                   bool /* ldsD */>>
     {
     };
 
@@ -1153,7 +1212,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1187,26 +1246,29 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        for(auto twoTile : {false})
-        {
-            gemm.streamKTwoTile = twoTile;
-            for(auto loadLDSA : {false, true})
-            {
-                gemm.loadLDSA = loadLDSA;
-                for(auto loadLDSB : {false, true})
-                {
-                    gemm.loadLDSB = loadLDSB;
-                    for(auto storeLDSD : {false, true})
-                    {
-                        gemm.storeLDSD = storeLDSD;
-                        basicGEMM<Half>(gemm);
-                    }
-                }
-            }
-        }
+        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        // for(auto twoTile : {true, false})
+        // {
+        //     gemm.streamKTwoTile = twoTile;
+        //     for(auto loadLDSA : {false, true})
+        //     {
+        //         gemm.loadLDSA = loadLDSA;
+        //         for(auto loadLDSB : {false, true})
+        //         {
+        //             gemm.loadLDSB = loadLDSB;
+        //             for(auto storeLDSD : {false, true})
+        //             {
+        //                 gemm.storeLDSD = storeLDSD;
+        basicGEMM<Half>(gemm);
+        //             }
+        //         }
+        //     }
+        // }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1235,14 +1297,19 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        for(auto twoTile : {false})
-        {
-            gemm.streamKTwoTile = twoTile;
-            basicGEMM<Half>(gemm);
-        }
+        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
+
+        // for(auto twoTile : {false, true})
+        // {
+        //     gemm.streamKTwoTile = twoTile;
+        //     basicGEMM<Half>(gemm);
+        // }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1254,45 +1321,42 @@ namespace GEMMDriverTest
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
 
-        gemm.macM = 128;
-        gemm.macN = 128;
+        gemm.macM = 64;
+        gemm.macN = 64;
         gemm.macK = 16;
 
         gemm.waveK = 8;
 
         gemm.workgroupSizeX = 128;
-        gemm.workgroupSizeY = 2;
+        gemm.workgroupSizeY = 1;
 
-        gemm.numWGs = 128;
+        gemm.numWGs = 64;
 
         auto numTilesM = 1;
         auto numTilesN = 2;
-        auto numTilesK = 249;
+        auto numTilesK = 199;
 
         gemm.m = numTilesM * gemm.macM;
         gemm.n = numTilesN * gemm.macN;
         gemm.k = numTilesK * gemm.macK;
 
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
-        gemm.storeLDSD = false;
-
-        gemm.beta = 0;
-
         // assert that the number of output tiles is smaller than number of WGs
         // which means there is not enough data-parallel tiles, and has to split
         // K dimension into multiple tiles
-        // ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
+        ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
 
         gemm.streamK = true;
-        // gemm.k       = gemm.macK * 8;
 
-        for(auto twoTile : {false})
-        {
-            gemm.streamKTwoTile = twoTile;
-            basicGEMM<Half>(gemm);
-            // basicGEMM<float>(gemm);
-        }
+        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
+
+        // for(auto twoTile : {false, true})
+        // {
+        //     gemm.streamKTwoTile = twoTile;
+        //     basicGEMM<Half>(gemm);
+        // }
     }
 
     TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
@@ -4126,4 +4190,13 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamK,
+        GEMMTestStreamKGPU,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(true, false), /* TwoTile */
+                                              ::testing::Values(true, false), /* ldsA */
+                                              ::testing::Values(true, false), /* ldsB */
+                                              ::testing::Values(true, false))));
 }

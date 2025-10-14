@@ -626,10 +626,6 @@ namespace rocRoller
             graph.control.addElement(Body(), {assignLocalTileForX}, {assignLocalTileForY});
             graph.control.addElement(Body(), {assignLocalTileForY}, {assignTile});
 
-            std::cout << "(localAccumulatorTile, partileResultTile, fullyAccumulatedTile) "
-                      << accumulatorTileTag << ", " << scratchTileTag << ", "
-                      << fullyAccumulatedTileTag << std::endl;
-
             // add fixup operations
             auto fixupTag = addFixup(graph,
                                      accumulatorTileTag,
@@ -647,8 +643,7 @@ namespace rocRoller
                 epilogueOperations, makeFindLoopPredicate(graph, rocRoller::XLOOP)));
             AssertFatal(epilogueYLoop, "Must have exactly one Y loop in the epilogue");
             AssertFatal(epilogueXLoop, "Must have exactly one X loop in the epilogue");
-            std::cout << "(epilogueXLoop, epilogueYLoop) " << *epilogueXLoop << ", "
-                      << *epilogueYLoop << std::endl;
+
             auto reindexer       = std::make_shared<GraphReindexer>();
             auto newEpilogueBody = duplicateControlNodes(
                 graph,
@@ -675,10 +670,7 @@ namespace rocRoller
             AssertFatal(newEpilogueBody.size() == 1);
             for(auto const& epilogueBody : newEpilogueBody)
             {
-                // graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
                 graph.control.addElement(Body(), {epilogueForY}, {epilogueBody});
-                std::cout << "connect (fixupTag, epilogueBody) " << fixupTag << ", " << epilogueBody
-                          << ", " << epilogueForY << std::endl;
             }
 
             // Add to control
@@ -1165,11 +1157,6 @@ namespace rocRoller
                 auto numRemainPartialResults
                     = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
 
-                std::cout << "numAccumTiles: " << toString(numAccumTiles) << ", " << std::endl
-                          << "numSKTilesPerWG: " << toString(argInfo.numSKTilesPerWG) << ", "
-                          << std::endl
-                          << "numFixups: " << toString(numRemainPartialResults) << std::endl;
-
                 // For loop that sums up all the partial result
                 auto [forReceiveTileLoopCoord, forReceiveTileLoopOp]
                     = rangeFor(graph,
@@ -1342,8 +1329,6 @@ namespace rocRoller
             for(auto tag : epilogueOperations)
             {
                 graph.control.addElement(Body(), {postAccumulationCond}, {tag});
-                std::cout << "connect (postAccumulationCond, tag) " << postAccumulationCond << ", "
-                          << tag << std::endl;
             }
         }
 
@@ -1444,10 +1429,20 @@ namespace rocRoller
 
                 if(twoTile)
                 {
-                    numSKTilesArgExpr      = (numNonAccTiles % numWGs + numWGs) * numAccTiles;
+                    auto enoughNonAccTilesExpr = numNonAccTiles > numWGs - one;
+
+                    numSKTilesArgExpr
+                        = conditional(enoughNonAccTilesExpr,
+                                      (numNonAccTiles % numWGs + numWGs) * numAccTiles,
+                                      numNonAccTiles * numAccTiles);
+
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
-                    numDPTilesArgExpr      = (numNonAccTiles / numWGs - one) * numWGs * numAccTiles;
-                    numDPTilesPerWGArgExpr = (numNonAccTiles / numWGs - one) * numAccTiles;
+                    numDPTilesArgExpr
+                        = conditional(enoughNonAccTilesExpr,
+                                      (numNonAccTiles / numWGs - one) * numWGs * numAccTiles,
+                                      zero);
+                    numDPTilesPerWGArgExpr = conditional(
+                        enoughNonAccTilesExpr, (numNonAccTiles / numWGs - one) * numAccTiles, zero);
                 }
                 else
                 {
@@ -1455,7 +1450,6 @@ namespace rocRoller
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
                     numDPTilesArgExpr      = zero;
                     numDPTilesPerWGArgExpr = zero;
-                    // numFixupsExpr =  numAccTiles / numSKTilesPerWGArgExpr;
                 }
             }
 
