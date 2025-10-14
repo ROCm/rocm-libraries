@@ -57,6 +57,10 @@ using decay_t = _THRUST_STD::decay_t<T>;
 
 template <typename Invokable, typename InputT, typename InitT = InputT>
 using accumulator_t = _THRUST_STD::__accumulator_t<Invokable, InputT, InitT>;
+template <typename T>
+using remove_cvref = _THRUST_STD::remove_cvref<T>;
+template <typename T>
+using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
 template <typename... Pred>
 using _And = _THRUST_STD::_And<Pred...>;
 
@@ -87,6 +91,10 @@ using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
 #else
 using accumulator_t = decay_t<::std::invoke_result_t<Invokable, InitT, InputT>>;
 #endif
+template <typename T>
+using remove_cvref = ::std::remove_cv<::std::remove_reference_t<T>>;
+template <typename T>
+using remove_cvref_t = ::std::remove_cv_t<::std::remove_reference_t<T>>;
 
 namespace detail
 {

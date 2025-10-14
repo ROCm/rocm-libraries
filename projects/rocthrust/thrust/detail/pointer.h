@@ -37,7 +37,6 @@
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_adaptor.h>
-#include <thrust/type_traits/remove_cvref.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -93,10 +92,9 @@ struct pointer_base
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  using value_type =
-    typename thrust::detail::eval_if<_THRUST_STD::is_void<typename thrust::remove_cvref<Element>::type>::value,
-                                     thrust::detail::identity_<void>,
-                                     _THRUST_STD::remove_cv<Element>>::type;
+  using value_type = typename thrust::detail::eval_if<_THRUST_STD::is_void<::internal::remove_cvref_t<Element>>::value,
+                                                      thrust::detail::identity_<void>,
+                                                      _THRUST_STD::remove_cv<Element>>::type;
 
   // if no Derived type is given, just use pointer
   using derived_type =
@@ -107,7 +105,7 @@ struct pointer_base
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
   using reference_type = typename thrust::detail::eval_if<
-    _THRUST_STD::is_void<typename thrust::remove_cvref<Element>::type>::value,
+    _THRUST_STD::is_void<::internal::remove_cvref_t<Element>>::value,
     thrust::detail::identity_<void>,
     thrust::detail::eval_if<_THRUST_STD::is_same<Reference, use_default>::value,
                             thrust::detail::identity_<reference<Element, derived_type>>,

@@ -28,6 +28,7 @@
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/detail/tuple_algorithms.h>
 #  include <thrust/detail/type_deduction.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/detail/type_traits/pointer_traits.h>
 #  include <thrust/optional.h>
 #  include <thrust/system/hip/detail/get_value.h>
@@ -35,7 +36,6 @@
 #  include <thrust/system/hip/future.h>
 #  include <thrust/system/hip/memory.h>
 #  include <thrust/type_traits/integer_sequence.h>
-#  include <thrust/type_traits/remove_cvref.h>
 
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
@@ -765,7 +765,7 @@ public:
 template <typename T>
 struct unique_eager_future final
 {
-  THRUST_STATIC_ASSERT_MSG((!std::is_same<T, remove_cvref_t<void>>::value),
+  THRUST_STATIC_ASSERT_MSG((!std::is_same<T, ::internal::remove_cvref_t<void>>::value),
                            "`thrust::event` should be used to express valueless futures");
 
   using value_type        = typename detail::async_value<T>::value_type;
