@@ -51,7 +51,6 @@ public:
         miopenGetReduceTensorDescriptor(
             reduceDesc_, &reduceOp, &compTypeVal, &nanOpt, &indicesOpt, &indicesType);
 
-        this->reduceDesc = reduceDesc_;
         this->inLengths  = GetTensorLengths(inDesc);
         this->outLengths = GetTensorLengths(outDesc);
         this->inStrides  = GetTensorStrides(inDesc);
@@ -73,7 +72,7 @@ public:
     };
 
     void Run(float alpha,
-             const Tgpu* in_data,
+             std::vector<Tgpu>& in_data,
              float beta,
              std::vector<Tref>& out_data,
              bool parallel,
@@ -98,17 +97,16 @@ public:
     };
 
 private:
-    miopenReduceTensorDescriptor_t reduceDesc;
     miopenReduceTensorOp_t reduceOp;
     miopenDataType_t compTypeVal;
     miopenNanPropagation_t nanOpt;
     miopenReduceTensorIndices_t indicesOpt;
     miopenIndicesType_t indicesType;
 
-    std::vector<std::size_t> inLengths;
-    std::vector<std::size_t> outLengths;
-    std::vector<std::size_t> inStrides;
-    std::vector<std::size_t> outStrides;
+    std::vector<int> inLengths;
+    std::vector<int> outLengths;
+    std::vector<int> inStrides;
+    std::vector<int> outStrides;
 
     std::vector<int> invariantLengths;
     std::vector<int> toReduceLengths;
@@ -120,7 +118,7 @@ private:
 
     template <typename compType>
     void RunImpl(float alpha,
-                 const Tgpu* in_data,
+                 std::vector<Tgpu>& in_data,
                  float beta,
                  std::vector<Tref>& out_data,
                  bool parallel,
@@ -131,20 +129,21 @@ private:
             (reduceOp == MIOPEN_REDUCE_TENSOR_MIN || reduceOp == MIOPEN_REDUCE_TENSOR_MAX ||
              reduceOp == MIOPEN_REDUCE_TENSOR_AMAX);
 
-        auto& [out_data_, indices_] = reduce_cpu_common<Tgpu, compType>(reduceDesc,
-                                          inLengths,
-                                          outLengths,
-                                          in_data,
-                                          inStrides,
-                                          out_data,
-                                          outStrides,
-                                          alpha,
-                                          beta,
-                                          parallel,
-                                          need_indices);
+        auto [out_data_, indices_] = reduce_cpu_common<Tgpu, Tref, compType, int>(reduceOp,
+                                                                                  nanOpt,
+                                                                                  inLengths,
+                                                                                  outLengths,
+                                                                                  in_data,
+                                                                                  inStrides,
+                                                                                  out_data,
+                                                                                  outStrides,
+                                                                                  alpha,
+                                                                                  beta,
+                                                                                  parallel,
+                                                                                  need_indices);
 
         out_data = std::move(out_data_.data);
-        indices = std::move(indices_.data);
+        indices  = std::move(indices_.data);
     };
 };
 

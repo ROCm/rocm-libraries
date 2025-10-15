@@ -65,26 +65,27 @@ static inline bool float_equal_zero(half_float::half x)
     return x == convert_type<half_float::half>(0.0f);
 };
 
-static inline void build_radix(const std::vector<std::size_t>& lens,
-                               std::vector<std::size_t>& radix)
+template <typename SizeT>
+static inline void build_radix(const std::vector<SizeT>& lens, std::vector<std::size_t>& radix)
 {
     const std::size_t D = lens.size();
     radix.assign(D, 1);
     for(std::size_t d = D; d-- > 1;)
-        radix[d - 1] = radix[d] * lens[d]; // radix[d] = Π_{k>d} lens[k]
+        radix[d - 1] = radix[d] * static_cast<std::size_t>(lens[d]); // radix[d] = Π_{k>d} lens[k]
 }
 
 // i -> memory offset using lens-radix + actual strides
+template <typename SizeT>
 static inline std::size_t linear_to_offset_by_lens_strides(std::size_t i,
-                                                           const std::vector<std::size_t>& lens,
+                                                           const std::vector<SizeT>& lens,
                                                            const std::vector<std::size_t>& radix,
-                                                           const std::vector<std::size_t>& strides)
+                                                           const std::vector<SizeT>& strides)
 {
     std::size_t off = 0;
     for(std::size_t d = 0; d < lens.size(); ++d)
     {
-        const std::size_t idx_d = (i / radix[d]) % lens[d];
-        off += idx_d * strides[d];
+        const std::size_t idx_d = (i / radix[d]) % static_cast<std::size_t>(lens[d]);
+        off += idx_d * static_cast<std::size_t>(strides[d]);
     }
     return off;
 }
@@ -411,15 +412,16 @@ struct Reducer
     }
 };
 
-template <typename T, typename compType>
-static std::tuple<tensor<T>, tensor<int>>
-reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
-                  const std::vector<std::size_t>& inLengths,
-                  const std::vector<std::size_t>& outLengths,
-                  const std::vector<T>& input,
-                  const std::vector<std::size_t>& inStrides,
-                  const std::vector<T>& output,
-                  const std::vector<std::size_t>& outStrides,
+template <typename Tgpu, typename Tref, typename compType, typename SizeT>
+static std::tuple<tensor<Tref>, tensor<int>>
+reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
+                  const miopenNanPropagation_t& nanOpt,
+                  const std::vector<SizeT>& inLengths,
+                  const std::vector<SizeT>& outLengths,
+                  const std::vector<Tgpu>& input,
+                  const std::vector<SizeT>& inStrides,
+                  const std::vector<Tref>& output,
+                  const std::vector<SizeT>& outStrides,
                   float alpha,
                   float beta,
                   bool parallel,
@@ -451,8 +453,6 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
     const bool reduceAllDims = invariantDims.empty();
 
     // unary ops & zero vals
-    const auto reduceOp  = reduceDesc.reduceTensorOp_;
-    const auto nanOpt    = reduceDesc.reduceTensorNanOpt_;
     const compType zeroV = ReduceOpZeroVal<compType>(reduceOp);
 
     // divider = Π reduced dims (or N if reduce-all)
@@ -468,8 +468,8 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
     auto PosUnaryOp = reduce::PosUnaryOpFn<compType>(reduceOp, divider);
 
     // outputs
-    auto res         = tensor<T>{outLengths};
-    res.data = output;
+    auto res         = tensor<Tref>{outLengths};
+    res.data         = output;
     auto res_indices = tensor<int>{outLengths};
     if(withIdx)
         std::fill(res_indices.begin(), res_indices.end(), 0);
@@ -482,7 +482,8 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
         reduce::build_radix(inLengths, lens_radix);
 
         // parallel chunking
-        std::size_t hw = std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+        std::size_t hw =
+            std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
         const std::size_t P     = std::min(N, hw * 4ul);
         const std::size_t chunk = (N + P - 1) / P;
 
@@ -530,7 +531,7 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
         if(beta != 0.0f)
             R.acc += convert_type<compType>(output[0]) * convert_type<compType>(beta);
 
-        res.data[0] = convert_type<T>(R.acc);
+        res.data[0] = convert_type<Tref>(R.acc);
         if(withIdx)
             res_indices.data[0] = R.idx;
     }
@@ -545,7 +546,8 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
             std::accumulate(invLens.begin(), invLens.end(), std::size_t{1}, std::multiplies<>());
         const std::size_t TR = divider;
 
-        std::size_t hw = std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+        std::size_t hw =
+            std::max(std::size_t{1}, static_cast<std::size_t>(std::thread::hardware_concurrency()));
         const std::size_t Te    = std::min(hw * 4ul, std::max<std::size_t>(1, INV));
         const std::size_t chunk = (INV + Te - 1) / Te;
 
@@ -588,10 +590,10 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
                 if(alpha != 1.0f)
                     R.acc *= convert_type<compType>(alpha);
                 if(beta != 0.0f)
-                    R.acc += convert_type<compType>(output[base_out_off]) *
-                             convert_type<compType>(beta);
+                    R.acc +=
+                        convert_type<compType>(output[base_out_off]) * convert_type<compType>(beta);
 
-                res.data[base_out_off] = convert_type<T>(R.acc);
+                res.data[base_out_off] = convert_type<Tref>(R.acc);
                 if(withIdx)
                     res_indices.data[base_out_off] = R.idx;
             }
@@ -628,17 +630,21 @@ reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
     auto inStrides  = input.desc.GetStrides();
     auto outStrides = output.desc.GetStrides();
 
-    return reduce_cpu_common<T, compType>(reduceDesc,
-                                          inLengths,
-                                          outLengths,
-                                          input.data,
-                                          inStrides,
-                                          output.data,
-                                          outStrides,
-                                          alpha,
-                                          beta,
-                                          parallel,
-                                          withIdx);
+    const auto reduceOp = reduceDesc.reduceTensorOp_;
+    const auto nanOpt   = reduceDesc.reduceTensorNanOpt_;
+
+    return reduce_cpu_common<T, T, compType, std::size_t>(reduceOp,
+                                                          nanOpt,
+                                                          inLengths,
+                                                          outLengths,
+                                                          input.data,
+                                                          inStrides,
+                                                          output.data,
+                                                          outStrides,
+                                                          alpha,
+                                                          beta,
+                                                          parallel,
+                                                          withIdx);
 }
 
 #endif

@@ -700,7 +700,7 @@ struct verify_reduce_no_indices
 
     tensor<T> gpuImpl() const
     {
-        auto&& handle = get_handle();
+        auto&& handle   = get_handle();
         auto input_dev  = handle.Write(input.data);
         auto output_dev = handle.Write(output.data);
 

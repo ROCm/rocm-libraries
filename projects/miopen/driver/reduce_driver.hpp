@@ -144,7 +144,8 @@ int ReduceDriver<Tgpu, Tref>::GetandSetData()
 
     assert(toReduceDims.size() <= inLengths.size());
 
-    for(int toReduceDim : toReduceDims) {
+    for(int toReduceDim : toReduceDims)
+    {
         assert(toReduceDim < inLengths.size());
 
         // set the lengths of the dimensions to be reduced to 1 to represent the output Tensor
@@ -266,11 +267,12 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 #if MIOPEN_BACKEND_OPENCL
     clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
 #endif
-    in_dev  =  std::make_unique<GPUMem>(ctx, in_nelem, sizeof(Tgpu));
-    out_dev =  std::make_unique<GPUMem>(ctx, out_nelem, sizeof(Tgpu));
-    ws_dev  = this->need_indices ?  std::make_unique<GPUMem>(
-                                      ctx, ws_nelem * 2, std::max<int>(sizeof(Tgpu), sizeof(int)))
-                                 :  std::make_unique<GPUMem>(ctx, ws_nelem, sizeof(Tgpu));
+    in_dev  = std::make_unique<GPUMem>(ctx, in_nelem, sizeof(Tgpu));
+    out_dev = std::make_unique<GPUMem>(ctx, out_nelem, sizeof(Tgpu));
+    ws_dev =
+        this->need_indices
+            ? std::make_unique<GPUMem>(ctx, ws_nelem * 2, std::max<int>(sizeof(Tgpu), sizeof(int)))
+            : std::make_unique<GPUMem>(ctx, ws_nelem, sizeof(Tgpu));
 
     indices_dev = std::make_unique<GPUMem>(ctx, indices_nelem, sizeof(int));
 
@@ -414,7 +416,7 @@ int ReduceDriver<Tgpu, Tref>::VerifyForward()
         beta  = 0.0f;
     };
 
-    hostReduction.Run(alpha, in.data(), beta, outhost, multithreaded, outhost_indices);
+    hostReduction.Run(alpha, in, beta, outhost, multithreaded, outhost_indices);
 
     auto error       = miopen::rms_range(outhost, out);
     double tolerance = 1.5e-4;
