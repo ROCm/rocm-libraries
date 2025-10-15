@@ -102,6 +102,7 @@ add_library(miopen_legacy_plugin_private
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvBwdPlan.cpp
+    engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     EngineManager.cpp
     MiopenHandleFactory.cpp
