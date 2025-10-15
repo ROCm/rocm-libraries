@@ -328,7 +328,7 @@ namespace rocRoller
             ResultType operator()(Concatenate const& expr)
             {
                 auto         registerType = Register::Type::Literal;
-                VariableType variableType{expr.destinationType};
+                VariableType variableType = expr.destinationType;
 
                 auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
                 unsigned actualNumRegister = 0;

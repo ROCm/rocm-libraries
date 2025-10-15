@@ -39,10 +39,10 @@ from typing import Any, List
 import numpy as np
 import pandas as pd
 import rrperf
-import scipy.stats
-from rrperf.specs import MachineSpecs
-from rrperf.problems import GEMMResult
 import rrperf.args as args
+import scipy.stats
+from rrperf.problems import GEMMResult
+from rrperf.specs import MachineSpecs
 
 
 def priority_problems():
@@ -275,7 +275,7 @@ def significant_changes(summary, threshold=0.05):
     return result_diff
 
 
-def markdown_summary(md, perf_runs):
+def markdown_summary(md, perf_runs, detail=False):
     """Create Markdown report of summary statistics."""
 
     summary = summary_statistics(perf_runs)
@@ -291,24 +291,25 @@ def markdown_summary(md, perf_runs):
     result_diff = significant_changes(summary)
 
     result_table = ""
-    for run in summary:
-        for result in summary[run]:
-            token, comparison = summary[run][result]
-            A, B = comparison.results
-            percent = (
-                ((comparison.median[1] - comparison.median[0]) * 100.0)
-                / comparison.median[0]
-                if comparison.median[0] != 0
-                else 0.0
-            )
-            row_str = [
-                f"{token}",
-                f"{(percent):.2f}%",
-                f"{comparison.moods_pval:0.4e}",
-                f"{A.kernelGenerate:,.0f}",
-                f"{B.kernelGenerate:,.0f}",
-            ]
-            result_table += " | ".join(row_str) + "\n"
+    if detail:
+        for run in summary:
+            for result in summary[run]:
+                token, comparison = summary[run][result]
+                A, B = comparison.results
+                percent = (
+                    ((comparison.median[1] - comparison.median[0]) * 100.0)
+                    / comparison.median[0]
+                    if comparison.median[0] != 0
+                    else 0.0
+                )
+                row_str = [
+                    f"{token}",
+                    f"{(percent):.2f}%",
+                    f"{comparison.moods_pval:0.4e}",
+                    f"{A.kernelGenerate:,.0f}",
+                    f"{B.kernelGenerate:,.0f}",
+                ]
+                result_table += " | ".join(row_str) + "\n"
 
     if len(result_diff) > 0:
         print("```diff", file=md)
@@ -325,14 +326,12 @@ def markdown_summary(md, perf_runs):
             file=md,
         )
 
-    print("<details><summary>Full table of results</summary>\n", file=md)
-
-    print(" | ".join(header), file=md)
-    print(" | ".join(["---"] * len(header)), file=md)
-    print(result_table, file=md)
-    print("\n</details>", file=md)
-
-    perf_runs.sort()
+    if detail:
+        print("<details><summary>Full table of results</summary>\n", file=md)
+        print(" | ".join(header), file=md)
+        print(" | ".join(["---"] * len(header)), file=md)
+        print(result_table, file=md)
+        print("\n</details>", file=md)
 
 
 def html_overview_table(html_file, summary, problems):
