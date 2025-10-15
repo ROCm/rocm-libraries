@@ -375,7 +375,30 @@ try
 
     *handle = sp;
 
-    if(std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    // we check if rocsolver logging needs to be started
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+        enable_rocsolver_logging = true;
+
+    if(enable_rocsolver_logging)
     {
         rocsolver_log_begin();
     }
@@ -401,7 +424,30 @@ try
     cholmod_finish(&sp->c_handle);
     delete sp;
 
-    if(std::getenv("HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+    // we check if rocsolver logging needs to be ended
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
+        enable_rocsolver_logging = true;
+
+    if(enable_rocsolver_logging)
     {
         rocsolver_log_end();
     }
