@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_dotci_bad_arg(const Arguments& argus)
 {
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int                  nnz       = 100;
     int                  safe_size = 100;
     hipsparseIndexBase_t idx_base  = HIPSPARSE_INDEX_BASE_ZERO;
@@ -79,7 +79,7 @@ void testing_dotci_bad_arg(const Arguments& argus)
 template <typename T>
 hipsparseStatus_t testing_dotci(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;

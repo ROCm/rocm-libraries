@@ -62,7 +62,7 @@ void testing_sctr_bad_arg(const Arguments& argus)
                                           "Error: nnz is invalid");
 
     // cusparse returns success for these
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseXsctr(handle, nnz, dx_val, (int*)nullptr, dy, idx_base),
         "Error: x_ind is nullptr");
@@ -78,7 +78,7 @@ void testing_sctr_bad_arg(const Arguments& argus)
 template <typename T>
 hipsparseStatus_t testing_sctr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;

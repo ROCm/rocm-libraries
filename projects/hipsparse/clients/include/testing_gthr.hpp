@@ -58,7 +58,7 @@ void testing_gthr_bad_arg(const Arguments& argus)
     int* dx_ind = (int*)dx_ind_managed.get();
     T*   dy     = (T*)dy_managed.get();
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseXgthr(handle, nnz, dy, dx_val, (int*)nullptr, idx_base),
         "Error: x_ind is nullptr");
@@ -74,7 +74,7 @@ void testing_gthr_bad_arg(const Arguments& argus)
 template <typename T>
 hipsparseStatus_t testing_gthr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;
