@@ -903,6 +903,13 @@ namespace GEMMDriverTest
     {
     };
 
+    // Params are: A & B type, LDS A, LDS B, LDS D, StreamK two-tile, beta is zero
+    class GEMMStreamKTestGPU
+        : public BaseGEMMContextFixture<
+              std::tuple<rocRoller::DataType, bool, bool, bool, rocRoller::StreamKMode, bool>>
+    {
+    };
+
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMF8F6F4TestGPU
         : public BaseGEMMContextFixture<
@@ -1081,14 +1088,22 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm, false, false, 1, true);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
+    TEST_P(GEMMStreamKTestGPU, GPU_BasicGEMMStreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
+        auto [typeAB, loadLDSA, loadLDSB, storeLDSD, mode, betaZero] = std::get<1>(GetParam());
+
         GEMMProblem gemm;
+
+        if(typeAB == DataType::Half)
+        {
+            gemm.waveK = 8;
+            gemm.macK  = 16;
+        }
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -1099,7 +1114,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Standard;
+        gemm.streamK = mode;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1107,162 +1122,23 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
-        gemm.storeLDSD = true;
+        gemm.loadLDSA  = loadLDSA;
+        gemm.loadLDSB  = loadLDSB;
+        gemm.storeLDSD = storeLDSD;
 
-        gemm.beta = 0;
+        if(betaZero)
+            gemm.beta = 0;
 
-        for(auto twoTile : {true, false})
+        switch(typeAB)
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
-        }
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
-
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
-
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
-        gemm.storeLDSD = true;
-
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
-        }
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
-    {
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-
-        GEMMProblem gemm;
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-        gemm.m      = gemm.macM * 8;
-        gemm.n      = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-        gemm.k = gemm.macK * 8;
-
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
-        gemm.storeLDSD = true;
-        gemm.streamK   = StreamKMode::TwoTileDPFirst;
-
-        basicGEMM<float>(gemm);
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-
-        gemm.waveK = 8;
-        gemm.macK  = 16;
-
-        gemm.macM           = 128;
-        gemm.macN           = 256;
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 2;
-
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
-
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
-
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            for(auto loadLDSA : {false, true})
-            {
-                gemm.loadLDSA = loadLDSA;
-                for(auto loadLDSB : {false, true})
-                {
-                    gemm.loadLDSB = loadLDSB;
-                    for(auto storeLDSD : {false, true})
-                    {
-                        gemm.storeLDSD = storeLDSD;
-                        basicGEMM<Half>(gemm);
-                    }
-                }
-            }
-        }
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = 3;
-
-        gemm.waveK = 8;
-        gemm.macK  = 16;
-
-        gemm.macM           = 128;
-        gemm.macN           = 128;
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 4;
-
-        gemm.m = 4 * gemm.macM;
-        gemm.n = 4 * gemm.macN;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
-
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
+        case DataType::Half:
             basicGEMM<Half>(gemm);
+            break;
+        case DataType::Float:
+            basicGEMM<float>(gemm);
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. ", toString(typeAB)));
         }
     }
 
@@ -4003,6 +3879,22 @@ namespace GEMMDriverTest
                                                  std::pair<std::string, std::string>("T", "T")),
                                ::testing::Values(true, false),
                                ::testing::Values(true, false))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMStreamKTest,
+        GEMMStreamKTestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::Float,
+                                  rocRoller::DataType::Half), // typeAB
+                ::testing::Values(true, false), // loadLDSA
+                ::testing::Values(true, false), // loadLDSB
+                ::testing::Values(true, false), // storeLDSD
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst), // StreamKMode
+                ::testing::Values(true, false)))); // betaZero
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMF8F6F4Test,
