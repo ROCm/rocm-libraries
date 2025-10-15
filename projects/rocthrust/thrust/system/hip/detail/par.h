@@ -121,6 +121,7 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
       : base_t(stream){};
 };
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
@@ -139,7 +140,9 @@ struct par_t
     return execute_on_stream(stream);
   }
 };
+THRUST_SUPPRESS_DEPRECATED_POP
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
@@ -279,6 +282,7 @@ private:
     return {};
   }
 };
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_INLINE_CONSTANT par_t par;
 

@@ -17,7 +17,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <async/exclusive_scan/mixin.h>
 #  include <async/test_policy_overloads.h>
@@ -31,7 +37,7 @@ struct stateful_operator
 {
   T offset;
 
-  THRUST_HOST_DEVICE T operator()(T v1, T v2)
+  __host__ __device__ T operator()(T v1, T v2)
   {
     return v1 + v2 + offset;
   }
@@ -79,3 +85,5 @@ struct test_stateful_operator
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_stateful_operator, NumericTypes);
 
 #endif // C++14
+
+THRUST_SUPPRESS_DEPRECATED_POP

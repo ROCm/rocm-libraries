@@ -17,6 +17,13 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+// need to suppress deprecation warnings for execute_with_allocator_and_dependencies inside type traits
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
 #include <thrust/system/hip/detail/par.h>
@@ -126,3 +133,5 @@ SimpleUnitTest<TestDependencyAttachment,
                  // tbb_par_info,
                  hip_par_info>>
   TestDependencyAttachmentInstance;
+
+THRUST_SUPPRESS_DEPRECATED_POP

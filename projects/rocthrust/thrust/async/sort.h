@@ -51,6 +51,7 @@ namespace async
 namespace unimplemented
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename StrictWeakOrdering>
 THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy>
 async_stable_sort(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, StrictWeakOrdering)
@@ -59,6 +60,7 @@ async_stable_sort(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel,
                            "this algorithm is not implemented for the specified system");
   return {};
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 
@@ -161,12 +163,14 @@ THRUST_INLINE_CONSTANT stable_sort_detail::stable_sort_fn stable_sort{};
 namespace fallback
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename StrictWeakOrdering>
 THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy>
 async_sort(thrust::execution_policy<DerivedPolicy>& exec, ForwardIt&& first, Sentinel&& last, StrictWeakOrdering&& comp)
 {
   return async_stable_sort(thrust::detail::derived_cast(exec), THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(comp));
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace fallback
 

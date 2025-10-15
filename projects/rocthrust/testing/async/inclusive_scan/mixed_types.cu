@@ -17,7 +17,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <async/inclusive_scan/mixin.h>
 #  include <async/test_policy_overloads.h>
@@ -123,3 +129,5 @@ void test_scan_mixed_types(size_t num_values)
 DECLARE_SIZED_UNITTEST(test_scan_mixed_types);
 
 #endif // C++14
+
+THRUST_SUPPRESS_DEPRECATED_POP

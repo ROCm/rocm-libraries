@@ -56,6 +56,7 @@
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -213,6 +214,7 @@ auto async_inclusive_scan(
 
 } // namespace hip_rocprim
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // THRUST_COMPILER(HIP)

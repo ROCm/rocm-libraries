@@ -17,6 +17,13 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+// need to suppress deprecation warnings inside a lot of thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 // Disabled on MSVC && NVCC < 11.1 for GH issue #1098.
 #if THRUST_COMPILER(MSVC) && defined(__CUDACC__)
 #  if (__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 1)
@@ -34,8 +41,6 @@
 #  include "test_utils.hpp"
 
 TESTS_DEFINE(AsyncSortTests, NumericalTestsParams);
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 enum wait_policy
 {
@@ -306,3 +311,5 @@ TYPED_TEST(AsyncSortTests, test_async_sort_policy_custom_greater_no_wait)
 // TODO: Test future return type.
 
 #endif
+
+THRUST_SUPPRESS_DEPRECATED_POP

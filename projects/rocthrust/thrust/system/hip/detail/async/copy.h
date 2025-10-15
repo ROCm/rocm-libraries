@@ -61,6 +61,7 @@
 
 #    include <type_traits>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -352,6 +353,7 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
 
 } // namespace hip_rocprim
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // THRUST_COMPILER(HIP)
