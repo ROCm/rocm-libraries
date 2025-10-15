@@ -8,12 +8,12 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_sdk/utilities/Visitor.hpp>
-#include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 
@@ -26,14 +26,14 @@ namespace fs = std::filesystem;
 class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
 {
 protected:
-    hipdnn_sdk::json::GraphAndTensorMap _graphAndTensors;
+    GraphAndTensorMap _graphAndTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
         auto const& path = GetParam();
 
-        _graphAndTensors = hipdnn_sdk::json::loadGraphAndTensors(path);
+        _graphAndTensors = loadGraphAndTensors(path);
     }
 };
 
@@ -49,11 +49,11 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
         = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
 
     int64_t yIndex = batchnormInferenceNode.y_tensor_uid();
-    hipdnn_sdk::json::TensorVariant& yTensorVariant = _graphAndTensors.tensorMap.at(yIndex);
+    TensorVariant& yTensorVariant = _graphAndTensors.tensorMap.at(yIndex);
 
     auto yTensorReferenceVariant = std::visit(
-        [](auto& yTensor) -> hipdnn_sdk::json::TensorVariant {
-            using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
+        [](auto& yTensor) -> TensorVariant {
+            using DataType = DataTypeFromTensor<decltype(*yTensor)>;
             auto ret = std::make_unique<hipdnn_sdk::utilities::Tensor<DataType>>(
                 std::move(yTensor->copy()));
             yTensor->fillWithValue(static_cast<DataType>(0.f));
@@ -70,7 +70,7 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
     auto validateResults = hipdnn_sdk::utilities::Visitor{
         [](std::unique_ptr<hipdnn_sdk::utilities::Tensor<int>>&) { FAIL(); },
         [&](auto& yTensor) {
-            using DataType = hipdnn_sdk::json::DataTypeFromTensor<decltype(*yTensor)>;
+            using DataType = DataTypeFromTensor<decltype(*yTensor)>;
 
             CpuFpReferenceValidation<DataType> cpuRefValidation(static_cast<DataType>(0.02f),
                                                                 static_cast<DataType>(0.02f));

@@ -14,7 +14,7 @@
 #include <type_traits>
 #include <variant>
 
-namespace hipdnn_sdk::json
+namespace hipdnn_sdk::utilities
 {
 
 namespace detail
@@ -23,7 +23,7 @@ namespace detail
 template <class... Ts>
 struct TensorVariant
 {
-    using Type = std::variant<std::unique_ptr<hipdnn_sdk::utilities::Tensor<Ts>>...>;
+    using Type = std::variant<std::unique_ptr<Tensor<Ts>>...>;
 };
 
 template <class T>
@@ -32,13 +32,13 @@ struct DatatypeFromTensor
 };
 
 template <class T>
-struct DatatypeFromTensor<hipdnn_sdk::utilities::Tensor<T>>
+struct DatatypeFromTensor<Tensor<T>>
 {
     using Type = T;
 };
 
 template <class T>
-void fillTensorFromFile(utilities::Tensor<T>& tensor, std::filesystem::path const& path)
+void fillTensorFromFile(Tensor<T>& tensor, std::filesystem::path const& path)
 {
 
     std::ifstream f(path, std::ios::binary);
@@ -72,7 +72,7 @@ inline TensorVariant
     auto createTensor = [&](auto dataType) -> TensorVariant {
         using DataType = std::remove_const_t<decltype(dataType)>;
 
-        auto tensor = std::make_unique<utilities::Tensor<DataType>>(dims, strides);
+        auto tensor = std::make_unique<Tensor<DataType>>(dims, strides);
 
         detail::fillTensorFromFile(*tensor, filepath);
 

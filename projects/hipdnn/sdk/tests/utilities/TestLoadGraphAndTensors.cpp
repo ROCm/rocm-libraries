@@ -5,17 +5,15 @@
 
 #include <hipdnn_sdk/test_utilities/ExecuteOnLeavingScope.hpp>
 #include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
+#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/json/LoadGraphAndTensors.hpp>
 
-using namespace hipdnn_sdk::json;
-
-namespace hipdnn_sdk::json
+namespace hipdnn_sdk::utilities
 {
 
 TEST(TestFillTensorFromFile, InvalidPath)
 {
-    hipdnn_sdk::utilities::Tensor<float> tensor({1});
+    Tensor<float> tensor({1});
     std::filesystem::path filepath = "./ea0w399059.txt";
     EXPECT_FALSE(std::filesystem::exists(filepath));
     EXPECT_THROW(detail::fillTensorFromFile(tensor, filepath), std::runtime_error);
@@ -23,7 +21,7 @@ TEST(TestFillTensorFromFile, InvalidPath)
 
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
-    hipdnn_sdk::utilities::Tensor<float> tensor({1});
+    Tensor<float> tensor({1});
     hipdnn_sdk::test_utilities::TempDirectory dir("oijaweorij33");
     EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
@@ -47,7 +45,7 @@ TEST(TestFillTensorFromFile, Valid)
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
 
-    hipdnn_sdk::utilities::Tensor<int> tensor({static_cast<int64_t>(values.size())});
+    Tensor<int> tensor({static_cast<int64_t>(values.size())});
     ASSERT_NO_THROW(detail::fillTensorFromFile(tensor, filename));
 
     ASSERT_EQ(tensor.memory().count(), values.size());
@@ -80,7 +78,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     for(const auto& [uid, value] : res.tensorMap)
     {
-        auto& tensor = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<float>>>(value);
+        auto& tensor = std::get<std::unique_ptr<Tensor<float>>>(value);
         EXPECT_EQ(expectedAttributes[uid], tensor->dims());
     }
 
@@ -88,8 +86,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     EXPECT_EQ(deviceBuffers.size(), res.tensorMap.size());
     for(auto db : deviceBuffers)
     {
-        auto& tensor = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<float>>>(
-            res.tensorMap.at(db.uid));
+        auto& tensor = std::get<std::unique_ptr<Tensor<float>>>(res.tensorMap.at(db.uid));
         EXPECT_EQ(tensor->memory().deviceData(), db.ptr);
     }
 }
