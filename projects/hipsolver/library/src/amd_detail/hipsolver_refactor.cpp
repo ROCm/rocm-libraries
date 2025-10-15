@@ -291,7 +291,7 @@ try
     // check for ROCSOLVER_LAYER environment variable
     if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
     {
-        errno = 0;
+        errno      = 0;
         long value = strtol(str_layer_mode, 0, 0);
         if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
             enable_rocsolver_logging = true;
@@ -300,7 +300,7 @@ try
     // check for ROCSOLVER_LEVELS environment variable
     if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
     {
-        errno = 0;
+        errno      = 0;
         long value = strtol(str_max_level, 0, 0);
         if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
             enable_rocsolver_logging = true;
@@ -338,7 +338,7 @@ try
     // check for ROCSOLVER_LAYER environment variable
     if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
     {
-        errno = 0;
+        errno      = 0;
         long value = strtol(str_layer_mode, 0, 0);
         if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
             enable_rocsolver_logging = true;
@@ -347,7 +347,7 @@ try
     // check for ROCSOLVER_LEVELS environment variable
     if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
     {
-        errno = 0;
+        errno      = 0;
         long value = strtol(str_max_level, 0, 0);
         if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
             enable_rocsolver_logging = true;
