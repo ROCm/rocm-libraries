@@ -154,6 +154,10 @@ namespace rocRoller
             {
                 size_t size;
                 auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
+                amd_comgr_metadata_kind_t kind;
+                amd_comgr_get_metadata_kind(n, &kind);
+                std::cout << "status: " << status << std::endl;
+                std::cout << "kind: " << kind << "\n" << std::endl;
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
                     std::string str(size - 1, '\0');

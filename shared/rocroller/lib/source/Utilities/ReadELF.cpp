@@ -28,17 +28,16 @@
 #include <rocRoller/Serialization/comgr/comgr.hpp>
 #include <rocRoller/Serialization/ELF.hpp>
 #include <rocRoller/Serialization/AssemblyKernel.hpp>
+#include <rocRoller/Serialization/YAML.hpp>
 #include <amd_comgr/amd_comgr.h>
 
 namespace rocRoller
 {
-    namespace Serialization
+    std::string readMetaDataFromCodeObject(std::string const& fileName)
     {
-        std::string readMetaDataFromCodeObject(std::string const& fileName)
-        {
-            std::string yaml;
-            
-            return yaml;
-        }
+        using namespace Serialization;
+        AssemblyKernels kernel = fromELF<AssemblyKernels>(fileName);
+        return toYAML(kernel);
     }
+    
 }
