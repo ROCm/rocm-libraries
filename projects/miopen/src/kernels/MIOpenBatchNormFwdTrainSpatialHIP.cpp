@@ -31,6 +31,7 @@
 #include "batchnorm_functions.hpp"
 #include "bnorm_spatial_activation_functions.hpp"
 #include "activation_functions.hpp"
+#include "configuration.hpp"
 #include "reduction_functions.hpp"
 #include "static_unroll.hpp"
 
@@ -47,6 +48,153 @@ template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAcc
 struct MIOpenBatchNormFwdTrainSpatialHIPImpl
 {
     static_assert(false, "this variant is not supported.");
+};
+
+// This is the instance for MIO_BN_VARIANT == 0
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
+{
+    // These are the configs for this variant
+    static constexpr unsigned int segtmp_1 = mio_bn_config::launch_dim.grp0 / mio_bn_config::hw;
+    static constexpr unsigned int segtmp_2 = (segtmp_1 == 0) ? 1 : segtmp_1;
+    static constexpr unsigned int segtmp   = mio_bn_config::hw * segtmp_2;
+    static constexpr unsigned int segment =
+        (segtmp > mio_bn_config::nhw) ? mio_bn_config::nhw : segtmp;
+    static constexpr unsigned int nloop  = (mio_bn_config::nhw + segment - 1) / segment;
+    static constexpr unsigned int segihw = segment / mio_bn_config::hw;
+    static constexpr unsigned int nloopm = nloop - 1;
+    static constexpr unsigned int snhw   = nloopm * segihw;
+
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict scale,
+                                                         const FpPrecType* __restrict bias,
+                                                         FpPrecType INHW,
+                                                         double epsilon,
+                                                         FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         FpPrecType _alpha,
+                                                         FpPrecType _beta)
+    {
+        // ACTIVATION_SET()
+
+        // SPATIAL
+        mean                = cast<FpAccumType>(0.);
+        variance            = cast<FpAccumType>(0.);
+        invVariance         = cast<FpAccumType>(0.);
+        FpAccumType pvscale = cast<FpAccumType>(0.);
+        FpAccumType pvbias  = cast<FpAccumType>(0.);
+        FpType batchvalues[nloop];
+        FpAccumType temp;
+
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+
+        unsigned int index  = 0;
+        unsigned int lid    = threadIdx.x;
+        unsigned int grpid  = blockIdx.x;
+        unsigned int chwid  = grpid * mio_bn_config::hw + (lid % mio_bn_config::hw);
+        unsigned int lidihw = lid / mio_bn_config::hw;
+        unsigned int nid    = 0;
+
+        if(lid == 0)
+        {
+            lcl_scale = *(scale + grpid);
+            lcl_bias  = *(bias + grpid);
+        }
+
+        __syncthreads();
+
+        if(lid < segment)
+        {
+            constexpr int unrollHint =
+                mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
+            static_unroll_count<unsigned int, 0, nloopm, 1, unrollHint>{[&](unsigned int n) {
+                nid            = n * segihw + lidihw;
+                index          = nid * mio_bn_config::chw + chwid;
+                batchvalues[n] = *(in + index);
+                temp           = cast<FpAccumType>(*(in + index));
+                mean += temp;
+                variance = fma(temp, temp, variance);
+            }};
+            nid   = snhw + lidihw;
+            index = nid * mio_bn_config::chw + chwid;
+            batchvalues[nloopm] =
+                (index < mio_bn_config::nchw) ? (*(in + index)) : cast<FpType>(0.);
+            temp = cast<FpAccumType>(batchvalues[nloopm]);
+            mean += temp;
+            variance = fma(temp, temp, variance);
+        }
+        __syncthreads(); // Note: in the original OpenCL kernel the synchronization was outside of
+                         // this if statement
+
+        constexpr auto lcl_data_size =
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        if constexpr(mio_bn_config::use_amdgcn)
+        {
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+        else
+        {
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+
+        // Reduction complete
+
+        variance = fma(-mean, mean, variance);
+        if(variance < 0)
+        {
+            variance = 0;
+        }
+        invVariance = rsqrt(variance + cast<FpAccumType>(epsilon));
+        pvscale     = cast<FpAccumType>(lcl_scale);
+        pvbias      = cast<FpAccumType>(lcl_bias);
+
+        if(lid < segment)
+        {
+            // Calculate norm
+
+            FpAccumType inhat = cast<FpAccumType>(0.);
+            FpPrecType value;
+
+            constexpr int unrollHint =
+                mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
+
+            static_unroll_count<unsigned int, 0, nloopm, 1, unrollHint>{[&](unsigned int n) {
+                // Apply normalization
+                inhat      = (cast<FpAccumType>(batchvalues[n]) - mean) * invVariance;
+                nid        = n * segihw + lidihw;
+                index      = nid * mio_bn_config::chw + chwid;
+                value      = cast<FpPrecType>(fma(pvscale, inhat, pvbias));
+                out[index] = cast<FpType>(miopen::batchnorm::activation_op(value, _alpha, _beta));
+            }};
+
+            // Tail of loop
+            inhat = (cast<FpAccumType>(batchvalues[nloopm]) - mean) * invVariance;
+            nid   = snhw + lidihw;
+            index = nid * mio_bn_config::chw + chwid;
+            if(index < mio_bn_config::nchw)
+            {
+                value      = cast<FpPrecType>(fma(pvscale, inhat, pvbias));
+                out[index] = cast<FpType>(miopen::batchnorm::activation_op(value, _alpha, _beta));
+            }
+        }
+    }
 };
 
 // This is the instance for MIO_BN_VARIANT == 1
@@ -406,7 +554,11 @@ extern "C" __global__ void __launch_bounds__(
 #endif
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
         miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
-            resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
+            resultSaveMean,
+            resultSaveInvVariance,
+            static_cast<fp_accum_c_type>(mean),
+            invVariance,
+            grpid);
 #endif
     }
 }
