@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,22 +25,12 @@
  *******************************************************************************/
 .include "Conv_Winograd_Fury_vX_X_X_metadata.inc"
 
-.if (.amdgcn.gfx_generation_number == 11)
-    .if ((.amdgcn.gfx_generation_minor == 0 && (.amdgcn.gfx_generation_stepping == 0 || .amdgcn.gfx_generation_stepping == 1)) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 1))
-        // gfx1100, gfx1101, gfx1151
-        KERNEL_PROLOG 2_4_1, _1536vgprs_fp16_fp16acc_f2x3_c16_stride1
-        .noaltmacro
-        .include "Conv_Winograd_Fury_v2_4_1_gfx11_1536vgprs_fp16_fp16acc_f2x3_c16_stride1.inc"
-        .altmacro
-        KERNEL_EPILOG 2_4_1, _1536vgprs_fp16_fp16acc_f2x3_c16_stride1
-    .else
-        // gfx1102, gfx1103, gfx1150
-        KERNEL_PROLOG 2_4_1, _1024vgprs_fp16_fp16acc_f2x3_c16_stride1
-        .noaltmacro
-        .include "Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc"
-        .altmacro
-        KERNEL_EPILOG 2_4_1, _1024vgprs_fp16_fp16acc_f2x3_c16_stride1
-    .endif
+.if (.amdgcn.gfx_generation_number == 12)
+    KERNEL_PROLOG 4_6_0, _1536vgprs_fp16_fp32acc_f2x3_c16_stride1
+    .noaltmacro
+    .include "Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c16_stride1.inc"
+    .altmacro
+    KERNEL_EPILOG 4_6_0, _1536vgprs_fp16_fp32acc_f2x3_c16_stride1
 .else
     .error "Unsupported gfx generation"
 .endif

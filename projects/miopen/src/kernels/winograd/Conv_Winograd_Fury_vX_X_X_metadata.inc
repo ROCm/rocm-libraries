@@ -129,7 +129,7 @@ amdhsa.kernels:
 
 kernel_end \kernel_name
 
-.if (.amdgcn.gfx_generation_number == 11)
+.if (.amdgcn.gfx_generation_number == 11 || .amdgcn.gfx_generation_number == 12)
     .if ((.amdgcn.gfx_generation_minor == 0 && (.amdgcn.gfx_generation_stepping == 0 || .amdgcn.gfx_generation_stepping == 1)) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 1))
         // gfx1100, gfx1101, gfx1151
         vgpr_cnt = 252
@@ -165,28 +165,39 @@ __dx10_clamp = 0
     .amdhsa_workgroup_processor_mode         0
 .end_amdhsa_kernel
 .endif
+.if (.amdgcn.gfx_generation_number == 12)
+.amdhsa_kernel \kernel_name
+    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
+    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
+    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
+    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
+    .amdhsa_wavefront_size32                 0
+    .amdhsa_workgroup_processor_mode         0
+.end_amdhsa_kernel
+.endif
 
 METADATA_WRAPPER sgpr_cnt, 0, workgroup_size_x, <\kernel_name>
 
 .endm
 
-.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_name_postfix:req
-    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvFury_v2_4_1_gfx\machine_version\()\kernel_name_postfix
+.macro PROLOG_KERNEL_DESCRIPTOR_WRAPPER version_name:req machine_version:req, kernel_name_postfix:req
+    PROLOG_KERNEL_DESCRIPTOR miopenSp3AsmConvFury_v\version_name\()_gfx\machine_version\()\kernel_name_postfix
 .endm
 
-.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER machine_version:req, kernel_name_postfix:req
-    EPILOG_KERNEL_DESCRIPTOR miopenSp3AsmConvFury_v2_4_1_gfx\machine_version\()\kernel_name_postfix
+.macro EPILOG_KERNEL_DESCRIPTOR_WRAPPER version_name:req machine_version:req, kernel_name_postfix:req
+    EPILOG_KERNEL_DESCRIPTOR miopenSp3AsmConvFury_v\version_name\()_gfx\machine_version\()\kernel_name_postfix
 .endm
 
-.macro KERNEL_PROLOG kernel_name_postfix:req
-	PROLOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_name_postfix
+.macro KERNEL_PROLOG version_name:req kernel_name_postfix:req
+	PROLOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %.amdgcn.gfx_generation_number, \kernel_name_postfix
 .endm
 
-.macro KERNEL_EPILOG kernel_name_postfix:req
-	EPILOG_KERNEL_DESCRIPTOR_WRAPPER %.amdgcn.gfx_generation_number, \kernel_name_postfix
+.macro KERNEL_EPILOG version_name:req kernel_name_postfix:req
+	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %.amdgcn.gfx_generation_number, \kernel_name_postfix
 .endm
 
-.if (.amdgcn.gfx_generation_number != 11)
+.if (.amdgcn.gfx_generation_number != 11 && .amdgcn.gfx_generation_number != 12)
     .error "Unsupported gfx generation"
     .end
 .endif

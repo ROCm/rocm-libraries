@@ -106,9 +106,11 @@ bool IsShaderConstraintsMet(const WinoShaderArgsV2& args, uint32_t n_groups)
 
 bool GpuHasReducedVGPRMem(const std::string& dev_name)
 {
-    if(dev_name == "gfx1100" || dev_name == "gfx1101" || dev_name == "gfx1151")
-        return false;
-    return true;
+    static constexpr std::array<std::string_view, 5> kFullVgprMemDevices{
+        "gfx1100", "gfx1101", "gfx1151", "gfx1200", "gfx1201"};
+    const std::string_view name{dev_name};
+    return std::find(kFullVgprMemDevices.begin(), kFullVgprMemDevices.end(), name) ==
+           kFullVgprMemDevices.end();
 }
 
 class ShaderModel
@@ -251,8 +253,8 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 
     const auto dev_name = ctx.GetStream().GetDeviceName();
-    // All gfx11 ASICs are supported
-    if(!StartsWith(dev_name, "gfx11"))
+    // All gfx11/gfx12 ASICs are supported
+    if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx12")))
         return false;
 
     if(StartsWith(dev_name, "gfx115"))
@@ -329,6 +331,11 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         MIOPEN_THROW(miopenStatusInternalError);
     }
 
+    if(!problem.IsFp16())
+    {
+        MIOPEN_THROW(miopenStatusInternalError);
+    }
+
     const auto shader_model = ShaderModel(ctx, args, cu_count, n_groups, reduced_vgpr_mem);
     // For ASICs with redused VGPR memory we have only c16 kernel
     const bool c32_mode = reduced_vgpr_mem ? false : shader_model.IsC32ModePreferable();
@@ -347,31 +354,31 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     }
 
     // Kernel name & file
-    const std::string kernel_version = "_v2_4_1";
-    std::string kernel_name          = "miopenSp3AsmConvFury" + kernel_version;
-    std::string kernel_file          = "Conv_Winograd_Fury" + kernel_version;
+    std::string kernel_version = "_v2_4_1";
+    std::string kernel_name    = "miopenSp3AsmConvFury";
+    std::string kernel_file    = "Conv_Winograd_Fury";
+    std::string kernel_postfix = "_fp16_fp16acc";
 
     if(StartsWith(dev_name, "gfx11"))
     {
+        kernel_name += kernel_version;
         kernel_name += "_gfx11";
         kernel_name += reduced_vgpr_mem ? "_1024vgprs" : "_1536vgprs";
     }
-    else
+    else if(StartsWith(dev_name, "gfx12"))
     {
-        MIOPEN_THROW(miopenStatusInternalError);
-    }
-
-    std::string kernel_postfix;
-
-    if(problem.IsFp16())
-    {
-        kernel_postfix += "_fp16_fp16acc";
+        kernel_version = "_v4_6_0";
+        kernel_name += kernel_version;
+        kernel_name += "_gfx12";
+        kernel_name += reduced_vgpr_mem ? "_1024vgprs" : "_1536vgprs";
+        kernel_postfix = "_fp16_fp32acc";
     }
     else
     {
         MIOPEN_THROW(miopenStatusInternalError);
     }
 
+    kernel_file += kernel_version;
     kernel_postfix += IS2X3 ? "_f2x3" : "_f3x2";
     kernel_postfix += c32_mode ? "_c32" : "_c16";
     kernel_postfix += "_stride1";
