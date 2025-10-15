@@ -178,7 +178,7 @@ template<class ConfigProvider>
 __global__
 void least_common_grid_size_kernel(unsigned int* least_common_grid_size, rocrand_ordering order)
 {
-    *least_common_grid_size = rocrand_impl::host::get_least_common_grid_size<ConfigProvider>(
+    *least_common_grid_size = rocrand_impl::host::get_least_common_grid_size<ConfigProvider, rocrand_impl::host::target_arch{}>(
         rocrand_impl::host::is_ordering_dynamic(order));
 }
 

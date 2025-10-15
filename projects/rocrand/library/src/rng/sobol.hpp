@@ -70,12 +70,13 @@ Engine create_engine(const Constant*           vectors,
 
 // Use compiler-defined macro to only define the kernel once, for host and device compilation.
 #ifdef __HIP_DEVICE_COMPILE__
-template<unsigned int OutputPerThread,
-         bool         Scrambled,
+template<unsigned int      OutputPerThread,
+         bool              Scrambled,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 void generate_sobol_host(dim3,
                          dim3,
                          dim3,
@@ -116,12 +117,13 @@ void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned int, Distribution)
 {}
 
-template<unsigned int OutputPerThread,
-         bool         Scrambled,
+template<unsigned int      OutputPerThread,
+         bool              Scrambled,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 void generate_sobol_host(dim3               block_idx,
                          dim3               thread_idx,
                          dim3               grid_dim,
@@ -717,13 +719,27 @@ public:
         else
         {
             using block_size_provider = static_block_size_config_provider<threads>;
-            status = system_type::template launch<generate_sobol_host<output_per_thread,
-                                                                      Scrambled,
-                                                                      engine_type,
-                                                                      constant_type,
-                                                                      T,
-                                                                      Distribution>,
-                                                  block_size_provider>(dim3(blocks_x, blocks_y),
+
+            host::target_arch target_arch;
+            hipError_t        result = host::get_device_arch(m_stream, target_arch);
+            if(result != hipSuccess)
+            {
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
+
+            auto generate_sobol_host_kernel = [&](auto arch, auto... args)
+            {
+                generate_sobol_host<output_per_thread,
+                                    Scrambled,
+                                    engine_type,
+                                    constant_type,
+                                    T,
+                                    Distribution,
+                                    arch>(args...);
+            };
+            status = system_type::template launch<block_size_provider>(generate_sobol_host_kernel,
+                                                                       target_arch,
+                                                                       dim3(blocks_x, blocks_y),
                                                                        dim3(threads),
                                                                        shared_mem_bytes,
                                                                        m_stream,
