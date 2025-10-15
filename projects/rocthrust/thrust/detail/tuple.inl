@@ -33,6 +33,10 @@ THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
   b                = temp;
 } // end swap()
 
+// define null_type for backwards compatibility
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
+{};
+
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
 // forward declaration for tuple
