@@ -568,7 +568,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int w = 0; w < width; ++w)
         {
-            const auto tid = Parens{thread + dt + h * threads_per_transform};
+            const auto tid = Parens{thread + dt + h * threads_per_transform * max_factor_pp};
             const auto idx = offset_lds + (tid + w * (length / width) * max_factor_pp) * lstride;
             work += Assign(l_offset, idx);
 
@@ -631,7 +631,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int w = 0; w < width; ++w)
         {
-            const auto tid = thread + dt + h * threads_per_transform;
+            const auto tid = thread + dt + h * threads_per_transform * max_factor_pp;
             const auto idx
                 = offset_lds
                   + (Parens{tid / (cumheight * max_factor_pp)} * (width * cumheight * max_factor_pp)
@@ -749,8 +749,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
             unsigned int pass_width = factors_pp[npass];
-            unsigned int pass_height
-                = static_cast<float>(length) / pass_width / threads_per_transform;
+            float pass_height = static_cast<float>(length) / pass_width / threads_per_transform;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
             stmts += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
