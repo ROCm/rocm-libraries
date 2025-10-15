@@ -119,8 +119,8 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         (use_hip ? "MIOpenBatchNormActivInferHIP.cpp" : "MIOpenBatchNormActivInfer.cl");
     std::string kernel_name = "MIOpenBatchNormActivInfer";
 
-    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::OpenCL{})
-                                 : build_params.GenerateFor(miopen::kbp::HIP{});
+    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::HIP{})
+                                 : build_params.GenerateFor(miopen::kbp::OpenCL{});
 
     if(bn_mode == miopenBNSpatial)
     {
@@ -144,15 +144,16 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     ss << "activ" << activ_mode;
     std::string network_config = ss.str();
 
+    // add the kernel to the handle
+    [[maybe_unused]] auto kernelInvoke =
+        handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
+
     if constexpr(PERF_ENABLE)
     {
 #if COMPARE_WITH_OPENCL
         // disable the perf test for FP16 as OpenCL FP16 is broken
         if(xDesc.GetType() != miopenHalf)
         {
-            // add the kernel to the handle
-            handle.AddKernel(
-                kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
             // run the perf test
             perf_helper.perfTest(handle,
                                  kernel_name,
@@ -170,8 +171,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                                  estimatedVariance);
         }
 #else
-        // add the kernel to the handle
-        handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
         // run the perf test
         perf_helper.perfTest(handle,
                              kernel_name,
@@ -191,18 +190,17 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     }
     else
     {
-        // add the kernel to the handle and execute it
-        handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params)(
-            static_cast<float>(activ_alpha),
-            static_cast<float>(activ_beta),
-            static_cast<float>(activ_gamma),
-            static_cast<double>(epsilon),
-            x,
-            y,
-            bnBias,
-            bnScale,
-            estimatedMean,
-            estimatedVariance);
+        // execute the kernel
+        kernelInvoke(static_cast<float>(activ_alpha),
+                     static_cast<float>(activ_beta),
+                     static_cast<float>(activ_gamma),
+                     static_cast<double>(epsilon),
+                     x,
+                     y,
+                     bnBias,
+                     bnScale,
+                     estimatedMean,
+                     estimatedVariance);
     }
 }
 
