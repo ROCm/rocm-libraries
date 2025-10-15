@@ -45,6 +45,324 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
+// Forward declaration of TensorBase
+template <typename T>
+class TensorBase;
+class ITensor;
+
+// Forward iterator for typed tensor iteration
+template <typename T, bool IsConst>
+class TensorIterator
+{
+public:
+    // Iterator traits for STL compatibility
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = T;
+    using difference_type = std::ptrdiff_t;
+    using pointer = std::conditional_t<IsConst, const T*, T*>;
+    using reference = std::conditional_t<IsConst, const T&, T&>;
+    using tensor_type = std::conditional_t<IsConst, const TensorBase<T>, TensorBase<T>>;
+
+    // Constructors
+    TensorIterator(tensor_type* tensor, std::vector<int64_t> indices, bool isEnd = false)
+        : _tensor(tensor)
+        , _indices(std::move(indices))
+        , _isEnd(isEnd)
+    {
+    }
+
+    // Dereference operators
+    reference operator*() const
+    {
+        if(_isEnd)
+        {
+            throw std::out_of_range("Cannot dereference end iterator");
+        }
+        int64_t index = _tensor->getIndex(_indices);
+        return _tensor->memory().hostData()[index];
+    }
+
+    pointer operator->() const
+    {
+        if(_isEnd)
+        {
+            throw std::out_of_range("Cannot dereference end iterator");
+        }
+        int64_t index = _tensor->getIndex(_indices);
+        return &_tensor->memory().hostData()[index];
+    }
+
+    // Prefix increment
+    TensorIterator& operator++()
+    {
+        if(_isEnd)
+        {
+            return *this;
+        }
+
+        const auto& dims = _tensor->dims();
+
+        // Increment indices in reverse order (rightmost dimension first)
+        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+        {
+            auto dimIdx = static_cast<size_t>(dim);
+            _indices[dimIdx]++;
+            if(_indices[dimIdx] < dims[dimIdx])
+            {
+                return *this; // Successfully incremented
+            }
+            _indices[dimIdx] = 0; // Carry to next dimension
+        }
+
+        // If we get here, we've incremented past the last element
+        _isEnd = true;
+        return *this;
+    }
+
+    // Postfix increment
+    TensorIterator operator++(int)
+    {
+        TensorIterator temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    // Comparison operators
+    bool operator==(const TensorIterator& other) const
+    {
+        if(_tensor != other._tensor)
+        {
+            return false;
+        }
+        if(_isEnd && other._isEnd)
+        {
+            return true;
+        }
+        if(_isEnd != other._isEnd)
+        {
+            return false;
+        }
+        return _indices == other._indices;
+    }
+
+    bool operator!=(const TensorIterator& other) const
+    {
+        return !(*this == other);
+    }
+
+    // Get current indices (useful for debugging)
+    const std::vector<int64_t>& indices() const
+    {
+        return _indices;
+    }
+
+private:
+    tensor_type* _tensor;
+    std::vector<int64_t> _indices;
+    bool _isEnd;
+};
+
+// Type-erased iterator for ITensor polymorphic iteration
+class TypeErasedIterator
+{
+public:
+    // Iterator traits for STL compatibility
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = void;
+    using difference_type = std::ptrdiff_t;
+    using pointer = void*;
+    using reference = void*;
+
+    // Default constructor
+    TypeErasedIterator() = default;
+
+    // Copy constructor
+    TypeErasedIterator(const TypeErasedIterator& other)
+        : _impl(other._impl ? other._impl->clone() : nullptr)
+    {
+    }
+
+    // Move constructor
+    TypeErasedIterator(TypeErasedIterator&&) = default;
+
+    // Copy assignment
+    TypeErasedIterator& operator=(const TypeErasedIterator& other)
+    {
+        if(this != &other)
+        {
+            _impl = other._impl ? other._impl->clone() : nullptr;
+        }
+        return *this;
+    }
+
+    // Move assignment
+    TypeErasedIterator& operator=(TypeErasedIterator&&) = default;
+
+    // Dereference - returns void*
+    void* operator*() const
+    {
+        if(!_impl)
+        {
+            throw std::runtime_error("Cannot dereference invalid iterator");
+        }
+        return _impl->get();
+    }
+
+    // Prefix increment
+    TypeErasedIterator& operator++()
+    {
+        if(_impl)
+        {
+            _impl->increment();
+        }
+        return *this;
+    }
+
+    // Postfix increment
+    TypeErasedIterator operator++(int)
+    {
+        TypeErasedIterator temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    // Comparison operators
+    bool operator==(const TypeErasedIterator& other) const
+    {
+        if(!_impl && !other._impl)
+        {
+            return true;
+        }
+        if(!_impl || !other._impl)
+        {
+            return false;
+        }
+        return _impl->equals(other._impl.get());
+    }
+
+    bool operator!=(const TypeErasedIterator& other) const
+    {
+        return !(*this == other);
+    }
+
+    // Get current indices (useful for debugging)
+    std::vector<int64_t> indices() const
+    {
+        if(!_impl)
+        {
+            return {};
+        }
+        return _impl->getIndices();
+    }
+
+    // Factory methods to create from typed iterators
+    template <typename T>
+    static TypeErasedIterator create(TensorIterator<T, false> iter)
+    {
+        TypeErasedIterator result;
+        result._impl = std::make_unique<IteratorModel<T>>(std::move(iter));
+        return result;
+    }
+
+    template <typename T>
+    static TypeErasedIterator createConst(TensorIterator<T, true> iter)
+    {
+        TypeErasedIterator result;
+        result._impl = std::make_unique<ConstIteratorModel<T>>(std::move(iter));
+        return result;
+    }
+
+private:
+    // Internal interface for type-erased operations
+    struct IteratorConcept
+    {
+        virtual ~IteratorConcept() = default;
+        virtual void increment() = 0;
+        virtual void* get() = 0;
+        virtual bool equals(const IteratorConcept* other) const = 0;
+        virtual std::unique_ptr<IteratorConcept> clone() const = 0;
+        virtual std::vector<int64_t> getIndices() const = 0;
+    };
+
+    // Concrete implementation for non-const typed iterators
+    template <typename T>
+    struct IteratorModel : IteratorConcept
+    {
+        TensorIterator<T, false> iter;
+
+        explicit IteratorModel(TensorIterator<T, false> iter)
+            : iter(std::move(iter))
+        {
+        }
+
+        void increment() override
+        {
+            ++iter;
+        }
+
+        void* get() override
+        {
+            return const_cast<void*>(static_cast<const void*>(&(*iter)));
+        }
+
+        bool equals(const IteratorConcept* other) const override
+        {
+            auto* otherModel = dynamic_cast<const IteratorModel<T>*>(other);
+            return otherModel && iter == otherModel->iter;
+        }
+
+        std::unique_ptr<IteratorConcept> clone() const override
+        {
+            return std::make_unique<IteratorModel<T>>(iter);
+        }
+
+        std::vector<int64_t> getIndices() const override
+        {
+            return iter.indices();
+        }
+    };
+
+    // Concrete implementation for const typed iterators
+    template <typename T>
+    struct ConstIteratorModel : IteratorConcept
+    {
+        TensorIterator<T, true> iter;
+
+        explicit ConstIteratorModel(TensorIterator<T, true> iter)
+            : iter(std::move(iter))
+        {
+        }
+
+        void increment() override
+        {
+            ++iter;
+        }
+
+        void* get() override
+        {
+            return const_cast<void*>(static_cast<const void*>(&(*iter)));
+        }
+
+        bool equals(const IteratorConcept* other) const override
+        {
+            auto* otherModel = dynamic_cast<const ConstIteratorModel<T>*>(other);
+            return otherModel && iter == otherModel->iter;
+        }
+
+        std::unique_ptr<IteratorConcept> clone() const override
+        {
+            return std::make_unique<ConstIteratorModel<T>>(iter);
+        }
+
+        std::vector<int64_t> getIndices() const override
+        {
+            return iter.indices();
+        }
+    };
+
+    std::unique_ptr<IteratorConcept> _impl;
+};
+
 class ITensor
 {
 public:
@@ -91,6 +409,11 @@ public:
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
+    virtual TypeErasedIterator begin() = 0;
+    virtual TypeErasedIterator end() = 0;
+    virtual TypeErasedIterator begin() const = 0;
+    virtual TypeErasedIterator end() const = 0;
+
     virtual bool isPacked() const = 0;
 
 protected:
@@ -113,6 +436,9 @@ template <typename T>
 class TensorBase : public ITensor
 {
 public:
+    using iterator = TensorIterator<T, false>;
+    using const_iterator = TensorIterator<T, true>;
+
     void* rawHostData() override
     {
         return memory().hostData();
@@ -172,6 +498,30 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+    TypeErasedIterator begin() override
+    {
+        std::vector<int64_t> startIndices(dims().size(), 0);
+        return TypeErasedIterator::create(iterator(this, startIndices, false));
+    }
+
+    TypeErasedIterator end() override
+    {
+        std::vector<int64_t> endIndices(dims().size(), 0);
+        return TypeErasedIterator::create(iterator(this, endIndices, true));
+    }
+
+    TypeErasedIterator begin() const override
+    {
+        std::vector<int64_t> startIndices(dims().size(), 0);
+        return TypeErasedIterator::createConst(const_iterator(this, startIndices, false));
+    }
+
+    TypeErasedIterator end() const override
+    {
+        std::vector<int64_t> endIndices(dims().size(), 0);
+        return TypeErasedIterator::createConst(const_iterator(this, endIndices, true));
+    }
 
 protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,

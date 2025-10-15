@@ -31,6 +31,7 @@ add_executable(hipdnn_sdk_tests
     utilities/TestScopedResource.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestTensor.cpp
+    utilities/TestTensorIterator.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp
