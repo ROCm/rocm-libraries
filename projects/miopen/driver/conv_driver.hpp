@@ -456,10 +456,11 @@ private:
         if(is_bfp8 || is_fp8 || TensorsCasted())
             tolerance *= 37.0;
 
-        // enhance tolerance due to tf32 has same mantissa length as fp16
-        auto math_type_ = inflags.GetValueInt("math_type");
-        if(std::is_same_v<Tgpu, float> && (miopen::EnvEnableTF32() || math_type_))
-            tolerance *= 20.0; // tf32
+        { // tf32 has same mantissa length as fp16
+            auto math_type_ = inflags.GetValueInt("math_type");
+            if(std::is_same_v<Tgpu, float> && (miopen::EnvEnableTF32() || math_type_))
+                tolerance = 8.2e-3;
+        }
         return tolerance;
     }
 
