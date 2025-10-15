@@ -66,6 +66,8 @@ public:
         EXPECT_CALL(*_mockEnginePluginResourceManager, createExecutionContext(_, _, _))
             .WillOnce(Return(getExecutionContext()));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _))
+            .WillOnce(Return(1024));
 
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
@@ -268,7 +270,6 @@ TEST_F(TestExecutionPlanDescriptor, GetWorkspaceSize)
     int64_t workspaceSize = 0;
 
     makeExecutionPlanFinalized();
-    EXPECT_CALL(*mockEngineConfig, getAttribute(_, _, _, _, _)).WillOnce(SetArg4ToInt64(1024));
     plan->getAttribute(
         HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspaceSize);
     ASSERT_EQ(workspaceSize, 1024);

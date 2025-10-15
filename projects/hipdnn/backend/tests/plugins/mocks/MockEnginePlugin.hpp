@@ -56,6 +56,11 @@ public:
                 (hipdnnEnginePluginHandle_t handle,
                  hipdnnEnginePluginExecutionContext_t executionContext),
                 (const));
+    MOCK_METHOD(size_t,
+                getWorkspaceSize,
+                (hipdnnEnginePluginHandle_t handle,
+                 hipdnnEnginePluginExecutionContext_t executionContext),
+                (const));
     MOCK_METHOD(void,
                 executeOpGraph,
                 (hipdnnEnginePluginHandle_t handle,

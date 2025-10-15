@@ -429,7 +429,7 @@ public:
                                                  1,
                                                  nullptr,
                                                  &workspaceSize),
-            "Failed to get engine configurations from the execution plan descriptor.");
+            "Failed to get workspace size from the execution plan descriptor.");
 
         return {ErrorCode::OK, ""};
     }
