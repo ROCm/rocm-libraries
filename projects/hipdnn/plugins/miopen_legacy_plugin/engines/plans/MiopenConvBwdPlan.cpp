@@ -23,6 +23,11 @@ ConvBwdParams::ConvBwdParams(
     , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
     , _conv(_spatialDimCount, attributes)
 {
+    const auto& attrDX = miopen_utils::findTensorAttributes(tensorMap, _dx.uid());
+    const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
+    const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
+
+    _tensorsValid = (!attrDX.virtual_() && !attrW.virtual_() && !attrDY.virtual_());
 }
 
 const MiopenTensor& ConvBwdParams::dx() const
@@ -43,6 +48,11 @@ const MiopenTensor& ConvBwdParams::dy() const
 const MiopenConvDescriptor& ConvBwdParams::conv() const
 {
     return _conv;
+}
+
+bool ConvBwdParams::validTensors() const
+{
+    return _tensorsValid;
 }
 
 ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&& params)
@@ -75,7 +85,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
                 auto status = miopenDestroySolution(s);
                 if(status != miopenStatusSuccess)
                 {
-                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvFwdPlan destructor");
+                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan destructor");
                 }
             });
     }
