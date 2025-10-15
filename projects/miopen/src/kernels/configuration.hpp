@@ -90,7 +90,7 @@ struct proto_config
         UseFp16 ? type_strategy::fp16
                 : (UseFp32 ? type_strategy::fp32
                            : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
-    static constexpr bool use_amdgnc = UseAMDGCN;
+    static constexpr bool use_amdgcn = UseAMDGCN;
     static constexpr auto neuron_op  = static_cast<neuron_op_type>(NrnOpId);
 };
 } // namespace detail
@@ -198,10 +198,10 @@ struct proto_config
 
     static constexpr auto input_type_strategy = MiopenConfig::input_type_strategy;
     using fp_type                             = typename std::conditional<
-                                    input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
-                                    _Float16,
-                                    typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
-                                        type>::type;
+        input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
+        _Float16,
+        typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
+            type>::type;
     using fp_prec_type  = float;
     using fp_accum_type = float;
     static constexpr double epsilon =
@@ -231,12 +231,12 @@ struct proto_config
     static constexpr auto target_arch = Architecture::value;
 #ifdef __AMDGCN__
     static constexpr bool use_amdgcn =
-        MiopenConfig::use_amdgnc &&
+        MiopenConfig::use_amdgcn &&
         !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
           target_arch == architecture::gfx120x || target_arch == architecture::gfx115x) &&
         !(use_nodpp && (variant != 0));
 #else
-    static constexpr bool use_amdgnc = false;
+    static constexpr bool use_amdgcn = false;
 #endif
     static constexpr unsigned int vec_size = vectorize ? 4 : 1;
     static constexpr unsigned int vec_size_x =
