@@ -189,8 +189,15 @@ namespace rocRoller::Expression::EvaluateDetail
         requires(!std::same_as<bool, ARG> && std::unsigned_integral<ARG>) CommandArgumentValue
             operator()(ARG const& arg) const
         {
+            auto argBits = resultVariableType(arg).getElementSize() * 8u;
+            AssertFatal(argBits >= expr.offset + expr.width,
+                        "BitFieldExtract out of bounds: offset={} + width={} > argBits={}",
+                        expr.offset,
+                        expr.width,
+                        argBits);
+
             ARG mask = 0;
-            if(resultVariableType(arg).getElementSize() * 8u == this->expr.width)
+            if(argBits == this->expr.width)
             {
                 mask = std::numeric_limits<ARG>::max();
             }
