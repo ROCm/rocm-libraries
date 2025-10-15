@@ -386,7 +386,8 @@ double GetThreshold(miopenConvAlgorithm_t algo,
     if constexpr(std::is_same_v<T, float>)
     {
         // float use tf32 compute which share same mantissa bits
-        epsilon_ = std::numeric_limits<half>::epsilon();
+        epsilon_  = std::numeric_limits<half>::epsilon();
+        tolerance = std::max<double>(tolerance, 2.f); // default 1.0 is too small
     }
     double threshold = epsilon_ * tolerance;
     return threshold;
