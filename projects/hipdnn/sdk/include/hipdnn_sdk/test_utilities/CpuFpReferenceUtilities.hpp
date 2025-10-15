@@ -6,15 +6,57 @@
 #include <algorithm>
 #include <array>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace hipdnn_sdk
 {
 namespace test_utilities
 {
+
+// Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
+template <typename T>
+constexpr bool IS_VALID_TENSOR_TYPE_V = std::
+    disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, hip_bfloat16>>;
+
+/**
+ * @brief Safely convert between types while avoiding implicit precision loss warnings
+ * 
+ * This function handles type conversions that may trigger compiler warnings about
+ * implicit precision loss, particularly when converting from double to hip_bfloat16
+ * or half. It makes the conversion path explicit to eliminate warnings.
+ * 
+ * @tparam TargetType The type to convert to
+ * @tparam SourceType The type to convert from
+ * @param value The value to convert
+ * @return The converted value
+ */
+template <typename TargetType, typename SourceType>
+inline TargetType safeConvert(const SourceType& value)
+{
+    if constexpr(std::is_same_v<TargetType, hip_bfloat16>)
+    {
+        // For hip_bfloat16, explicitly convert through float to avoid precision warnings
+        // hip_bfloat16 lacks direct constructor from double, only from float
+        return static_cast<TargetType>(static_cast<float>(value));
+    }
+    else if constexpr(std::is_same_v<TargetType, half>)
+    {
+        // For half, explicitly convert through float to avoid precision warnings
+        // half lacks direct constructor from double, only from float
+        return static_cast<TargetType>(static_cast<float>(value));
+    }
+    else
+    {
+        // For all other types, direct cast is fine
+        return static_cast<TargetType>(value);
+    }
+}
 
 struct JoinableThread : std::thread
 {
