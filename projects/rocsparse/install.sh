@@ -173,7 +173,7 @@ install_packages( )
 
   local client_dependencies_ubuntu=( "python3" "python3-yaml" )
   local client_dependencies_centos=( "python36" "python3-pip" )
-  local client_dependencies_centos8=( "python36" "python3-pip" )
+  local client_dependencies_centos8=( "python39" "python3-pip" )
   local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" )
   local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" )
 
@@ -183,7 +183,9 @@ install_packages( )
     else
       library_dependencies_centos+=( "numactl-libs" )
     fi
-    if [[ "${MAJORVERSION}" == "8" ]]; then
+    if [[ "${MAJORVERSION}" == "9" ]]; then
+      client_dependencies_centos8+=( "python3-pyyaml" )
+    elif [[ "${MAJORVERSION}" == "8" ]]; then
       client_dependencies_centos8+=( "python3-pyyaml" )
     else
       client_dependencies_centos8+=( "PyYAML" )
