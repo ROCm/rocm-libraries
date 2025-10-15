@@ -347,11 +347,9 @@ private:
         : _memory(std::move(memory))
         , _dims(dims)
         , _strides(strides)
+        , _elementCount(TensorBase<T>::calculateItemCount(dims))
+        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
-        if(!TensorBase<T>::isPacked(dims, strides))
-        {
-            throw std::invalid_argument("Tensor must be packed");
-        }
     }
 };
 

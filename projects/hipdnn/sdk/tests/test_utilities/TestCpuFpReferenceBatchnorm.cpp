@@ -55,8 +55,10 @@ TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
         [](auto& yTensor) -> TensorVariant {
             using DataType = DataTypeFromTensor<decltype(*yTensor)>;
             auto ret = std::make_unique<hipdnn_sdk::utilities::Tensor<DataType>>(
-                std::move(yTensor->copy()));
-            yTensor->fillWithValue(static_cast<DataType>(0.f));
+                yTensor->dims(), yTensor->strides());
+            ret->fillWithValue(static_cast<DataType>(0.f));
+            std::swap(ret, yTensor);
+
             return ret;
         },
         yTensorVariant);

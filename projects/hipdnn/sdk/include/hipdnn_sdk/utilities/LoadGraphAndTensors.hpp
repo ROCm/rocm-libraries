@@ -47,7 +47,7 @@ void fillTensorFromFile(Tensor<T>& tensor, std::filesystem::path const& path)
         throw std::runtime_error("Error: could not load tensor " + path.string());
     }
 
-    auto vec = std::vector<unsigned char>(std::istreambuf_iterator<char>(f),
+    auto vec = std::vector<unsigned char>(std::istreambuf_iterator<char>(fileInputStream),
                                           std::istreambuf_iterator<char>{});
 
     tensor.fillWithData(reinterpret_cast<T*>(vec.data()), vec.size() / sizeof(T));
@@ -143,19 +143,20 @@ inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
     return outputTensorUids;
 }
 
-inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path)
+inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path
+                                             /*bool separateOutputs = false*/)
 {
     auto basePath = path;
     basePath.replace_extension();
 
     nlohmann::json graphJson = [](auto const& path) {
-        std::ifstream f(path);
-        if(!f)
+        std::ifstream graphFileStream(path);
+        if(!graphFileStream)
         {
             throw std::runtime_error("Error in loadGraphAndTensors(): file could not be opened "
                                      + path.string());
         }
-        return nlohmann::json::parse(f);
+        return nlohmann::json::parse(graphFileStream);
     }(path);
 
     flatbuffers::FlatBufferBuilder graphBuilder;
