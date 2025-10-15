@@ -53,12 +53,6 @@
 #include "rocsolver_logvalue.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
-#define HIP_CHECK(...)                                         \
-    {                                                          \
-        hipError_t _status = (__VA_ARGS__);                    \
-        if(_status != hipSuccess)                              \
-            return get_rocblas_status_for_hip_status(_status); \
-    }
 
 /***************************************************************************
  * rocSOLVER logging macros
