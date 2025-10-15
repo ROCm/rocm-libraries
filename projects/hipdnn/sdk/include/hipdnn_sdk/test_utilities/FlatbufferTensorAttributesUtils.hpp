@@ -15,7 +15,6 @@ inline hipdnn_sdk::data_objects::TensorAttributesT
 {
     hipdnn_sdk::data_objects::TensorAttributesT tensorAttributesT;
     tensorAttributes.UnPackTo(&tensorAttributesT);
-
     return tensorAttributesT;
 }
 
