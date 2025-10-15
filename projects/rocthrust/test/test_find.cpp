@@ -15,14 +15,14 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
-#include <thrust/functional.h>
-#include <thrust/iterator/discard_iterator.h>
+#include <thrust/find.h>
 #include <thrust/iterator/retag.h>
-#include <thrust/tabulate.h>
+#include <thrust/sequence.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(cstdint)
 
 TESTS_DEFINE(FindTestsVector, FullTestsParams);
 TESTS_DEFINE(FindTests, NumericalTestsParams);
@@ -36,7 +36,7 @@ struct equal_to_value_pred
       : value(value)
   {}
 
-  __host__ __device__ bool operator()(T v) const
+  THRUST_HOST_DEVICE bool operator()(T v) const
   {
     return v == value;
   }
@@ -51,7 +51,7 @@ struct not_equal_to_value_pred
       : value(value)
   {}
 
-  __host__ __device__ bool operator()(T v) const
+  THRUST_HOST_DEVICE bool operator()(T v) const
   {
     return v != value;
   }
@@ -66,7 +66,7 @@ struct less_than_value_pred
       : value(value)
   {}
 
-  __host__ __device__ bool operator()(T v) const
+  THRUST_HOST_DEVICE bool operator()(T v) const
   {
     return v < value;
   }
@@ -75,24 +75,17 @@ struct less_than_value_pred
 TYPED_TEST(FindTestsVector, TestFindSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-  vec[0] = T(1);
-  vec[1] = T(2);
-  vec[2] = T(3);
-  vec[3] = T(3);
-  vec[4] = T(5);
+  Vector vec{1, 2, 3, 3, 5};
 
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(0)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(1)) - vec.begin(), 0);
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(2)) - vec.begin(), 1);
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(4)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(5)) - vec.begin(), 4);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 0) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 1) - vec.begin(), 0);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 2) - vec.begin(), 1);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 3) - vec.begin(), 2);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 4) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find(vec.begin(), vec.end(), 5) - vec.begin(), 4);
 }
 
 template <typename InputIterator, typename T>
@@ -135,24 +128,18 @@ TEST(FindTests, TestFindDispatchImplicit)
 TYPED_TEST(FindTestsVector, TestFindIfSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-  vec[0] = T(1);
-  vec[1] = T(2);
-  vec[2] = T(3);
-  vec[3] = T(3);
-  vec[4] = T(5);
+  Vector vec{1, 2, 3, 3, 5};
 
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(2)) - vec.begin(), 1);
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(3)) - vec.begin(), 2);
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(4)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(5)) - vec.begin(), 4);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(2)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(3)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(4)) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(5)) - vec.begin(), 4);
 }
 
 template <typename InputIterator, typename Predicate>
@@ -195,24 +182,18 @@ TEST(FindTests, TestFindIfDispatchImplicit)
 TYPED_TEST(FindTestsVector, TestFindIfNotSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-  vec[0] = T(0);
-  vec[1] = T(1);
-  vec[2] = T(2);
-  vec[3] = T(3);
-  vec[4] = T(4);
+  Vector vec{0, 1, 2, 3, 4};
 
-  ASSERT_EQ(0, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
-  ASSERT_EQ(1, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
-  ASSERT_EQ(2, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(2)) - vec.begin());
-  ASSERT_EQ(3, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(3)) - vec.begin());
-  ASSERT_EQ(4, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(4)) - vec.begin());
-  ASSERT_EQ(5, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(5)) - vec.begin());
+  ASSERT_EQ(0, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
+  ASSERT_EQ(1, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
+  ASSERT_EQ(2, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(2)) - vec.begin());
+  ASSERT_EQ(3, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(3)) - vec.begin());
+  ASSERT_EQ(4, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(4)) - vec.begin());
+  ASSERT_EQ(5, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(5)) - vec.begin());
 }
 
 template <typename InputIterator, typename Predicate>
@@ -256,9 +237,6 @@ TYPED_TEST(FindTests, TestFind)
 {
   using T = typename TestFixture::input_type;
 
-  using HostIterator   = typename thrust::host_vector<T>::iterator;
-  using DeviceIterator = typename thrust::device_vector<T>::iterator;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   for (auto size : get_sizes())
@@ -273,8 +251,8 @@ TYPED_TEST(FindTests, TestFind)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      HostIterator h_iter;
-      DeviceIterator d_iter;
+      typename thrust::host_vector<T>::iterator h_iter;
+      typename thrust::device_vector<T>::iterator d_iter;
 
       h_iter = thrust::find(h_data.begin(), h_data.end(), T(0));
       d_iter = thrust::find(d_data.begin(), d_data.end(), T(0));
@@ -295,9 +273,6 @@ TYPED_TEST(FindTests, TestFindIf)
 {
   using T = typename TestFixture::input_type;
 
-  using HostIterator   = typename thrust::host_vector<T>::iterator;
-  using DeviceIterator = typename thrust::device_vector<T>::iterator;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   for (auto size : get_sizes())
@@ -312,8 +287,8 @@ TYPED_TEST(FindTests, TestFindIf)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      HostIterator h_iter;
-      DeviceIterator d_iter;
+      typename thrust::host_vector<T>::iterator h_iter;
+      typename thrust::device_vector<T>::iterator d_iter;
 
       h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
       d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
@@ -334,9 +309,6 @@ TYPED_TEST(FindTests, TestFindIfNot)
 {
   using T = typename TestFixture::input_type;
 
-  using HostIterator   = typename thrust::host_vector<T>::iterator;
-  using DeviceIterator = typename thrust::device_vector<T>::iterator;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   for (auto size : get_sizes())
@@ -351,8 +323,8 @@ TYPED_TEST(FindTests, TestFindIfNot)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      HostIterator h_iter;
-      DeviceIterator d_iter;
+      typename thrust::host_vector<T>::iterator h_iter;
+      typename thrust::device_vector<T>::iterator d_iter;
 
       h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
       d_iter = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
@@ -367,6 +339,61 @@ TYPED_TEST(FindTests, TestFindIfNot)
       }
     }
   }
+}
+
+void TestFindWithBigIndexesHelper(int magnitude)
+{
+  thrust::counting_iterator<long long> begin(1);
+  thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  _THRUST_STD::intmax_t distance_low_value = thrust::distance(begin, thrust::find(thrust::device, begin, end, 17));
+
+  _THRUST_STD::intmax_t distance_high_value =
+    thrust::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
+
+  ASSERT_EQ(distance_low_value, 16);
+  ASSERT_EQ(distance_high_value, (1ll << magnitude) - 18);
+}
+
+TEST(FindTests, TestFindWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestFindWithBigIndexesHelper(30);
+  TestFindWithBigIndexesHelper(31);
+  TestFindWithBigIndexesHelper(32);
+  TestFindWithBigIndexesHelper(33);
+}
+
+namespace
+{
+
+class Weird
+{
+  int value;
+
+public:
+  THRUST_HOST_DEVICE Weird(int val, int)
+      : value(val)
+  {}
+
+  friend THRUST_HOST_DEVICE bool operator==(int x, Weird y)
+  {
+    return x == y.value;
+  }
+};
+
+} // namespace
+
+TEST(FindTests, TestFindAsymmetricEquality)
+{ // Regression test for NVIDIA/thrust#1229
+  thrust::host_vector<int> v(1000);
+  thrust::sequence(v.begin(), v.end());
+  thrust::device_vector<int> dv(v);
+  auto result = thrust::find(dv.begin(), dv.end(), Weird(333, 0));
+  ASSERT_EQ(*result, 333);
+  ASSERT_EQ(result - dv.begin(), 333);
 }
 
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void FindKernel(int const N, int* in_array, int value, int* out_array)

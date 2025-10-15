@@ -22,6 +22,7 @@
 
 #include <unittest/unittest.h>
 
+#include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(type_traits)
 
 void TestConstantIteratorConstructFromConvertibleSystem()
@@ -117,7 +118,7 @@ void TestMakeConstantIterator()
   ASSERT_EQUAL(13, *iter0);
 
   // test two argument version
-  constant_iterator<int, thrust::detail::intmax_t> iter1 = make_constant_iterator<int, thrust::detail::intmax_t>(13, 7);
+  constant_iterator<int, _THRUST_STD::intmax_t> iter1 = make_constant_iterator<int, _THRUST_STD::intmax_t>(13, 7);
 
   ASSERT_EQUAL(13, *iter1);
   ASSERT_EQUAL(7, iter1 - iter0);
