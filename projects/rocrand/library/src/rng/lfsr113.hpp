@@ -66,7 +66,11 @@ inline void init_lfsr113_engines(dim3 block_idx,
     }
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, host::target_arch Arch = host::target_arch::unknown>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 __host__ __device__ __forceinline__
 void generate_lfsr113(dim3 block_idx,
                       dim3 thread_idx,

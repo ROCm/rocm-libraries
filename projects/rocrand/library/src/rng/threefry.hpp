@@ -84,7 +84,10 @@ struct threefry_device_engine : public BaseType
     // m_state from base class
 };
 
-template<class Engine, class T, class Distribution, host::target_arch Arch = host::target_arch::unknown>
+template<class Engine,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 __host__ __device__ __forceinline__
 void generate_threefry(dim3         block_idx,
                        dim3         thread_idx,

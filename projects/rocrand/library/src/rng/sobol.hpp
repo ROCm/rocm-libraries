@@ -70,8 +70,8 @@ Engine create_engine(const Constant*           vectors,
 
 // Use compiler-defined macro to only define the kernel once, for host and device compilation.
 #ifdef __HIP_DEVICE_COMPILE__
-template<unsigned int      OutputPerThread,
-         bool              Scrambled,
+template<unsigned int OutputPerThread,
+         bool         Scrambled,
          class Engine,
          class Constant,
          class T,
@@ -117,8 +117,8 @@ void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned int, Distribution)
 {}
 
-template<unsigned int      OutputPerThread,
-         bool              Scrambled,
+template<unsigned int OutputPerThread,
+         bool         Scrambled,
          class Engine,
          class Constant,
          class T,

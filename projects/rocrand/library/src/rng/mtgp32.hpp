@@ -230,7 +230,11 @@ void save_head_tail(T (&output)[output_width],
     save_head_tail_impl(output, index, data, n, head_size, tail_size, vec_n_up);
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, host::target_arch Arch = host::target_arch::unknown>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 __host__ __device__ __forceinline__
 void generate_mtgp(dim3 block_idx,
                    dim3 thread_idx,

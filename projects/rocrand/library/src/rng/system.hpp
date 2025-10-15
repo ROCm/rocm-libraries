@@ -269,7 +269,7 @@ namespace detail
 
 template<typename ConfigProvider,
          typename T,
-         bool IsDynamic,
+         bool              IsDynamic,
          host::target_arch Arch,
          typename Kernel,
          typename... Args>

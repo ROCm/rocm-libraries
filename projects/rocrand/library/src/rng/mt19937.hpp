@@ -82,9 +82,9 @@ unsigned int wrap_n(unsigned int i)
 
 // Config is not actually used for kernel launch here, but is needed to check the number of generators
 // As this kernel is not dependent on any type just use void for the config, as mt19937 is not tuned for types independently, so all configs are the same for different types.
-template<unsigned int      jump_ahead_thread_count,
+template<unsigned int jump_ahead_thread_count,
          class ConfigProvider,
-         bool IsDynamic,
+         bool              IsDynamic,
          host::target_arch Arch = host::target_arch::unknown>
 __forceinline__ __host__ __device__
 void jump_ahead_mt19937(dim3 block_idx,

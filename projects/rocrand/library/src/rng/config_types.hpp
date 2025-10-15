@@ -87,7 +87,8 @@ constexpr void for_each_arch(F&& f)
 }
 
 /// @brief Returns the detected processor architecture of the device that is currently compiled against.
-__host__ __device__ constexpr target_arch get_device_arch()
+__host__ __device__
+constexpr target_arch get_device_arch()
 {
 #if !USE_DEVICE_DISPATCH
     return target_arch::unknown;

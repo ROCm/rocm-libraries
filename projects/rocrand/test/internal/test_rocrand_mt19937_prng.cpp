@@ -760,11 +760,13 @@ TYPED_TEST(mt19937_generator_engine_tests, subsequence_test)
 
     // dummy config provider, kernel just needs to verify the amount of generators for the actual call
     using ConfigProvider = default_config_provider<ROCRAND_RNG_PSEUDO_MT19937>;
-    auto jump_ahead_mt19937_kernel = [&](auto arch, auto... args) {
-        rocrand_impl::host::jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false, arch>(
-                        args...);
-                };
-    
+    auto jump_ahead_mt19937_kernel = [&](auto arch, auto... args)
+    {
+        rocrand_impl::host::
+            jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false, arch>(
+                args...);
+    };
+
     rocrand_status status = rocrand_impl::system::device_system::template launch<
         rocrand_impl::host::static_block_size_config_provider<
             generator_t::jump_ahead_thread_count>>(jump_ahead_mt19937_kernel,
@@ -1183,12 +1185,13 @@ TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_test)
         {
             rocrand_impl::host::target_arch target_arch;
             HIP_CHECK(rocrand_impl::host::get_device_arch(0, target_arch));
-            auto jump_ahead_mt19937_kernel = [&](auto arch, auto... args) {
-            rocrand_impl::host::jump_ahead_mt19937<generator_t::jump_ahead_thread_count,
+            auto jump_ahead_mt19937_kernel = [&](auto arch, auto... args)
+            {
+                rocrand_impl::host::jump_ahead_mt19937<generator_t::jump_ahead_thread_count,
                                                        ConfigProvider,
-                                                       is_dynamic, arch>(
-                        args...);
-                };
+                                                       is_dynamic,
+                                                       arch>(args...);
+            };
             rocrand_status status = rocrand_impl::system::device_system::template launch<
                 rocrand_impl::host::static_block_size_config_provider<
                     generator_t::jump_ahead_thread_count>>(
