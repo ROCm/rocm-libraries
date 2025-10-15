@@ -49,6 +49,7 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
+#  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
 #  include _THRUST_STD_INCLUDE(type_traits)
 
