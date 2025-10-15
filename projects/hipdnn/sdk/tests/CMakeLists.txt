@@ -34,6 +34,7 @@ add_executable(hipdnn_sdk_tests
     utilities/TestPlatformUtils.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp
+    utilities/TestPointwiseValidation.cpp
     test_utilities/TestCpuFpReferenceBatchnorm.cpp
     test_utilities/TestCpuFpReferenceConvolution.cpp
     test_utilities/TestCpuFpReferenceUtilities.cpp
