@@ -64,33 +64,6 @@ public:
                                                                   stream));
     }
 
-    template<typename InputIteratorT,
-             typename OutputIteratorT,
-             typename ReduceOpT,
-             typename T,
-             typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Reduce(void*           d_temp_storage,
-               size_t&         temp_storage_bytes,
-               InputIteratorT  d_in,
-               OutputIteratorT d_out,
-               NumItemsT       num_items,
-               ReduceOpT       reduction_op,
-               T               init,
-               hipStream_t     stream,
-               bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return Reduce(d_temp_storage,
-                      temp_storage_bytes,
-                      d_in,
-                      d_out,
-                      num_items,
-                      reduction_op,
-                      init,
-                      stream);
-    }
-
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t Sum(void*           d_temp_storage,
                                                   size_t&         temp_storage_bytes,
@@ -108,20 +81,6 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Sum(void*           d_temp_storage,
-            size_t&         temp_storage_bytes,
-            InputIteratorT  d_in,
-            OutputIteratorT d_out,
-            NumItemsT       num_items,
-            hipStream_t     stream,
-            bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
-    }
-
-    template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t Min(void*           d_temp_storage,
                                                   size_t&         temp_storage_bytes,
                                                   InputIteratorT  d_in,
@@ -135,20 +94,6 @@ public:
                                                                d_out,
                                                                num_items,
                                                                stream));
-    }
-
-    template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Min(void*           d_temp_storage,
-            size_t&         temp_storage_bytes,
-            InputIteratorT  d_in,
-            OutputIteratorT d_out,
-            NumItemsT       num_items,
-            hipStream_t     stream,
-            bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return Min(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
     template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT>
@@ -196,20 +141,6 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        ArgMin(void*           d_temp_storage,
-               size_t&         temp_storage_bytes,
-               InputIteratorT  d_in,
-               OutputIteratorT d_out,
-               NumItemsT       num_items,
-               hipStream_t     stream,
-               bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return ArgMin(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
-    }
-
-    template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t Max(void*           d_temp_storage,
                                                   size_t&         temp_storage_bytes,
                                                   InputIteratorT  d_in,
@@ -223,20 +154,6 @@ public:
                                                                d_out,
                                                                num_items,
                                                                stream));
-    }
-
-    template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Max(void*           d_temp_storage,
-            size_t&         temp_storage_bytes,
-            InputIteratorT  d_in,
-            OutputIteratorT d_out,
-            NumItemsT       num_items,
-            hipStream_t     stream,
-            bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return Max(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
     template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT>
@@ -281,20 +198,6 @@ public:
                                                                   num_items,
                                                                   stream));
         _CCCL_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        ArgMax(void*           d_temp_storage,
-               size_t&         temp_storage_bytes,
-               InputIteratorT  d_in,
-               OutputIteratorT d_out,
-               NumItemsT       num_items,
-               hipStream_t     stream,
-               bool            debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return ArgMax(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
     template<typename InputIteratorT,
@@ -354,39 +257,6 @@ public:
                                                                        reduction_op,
                                                                        num_items,
                                                                        stream));
-    }
-
-    template<typename KeysInputIteratorT,
-             typename UniqueOutputIteratorT,
-             typename ValuesInputIteratorT,
-             typename AggregatesOutputIteratorT,
-             typename NumRunsOutputIteratorT,
-             typename ReductionOpT,
-             typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        ReduceByKey(void*                     d_temp_storage,
-                    size_t&                   temp_storage_bytes,
-                    KeysInputIteratorT        d_keys_in,
-                    UniqueOutputIteratorT     d_unique_out,
-                    ValuesInputIteratorT      d_values_in,
-                    AggregatesOutputIteratorT d_aggregates_out,
-                    NumRunsOutputIteratorT    d_num_runs_out,
-                    ReductionOpT              reduction_op,
-                    NumItemsT                 num_items,
-                    hipStream_t               stream,
-                    bool                      debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return ReduceByKey(d_temp_storage,
-                           temp_storage_bytes,
-                           d_keys_in,
-                           d_unique_out,
-                           d_values_in,
-                           d_aggregates_out,
-                           d_num_runs_out,
-                           reduction_op,
-                           num_items,
-                           stream);
     }
 };
 
