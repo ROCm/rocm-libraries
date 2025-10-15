@@ -55,6 +55,7 @@ option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
+option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
@@ -130,7 +131,7 @@ if(HIPSPARSELT_ENABLE_CUDA)
     message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()
 
-if(HIPSPARSELT_ENABLE_HIP)
+if(HIPSPARSELT_ENABLE_HIP AND HIPSPARSELT_ENABLE_DEVICE)
     set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
     if(NOT EXISTS "${HIPBLASLT_PATH}")
         message(
