@@ -35,7 +35,8 @@ public:
 
     bool allClose(const ITensor& reference, const ITensor& implementation) override
     {
-        if(reference.elementCount() != implementation.elementCount())
+        if(reference.elementCount() != implementation.elementCount()
+           || reference.dims() != implementation.dims())
         {
             return false;
         }

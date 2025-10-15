@@ -507,3 +507,17 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DefaultTolerance)
 
     EXPECT_TRUE(validator.allClose(tensor1, tensor2));
 }
+
+TEST(TestCpuFpReferenceMiopenRmsValidationITensor, TensorSameElementCountDifferentDims)
+{
+    CpuFpReferenceMiopenRmsValidation<float> refValidation;
+
+    Tensor<float> tensor1({2, 50}); // 100 elements
+    Tensor<float> tensor2({10, 10}); // 100 elements
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    // Should return false because dimensions don't match
+    // even though element counts are the same
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
