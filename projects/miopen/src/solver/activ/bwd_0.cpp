@@ -110,22 +110,23 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     const auto& dxDesc = problem.GetDXDesc();
     const auto& dyDesc = problem.GetDYDesc();
 
-    const auto& x_lens  = xDesc.GetLengths();
     const auto& dx_lens = dxDesc.GetLengths();
 
     const auto dx_width2D = dx_lens[dx_lens.size() - 1];
-    const auto height     = x_lens[x_lens.size() - 2];
+    const auto dx_height  = dx_lens[dx_lens.size() - 2];
 
     const auto packed =
         xDesc.IsPacked() && yDesc.IsPacked() && dxDesc.IsPacked() && dyDesc.IsPacked();
 
-    const auto x_elem_sz = xDesc.GetElementSize();
+    const auto dx_elem_sz = dxDesc.GetElementSize();
 
-    const auto read_len = (packed) ? x_elem_sz : dx_width2D;
+    const auto read_len = (packed) ? dx_elem_sz : dx_width2D;
 
     const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
-    const auto map_size_aligned = (x_elem_sz + read_unit - 1) / read_unit;
+    const auto map_size_aligned = (read_len + read_unit - 1) / read_unit;
+
+    const auto local_work_size = 256;
 
     auto compiler_options = KernelBuildParameters{
         {"LITE"},
@@ -133,7 +134,6 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
         {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
-        {"MIOPEN_ROW_WIDTH", dx_width2D},
     };
 
     if(xDesc.GetType() == miopenFloat)
@@ -154,8 +154,6 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         kernel.kernel_file  = "MIOpenNeuron.cpp";
         kernel.kernel_name  = (packed) ? "MIOpenActiveBwdLite" : "MIOpenActiveBwd2DLite";
 
-        const auto local_work_size = 256;
-
         kernel.l_wk.push_back(local_work_size);
         kernel.l_wk.push_back(1);
         kernel.l_wk.push_back(1);
@@ -165,7 +163,7 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         const auto global_work_size =
             ((map_size_aligned + local_work_size - 1) / local_work_size) * local_work_size;
         kernel.g_wk.push_back(global_work_size);
-        kernel.g_wk.push_back(packed ? 1 : height);
+        kernel.g_wk.push_back(packed ? 1 : dx_height);
         kernel.g_wk.push_back(1);
 
         result.construction_params.push_back(kernel);

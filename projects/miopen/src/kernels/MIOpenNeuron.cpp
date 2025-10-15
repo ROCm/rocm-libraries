@@ -88,7 +88,7 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if(x_id * MIOPEN_READ_UNIT >= MIOPEN_ROW_WIDTH)
+    if(x_id >= MIOPEN_MAP_SZ_ALIGNED)
         return;
 
     uint bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
@@ -165,7 +165,7 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if(x_id * MIOPEN_READ_UNIT >= MIOPEN_ROW_WIDTH)
+    if(x_id >= MIOPEN_MAP_SZ_ALIGNED)
         return;
 
     uint bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;

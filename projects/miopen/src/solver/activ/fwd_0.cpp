@@ -80,7 +80,6 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
 
     // short cut for packed tensors and 2D tensors with stride != width
     const auto x_lens = problem.GetXDesc().GetLengths();
-    const auto y_lens = problem.GetYDesc().GetLengths();
 
     const auto x_elem_sz = problem.GetXDesc().GetElementSize();
 
@@ -100,7 +99,9 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
                         : (x_lens.size() == 4) ? x_lens[2]
                                                : x_lens[3];
 
-    const auto map_size_aligned = (x_elem_sz + read_unit - 1) / read_unit;
+    const auto map_size_aligned = (read_len + read_unit - 1) / read_unit;
+
+    const auto local_work_size = 256;
 
     auto build_params = KernelBuildParameters{
         {"LITE"},
@@ -108,7 +109,6 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
         {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
-        {"MIOPEN_ROW_WIDTH", x_width2D},
     };
 
     if(problem.GetXDesc().GetType() == miopenFloat)
@@ -133,15 +133,12 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         auto kernel_info         = KernelInfo{};
         kernel_info.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-        const auto local_work_size = 256;
-
         kernel_info.l_wk.push_back(local_work_size);
         kernel_info.l_wk.push_back(1);
         kernel_info.l_wk.push_back(1);
 
-        const auto MAP_RD = read_len / read_unit;
         const auto global_work_size =
-            ((MAP_RD + local_work_size - 1) / local_work_size) * local_work_size;
+            ((map_size_aligned + local_work_size - 1) / local_work_size) * local_work_size;
 
         kernel_info.g_wk.push_back(global_work_size);
         kernel_info.g_wk.push_back(packed ? 1 : height);
