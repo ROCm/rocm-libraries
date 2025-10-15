@@ -14,6 +14,7 @@
 #include "MiopenUtils.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
+#include "engines/plans/MiopenConvWrwPlan.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -31,22 +32,26 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
 
-    // Check tensor attributes
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrX = miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
-    const auto& tensorAttrY = miopen_utils::findTensorAttributes(tensorMap, attr.y_tensor_uid());
-
-    if(tensorAttrX.virtual_() || tensorAttrW.virtual_() || tensorAttrY.virtual_())
-    {
-        HIPDNN_LOG_WARN("All tensors must be non-virtual");
-        return false;
-    }
-
-    size_t spatialDimCount;
+    size_t solutionCount = 0;
     try
     {
-        spatialDimCount = miopen_utils::getSpatialDimCount(tensorAttrX);
+        ConvFwdParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                               params.w().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.y().tensorDescriptor(),
+                                                               &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
@@ -54,34 +59,6 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
         return false;
     }
 
-    // Create MIOpen tensor descriptors
-    const MiopenTensor tensorX(tensorAttrX);
-    const MiopenTensor tensorW(tensorAttrW);
-    const MiopenTensor tensorY(tensorAttrY);
-
-    // Create MIOpen convolution descriptor
-    MiopenConvDescriptor convDesc;
-    try
-    {
-        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
-    }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
-    {
-        HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    size_t solutionCount;
-    auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
-                                                           tensorW.tensorDescriptor(),
-                                                           tensorX.tensorDescriptor(),
-                                                           convDesc.convDescriptor(),
-                                                           tensorY.tensorDescriptor(),
-                                                           &solutionCount);
-    if(status != miopenStatusSuccess)
-    {
-        return false;
-    }
     return solutionCount != 0;
 }
 
@@ -90,22 +67,26 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
 
-    // Check tensor attributes
-    const auto& tensorMap = opGraph.getTensorMap();
-    const auto& tensorAttrDX = miopen_utils::findTensorAttributes(tensorMap, attr.dx_tensor_uid());
-    const auto& tensorAttrW = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
-    const auto& tensorAttrDY = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
-
-    if(tensorAttrDX.virtual_() || tensorAttrW.virtual_() || tensorAttrDY.virtual_())
-    {
-        HIPDNN_LOG_WARN("All tensors must be non-virtual");
-        return false;
-    }
-
-    size_t spatialDimCount;
+    size_t solutionCount = 0;
     try
     {
-        spatialDimCount = miopen_utils::getSpatialDimCount(tensorAttrDX);
+        ConvBwdParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                                    params.dy().tensorDescriptor(),
+                                                                    params.w().tensorDescriptor(),
+                                                                    params.conv().convDescriptor(),
+                                                                    params.dx().tensorDescriptor(),
+                                                                    &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
@@ -113,33 +94,39 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin
         return false;
     }
 
-    // Create MIOpen tensor descriptors
-    const MiopenTensor tensorDX(tensorAttrDX);
-    const MiopenTensor tensorW(tensorAttrW);
-    const MiopenTensor tensorDY(tensorAttrDY);
+    return solutionCount != 0;
+}
 
-    // Create MIOpen convolution descriptor
-    MiopenConvDescriptor convDesc;
+bool isApplicableWrw(const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+
+    size_t solutionCount = 0;
     try
     {
-        convDesc = MiopenConvDescriptor(spatialDimCount, attr);
+        ConvWrwParams params(attr, opGraph.getTensorMap());
+
+        if(!params.validTensors())
+        {
+            return false;
+        }
+
+        auto status
+            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                               params.dy().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.dw().tensorDescriptor(),
+                                                               &solutionCount);
+        if(status != miopenStatusSuccess)
+        {
+            return false;
+        }
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
         HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-
-    size_t solutionCount;
-    auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
-                                                                tensorDY.tensorDescriptor(),
-                                                                tensorW.tensorDescriptor(),
-                                                                convDesc.convDescriptor(),
-                                                                tensorDX.tensorDescriptor(),
-                                                                &solutionCount);
-
-    if(status != miopenStatusSuccess)
-    {
         return false;
     }
 
@@ -182,6 +169,25 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
     return workSpaceSize;
 }
 
+size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
+                           const hipdnn_plugin::IGraph& opGraph)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+    ConvWrwParams params(attr, opGraph.getTensorMap());
+    size_t workSpaceSize;
+
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                         params.dy().tensorDescriptor(),
+                                                         params.x().tensorDescriptor(),
+                                                         params.conv().convDescriptor(),
+                                                         params.dw().tensorDescriptor(),
+                                                         &workSpaceSize));
+
+    return workSpaceSize;
+}
+
 void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
@@ -201,6 +207,17 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
                            .attributesAs<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
+void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
+                  const hipdnn_plugin::IGraph& opGraph,
+                  HipdnnEnginePluginExecutionContext& executionContext)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>();
+    ConvWrwParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params));
     executionContext.setPlan(std::move(plan));
 }
 
@@ -227,6 +244,9 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         break;
     case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         ret = isApplicableBwd(handle, opGraph);
+        break;
+    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        ret = isApplicableWrw(handle, opGraph);
         break;
     default:
         break;
@@ -258,6 +278,8 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& h
         return getWorkspaceSizeFwd(handle, opGraph);
     case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         return getWorkspaceSizeBwd(handle, opGraph);
+    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        return getWorkspaceSizeWrw(handle, opGraph);
     default:
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -290,6 +312,10 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
     case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
         buildPlanBwd(handle, opGraph, executionContext);
+        break;
+    case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        HIPDNN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
+        buildPlanWrw(handle, opGraph, executionContext);
         break;
     default:
         throw hipdnn_plugin::HipdnnPluginException(
