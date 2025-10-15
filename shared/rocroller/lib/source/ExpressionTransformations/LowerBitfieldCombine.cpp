@@ -113,14 +113,16 @@ namespace rocRoller
                 auto const srcIsZero = expr.srcIsZero && expr.srcIsZero.value();
                 if(not srcIsZero)
                 {
-                    rocRoller::Raw32 srcMask((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.srcOffset);
+                    rocRoller::Raw32 srcMask((static_cast<uint32_t>(1ul << expr.width) - 1ul)
+                                             << expr.srcOffset);
                     lhs = (literal(srcMask) & lhs); // Extract bits
                 }
 
                 auto const dstIsZero = expr.dstIsZero && expr.dstIsZero.value();
                 if(not dstIsZero)
                 {
-                    rocRoller::Raw32 dstMask(~((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.dstOffset));
+                    rocRoller::Raw32 dstMask(
+                        ~((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.dstOffset));
                     rhs = (literal(dstMask) & rhs); // Clear bits
                 }
 

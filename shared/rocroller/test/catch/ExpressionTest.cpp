@@ -2300,8 +2300,8 @@ namespace ExpressionTest
         SECTION("Evaluation 1")
         {
             auto const offset = 0u;
-            auto const width     = 32u;
-            auto       src       = literal(1222u);
+            auto const width  = 32u;
+            auto       src    = literal(1222u);
 
             auto expr = bfe(DataType::UInt32, src, offset, width);
 
@@ -2311,8 +2311,8 @@ namespace ExpressionTest
         SECTION("Evaluation 2")
         {
             auto const offset = 0u;
-            auto const width     = 8u;
-            auto       src       = literal(0x000000ffu);
+            auto const width  = 8u;
+            auto       src    = literal(0x000000ffu);
 
             auto expr = bfe(DataType::UInt32, src, offset, width);
 
@@ -2322,8 +2322,8 @@ namespace ExpressionTest
         SECTION("Evaluation 3")
         {
             auto const offset = 16u;
-            auto const width     = 8u;
-            auto       src       = literal(0x00ff0000u);
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff0000u);
 
             auto expr = bfe(DataType::UInt32, src, offset, width);
 
@@ -2333,8 +2333,8 @@ namespace ExpressionTest
         SECTION("Evaluation 4")
         {
             auto const offset = 48u;
-            auto const width     = 8u;
-            auto       src       = literal(0x00ff000000000000ul);
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff000000000000ul);
 
             auto expr = bfe(DataType::UInt32, src, offset, width);
 
