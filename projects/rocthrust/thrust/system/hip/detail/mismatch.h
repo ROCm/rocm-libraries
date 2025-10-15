@@ -41,14 +41,14 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
-#  include <thrust/functional.h>
+#  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/zip_function.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
 pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred);
@@ -69,15 +69,12 @@ template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
 pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
-  using transform_t = transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>;
-
-  transform_t transform_first = transform_t(first1, first2, binary_pred);
-
-  transform_t result = hip_rocprim::find_if_not(
-    policy, transform_first, transform_first + thrust::distance(first1, last1), ::internal::identity{});
-
-  return thrust::make_pair(first1 + thrust::distance(transform_first, result),
-                           first2 + thrust::distance(transform_first, result));
+  const auto n            = thrust::distance(first1, last1);
+  const auto first        = make_zip_iterator(first1, first2);
+  const auto last         = make_zip_iterator(last1, first2 + n);
+  const auto mismatch_pos = hip_rocprim::find_if_not(policy, first, last, make_zip_function(binary_pred));
+  const auto dist         = thrust::distance(first, mismatch_pos);
+  return thrust::make_pair(first1 + dist, first2 + dist);
 }
 
 template <class Derived, class InputIt1, class InputIt2>
