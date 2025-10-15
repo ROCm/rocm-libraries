@@ -41,8 +41,8 @@ template <class T>
 void fillTensorFromFile(Tensor<T>& tensor, std::filesystem::path const& path)
 {
 
-    std::ifstream f(path, std::ios::binary);
-    if(!f)
+    std::ifstream fileInputStream(path, std::ios::binary);
+    if(!fileInputStream)
     {
         throw std::runtime_error("Error: could not load tensor " + path.string());
     }
@@ -99,8 +99,6 @@ struct GraphAndTensorMap
 
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
-        // Iterating over this loop triggers the portability-template-virtual-member-function tidy for Allocator
-        // Need to figure out why
         for(auto& [uid, tensorVariant] : tensorMap)
         {
             hipdnnPluginDeviceBuffer_t deviceBuffer;
