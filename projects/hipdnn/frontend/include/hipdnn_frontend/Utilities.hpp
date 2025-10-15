@@ -77,8 +77,8 @@ inline TensorAttributes
 
 inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              DataType dataType,
-                                             std::vector<int64_t>& dims,
-                                             std::vector<int64_t>& strides)
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
 {
     return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
         strides);

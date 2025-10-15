@@ -11,6 +11,8 @@ on:
         type: string
       platform:
         type: string
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -50,8 +52,8 @@ jobs:
 
       - name: "Configuring CI options"
         env:
-          PLATFORM: ${{ inputs.platform }}
           project_to_test: ${{ inputs.project_to_test }}
+          TEST_TYPE: ${{ inputs.test_type }}
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 

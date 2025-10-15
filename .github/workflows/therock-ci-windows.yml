@@ -7,6 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -72,7 +74,9 @@ jobs:
           choco source disable -n=chocolatey
           choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
           choco install --no-progress -y ccache
-          choco install --no-progress -y ninja
+          # ninja pinned due to a bug in the 1.13.0 release:
+          # https://github.com/ninja-build/ninja/issues/2616
+          choco install --no-progress -y ninja --version 1.12.1
           choco install --no-progress -y strawberryperl
           echo "$PATH;C:\Strawberry\c\bin" >> $GITHUB_PATH
           choco install --no-progress -y awscli
@@ -163,3 +167,4 @@ jobs:
       amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
       test_runs_on: "windows-strix-halo-gpu-rocm"
       platform: "windows"
+      test_type: ${{ inputs.test_type }}
