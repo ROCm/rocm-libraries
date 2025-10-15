@@ -7,6 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -43,7 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
+          ref: c11594642430b64e73774652e3d9137dd096358c # 2025-10-13 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -155,3 +157,4 @@ jobs:
       amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
       test_runs_on: "windows-strix-halo-gpu-rocm"
       platform: "windows"
+      test_type: ${{ inputs.test_type }}
