@@ -13,7 +13,7 @@ target_compile_definitions(hipdnn_frontend INTERFACE COMPONENT_NAME="hipdnn_fron
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_sdk hipdnn_backend)
 
-SET(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
+set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
 target_include_directories(hipdnn_frontend INTERFACE
     $<BUILD_INTERFACE:${HIP_DNN_FRONTEND_INCLUDE_DIR}>
@@ -23,31 +23,37 @@ target_include_directories(hipdnn_frontend INTERFACE
 # Generate the config file from template
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_frontendConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend # Install is scheduled
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
 )
 
 export(
     TARGETS hipdnn_frontend
-    FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
+    FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendTargets.cmake"
 )
 
 install( 
     TARGETS hipdnn_frontend
     EXPORT hipdnn_frontend_targets
+    COMPONENT Development
 )
 
 install(
     DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}
-)
-
-install(EXPORT hipdnn_frontend_targets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
-    FILE hipdnn_frontendTargets.cmake
+    COMPONENT Development
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
 
 install(
-    FILES "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    EXPORT hipdnn_frontend_targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
+    FILE hipdnn_frontendTargets.cmake
+    COMPONENT Development
+)
+
+install(
+    FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
+    COMPONENT Development
 )
