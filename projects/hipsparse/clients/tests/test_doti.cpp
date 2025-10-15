@@ -24,4 +24,6 @@
 #include "test.hpp"
 #include "testing_doti.hpp"
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST_ROUTINE(doti, level1, arg.N, arg.nnz, arg.baseA);
+#endif

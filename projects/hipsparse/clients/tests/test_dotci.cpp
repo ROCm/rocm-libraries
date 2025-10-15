@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,5 +24,7 @@
 #include "test.hpp"
 #include "testing_dotci.hpp"
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST_ROUTINE_WITH_CONFIG(
     dotci, level1, hipsparse_test_config_complex_only, arg.N, arg.nnz, arg.baseA);
+#endif
