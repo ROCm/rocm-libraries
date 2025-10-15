@@ -97,7 +97,7 @@ if(ROCROLLER_ENABLE_ASAN)
     )
 endif()
 
-find_package(BLAS REQUIRED)
+find_package(LAPACK REQUIRED)
 find_package(OpenMP REQUIRED)
 
 if(ROCROLLER_ENABLE_YAML_CPP)
