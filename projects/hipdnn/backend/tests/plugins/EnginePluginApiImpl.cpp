@@ -140,6 +140,20 @@ extern "C" hipdnnPluginStatus_t
     });
 }
 
+extern "C" hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    size_t* workspaceSize)
+{
+    return hipdnn_plugin::tryCatch([&]() {
+        checkHandleValidity(handle);
+        THROW_IF_NULL(executionContext);
+        THROW_IF_NULL(workspaceSize);
+
+        *workspaceSize = getWorkspaceSize(handle, executionContext);
+    });
+}
+
 extern "C" hipdnnPluginStatus_t
     hipdnnEnginePluginCreateExecutionContext(hipdnnEnginePluginHandle_t handle,
                                              const hipdnnPluginConstData_t* engineConfig,
