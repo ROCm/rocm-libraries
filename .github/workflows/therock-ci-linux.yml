@@ -7,7 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
-
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -38,9 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          # TEST COMMIT
-          ref: users/geomin12/add-hipsparse-data
-          # ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
+          ref: 5542f136fe57cd1c485dd369277ef0613fd919b9 # 2025-10-15 commit
 
       - name: Install python deps
         run: |
@@ -129,3 +128,4 @@ jobs:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
+      test_type: ${{ inputs.test_type }}
