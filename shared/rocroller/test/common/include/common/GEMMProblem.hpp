@@ -28,7 +28,6 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
-#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
 
 struct GEMMProblem
@@ -88,9 +87,9 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles = false;
-
-    rocRoller::StreamKConfig streamK{rocRoller::StreamKMode::None};
+    bool loopOverTiles  = false;
+    bool streamK        = false;
+    bool streamKTwoTile = false;
 
     bool splitStoreTileIntoWaveBlocks = false;
 

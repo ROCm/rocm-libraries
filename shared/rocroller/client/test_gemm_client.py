@@ -276,7 +276,6 @@ types:
   scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
-streamKTwoTileDPFirst: false
 matchMemoryAccess: true
 loadLDSScale_A: false
 loadLDSScale_B: false
@@ -341,7 +340,6 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
-streamKTwoTileDPFirst: false
 ...
 """
 
@@ -400,7 +398,6 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
-streamKTwoTileDPFirst: false
 ...
 """
 

@@ -1127,9 +1127,8 @@ int main(int argc, const char* argv[])
         .scheduler         = "Priority",
         .matchMemoryAccess = true,
 
-        .streamK               = false,
-        .streamKTwoTile        = false,
-        .streamKTwoTileDPFirst = false,
+        .streamK        = false,
+        .streamKTwoTile = false,
 
         .version = rocRoller::Version::Git(),
     };
@@ -1328,9 +1327,6 @@ int main(int argc, const char* argv[])
                        "Mix global and LDS memory operations during prefetching.");
     app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
     app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
-    app.add_flag("--streamKTwoTileDPFirst",
-                 solution.streamKTwoTileDPFirst,
-                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
 
     app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
     app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");

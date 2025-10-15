@@ -263,7 +263,8 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK                       = gemm.streamK;
+                params->streamK                       = true;
+                params->streamKTwoTile                = gemm.streamKTwoTile;
             }
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(

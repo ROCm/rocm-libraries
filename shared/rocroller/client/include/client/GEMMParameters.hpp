@@ -164,10 +164,8 @@ namespace rocRoller
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                bool streamK        = false;
+                bool streamKTwoTile = false;
 
                 std::string version;
 

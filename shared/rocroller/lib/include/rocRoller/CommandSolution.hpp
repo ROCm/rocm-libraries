@@ -40,7 +40,6 @@
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
-#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
@@ -134,7 +133,8 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        StreamKConfig streamK{StreamKMode::None};
+        bool streamK        = false;
+        bool streamKTwoTile = false;
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;

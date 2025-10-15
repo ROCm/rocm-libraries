@@ -116,8 +116,6 @@ namespace rocRoller
         template <typename T>
         std::shared_ptr<Base> ComponentFactory<Base>::get(T&& arg) const
         {
-            WriterLock lock{m_instanceCacheLock};
-
             auto iter = m_instanceCache.find(arg);
 
             if(iter != m_instanceCache.end())
@@ -145,8 +143,6 @@ namespace rocRoller
         typename ComponentFactory<Base>::Entry const&
             ComponentFactory<Base>::getEntry(T&& arg) const
         {
-            WriterLock lock{m_entryCacheLock};
-
             auto iter = m_entryCache.find(arg);
 
             if(iter != m_entryCache.end())
@@ -164,8 +160,6 @@ namespace rocRoller
         typename ComponentFactory<Base>::Entry const&
             ComponentFactory<Base>::findEntry(T&& arg) const
         {
-            ReaderLock lock{m_entriesLock};
-
             auto foundIter = m_entries.end();
 
             for(auto iter = m_entries.begin(); iter != m_entries.end(); iter++)
@@ -216,8 +210,6 @@ namespace rocRoller
             if(name == "")
                 throw std::runtime_error(concatenate("Empty ", Base::Basename, " component name"));
             auto sameName = [&name](auto const& entry) { return entry.name == name; };
-
-            WriterLock lock{m_entriesLock};
             if(std::any_of(m_entries.begin(), m_entries.end(), sameName))
                 throw std::runtime_error(
                     concatenate("Duplicate ", Base::Basename, " component names: '", name, "'"));
@@ -233,27 +225,15 @@ namespace rocRoller
         template <typename T>
         void ComponentFactory<Base>::emptyCache(T&& arg)
         {
-            {
-                WriterLock lock{m_entryCacheLock};
-                m_entryCache.erase(arg);
-            }
-            {
-                WriterLock lock{m_instanceCacheLock};
-                m_instanceCache.erase(arg);
-            }
+            m_entryCache.erase(arg);
+            m_instanceCache.erase(arg);
         }
 
         template <ComponentBase Base>
         void ComponentFactory<Base>::emptyCache()
         {
-            {
-                WriterLock lock{m_entryCacheLock};
-                m_entryCache.clear();
-            }
-            {
-                WriterLock lock{m_instanceCacheLock};
-                m_instanceCache.clear();
-            }
+            m_entryCache.clear();
+            m_instanceCache.clear();
         }
 
         inline void ComponentFactoryBase::ClearAllCaches()
