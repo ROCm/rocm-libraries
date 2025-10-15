@@ -152,18 +152,22 @@ Your plugin's CMakeLists.txt should:
 
 When building an external plugin, the hipDNN SDK provides CMake variables to help you install your plugin in the correct location:
 
-```cmake
-find_package(hipdnn_sdk CONFIG REQUIRED)
+- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`): 
+  - Hardcoded at CMake configure time
+  - This is intended for **developer-use only**
+  
+- **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):
+  - **Recommended for installations**
+  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer 
+  - Remains correct when setting the prefix during the CMake install command 
 
-# The SDK provides these variables:
-# HIPDNN_PLUGIN_ENGINE_SUBDIR - Subdirectory path for engine plugins (e.g., "hipdnn_plugins/engines")
-# HIPDNN_INSTALL_PLUGIN_ENGINE_DIR - Install directory relative to CMAKE_INSTALL_PREFIX
-# HIPDNN_PLUGIN_ENGINE_INSTALL_PATH - Full install path for plugins
+```cmake
+find_package(hipdnn_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_sdk
 
 # Example: Configure your plugin to install to the correct location
 install(
     TARGETS your_plugin_name
-    LIBRARY DESTINATION ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}
+    LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 ```
 
