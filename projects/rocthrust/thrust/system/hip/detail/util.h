@@ -316,12 +316,13 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
   }
 }
 
-// FIXME: Move the iterators elsewhere.
-
+// deprecated [Since 2.8]
 template <class ValueType, class InputIt, class UnaryOp>
-struct transform_input_iterator_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator") transform_input_iterator_t
 {
-  using self_t            = transform_input_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = transform_input_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = typename iterator_traits<InputIt>::difference_type;
   using value_type        = ValueType;
   using pointer           = void;
@@ -425,10 +426,14 @@ struct transform_input_iterator_t
   }
 }; // struct transform_input_iterarot_t
 
+// deprecated [Since 2.8]
 template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
-struct transform_pair_of_input_iterators_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator of a thrust::zip_iterator")
+  transform_pair_of_input_iterators_t
 {
-  using self_t            = transform_pair_of_input_iterators_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = transform_pair_of_input_iterators_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = typename iterator_traits<InputIt1>::difference_type;
   using value_type        = ValueType;
   using pointer           = void;
@@ -555,10 +560,13 @@ struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::identity") identity
   }
 };
 
+// deprecated [Since 2.8]
 template <class T>
-struct counting_iterator_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::counting_iterator") counting_iterator_t
 {
-  using self_t            = counting_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = counting_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = T;
   using value_type        = T;
   using pointer           = void;

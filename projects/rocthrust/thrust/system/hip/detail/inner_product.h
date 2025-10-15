@@ -39,9 +39,10 @@
 
 #if THRUST_COMPILER(HIP)
 #  include <thrust/distance.h>
+#  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/reduce.h>
-
-#  include <iterator>
+#  include <thrust/zip_function.h>
 
 // rocPRIM includes
 #  include <rocprim/rocprim.hpp>
@@ -50,7 +51,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 template <class Derived, class InputIt1, class InputIt2, class T, class ReduceOp, class ProductOp>
 T THRUST_HOST_DEVICE inner_product(
   execution_policy<Derived>& policy,
@@ -61,11 +61,9 @@ T THRUST_HOST_DEVICE inner_product(
   ReduceOp reduce_op,
   ProductOp product_op)
 {
-  using size_type        = typename iterator_traits<InputIt1>::difference_type;
-  size_type num_items    = static_cast<size_type>(thrust::distance(first1, last1));
-  using binop_iterator_t = transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>;
-
-  return hip_rocprim::reduce_n(policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op);
+  const auto n     = thrust::distance(first1, last1);
+  const auto first = make_transform_iterator(make_zip_iterator(first1, first2), make_zip_function(product_op));
+  return hip_rocprim::reduce_n(policy, first, n, init, reduce_op);
 }
 
 template <class Derived, class InputIt1, class InputIt2, class T>
@@ -74,7 +72,6 @@ inner_product(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1
 {
   return hip_rocprim::inner_product(policy, first1, last1, first2, init, plus<T>(), multiplies<T>());
 }
-
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END

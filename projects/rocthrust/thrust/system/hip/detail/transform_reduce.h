@@ -46,6 +46,7 @@
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
+#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -66,7 +67,7 @@ T THRUST_HOST_DEVICE transform_reduce(
 {
   using size_type              = typename iterator_traits<InputIt>::difference_type;
   const size_type num_items    = static_cast<size_type>(thrust::distance(first, last));
-  using transformed_iterator_t = transform_input_iterator_t<T, InputIt, TransformOp>;
+  using transformed_iterator_t = transform_iterator<TransformOp, InputIt, T, T>;
 
   return reduce_n(policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op);
 }
