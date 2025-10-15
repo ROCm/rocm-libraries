@@ -62,6 +62,7 @@ using thrust::system::hip::when_all;
 
 } // namespace hip
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy>
 THRUST_HOST thrust::hip::unique_eager_event
 unique_eager_event_type(thrust::hip::execution_policy<DerivedPolicy> const&) noexcept;
@@ -69,6 +70,7 @@ unique_eager_event_type(thrust::hip::execution_policy<DerivedPolicy> const&) noe
 template <typename T, typename DerivedPolicy>
 THRUST_HOST thrust::hip::unique_eager_future<T>
 unique_eager_future_type(thrust::hip::execution_policy<DerivedPolicy> const&) noexcept;
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
 

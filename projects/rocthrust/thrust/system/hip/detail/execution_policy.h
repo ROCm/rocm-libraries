@@ -62,11 +62,13 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
     , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
     , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
 {};
+THRUST_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>

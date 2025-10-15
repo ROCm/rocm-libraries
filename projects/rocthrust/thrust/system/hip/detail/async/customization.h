@@ -31,6 +31,12 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__cccl/diagnostic.h)
+// clang-format on
+#endif
+
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
@@ -85,10 +91,11 @@ auto get_async_device_allocator(thrust::detail::execution_policy_base<DerivedPol
     auto get_async_device_allocator(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec)
       THRUST_RETURNS(exec.get_allocator())
 
-        template <typename Allocator, template <typename> class BaseSystem>
-        auto get_async_device_allocator(
-          thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
-          THRUST_RETURNS(exec.get_allocator())
+        THRUST_SUPPRESS_DEPRECATED_PUSH
+  template <typename Allocator, template <typename> class BaseSystem>
+  THRUST_DEPRECATED auto get_async_device_allocator(
+    thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
+    THRUST_RETURNS(exec.get_allocator()) THRUST_SUPPRESS_DEPRECATED_POP
 
   ///////////////////////////////////////////////////////////////////////////////
 

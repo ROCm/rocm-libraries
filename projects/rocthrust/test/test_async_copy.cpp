@@ -17,6 +17,13 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+// need to suppress deprecation warnings inside a lot of thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/copy.h>
@@ -44,8 +51,6 @@ using BuiltinNumericTypes = ::testing::Types<
   Params<double>>;
 
 TESTS_DEFINE(AsyncCopyTests, BuiltinNumericTypes);
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 #  define DEFINE_ASYNC_COPY_CALLABLE(name, ...)                                                \
     struct THRUST_PP_CAT2(name, _fn)                                                           \
@@ -433,3 +438,5 @@ TYPED_TEST(AsyncCopyTests, test_async_copy_after_test)
 // Can't do this today because we can't do cross-system with explicit policies.
 
 #endif
+
+THRUST_SUPPRESS_DEPRECATED_POP

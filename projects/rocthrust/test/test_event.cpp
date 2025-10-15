@@ -17,7 +17,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/event.h>
 
@@ -26,6 +26,10 @@
 #  include "test_utils.hpp"
 
 TESTS_DEFINE(EventTests, FullTestsParams);
+
+// note: there is no matching THRUST_SUPPRESS_DEPRECATED_POP, so the warning suppression leaks into more content of the
+// generated cudafe1.stub.c file.
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 ///////////////////////////////////////////////////////////////////////////////
 

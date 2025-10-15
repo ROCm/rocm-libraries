@@ -17,7 +17,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <algorithm>
 #  include <limits>
@@ -56,3 +62,5 @@ struct test_counting_iterator
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_counting_iterator, UnsignedIntegralTypes);
 
 #endif // C++14
+
+THRUST_SUPPRESS_DEPRECATED_POP

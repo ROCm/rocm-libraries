@@ -17,12 +17,16 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/future.h>
 
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
+
+// note: there is no matching THRUST_SUPPRESS_DEPRECATED_POP, so the warning suppression leaks into more content of the
+// generated cudafe1.stub.c file.
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 struct mock
 {};

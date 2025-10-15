@@ -19,6 +19,13 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+// need to suppress deprecation warnings inside several thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/async/copy.h>
@@ -31,9 +38,6 @@
 #  include "test_utils.hpp"
 
 TESTS_DEFINE(AsyncReduceTests, NumericalTestsParams);
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template <typename T>
 struct custom_plus
 {
@@ -626,16 +630,12 @@ THRUST_HOST void test_async_reduce_using()
     // When you import the customization points into the global namespace,
     // they should be selected instead of the synchronous algorithms.
     {
-      THRUST_SUPPRESS_DEPRECATED_PUSH
       using namespace thrust::async;
       f0a = reduce(d0a.begin(), d0a.end());
-      THRUST_SUPPRESS_DEPRECATED_POP
     }
     {
-      THRUST_SUPPRESS_DEPRECATED_PUSH
       using thrust::async::reduce;
       f0b = reduce(d0b.begin(), d0b.end());
-      THRUST_SUPPRESS_DEPRECATED_POP
     }
 
     // ADL should find the synchronous algorithms.
@@ -1027,3 +1027,5 @@ TEST(AsyncReduceTests, test_async_reduce_bug1886)
 }
 
 #endif
+
+THRUST_SUPPRESS_DEPRECATED_POP

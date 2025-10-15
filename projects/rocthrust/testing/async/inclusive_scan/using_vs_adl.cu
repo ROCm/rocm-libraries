@@ -17,6 +17,12 @@
 
 #include <thrust/detail/config.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/detail/type_traits.h>
@@ -185,3 +191,5 @@ void test_using_cpo()
 DECLARE_UNITTEST(test_using_cpo);
 
 #endif // C++14
+
+THRUST_SUPPRESS_DEPRECATED_POP
