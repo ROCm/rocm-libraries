@@ -880,13 +880,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                          load_input_method,
                                          scan_algorithm>;
 
-    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH ROCPRIM_SHARED_MEMORY
-    typename detail::raw_storage<typename block_processor::storage_type>
-        storage;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH ROCPRIM_SHARED_MEMORY union
+    {
+        typename detail::raw_storage<typename block_processor::storage_type> storage;
+        typename BlockIdWrapper::storage_type                                ordered_bid_storage;
+    };
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-
-        ROCPRIM_SHARED_MEMORY
-    typename BlockIdWrapper::storage_type ordered_bid_storage;
     const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;
