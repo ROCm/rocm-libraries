@@ -121,6 +121,7 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
         find_library(rocTracer roctx64 REQUIRED)
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
     else()
         set(rocTracer)
     endif()
@@ -269,6 +270,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_MARKER)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
+        target_include_directories(hipblaslt PRIVATE ${ROCTRACER_INCLUDE_DIR})
     endif()
 
     target_include_directories(hipblaslt
