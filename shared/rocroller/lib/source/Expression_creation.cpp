@@ -97,7 +97,11 @@ namespace rocRoller
             return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
         }
 
-        ExpressionPtr bfc(ExpressionPtr src, ExpressionPtr dst, unsigned srcOffset, unsigned dstOffset, unsigned width)
+        ExpressionPtr bfc(ExpressionPtr src,
+                          ExpressionPtr dst,
+                          unsigned      srcOffset,
+                          unsigned      dstOffset,
+                          unsigned      width)
         {
             return std::make_shared<Expression>(
                 BitfieldCombine{{src, dst}, srcOffset, dstOffset, width});

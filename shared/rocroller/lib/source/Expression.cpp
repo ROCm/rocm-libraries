@@ -134,8 +134,8 @@ namespace rocRoller
 
             bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
             {
-                bool offset         = (a.offset == b.offset);
-                bool width          = (a.width == b.width);
+                bool offset = (a.offset == b.offset);
+                bool width  = (a.width == b.width);
 
                 return call(a.arg, b.arg) && offset && width;
             }

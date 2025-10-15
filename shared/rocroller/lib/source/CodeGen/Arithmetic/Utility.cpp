@@ -32,7 +32,8 @@ namespace rocRoller
 {
     namespace Arithmetic
     {
-        struct LiteralDWordsVisitor {
+        struct LiteralDWordsVisitor
+        {
             Register::ValuePtr& lsd;
             Register::ValuePtr& msd;
 
@@ -41,7 +42,7 @@ namespace rocRoller
                 Throw<FatalError>("Buffer type is not valid for get2LiteralDwords.");
             }
 
-            template<typename T>
+            template <typename T>
             void operator()(T v) const
             {
                 using U = std::decay_t<T>;
