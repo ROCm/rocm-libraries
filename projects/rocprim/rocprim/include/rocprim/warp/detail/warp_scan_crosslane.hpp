@@ -44,11 +44,15 @@ private:
         // We use a dispatch here because when we target SPIR-V, we have to know after
         // compiling SPIR-V whether DPP is available. Therefore, this check cannot
         // be done at the C++ constexpr-level.
-        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP() && UseDPP)
+        if constexpr(UseDPP)
         {
-            if constexpr(UseDPP)
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
             {
                 f(warp_scan_dpp<T, VirtualWaveSize>{});
+            }
+            else
+            {
+                f(warp_scan_shuffle<T, VirtualWaveSize>{});
             }
         }
         else
