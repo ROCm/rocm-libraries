@@ -102,7 +102,7 @@ using GPU_UnitTestConvSolverImplicitGemmBwdXdlops_BFP16 = GPU_UnitTestConvSolver
 using GPU_UnitTestConvSolverImplicitGemmBwdXdlops_FP32  = GPU_UnitTestConvSolverBwd_FP32;
 using CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDevApplicability_FP16 =
     CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
-using CPU_UnitTestConvSolverImplicitGemmBwdXdlopsApplicability_Deterministic =
+using CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDeterministicApplicability_NONE =
     CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
 
 TEST_P(GPU_UnitTestConvSolverImplicitGemmBwdXdlops_FP16, ConvHipImplicitGemmBwdXdlops)
@@ -125,7 +125,7 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDevApplicability_FP16, SOLVER_
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmBwdXdlops{});
 };
 
-TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsApplicability_Deterministic,
+TEST_P(CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDeterministicApplicability_NONE,
        ConvHipImplicitGemmBwdXdlops)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmBwdXdlops{});
@@ -177,6 +177,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverImplicitGemmBwdXdlopsApplicability_Deterministic,
+                         CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDeterministicApplicability_NONE,
                          testing::Combine(testing::Values(Gpu::None),
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[1])));
