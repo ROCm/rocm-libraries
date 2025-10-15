@@ -58,7 +58,7 @@ struct ConvolutionDescriptorParams
         // SET DETERMINISTIC ATTRIBUTE
         if(deterministic)
         {
-            desc.attribute.deterministic.value = 1;
+            desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
         }
         return desc;
     }
