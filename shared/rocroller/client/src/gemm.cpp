@@ -1154,12 +1154,13 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
         std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--streamK", &SolutionParameters::streamK),
-        std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile));
+        std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile),
+        std::make_pair("--streamKTwoTileDPFirst", &SolutionParameters::streamKTwoTileDPFirst));
 
     template <typename T, typename U>
     std::string getSolutionParameterArgumentName(U T::*member_ptr)
     {
-        std::string found_name = "unknown";
+        std::optional<std::string> found_name;
 
         std::apply(
             [&](auto&&... args) {
@@ -1176,10 +1177,9 @@ namespace rocRoller::Client::GEMMClient::CLI
             },
             SolutionParameterArguments);
 
-        if(found_name == "unknown")
-            Throw<FatalError>("Internal error: could not find argument name.");
+        AssertFatal(found_name, "Internal error: could not find argument name.");
 
-        return found_name;
+        return found_name.value();
     }
 
     void updateSolutionFromArguments(rocRoller::Client::GEMMClient::SolutionParameters& solution,
@@ -1320,6 +1320,7 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         update(SN(&SP::streamK), solution.streamK);
         update(SN(&SP::streamKTwoTile), solution.streamKTwoTile);
+        update(SN(&SP::streamKTwoTileDPFirst), solution.streamKTwoTileDPFirst);
 
         // Other
 
@@ -1590,6 +1591,8 @@ int main(int argc, const char* argv[])
                  "Mix global and LDS memory operations during prefetching.");
     app.add_flag(SN(&SP::streamK), "Enable StreamK algorithm.");
     app.add_flag(SN(&SP::streamKTwoTile), "Enable two-tile StreamK algorithm.");
+    app.add_flag(SN(&SP::streamKTwoTileDPFirst),
+                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
 
     app.add_flag(SN(&SP::loadLDSScaleA), "Use LDS when loading A scale.");
     app.add_flag(SN(&SP::loadLDSScaleB), "Use LDS when loading B scale.");
@@ -1603,55 +1606,6 @@ int main(int argc, const char* argv[])
                    "Workgroup mapping value. Default: -1")
         ->check(CLI::IsMember({-1}) | CLI::PositiveNumber);
 
-<<<<<<< HEAD
-=======
-    app.add_flag(
-        "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
-    app.add_option("--workgroupRemapXCCValue",
-                   solution.workgroupRemapXCCValue,
-                   "Force an XCC-aware workgroup remapping value. (Optional)");
-    app.add_option("--unroll_x", solution.unrollX, "Unroll size in X.");
-    app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
-    app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
-    app.add_flag("--loadLDS_B", solution.loadLDSB, "Use LDS when loading B.");
-    app.add_flag("--storeLDS_D", solution.storeLDSD, "Use LDS when storing D.");
-    app.add_flag("--direct2LDS_A", solution.direct2LDSA, "Use direct-to-LDS when loading A.");
-    app.add_flag("--direct2LDS_B", solution.direct2LDSB, "Use direct-to-LDS when loading B.");
-    app.add_flag(
-        "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
-    app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");
-    app.add_option(
-        "--schedulerCost", solution.schedulerCost, "Which scheduler cost function to use.");
-    app.add_flag("--matchMemoryAccess",
-                 solution.matchMemoryAccess,
-                 "Match memory access to transpose.  Currently decreases performance.");
-    app.add_flag("--prefetch", solution.prefetch, "Enable prefetching (UnrollK=2 implied).");
-    app.add_option("--prefetchInFlight",
-                   solution.prefetchInFlight,
-                   "Number of prefetches in flight at the same time");
-    app.add_option("--prefetchLDSFactor",
-                   solution.prefetchLDSFactor,
-                   "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
-    auto prefetchMixMemOpsFlag
-        = app.add_flag("--prefetchMixMemOps",
-                       solution.prefetchMixMemOps,
-                       "Mix global and LDS memory operations during prefetching.");
-    app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
-    app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
-    app.add_flag("--streamKTwoTileDPFirst",
-                 solution.streamKTwoTileDPFirst,
-                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
-
-    app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
-    app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");
-
-    app.add_flag(
-        "--swizzleScale", solution.swizzleScale, "Use Swizzle when loading A and B scale.");
-    app.add_flag("--prefetchScale",
-                 solution.prefetchScale,
-                 "Prefetch scale values with using Swizzled scales.");
-
->>>>>>> develop
     //
     // Benchmarking options
     //
