@@ -189,7 +189,16 @@ namespace rocRoller::Expression::EvaluateDetail
         requires(!std::same_as<bool, ARG> && std::unsigned_integral<ARG>) CommandArgumentValue
             operator()(ARG const& arg) const
         {
-            ARG  mask       = (static_cast<ARG>(1) << this->expr.width) - 1;
+            ARG mask = 0;
+            if(resultVariableType(arg).getElementSize() * 8u == this->expr.width)
+            {
+                mask = std::numeric_limits<ARG>::max();
+            }
+            else
+            {
+                mask = (static_cast<ARG>(1) << this->expr.width) - 1;
+            }
+
             ARG  result     = (arg >> this->expr.offset) & mask;
             auto resultExpr = literal(result);
 
