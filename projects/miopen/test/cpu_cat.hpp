@@ -32,8 +32,9 @@
 #include "tensor_holder.hpp"
 
 template <class T>
-void cpu_cat_forward(std::vector<tensor<T>> inputs, tensor<T>& ref_output, int32_t dim)
+void cpu_cat_forward(const std::vector<tensor<T>>& inputs, tensor<T>& ref_output, int32_t dim)
 {
+<<<<<<< HEAD
     const auto t0 = std::chrono::high_resolution_clock::now();
     auto dims              = ref_output.desc.GetLengths();
     size_t output_dim_size = dims[dim];
@@ -80,6 +81,8 @@ template <class T>
 void cpu_cat_forward_upd(std::vector<tensor<T>> inputs, tensor<T>& ref_output, int32_t dim)
 {
     const auto t0 = std::chrono::high_resolution_clock::now();
+=======
+>>>>>>> f84b3a0971 (Added GTEsts for float16 and bfloat16 data types)
     const auto& dims                = ref_output.desc.GetLengths();
     const size_t output_dim_size    = dims[dim];
     size_t outer_size               = 1;
@@ -103,29 +106,22 @@ void cpu_cat_forward_upd(std::vector<tensor<T>> inputs, tensor<T>& ref_output, i
         const size_t dim_size   = inputs[i].desc.GetLengths()[dim];
         const size_t copy_size  = inner_size_on_output_dim_size * dim_size;
         const size_t input_size = outer_size * copy_size;
-        ford(input_size)([&](size_t o) {
+
+        for (size_t o = 0; o < input_size; ++o)
+        {
             const size_t outer_idx = o / copy_size;
             const size_t copy_idx  = o % copy_size;
             ref_output[output_start_offset + (outer_idx * inner_size) + copy_idx] =
                 input[copy_size * outer_idx + copy_idx];
-        });
+        }
 
         output_start_offset += copy_size;
     });
-
-    const auto t1 = std::chrono::high_resolution_clock::now();
-    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-
-    std::cout << "Updated CPU CAT solver: " << ns << "ns (" << (double(ns) / 1000000000.0) << " sec)" << std::endl;
-
-    std::fstream of("/data/Dev/cpu_cat_forward_upd.txt", std::ofstream::app);
-    of << ns << std::endl;
 }
 
 template <class T>
-void cpu_cat_forward_upd_st(std::vector<tensor<T>> inputs, tensor<T>& ref_output, int32_t dim)
+void cpu_cat_forward_st(const std::vector<tensor<T>>& inputs, tensor<T>& ref_output, int32_t dim)
 {
-    const auto t0 = std::chrono::high_resolution_clock::now();
     const auto& dims                = ref_output.desc.GetLengths();
     const size_t output_dim_size    = dims[dim];
     size_t outer_size               = 1;
@@ -161,14 +157,6 @@ void cpu_cat_forward_upd_st(std::vector<tensor<T>> inputs, tensor<T>& ref_output
 
         output_start_offset += copy_size;
     }
-
-    const auto t1 = std::chrono::high_resolution_clock::now();
-    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-
-    std::cout << "Updated single-threaded CPU CAT solver: " << ns << "ns (" << (double(ns) / 1000000000.0) << " sec)" << std::endl;
-
-    std::fstream of("/data/Dev/cpu_cat_forward_upd_st.txt", std::ofstream::app);
-    of << ns << std::endl;
 }
 
 #endif

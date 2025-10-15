@@ -31,6 +31,14 @@ struct GPU_Cat_FP32 : CatTest<float>
 {
 };
 
+struct GPU_Cat_FP16 : CatTest<half_float::half>
+{
+};
+
+struct GPU_Cat_BFP16 : CatTest<bfloat16>
+{
+};
+
 } // namespace cat
 using namespace cat;
 
@@ -40,16 +48,36 @@ TEST_P(GPU_Cat_FP32, CatTestFw)
     Verify();
 };
 
-TEST_P(GPU_Cat_FP32, CatTestUpdFw)
+TEST_P(GPU_Cat_FP32, CatTestStFw)
 {
-    RunTestUpd();
+    RunTestSt();
     Verify();
 };
 
-TEST_P(GPU_Cat_FP32, CatTestUpdStFw)
+TEST_P(GPU_Cat_FP16, CatTestFw)
 {
-    RunTestUpdSt();
+    RunTest();
+    Verify();
+};
+
+TEST_P(GPU_Cat_FP16, CatTestStFw)
+{
+    RunTestSt();
+    Verify();
+};
+
+TEST_P(GPU_Cat_BFP16, CatTestFw)
+{
+    RunTest();
+    Verify();
+};
+
+TEST_P(GPU_Cat_BFP16, CatTestStFw)
+{
+    RunTestSt();
     Verify();
 };
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Cat_FP32, testing::ValuesIn(CatTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Cat_FP16, testing::ValuesIn(CatTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Cat_BFP16, testing::ValuesIn(CatTestConfigs()));

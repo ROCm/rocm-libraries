@@ -331,13 +331,28 @@ int CatDriver<Tgpu, Tref>::GetandSetData()
     auto in_lens           = GetInputTensorLengthsFromCmdLine();
     dim                    = inflags.GetValueInt("dim");
 
+    int64_t t = 0;
+
     for(auto in_len : in_lens)
     {
         miopenCreateTensorDescriptor(&inputDesc);
         SetTensorNd(inputDesc, in_len, data_type);
         inputDescs.push_back(inputDesc);
         output_dim_size += in_len[dim];
+
+        int64_t s = 1;
+
+        for (const auto i : in_len)
+        {
+            s *= int64_t(i);
+            std::cout << i << " ";
+        }
+
+        t += s;
+
+        std::cout << "-> " << s << std::endl;
     }
+    std::cout << "Tot: " << t << std::endl;
     auto out_len = in_lens[0];
     out_len[dim] = output_dim_size;
 
