@@ -3,6 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.2.0 for ROCm 7.2
+
+### Added
+
+* Added `thrust::unique_ptr` - a smart pointer for managing device memory with automatic cleanup.
+
 ## rocThrust 4.1.0 for ROCm 7.1
 
 ### Added
