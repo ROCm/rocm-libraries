@@ -15,7 +15,7 @@ Documentation for rocSPARSE is available at
 * Added brain half float mixed precision to `rocsparse_sddmm` where A and B and C use bfloat16 and the compute type use float.
 * Added half float mixed precision to `rocsparse_sddmm` where A and B and C use float16 and the compute type use float.
 * Added brain half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines.
-* Added `--clients-only` option to install.sh and rmake.py scripts to allow building only the clients while using an already installed version of rocsparse.
+* Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocSPARSE.
 
 ### Optimized
 
