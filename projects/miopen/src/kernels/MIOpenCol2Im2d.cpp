@@ -60,15 +60,14 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
                                      FLOAT* im,
                                      const unsigned int im_offset)
 {
-    FLOAT* im_off    = im + im_offset;
-    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    FLOAT* im_off            = im + im_offset;
+    unsigned int gid         = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int global_size = channels * height * width;
 
     unsigned int im_ch  = gid / (width * height);
     unsigned int im_pix = gid % (width * height);
     unsigned int im_h   = (im_pix / width) + pad_h;
     unsigned int im_w   = (im_pix % width) + pad_w;
-
 
     if(gid < global_size)
     {
