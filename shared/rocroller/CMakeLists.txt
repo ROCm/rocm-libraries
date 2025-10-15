@@ -190,9 +190,10 @@ if(ROCROLLER_ENABLE_YAML_CPP)
         FetchContent_MakeAvailable(yaml_cpp)
         set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
-        find_package(yaml-cpp 0.8.0 REQUIRED)
+        find_package(yaml-cpp REQUIRED)
     endif()
-    target_link_libraries(rocroller PUBLIC yaml-cpp::yaml-cpp)
+   
+    target_link_libraries(rocroller PUBLIC ${YAML_CPP_LIBRARIES})
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
 endif()
 
