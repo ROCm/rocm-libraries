@@ -197,7 +197,8 @@ endif()
 add_subdirectory(hipcub)
 
 if(BUILD_CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+    target_compile_options( hipcub PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
+    target_link_options( hipcub PUBLIC -fprofile-instr-generate )
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
