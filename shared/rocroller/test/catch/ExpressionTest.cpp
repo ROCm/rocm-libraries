@@ -2236,6 +2236,112 @@ namespace ExpressionTest
         CHECK(std::get<float>(evaluate(exp7)) == static_cast<float>(d));
     }
 
+    TEST_CASE("Expression evaluate BitfieldCombine", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(1222u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0u);
+            auto       dst       = literal(0xffffffffu);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xff00ffffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 0;
+            auto const width     = 16u;
+            auto       src       = literal(0xffff0000u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x0000ffffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0x0000ff00u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x00ff0000u);
+        }
+    }
+
+    TEST_CASE("Expression evaluate BitfieldExtract", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const offset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(1222u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const offset = 0u;
+            auto const width     = 8u;
+            auto       src       = literal(0x000000ffu);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const offset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0x00ff0000u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const offset = 48u;
+            auto const width     = 8u;
+            auto       src       = literal(0x00ff000000000000ul);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+    }
+
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
