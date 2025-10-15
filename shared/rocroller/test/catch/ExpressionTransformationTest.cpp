@@ -1121,7 +1121,7 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
     }
 }
 
-TEST_CASE("BitfieldCombine epxression and lowering", "[expression][expression-transformation]")
+TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-transformation]")
 {
     using namespace rocRoller;
 
