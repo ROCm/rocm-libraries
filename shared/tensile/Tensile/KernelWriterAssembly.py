@@ -842,10 +842,14 @@ class KernelWriterAssembly(KernelWriter):
     self.combineLocalAddresses = 0
 
     # ISA version, such as 803
+
     if "ISA" in kernel:
-      self.version = tuple(kernel["ISA"])
+      versionISA = kernel["ISA"]
+      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+      self.version = versionISA
     else:
-      printExit(f"ISA not found in kernel {kernel}")
+      raise ValueError(f"ISA not found in kernel {kernel}")
     if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
       defaultIsa = (9,0,0)
       print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

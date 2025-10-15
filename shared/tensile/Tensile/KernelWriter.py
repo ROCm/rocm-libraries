@@ -212,7 +212,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, uDu=0, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False):
 
-    currentIsa = kernel["ISA"]
+
+    versionISA = kernel["ISA"]
+    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        printExit(f"Version is None or [0, 0, 0] for kernel {kernel}")
+    currentIsa = versionISA
+
     maxVmcnt = globalParameters["AsmCaps"][currentIsa]["MaxVmcnt"]
 
     self.unrollLoopHeaderCode = Code.Module()
@@ -3705,8 +3710,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def initKernel(self, kernel, tensorParametersA, tensorParametersB ):
 
-    if "ISA" not in kernel:
-      printExit(f"ISA not found in kernel {kernel}")
+    versionISA = kernel["ISA"]
+    # tPrint(1, f"versionISA: {versionISA}")
+    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+      raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
 
     self.staggerU = kernel["StaggerU"]
     if self.staggerU:
@@ -4272,8 +4279,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # condition(s) to enable init accvgpr opt (use const "0" as an operand instead of initializing whole accvgpr)
     self.useInitAccVgprOpt = False
     # enable for the following conditions
+    versionISA = kernel["ISA"]
+    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+      raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+
     if kernel["EnableMatrixInstruction"] and (kernel["PrefetchGlobalRead"] == 1 or kernel["PrefetchGlobalRead"] == 2) \
-       and globalParameters["AsmCaps"][kernel["ISA"]]["HasMFMA_constSrc"] \
+       and globalParameters["AsmCaps"][versionISA]["HasMFMA_constSrc"] \
        and kernel["StreamK"] == 0:
       self.useInitAccVgprOpt = True
     # force to disable for the following conditions
@@ -5386,9 +5397,13 @@ for codeObjectFileName in codeObjectFileNames:
         # ISA version, such as 803
         self.kernel = kernel
         self.language = "ASM"
-        self.version = kernel["ISA"] 
-        if "ISA" in kernel:
-          self.version = tuple(kernel["ISA"])
+        
+        versionISA = kernel["ISA"]
+        self.version = versionISA
+        if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+          raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+        self.version = tuple(versionISA)
+
         if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
           defaultIsa = (9,0,0)
           print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

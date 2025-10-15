@@ -1736,11 +1736,14 @@ class Solution(collections.abc.Mapping):
       if 'ISA' in config:
         state['ISA'] = config['ISA']
       else:
-        printExit("ISA not found in config")
+        raise ValueError("ISA not found in config")
       # elif config['KernelLanguage'] == 'Assembly':
       #   state['ISA'] = list(globalParameters["CurrentISA"])
       # else:
       #   state['ISA'] = [0,0,0]
+    versionISA = state['ISA']
+    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+      raise ValueError(f"Version is None or [0, 0, 0] for kernel {state}")
 
     if "CodeObjectVersion" not in state:
       if "CodeObjectVersion" in config:

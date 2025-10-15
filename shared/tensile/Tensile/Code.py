@@ -288,6 +288,8 @@ class WaitCnt (Module):
   def __init__(self, version,lgkmcnt=-1,vmcnt=-1,comment=""):
     super().__init__("wait")
 
+    if version is None or version == [0, 0, 0] or version == (0, 0, 0) or version == "[0, 0, 0]" or version == "":
+      printExit("Version is None or [0, 0, 0]")
     self.version = version
     self.lgkmcnt = lgkmcnt
     self.vmcnt   = vmcnt
@@ -358,7 +360,12 @@ class  MFMAInst (Inst):
   """
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = kernel["ISA"]
+
+       versionISA = kernel["ISA"]
+       if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+         raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+       self.version = versionISA
+
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
@@ -410,7 +417,12 @@ class  MacInst (Inst):
 
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = kernel["ISA"]
+
+       versionISA = kernel["ISA"]
+       if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+         raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+       self.version = versionISA
+
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
