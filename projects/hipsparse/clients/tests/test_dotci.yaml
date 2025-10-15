@@ -21,11 +21,20 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+- name: dotci_bad_arg
+  category: pre_checkin
+  function: dotci_bad_arg
+  precision: *single_double_precisions_complex
+
+- name: dotci
+  category: pre_checkin
+  function: dotci
+  precision: *single_double_precisions_complex
+  N: [15332, 22031, 31958]
+  nnz: [0, 1543, 7111, 10000]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

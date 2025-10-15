@@ -40,7 +40,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_roti_bad_arg(void)
+void testing_roti_bad_arg(const Arguments& argus)
 {
     int nnz       = 100;
     int safe_size = 100;
@@ -64,7 +64,7 @@ void testing_roti_bad_arg(void)
         hipsparseXroti(handle, -1, dx_val, dx_ind, dy, &c, &s, idx_base), "Error: nnz is invalid");
 
     // cusparse returns success when passed nullptrs
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     verify_hipsparse_status_invalid_pointer(
         hipsparseXroti(handle, nnz, dx_val, (int*)nullptr, dy, &c, &s, idx_base),
         "Error: x_ind is nullptr");
@@ -88,7 +88,7 @@ void testing_roti_bad_arg(void)
 template <typename T>
 hipsparseStatus_t testing_roti(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
     T                    c        = argus.get_alpha<T>();

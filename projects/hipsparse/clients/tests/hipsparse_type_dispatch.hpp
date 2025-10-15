@@ -43,6 +43,7 @@
 template <template <typename...> class TEST>
 auto hipsparse_simple_dispatch(const Arguments& arg)
 {
+    std::cout << "hipsparse_simple_dispatch" << std::endl;
     switch(arg.compute_type)
     {
     case HIP_R_32F:
@@ -62,6 +63,7 @@ auto hipsparse_simple_dispatch(const Arguments& arg)
 template <template <typename...> class TEST>
 auto hipsparse_it_dispatch(const Arguments& arg)
 {
+    std::cout << "hipsparse_it_dispatch" << std::endl;
     const auto I = arg.index_type_I;
     if(I == HIPSPARSE_INDEX_32I)
     {

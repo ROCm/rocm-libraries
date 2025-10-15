@@ -21,64 +21,8 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_dotci.hpp"
-#include "utility.hpp"
 
-#include <hipsparse.h>
-#include <vector>
-
-typedef hipsparseIndexBase_t       base;
-typedef std::tuple<int, int, base> dotci_tuple;
-
-int dotci_N_range[]   = {12000, 15332, 22031};
-int dotci_nnz_range[] = {0, 5, 10, 500, 1000, 7111, 10000};
-
-base dotci_idx_base_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-
-class parameterized_dotci : public testing::TestWithParam<dotci_tuple>
-{
-protected:
-    parameterized_dotci() {}
-    virtual ~parameterized_dotci() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
-
-Arguments setup_dotci_arguments(dotci_tuple tup)
-{
-    Arguments arg;
-    arg.N      = std::get<0>(tup);
-    arg.nnz    = std::get<1>(tup);
-    arg.baseA  = std::get<2>(tup);
-    arg.timing = 0;
-    return arg;
-}
-
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
-TEST(dotci_bad_arg, dotci_float)
-{
-    testing_dotci_bad_arg<hipComplex>();
-}
-
-TEST_P(parameterized_dotci, dotci_float_complex)
-{
-    Arguments arg = setup_dotci_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_dotci<hipComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST_P(parameterized_dotci, dotci_double_complex)
-{
-    Arguments arg = setup_dotci_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_dotci<hipDoubleComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-INSTANTIATE_TEST_SUITE_P(dotci,
-                         parameterized_dotci,
-                         testing::Combine(testing::ValuesIn(dotci_N_range),
-                                          testing::ValuesIn(dotci_nnz_range),
-                                          testing::ValuesIn(dotci_idx_base_range)));
-#endif
+TEST_ROUTINE_WITH_CONFIG(
+    dotci, level1, hipsparse_test_config_complex_only, arg.N, arg.nnz, arg.baseA);
