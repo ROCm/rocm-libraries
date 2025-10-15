@@ -867,6 +867,11 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     r->allocateNow();
     auto reg32 = r->expression();
 
+    auto r2
+        = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::UInt64, 1);
+    r2->allocateNow();
+    auto reg64 = r2->expression();
+
     SECTION("Combine into first dword of 64bit and fold to constant")
     {
         auto bfc = std::make_shared<Expression::Expression>(
@@ -1007,6 +1012,19 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
 
         CHECK_THAT(splitBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Combine two dword register into of 128bit constant")
+    {
+        auto expr = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{reg64, zero128, "", 0, 0, 64});
+
+        std::vector<Expression::ExpressionPtr> operands{
+            bfc(reg64, zero32, 0, 0, 32), bfc(reg64, zero32, 32, 0, 32), zero32, zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        // TODO: The two first operands could be simplified into reg64
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
     SECTION("BitfieldCombine chain into 128bit")
