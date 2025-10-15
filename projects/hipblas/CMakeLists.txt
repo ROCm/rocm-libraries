@@ -25,9 +25,6 @@ cmake_minimum_required( VERSION 3.5 )
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )
 
-# Build documentation
-option(BUILD_DOCS "Build documentation" OFF)
-
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
 if( WIN32 )

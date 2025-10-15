@@ -60,15 +60,22 @@ function( get_cblas cblas_libs cblas_inc cblas_defs )
 
       # get CBLAS from the same source as BLAS
       get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
+      set(ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
       if(BLA_STATIC)
-        find_library(CBLAS_LIBRARIES NAMES libcblas64.a PATHS BLAS_DIR)
-      else()
-        find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+        if(WIN32)
+          list(PREPEND CMAKE_FIND_LIBRARY_SUFFIXES .lib .a)
+        else()
+          set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+        endif()
       endif()
+      find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+      set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+
       if(CBLAS_LIBRARIES)
         list( PREPEND libs ${CBLAS_LIBRARIES} )
       endif()
     endif()
+
     # defines to set cblas.h to 64-bit indices
     set ( defs "WeirdNEC" "LAPACK_ILP64" "USE64BITINT" "OPENBLAS_USE64BITINT")
   endif()
@@ -196,6 +203,11 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( COMMON_DEFINES HIPBLAS_BFLOAT16_CLASS ROCM_USE_FLOAT16 HIPBLAS_NO_DEPRECATED_WARNINGS ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
   if (BUILD_FORTRAN_CLIENTS)
     list( APPEND COMMON_DEFINES "HIPBLAS_FORTRAN_CLIENTS" )
+  endif()
+
+  # Default search for static host libraries
+  if(NOT DEFINED BLA_STATIC)
+    set(BLA_STATIC ON)
   endif()
 
   if( NOT WIN32 )
