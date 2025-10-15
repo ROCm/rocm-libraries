@@ -22,6 +22,8 @@
 
 #include <unittest/unittest.h>
 
+#include _THRUST_STD_INCLUDE(cstdint)
+
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
@@ -265,10 +267,10 @@ void TestBoundsWithBigIndexesHelper(int magnitude)
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
   ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
 
-  thrust::detail::intmax_t distance_low_value =
+  _THRUST_STD::intmax_t distance_low_value =
     thrust::distance(begin, thrust::lower_bound(thrust::device, begin, end, 17));
 
-  thrust::detail::intmax_t distance_high_value =
+  _THRUST_STD::intmax_t distance_high_value =
     thrust::distance(begin, thrust::lower_bound(thrust::device, begin, end, (1ll << magnitude) - 17));
 
   ASSERT_EQUAL(distance_low_value, 16);

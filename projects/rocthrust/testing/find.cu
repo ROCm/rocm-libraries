@@ -21,6 +21,8 @@
 
 #include <unittest/unittest.h>
 
+#include _THRUST_STD_INCLUDE(cstdint)
+
 template <typename T>
 struct equal_to_value_pred
 {
@@ -67,14 +69,9 @@ struct less_than_value_pred
 };
 
 template <class Vector>
-void TestFindSimple(void)
+void TestFindSimple()
 {
-  Vector vec(5);
-  vec[0] = 1;
-  vec[1] = 2;
-  vec[2] = 3;
-  vec[3] = 3;
-  vec[4] = 5;
+  Vector vec{1, 2, 3, 3, 5};
 
   ASSERT_EQUAL(thrust::find(vec.begin(), vec.end(), 0) - vec.begin(), 5);
   ASSERT_EQUAL(thrust::find(vec.begin(), vec.end(), 1) - vec.begin(), 0);
@@ -121,16 +118,11 @@ void TestFindDispatchImplicit()
 DECLARE_UNITTEST(TestFindDispatchImplicit);
 
 template <class Vector>
-void TestFindIfSimple(void)
+void TestFindIfSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-  vec[0] = 1;
-  vec[1] = 2;
-  vec[2] = 3;
-  vec[3] = 3;
-  vec[4] = 5;
+  Vector vec{1, 2, 3, 3, 5};
 
   ASSERT_EQUAL(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
   ASSERT_EQUAL(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
@@ -177,16 +169,11 @@ void TestFindIfDispatchImplicit()
 DECLARE_UNITTEST(TestFindIfDispatchImplicit);
 
 template <class Vector>
-void TestFindIfNotSimple(void)
+void TestFindIfNotSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector vec(5);
-  vec[0] = 0;
-  vec[1] = 1;
-  vec[2] = 2;
-  vec[3] = 3;
-  vec[4] = 4;
+  Vector vec{0, 1, 2, 3, 4};
 
   ASSERT_EQUAL(0, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
   ASSERT_EQUAL(1, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
@@ -316,9 +303,9 @@ void TestFindWithBigIndexesHelper(int magnitude)
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
   ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
 
-  thrust::detail::intmax_t distance_low_value = thrust::distance(begin, thrust::find(thrust::device, begin, end, 17));
+  _THRUST_STD::intmax_t distance_low_value = thrust::distance(begin, thrust::find(thrust::device, begin, end, 17));
 
-  thrust::detail::intmax_t distance_high_value =
+  _THRUST_STD::intmax_t distance_high_value =
     thrust::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
 
   ASSERT_EQUAL(distance_low_value, 16);

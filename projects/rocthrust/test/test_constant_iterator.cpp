@@ -23,6 +23,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(type_traits)
 
 TESTS_DEFINE(ConstantIteratorTests, VectorSignedTestsParams);
@@ -133,7 +134,7 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
   ASSERT_EQ(13, *iter0);
 
   // test two argument version
-  constant_iterator<int, thrust::detail::intmax_t> iter1 = make_constant_iterator<int, thrust::detail::intmax_t>(13, 7);
+  constant_iterator<int, _THRUST_STD::intmax_t> iter1 = make_constant_iterator<int, _THRUST_STD::intmax_t>(13, 7);
 
   ASSERT_EQ(13, *iter1);
   ASSERT_EQ(7, iter1 - iter0);

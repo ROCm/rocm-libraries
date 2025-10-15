@@ -26,15 +26,13 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/numeric_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include <cstddef>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(cstddef)
+#include _THRUST_STD_INCLUDE(limits)
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -44,6 +42,58 @@ class counting_iterator;
 
 namespace detail
 {
+
+template <typename T>
+struct num_digits
+    : eval_if<_THRUST_STD::numeric_limits<T>::is_specialized,
+              integral_constant<int, _THRUST_STD::numeric_limits<T>::digits>,
+              integral_constant<int,
+                                sizeof(T) * _THRUST_STD::numeric_limits<unsigned char>::digits
+                                  - (_THRUST_STD::numeric_limits<T>::is_signed ? 1 : 0)>>::type
+{}; // end num_digits
+
+template <typename Integer>
+struct integer_difference
+//: eval_if<
+//    sizeof(Integer) >= sizeof(intmax_t),
+//    eval_if<
+//      is_signed<Integer>::value,
+//      identity_<Integer>,
+//      identity_<intmax_t>
+//    >,
+//    eval_if<
+//      sizeof(Integer) < sizeof(std::ptrdiff_t),
+//      identity_<std::ptrdiff_t>,
+//      identity_<intmax_t>
+//    >
+//  >
+{
+private:
+
+public:
+  using type =
+    typename eval_if<_THRUST_STD::numeric_limits<Integer>::is_signed
+                       && (!_THRUST_STD::numeric_limits<Integer>::is_bounded
+                           || (int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 >= num_digits<intmax_t>::value)),
+                     identity_<Integer>,
+                     eval_if<int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 < num_digits<int>::value,
+                             identity_<int>,
+                             eval_if<int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 < num_digits<long>::value,
+                                     identity_<long>,
+                                     identity_<intmax_t>>>>::type;
+}; // end integer_difference
+
+template <typename Number>
+struct numeric_difference
+    : eval_if<::internal::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
+{}; // end numeric_difference
+
+template <typename Number>
+THRUST_HOST_DEVICE typename numeric_difference<Number>::type numeric_distance(Number x, Number y)
+{
+  using difference_type = typename numeric_difference<Number>::type;
+  return difference_type(y) - difference_type(x);
+} // end numeric_distance
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct counting_iterator_base
@@ -65,7 +115,7 @@ struct counting_iterator_base
     thrust::detail::eval_if<thrust::detail::is_numeric<Incrementable>::value,
                             thrust::detail::eval_if<::internal::is_integral<Incrementable>::value,
                                                     thrust::detail::numeric_difference<Incrementable>,
-                                                    thrust::detail::identity_<std::ptrdiff_t>>,
+                                                    thrust::detail::identity_<_THRUST_STD::ptrdiff_t>>,
                             thrust::iterator_difference<Incrementable>>>::type;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
