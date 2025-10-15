@@ -16,7 +16,7 @@ various approximations of true randomness.
 
 Any decision regarding what randomization technique to use must account for tradeoffs in statistical performance
 against computing performance. rocRAND implements several different software-based random number generators
-that attempt to balance performance and effective randomization. This topic discusses the various
+that attempt to balance performance and viable randomization. This topic discusses the various
 classes of random number generators and provides some background on the various generator types 
 supported by rocRAND.
 
@@ -45,20 +45,20 @@ settings, and the algorithm in use, so it's not truly random.
 Therefore, it's important to choose good values for these parameters so the algorithm can produce a sequence
 that provides a close approximation of true randomness.
 
-Two important advantages of SRNGs are that they are very fast, and they generate reproducible results.
+Two important advantages of SRNGs are that they are very fast and that they generate reproducible results.
 Many of the fundamental operations of SRNGs, such as XOR operations and shifts, are very fast to
-calculate. They are reproducible in that they generate the same results each time given the same
+calculate. They are reproducible in that they generate the same results each time, given the same
 initial seed, parameters, and algorithm. This is useful for analysis and testing.
 
-The downside of their lacking true randomness is that the generated sequences can include artifacts which fail
+The downside of their lack of true randomness is that the generated sequences can include artifacts that fail
 statistical pattern-detection tests. For instance, they might contain a series of alternating sequences
-which are all ascending or descending or fail to completely fill the potential output space in all
+that are all ascending or descending, or fail to completely fill the potential output space in all
 dimensions. These artifacts might pose problems if randomness is required for cryptographic security, for
-example, because new outputs cannot be predictable from earlier results. The statistical artifacts
-could reveal information about the parameters or algorithm. However, this might not matter if
-randomization is required for video game inputs or statistical modelling for research.
+example, because new outputs cannot be able to be predicted from earlier results. The statistical artifacts
+could reveal information about the parameters or the algorithm. However, this might not matter if
+randomization is required for video game inputs or statistical modeling for research.
 
-rocRAND provides a choice of several random number generators which show good performance and create
+rocRAND provides a choice of several random number generators that show good performance and create
 sequences that perform well on statistical tests for randomness. Here's a list and
 short description of the supported PRNGs.
 
