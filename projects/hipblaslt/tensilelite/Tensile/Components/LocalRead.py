@@ -291,6 +291,16 @@ class LocalReadMFMA(LocalRead):
                             if kernel["UseF32XEmulation"]:
                                 vectorWidthA  = kernel["VectorWidthA"]
 
+                                # Pack data 0-7 with layout:
+                                # Val+0: bf16 high (0,1)
+                                # Val+1: bf16 high (2,3)
+                                # Val+2: bf16 high (4,5)
+                                # Val+3: bf16 high (6,7)
+                                # Val+4: bf16 low  (0,1)
+                                # Val+5: bf16 low  (2,3)
+                                # Val+6: bf16 low  (4,5)
+                                # Val+7: bf16 low  (6,7)
+
                                 def pack4HiBits(tct, index):
                                     valOffset = baseValuiIdx + index
                                     v0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset))

@@ -117,8 +117,6 @@ class GlobalReadGprRecord:
   a: GprInfo                       = field(default_factory=GprInfo)
   b: GprInfo                       = field(default_factory=GprInfo)
 
-dbgCounter = 0
-
 ################################################################################
 # Assembly Kernel
 ################################################################################
