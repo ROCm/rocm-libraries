@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
@@ -45,8 +45,6 @@ option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
 option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
 set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
-set(MXDATAGENERATOR_GIT_TAG "31407efa7938fd70ea9b28e08a4d53e398415f8b" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
-set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
@@ -83,6 +81,7 @@ if(NOT fmt_FOUND)
             GIT_TAG 11.1.3
         )
         FetchContent_MakeAvailable(fmt)
+        set_property(DIRECTORY ${fmt_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find fmt")
     endif()
@@ -97,6 +96,7 @@ if(NOT spdlog_FOUND)
             GIT_TAG v1.x
         )
         FetchContent_MakeAvailable(spdlog)
+        set_property(DIRECTORY ${spdlog_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find spdlog")
     endif()
@@ -111,6 +111,7 @@ if(ROCROLLER_ENABLE_FETCH)
         GIT_TAG master
     )
     FetchContent_MakeAvailable(libdivide)
+    set_property(DIRECTORY ${libdivide_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find libdivide")
     endif()
@@ -123,7 +124,7 @@ if(msgpack-cxx_FOUND)
 else()
     find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
     message(STATUS "Found msgpack (<=5.x)")
-    set(msgpack_libs msgpackc)
+    set(msgpack_libs msgpackc-cxx)
 endif()
 
 find_package(hip REQUIRED)
@@ -181,21 +182,19 @@ if(ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
-    find_package(yaml-cpp 0.8.0)
-    if(NOT yaml-cpp_FOUND)
-        if(ROCROLLER_ENABLE_FETCH)
-            set(YAML_CPP_BUILD_TOOLS OFF)
-            set(YAML_BUILD_SHARED_LIBS OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            FetchContent_Declare(
-                yaml_cpp
-                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
-            )
-            FetchContent_MakeAvailable(yaml_cpp)
-        else()
-            message(FATAL_ERROR "Failed to find yaml-cpp")
-        endif()
+    if(ROCROLLER_ENABLE_FETCH)
+        set(YAML_CPP_BUILD_TOOLS OFF)
+        set(YAML_BUILD_SHARED_LIBS OFF)
+        option(YAML_CPP_INSTALL "" ON)
+        FetchContent_Declare(
+            yaml_cpp
+            GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+            GIT_TAG 0.8.0
+        )
+        FetchContent_MakeAvailable(yaml_cpp)
+        set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
+    else()
+        find_package(yaml-cpp 0.8.0 REQUIRED)
     endif()
     target_link_libraries(rocroller PUBLIC yaml-cpp::yaml-cpp)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)

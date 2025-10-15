@@ -61,6 +61,8 @@ public:
     BatchnormBwdPlan(BatchnormBwdPlan&&) = default;
     BatchnormBwdPlan& operator=(BatchnormBwdPlan&&) = default;
 
+    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
