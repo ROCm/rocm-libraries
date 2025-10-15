@@ -31,7 +31,7 @@
 
 #define PERF_ENABLE 1
 #if PERF_ENABLE
-  #include "perf_helper.hpp"
+#include "perf_helper.hpp"
 #endif
 
 struct TensorsConfig
@@ -118,15 +118,16 @@ protected:
 
         auto len     = tensorsConfig.aclens[2];
         auto RD_BLCK = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
-        const std::string MIOPEN_TYPE = miopen::GetDataType(data_type);
-        const std::string READ_TYPE   = (RD_BLCK == 1) ? MIOPEN_TYPE : MIOPEN_TYPE + std::to_string(RD_BLCK);
 
-        params = " -DMIOPEN_TYPE=" + MIOPEN_TYPE +
-                 " -DREAD_TYPE=" + READ_TYPE +
+        const std::string MIOPEN_TYPE = miopen::GetDataType(data_type);
+        const std::string READ_TYPE =
+            (RD_BLCK == 1) ? MIOPEN_TYPE : MIOPEN_TYPE + std::to_string(RD_BLCK);
+
+        params = " -DMIOPEN_TYPE=" + MIOPEN_TYPE + " -DREAD_TYPE=" + READ_TYPE +
                  " -DRD_BLCK=" + std::to_string(RD_BLCK);
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_2D_TENSOR_LITE";
 
-        total_work         = std::max(len/RD_BLCK, 1);
+        total_work         = std::max(len / RD_BLCK, 1);
         long local_threads = 256;
         long grp_sz        = (total_work + local_threads - 1) / local_threads;
         grp_sz             = std::min(max_num_wg, grp_sz);
@@ -153,7 +154,8 @@ protected:
         // Write data to device tensor
         tensC_dev = handle.Write(tensC.data);
 
-        std::string paramsOCL = params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
+        std::string paramsOCL =
+            params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
 
         std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
@@ -164,18 +166,18 @@ protected:
                          "Op2dTensorLite",
                          vld,
                          vgd,
-                         paramsOCL)(tensA_dev.get(), //a
-                                    tensorsConfig.acstrides[0], //a_nstride
-                                    tensB_dev.get(), //b
-                                    tensorsConfig.bstrides[0], //b_nstride
-                                    tensC_dev.get(), //c
-                                    tensorsConfig.acstrides[0], //c_nstride
+                         paramsOCL)(tensA_dev.get(),
+                                    tensorsConfig.acstrides[0],
+                                    tensB_dev.get(),
+                                    tensorsConfig.bstrides[0],
+                                    tensC_dev.get(),
+                                    tensorsConfig.acstrides[0],
                                     alpha0,
                                     alpha1,
                                     beta,
-                                    uint64_t(0), //Aoffset
-                                    uint64_t(0), //Boffset
-                                    uint64_t(0), //Coffset
+                                    uint64_t(0),
+                                    uint64_t(0),
+                                    uint64_t(0),
                                     total_work,
                                     total_work2,
                                     use_beta,
@@ -209,9 +211,10 @@ protected:
     void runHIP() // run HIP kernel
     {
         auto&& handle = get_handle();
-        tensC_dev = handle.Write(tensC.data);
+        tensC_dev     = handle.Write(tensC.data);
 
-        std::string paramsHIP = params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
+        std::string paramsHIP =
+            params + " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
 
         std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
@@ -222,18 +225,18 @@ protected:
                          "Op2dTensorLite",
                          vld,
                          vgd,
-                         paramsHIP)(tensA_dev.get(), /* a */
-                                    tensorsConfig.acstrides[0], /* a_nstride */
-                                    tensB_dev.get(), /* b */
-                                    tensorsConfig.bstrides[0], /* b_nstride */
-                                    tensC_dev.get(), /* c */
-                                    tensorsConfig.acstrides[0], /* c_nstride */
+                         paramsHIP)(tensA_dev.get(),
+                                    tensorsConfig.acstrides[0],
+                                    tensB_dev.get(),
+                                    tensorsConfig.bstrides[0],
+                                    tensC_dev.get(),
+                                    tensorsConfig.acstrides[0],
                                     alpha0,
                                     alpha1,
                                     beta,
-                                    uint64_t(0), /* Aoffset */
-                                    uint64_t(0), /* Boffset */
-                                    uint64_t(0), /* Coffset */
+                                    uint64_t(0),
+                                    uint64_t(0),
+                                    uint64_t(0),
                                     total_work,
                                     total_work2,
                                     use_beta,

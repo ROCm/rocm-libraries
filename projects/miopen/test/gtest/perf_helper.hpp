@@ -76,9 +76,12 @@ struct PerfHelper
             throw std::invalid_argument("Empty vector");
         double data_mean = perf_mean(data);
         double sq_sum    = std::inner_product(
-            data.begin(), data.end(), data.begin(), 0.0, std::plus<>(), [data_mean](double a, double b) {
-                return (a - data_mean) * (b - data_mean);
-            });
+            data.begin(),
+            data.end(),
+            data.begin(),
+            0.0,
+            std::plus<>(),
+            [data_mean](double a, double b) { return (a - data_mean) * (b - data_mean); });
         return std::sqrt(sq_sum / data.size());
     }
 
