@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <filesystem>
+#include <span>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -48,6 +49,7 @@
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
 #include "client/PreSwizzle.hpp"
+#include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
@@ -202,9 +204,11 @@ namespace rocRoller::Client::GEMMClient
             DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
         }
 
-        auto deviceA = make_shared_device(hostA);
-        auto deviceB = make_shared_device(hostB);
-        auto deviceC = make_shared_device(hostC);
+        size_t rotatingSize = benchmarkParams.rotatingBuffSize;
+
+        RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB, rotatingSize);
+        RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
 
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
@@ -270,9 +274,7 @@ namespace rocRoller::Client::GEMMClient
         auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
-        commandArgs.setArgument(aTag, ArgumentType::Value, (A*)deviceA.get());
-        commandArgs.setArgument(bTag, ArgumentType::Value, (B*)deviceB.get());
-        commandArgs.setArgument(cTag, ArgumentType::Value, (C*)deviceC.get());
+
         commandArgs.setArgument(dTag, ArgumentType::Value, (D*)deviceD.get());
 
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
@@ -355,12 +357,40 @@ namespace rocRoller::Client::GEMMClient
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
+
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanA.data()));
+
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanB.data()));
+
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanC.data()));
+
+                auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
 
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
+
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanA.data()));
+
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanB.data()));
+
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanC.data()));
+
+                auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
             HIP_SYNC(t_kernel);
@@ -1154,12 +1184,13 @@ int main(int argc, const char* argv[])
     };
 
     rocRoller::Client::BenchmarkParameters benchmarkParams{
-        .device    = 0,
-        .numWarmUp = 3,
-        .numOuter  = 5,
-        .numInner  = 2,
-        .check     = true,
-        .visualize = false,
+        .device           = 0,
+        .numWarmUp        = 3,
+        .numOuter         = 5,
+        .numInner         = 2,
+        .check            = true,
+        .rotatingBuffSize = 32'000'000ull,
+        .visualize        = false,
     };
 
     rocRoller::Client::GEMMClient::IOParameters io{
@@ -1353,6 +1384,8 @@ int main(int argc, const char* argv[])
                    runParams.numWGs,
                    "Number of workgroups to use with StreamK algorithm.  Defaults to number of WGs "
                    "present on local device.");
+    app.add_option(
+        "--rotating_buff_size", benchmarkParams.rotatingBuffSize, "Rotating Buffer Size.");
 
     //
     // Client params and shortcuts

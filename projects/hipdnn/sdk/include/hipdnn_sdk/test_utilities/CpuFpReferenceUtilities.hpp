@@ -162,58 +162,5 @@ static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimension
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
 }
 
-// Iterates the elements along each of the dimensions specified in dims and calls func for each unique index
-// Formally, we are iterating over a cartesian product of the ranges [0, dims[0]), [0, dims[1]), ..., [0, dims[n - 1]) for n dimensions
-template <typename F>
-static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
-{
-    if(dims.empty())
-    {
-        func({});
-        return;
-    }
-
-    int64_t totalElements = 1;
-    for(auto dim : dims)
-    {
-        totalElements *= dim;
-    }
-
-    std::vector<int64_t> indices(dims.size(), 0);
-
-    // Iterate over each unique position
-    for(int64_t iter = 0; iter < totalElements; ++iter)
-    {
-        func(indices);
-
-        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
-        {
-            auto dimIdx = static_cast<size_t>(dim);
-            indices[dimIdx]++;
-
-            if(indices[dimIdx] < dims[dimIdx])
-            {
-                break;
-            }
-
-            indices[dimIdx] = 0;
-        }
-    }
-}
-
-// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
-// skipping initial elements in the spatialIndices vector for convenience.
-static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
-                                                      int64_t channelIdx,
-                                                      const std::vector<int64_t>& spatialIndices,
-                                                      size_t spatialOffset = 0)
-{
-    std::vector<int64_t> fullIndices = {batchIdx, channelIdx};
-    fullIndices.insert(fullIndices.end(),
-                       spatialIndices.begin() + static_cast<std::ptrdiff_t>(spatialOffset),
-                       spatialIndices.end());
-    return fullIndices;
-}
-
 } // namespace test_utilities
 } // namespace hipdnn_sdk

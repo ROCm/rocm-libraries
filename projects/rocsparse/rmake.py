@@ -233,6 +233,9 @@ def config_cmd():
             fatal("Could not detect GPU as requested. Not continuing.")
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
+    if args.clients_only:
+        cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
+
     if args.cmake_dargs:
         for i in args.cmake_dargs:
           cmake_options.append( f"-D{i}" )
