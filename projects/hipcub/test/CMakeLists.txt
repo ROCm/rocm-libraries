@@ -41,6 +41,10 @@ function(add_relative_test test_name test_target)
             set(EXE_NAME "${test_target}")
         endif()
     endif()
+    if(BUILD_CODE_COVERAGE)
+        set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
+        set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
+    endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     if(BUILD_COMPUTE_SANITIZER)
         add_test(NAME "${test_name}" COMMAND "compute-sanitizer" "./${rel_path}")
@@ -84,8 +88,8 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS code_cov_tests
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipcub-coverage_*.profraw -o ./coverage-report/hipcub.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/libhipcub.so -instr-profile=./coverage-report/hipcub.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/libhipcub.so -instr-profile=./coverage-report/hipcub.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} -instr-profile=./coverage-report/hipcub.profdata
+    COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} -instr-profile=./coverage-report/hipcub.profdata -format=html -output-dir=coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
