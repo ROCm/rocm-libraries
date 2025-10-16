@@ -265,6 +265,12 @@ namespace rocRoller
                         auto        aIdx = graphIndices[a];
                         auto        bIdx = graphIndices[b];
 
+                        // This can happen with Exchange nodes
+                        // when scaleSkipPermlane=True, because
+                        // src and dst of each Exchange point
+                        // to the same macrotile (register allocation),
+                        // and therefore recorded twice in the
+                        // ControlFlowRWTracer.
                         if(aRec.control == bRec.control)
                             continue;
 

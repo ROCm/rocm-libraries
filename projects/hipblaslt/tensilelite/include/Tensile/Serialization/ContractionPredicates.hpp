@@ -103,7 +103,9 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ExperimentalMLP>(),
                      Base::template Pair<Predicates::Contraction::ExperimentalStreamK>(),
                      Base::template Pair<Predicates::Contraction::EqualityMatching>(),
+                     Base::template Pair<Predicates::Contraction::RangeMatching>(),
                      Base::template Pair<Predicates::Contraction::FreeSizeMatching>(),
+                     Base::template Pair<Predicates::Contraction::PredictionMatching>(),
                      Base::template Pair<Predicates::Contraction::UseGradientEqual>(),
                      Base::template Pair<Predicates::Contraction::ActivationCheck>(),
                      Base::template Pair<Predicates::Contraction::ActivationComputeTypeEqual>(),
@@ -406,8 +408,20 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::RangeMatching, IO>
+            : public AutoMappingTraits<Predicates::Contraction::RangeMatching, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::FreeSizeMatching, IO>
             : public AutoMappingTraits<Predicates::Contraction::FreeSizeMatching, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::PredictionMatching, IO>
+            : public AutoMappingTraits<Predicates::Contraction::PredictionMatching, IO>
         {
         };
 

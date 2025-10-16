@@ -251,7 +251,7 @@ Real precisions 2 bytes: &real_precisions_2b
   - *hpa_half_precision
   - *hpa_bf16_precision
 
-Real precisions swizzle support: &real_precisions_swizzleA_support
+Real precisions swizzleA support: &real_precisions_swizzleA_support
   - &fp16_precision_dst_fp32_swizzleA
     { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
   - &fp16_precision_dst_fp16_swizzleA
@@ -261,9 +261,21 @@ Real precisions swizzle support: &real_precisions_swizzleA_support
   - &f8n_precision_dst_fp16_swizzleA
     { a_type: f8_fnuz_r, b_type: f8_fnuz_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
 
+Real precisions swizzleB support: &real_precisions_swizzleB_support
+  - &fp16_precision_dst_fp32_swizzleB
+    { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_b: true}
+  - &fp16_precision_dst_fp16_swizzleB
+    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_b: true}
+  - &bf16_precision_dst_bf16_swizzleB
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_b: true}
+  - &f8n_precision_dst_fp16_swizzleB
+    { a_type: f8_fnuz_r, b_type: f8_fnuz_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_b: true}
+
 Real precisions f32_bf16_r: &real_precisions_intermeddiate_bf16
   - &hpa_half_fp16dst_bf16computeIn_precision
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_bf16_r, scale_type: f32_r}
+  - &single_precision_bf16computeIn_precision
+    { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_fast_bf16_r, scale_type: f32_r}
 
 Real precisions f32_f8_fnuz_r: &real_precisions_intermeddiate_f8_fnuz
   - &hpa_half_fp16dst_f8_fnuz_computeIn_precision
@@ -554,6 +566,8 @@ Arguments:
   - gradient: c_bool
   - norm_check_assert: c_bool
   - swizzle_a: c_bool
+  - swizzle_b: c_bool
+  - dump_matrix: c_bool
   - scaleABlockRowSize: c_uint32
   - scaleABlockColSize: c_uint32
   - scaleBBlockRowSize: c_uint32
@@ -662,6 +676,8 @@ Defaults:
   grouped_gemm: 0
   norm_check_assert: true
   swizzle_a: false
+  swizzle_b: false
+  dump_matrix: false
   scaleABlockRowSize: 32
   scaleABlockColSize: 1
   scaleBBlockRowSize: 1

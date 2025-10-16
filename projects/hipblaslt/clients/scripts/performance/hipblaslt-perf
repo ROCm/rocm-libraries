@@ -39,7 +39,7 @@ console = logging.StreamHandler()
 # Output from bench exe msg:
 matmul_paramList = ['function','transA','transB','grouped_gemm','batch_count','m','n','k','alpha','lda','stride_a','beta','ldb','stride_b',
                     'ldc','stride_c','ldd','stride_d','a_type','b_type','c_type','d_type','compute_type','scaleA','scaleB','scaleC',
-                    'scaleD','amaxD','activation_type','bias_vector','bias_type','rotating_buffer','gflops','GB/s','us']
+                    'scaleD','amaxD','swizzle_a','swizzle_b','activation_type','bias_vector','bias_type','rotating_buffer','gflops','GB/s','us']
 
 amax_paramList = ['function','m','n','type','dtype','us']
 
@@ -55,7 +55,7 @@ benchMsgOutParams = {'matmul' : matmul_paramList,
 #
 matmul_probKey = ['function','transA','transB','grouped_gemm','batch_count','m','n','k','alpha','lda','stride_a','beta','ldb','stride_b',
                     'ldc','stride_c','ldd','stride_d','a_type','b_type','c_type','d_type','compute_type','scaleA','scaleB','scaleC',
-                    'scaleD','amaxD','activation_type','bias_vector','bias_type','rotating_buffer']
+                    'scaleD','amaxD','swizzle_a','swizzle_b','activation_type','bias_vector','bias_type','rotating_buffer']
 
 amax_probKey = ['function','m','n','type','dtype']
 
@@ -277,7 +277,7 @@ def main():
     dir_of_this_script = pathlib.Path(os.path.dirname(os.path.realpath(__file__))).resolve()
     dir_of_this_repo = pathlib.Path(os.path.join(dir_of_this_script, '../../../')).resolve()
     probYaml_folder = pathlib.Path(os.path.join(dir_of_this_script, 'problems/')).resolve()
-    executable_folder = pathlib.Path(os.path.join(dir_of_this_repo, "build/release/clients/staging/")).resolve()
+    executable_folder = pathlib.Path(os.path.join(dir_of_this_repo, "build/release/clients/")).resolve()
     print(f'Info: path of this script = {dir_of_this_script}')
     print(f'Info: path of this repos = {dir_of_this_repo}')
     print(f'Info: path of bench yaml problems = {probYaml_folder}')
@@ -309,6 +309,11 @@ def main():
                         type=str,
                         action='append')
 
+    parser.add_argument('--targetArch',
+                        type=str,
+                        help='specify the target arch, mainly used when --suite all for PTS. If None, will use rocm_agent_enumerator to query',
+                        default=None)
+
     parser.add_argument('--tag',
                         type=str,
                         help='subfolder under workspace, (optional, useful for comparing two commits)',
@@ -330,6 +335,8 @@ def main():
                         default=False)
 
     arguments = parser.parse_args()
+
+    SuiteProblemGenerator.target_arch_static = arguments.targetArch
 
     if arguments.run_sh is not None:
         run_sh_bench(arguments)

@@ -1911,6 +1911,37 @@ namespace TensileLite
                 }
             };
 
+            struct RangeMatching
+                : public Predicate_CRTP<RangeMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                RangeMatching() = default;
+
+                static std::string Type()
+                {
+                    return "RangeMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << rv << ": " << this->type() << std::endl;
+                    return rv;
+                }
+            };
+
+
             struct FreeSizeMatching
                 : public Predicate_CRTP<FreeSizeMatching, ContractionProblemGemm>
             {
@@ -1940,6 +1971,37 @@ namespace TensileLite
                     return rv;
                 }
             };
+
+            struct PredictionMatching
+                : public Predicate_CRTP<PredictionMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                PredictionMatching() = default;
+
+                static std::string Type()
+                {
+                    return "PredictionMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << rv << ": " << this->type() << std::endl;
+                    return rv;
+                }
+            };
+
 
             struct UseGradientEqual
                 : public Predicate_CRTP<UseGradientEqual, ContractionProblemGemm>

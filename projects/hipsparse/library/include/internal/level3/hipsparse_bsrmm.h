@@ -112,8 +112,8 @@ extern "C" {
  *              \f$\max{(1, k)}\f$ where \p k=blockDim*kb otherwise.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb, 
- *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb,
+ *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
  *              \p B, \p beta or \p C is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -122,93 +122,7 @@ extern "C" {
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  *
  *  \par Example
- *  \code{.c}
- *      // hipSPARSE handle
- *      hipsparseHandle_t handle;
- *      hipsparseCreate(&handle);
- *
- *      //     1 2 0 3 0 0
- *      // A = 0 4 5 0 0 0
- *      //     0 0 0 7 8 0
- *      //     0 0 1 2 4 1
- *
- *      int blockDim = 2;
- *      int mb   = 2;
- *      int kb   = 3;
- *      int nnzb = 4;
- *      hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
- *
- *      int hbsrRowPtr[2 + 1]   = {0, 2, 4};
- *      int hbsrColInd[4]       = {0, 1, 1, 2};
- *      float hbsrVal[4 * 2 * 2] = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
- *
- *      // Set dimension n of B
- *      int n = 3;
- *      int m = mb * blockDim;
- *      int k = kb * blockDim;
- *
- *      // Allocate and generate dense matrix B (k x n)
- *      float hB[6 * 3] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 
- *                      11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f};
- *
- *      int* dbsrRowPtr = NULL;
- *      int* dbsrColInd = NULL;
- *      float* dbsrVal = NULL;
- *      hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
- *      hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
- *      hipMalloc((void**)&dbsrVal, sizeof(float) * nnzb * blockDim * blockDim);
- *      hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice);
- *      hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice);
- *      hipMemcpy(dbsrVal, hbsrVal, sizeof(float) * nnzb * blockDim * blockDim, hipMemcpyHostToDevice);
- *
- *      // Copy B to the device
- *      float* dB;
- *      hipMalloc((void**)&dB, sizeof(float) * k * n);
- *      hipMemcpy(dB, hB, sizeof(float) * k * n, hipMemcpyHostToDevice);
- *
- *      // alpha and beta
- *      float alpha = 1.0f;
- *      float beta  = 0.0f;
- *
- *      // Allocate memory for the resulting matrix C
- *      float* dC;
- *      hipMalloc((void**)&dC, sizeof(float) * m * n);
- *
- *      // Matrix descriptor
- *      hipsparseMatDescr_t descr;
- *      hipsparseCreateMatDescr(&descr);
- *
- *      // Perform the matrix multiplication
- *      hipsparseSbsrmm(handle,
- *                      dir,
- *                      HIPSPARSE_OPERATION_NON_TRANSPOSE,
- *                      HIPSPARSE_OPERATION_NON_TRANSPOSE,
- *                      mb,
- *                      n,
- *                      kb,
- *                      nnzb,
- *                      &alpha,
- *                      descr,
- *                      dbsrVal,
- *                      dbsrRowPtr,
- *                      dbsrColInd,
- *                      blockDim,
- *                      dB,
- *                      k,
- *                      &beta,
- *                      dC,
- *                      m);
- *
- *      // Copy results to host
- *      float hC[6 * 3];
- *      hipMemcpy(hC, dC, sizeof(float) * m * n, hipMemcpyDeviceToHost);
- *
- *      hipFree(dbsrRowPtr);
- *      hipFree(dbsrColInd);
- *      hipFree(dbsrVal);
- *      hipFree(dB);
- *      hipFree(dC);
- *  \endcode
+ *  \snippet example_hipsparse_bsrmm.cpp doc example
  */
 /**@{*/
 HIPSPARSE_EXPORT

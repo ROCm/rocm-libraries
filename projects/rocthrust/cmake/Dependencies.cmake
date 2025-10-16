@@ -306,7 +306,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       UPDATE_DISCONNECTED TRUE
     )
     find_package(TBB REQUIRED CONFIG PATHS ${TBB_ROOT})
-  
+
   endif()
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
@@ -319,13 +319,13 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     list(APPEND static_depends PACKAGE SQLite3)
     set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()
-    if(DEFINED ENV{SQLITE_3_49_2_SRC_URL})
-      set(SQLITE_3_49_2_SRC_URL_INIT $ENV{SQLITE_3_49_2_SRC_URL})
+    if(DEFINED ENV{SQLITE_3_50_2_SRC_URL})
+      set(SQLITE_3_50_2_SRC_URL_INIT $ENV{SQLITE_3_50_2_SRC_URL})
     else()
-      set(SQLITE_3_49_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3490200.zip)
+      set(SQLITE_3_50_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3500200.zip)
     endif()
-    set(SQLITE_3_49_2_SRC_URL ${SQLITE_3_49_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
-    set(SQLITE_SRC_3_43_2_SHA3_256 fad307cde789046256b4960734d7fec6b31db7f5dc8525474484885faf82866c CACHE STRING "SHA3-256 hash of SQLite source code")
+    set(SQLITE_3_50_2_SRC_URL ${SQLITE_3_50_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+    set(SQLITE_SRC_3_50_2_SHA3_256 75c118e727ee6a9a3d2c0e7c577500b0c16a848d109027f087b915b671f61f8a CACHE STRING "SHA3-256 hash of SQLite source code")
 
     # embed SQLite
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
@@ -335,8 +335,8 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
     message("Downloading SQLite.")
     FetchContent_Declare(sqlite_local
-      URL ${SQLITE_3_49_2_SRC_URL}
-      URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
+      URL ${SQLITE_3_50_2_SRC_URL}
+      URL_HASH SHA3_256=${SQLITE_SRC_3_50_2_SHA3_256}
     )
     FetchContent_MakeAvailable(sqlite_local)
 

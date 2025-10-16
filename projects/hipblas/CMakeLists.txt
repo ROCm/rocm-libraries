@@ -42,14 +42,7 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-if (NOT WIN32)
-    if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
-      set( CMAKE_Fortran_COMPILER  "gfortran" )
-    endif()
-    set( fortran_language "Fortran" )
-endif( )
-
-project( hipblas LANGUAGES CXX ${fortran_language} )
+project( hipblas LANGUAGES CXX )
 
 if (NOT python)
     set(python "python3") # default for linux
@@ -135,16 +128,19 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
   endif()
   message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
+
+  if(BUILD_FORTRAN_CLIENTS)
+    set(GFORTRAN_RPM "libgfortran4")
+    set(GFORTRAN_DEB "libgfortran4")
+    if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
+      if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
+        set(GFORTRAN_RPM "libgfortran")
+      endif()
+    elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
+      set(GFORTRAN_DEB "libgfortran5")
+    elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
+      set(GFORTRAN_RPM "gfortran")
     endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
   endif()
 
   set( BUILD_CLIENTS ON )
@@ -154,26 +150,35 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     rocm_package_setup_client_component(
       tests
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_BENCHMARKS)
     rocm_package_setup_client_component(
       benchmarks
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_SAMPLES)
-    rocm_package_setup_client_component(
+    rocm_package_setup_client_component( 
       samples
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
+  if(BUILD_FORTRAN_CLIENTS)
+    if(BUILD_CLIENTS_TESTS)
+      rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_BENCHMARKS)
+      rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_SAMPLES)
+      rocm_package_add_rpm_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_DEB}")
+    endif()
+  endif()
+
   add_subdirectory( clients )
 endif( )
 

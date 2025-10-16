@@ -89,7 +89,7 @@ def makeValidWMMA():
 def makeValidMFMA():
     validMFMA = {}
     validMFMA["H"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
-    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16]]
+    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16], [16, 16, 32, 1], [32, 32, 16, 1]]
     validMFMA["B"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
     validMFMA["4xi8"] = [
         [32, 32, 4, 2],
@@ -654,6 +654,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
     "StreamKXCCMapping": [0] + list(range(2, 9)),
+    # Enables using a Tree-reduction for the fixup step of StreamK algorithm
+    # 0: use linear reduction
+    # 1: use tree reduction
+    "StreamKFixupTreeReduction": [0, 1],
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code
@@ -815,6 +819,7 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
+    "UseCustomMainLoopSchedule" : [0, 1]
 }
 
 newMIValidParameters = {

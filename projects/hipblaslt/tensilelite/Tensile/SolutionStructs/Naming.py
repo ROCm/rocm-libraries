@@ -105,7 +105,6 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
-
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
   if ignoreInternalArgs:
@@ -132,6 +131,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")
+
+  if state["UseCustomMainLoopSchedule"]:
+    components.append('CMS')
 
   components.append('SN')
   for key in sorted(state.keys()):
@@ -176,4 +178,3 @@ def getSolutionNameMin(solution, splitGSU: bool):
 
 def getSolutionNameFull(state, splitGSU: bool):
   return _getName(state, getRequiredParametersFull(), splitGSU, False)
-

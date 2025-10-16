@@ -54,7 +54,7 @@ elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
 endif()
 
 # Set HIP flags
-set(CMAKE_HIP_STANDARD 14)
+set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_EXTENSIONS OFF)
 
@@ -71,9 +71,14 @@ option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
 
+# Check and test cuda compiler, defines 'CMAKE_HIP_COMPILER'
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+# Check and test cuda compiler, defines 'CMAKE_CUDA_COMPILER'
+check_language(CUDA)
 
 # Set the ROCM install directory.
 if(WIN32)
@@ -116,33 +121,42 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 # If hip is included prior to setting that then it defaults to building only for the current architecture
 include(ROCmCMakeBuildToolsDependency)
 
-# Setup GPU targets for rocm platform
+# Detect compiler through use of result from 'check_language(...)'
 if(USE_HIPCXX)
   enable_language(HIP)
-else()
-  # Setup GPU targets for rocm platform
-  if(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
-    if(NOT DEFINED AMDGPU_TARGETS)
-      set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
-    else()
-      set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
-    endif()
-    set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+  # Detected HIP through archaic match by checking passed CXX compiler. This can
+  # be removed once we bump minimum CMake version to 3.21 or higher.
 
-    if(GPU_TARGETS STREQUAL "all")
-      if(BUILD_ADDRESS_SANITIZER)
-        # ASAN builds require xnack
-        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
-        )
-      else()
-        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
-        )
-      endif()
-      set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
-    endif()
+  # Setup GPU targets for rocm platform
+  message(STATUS "CMake could not derive language via 'check_language'. Falling back to legacy compiler checks.")
+  if(NOT DEFINED AMDGPU_TARGETS)
+    set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
+  else()
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
   endif()
+  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+
+  if(GPU_TARGETS STREQUAL "all")
+    if(BUILD_ADDRESS_SANITIZER)
+      # ASAN builds require xnack
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
+      )
+    else()
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+      )
+    endif()
+    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  endif()
+elseif(CMAKE_CUDA_COMPILER)
+  # We haven't detected HIP, so surely we must be on a CUDA-compatible compiler.
+  # Contrary to HIP, 'enable_language(CUDA)' is supported from CMake 3.8 and higher.
+  enable_language(CUDA)
+
+  # Hack: let CMake think that our 'hip' files are actually CUDA files.
+  set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hip;cu)
 endif()
 
 # Compressed offload binaries are currently not working with the SPIR-V target
@@ -170,7 +184,8 @@ endif()
 include(CheckCXXCompilerFlag)
 
 if(BUILD_OFFLOAD_COMPRESS)
-  check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
   else()
@@ -191,6 +206,20 @@ endif()
 
 # Tests
 if(BUILD_TEST)
+  if(USE_SYSTEM_LIB)
+    # On ROCm hipCUB requires rocPRIM
+    if(HIP_COMPILER STREQUAL "clang")
+      find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/rocprim")
+      if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+        message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+      endif()
+    endif()
+    find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
+    if (NOT ${hipcub_VERSION} VERSION_EQUAL ${VERSION_STRING})
+      message(WARNING "The installed hipcub version, ${hipcub_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+    endif()
+  endif()
+
   enable_testing()
   rocm_package_setup_client_component(tests)
   add_subdirectory(test)

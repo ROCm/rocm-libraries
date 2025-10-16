@@ -13,7 +13,8 @@ works on HIP and ROCm software.
 Software requirements include:
 
 * CMake (3.10.2 or later)
-* AMD [ROCm](https://rocm.docs.amd.com) Software (1.8.0 or later)
+* AMD [ROCm](https://rocm.docs.amd.com)
+  * The version of ROCm needs to correspond to the rocThrust branch you're using.
   * Including the [HipCC](https://github.com/ROCm/HIP) compiler, which must be set
     as your C++ compiler for ROCm
 * [rocPRIM](https://github.com/ROCm/rocPRIM) library
@@ -77,6 +78,7 @@ mkdir build; cd build
 #   RNG_SEED_COUNT               - 0 by default, controls non-repeatable random dataset count
 #   PRNG_SEEDS                   - 1 by default, reproducible seeds to generate random data
 #   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
+#   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
@@ -103,7 +105,7 @@ rocThrust can (optionally) automatically fetch a number of dependencies for you 
 Alternatively, it can seach for an existing installation on your system.
 The following cmake build options control how dependencies are located.
 
-- `FORCE_DEPENDENCIES_DOWNLOAD` (default: `OFF`) - when set to `ON`, non-ROCm dependencies (Google Test, Google Benchmark) will always be downloaded, even if they are already installed ony your system. When set to `OFF`, rocThrust first searches for existing installations of the dependencies on your system, and only downloads them if they cannot be found.
+- `EXTERNAL_DEPS_FORCE_DOWNLOAD` (default: `OFF`) - when set to `ON`, non-ROCm dependencies (Google Test, Google Benchmark) will always be downloaded, even if they are already installed ony your system. When set to `OFF`, rocThrust first searches for existing installations of the dependencies on your system, and only downloads them if they cannot be found.
 
 - `ROCPRIM_FETCH_METHOD` (default: `PACKAGE`) - controls the way that the rocPRIM dependency is fetched. This option must be set to one of:
   - `PACKAGE` - searches for an existing installation of the dependency. If it is not found, rocThrust will fall back to using the `DOWNLOAD` setting (below).
@@ -115,7 +117,7 @@ To specify an option, add it to your camke command, prefixed with the `-D` switc
 
 ### HIP on Windows
 
-We've added initial support for HIP on Windows. 
+We've added initial support for HIP on Windows.
 To install, first clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
 Then, use the provided `rmake.py` Python script:
 

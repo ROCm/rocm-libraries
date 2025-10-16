@@ -72,7 +72,7 @@ if (NOT WIN32)
   if(TARGET hipsparse AND NOT USE_CUDA)
     # Compile Fortran examples only if built directly with package
     # else the Fortran module file is not generated
-    
+
     add_hipsparse_example(example_fortran_auxiliary.f90)
     add_hipsparse_example(example_fortran_csrsv2.f90)
     add_hipsparse_example(example_fortran_bsric02.f90)
@@ -84,6 +84,16 @@ if (NOT WIN32)
     add_hipsparse_example(example_fortran_roti.f90)
     add_hipsparse_example(example_fortran_spmv.f90)
     add_hipsparse_example(example_fortran_bsrmm.f90)
-    
+
   endif()
+endif()
+
+if(NOT USE_CUDA)
+  # Build documentation examples
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+
+  foreach(file ${DOCUMENTATION_EXAMPLES})
+      message(STATUS "Found .cpp file: ${file}")
+      add_hipsparse_example(${file})
+  endforeach()
 endif()

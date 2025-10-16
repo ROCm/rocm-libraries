@@ -39,7 +39,7 @@ jobs:
     steps:
     - name: Generate a token
       id: generate-token
-      uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+      uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
       with:
         app-id: ${{ secrets.APP_ID }}
         private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -75,7 +75,7 @@ jobs:
         fi
 
     - name: Checkout code
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         ref: refs/pull/${{ github.event.pull_request.number }}/merge
         sparse-checkout: .github
@@ -95,8 +95,7 @@ jobs:
         python .github/scripts/pr_detect_changed_subtrees.py \
           --repo "${{ github.repository }}" \
           --pr "${{ github.event.pull_request.number }}" \
-          --config ".github/repos-config.json" \
-          --require-auto-push
+          --config ".github/repos-config.json"
 
     - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress

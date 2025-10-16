@@ -28,6 +28,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
 
 struct GEMMProblem
@@ -79,6 +80,11 @@ struct GEMMProblem
 
     bool swizzleScale  = false;
     bool prefetchScale = false;
+    // Swizzle tile size
+    int swizzleM = 64;
+    int swizzleN = 64;
+    int swizzleK = 4;
+    int swizzleB = 1;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
@@ -87,9 +93,9 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles  = false;
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    bool loopOverTiles = false;
+
+    rocRoller::StreamKConfig streamK{rocRoller::StreamKMode::None};
 
     bool splitStoreTileIntoWaveBlocks = false;
 

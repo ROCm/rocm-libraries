@@ -40,27 +40,27 @@ extern "C" {
 *
 *  For example, given the BSR matrix using block dimension 2:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
-*       1 & 2 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  The resulting CSR matrix row pointer, column indices, and values arrays are:
@@ -112,90 +112,7 @@ extern "C" {
 *              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t csr_descr;
-*    hipsparseCreateMatDescr(&csr_descr);
-*
-*    hipsparseMatDescr_t bsr_descr;
-*    hipsparseCreateMatDescr(&bsr_descr);
-*
-*    // Sparse matrix in BSR format
-*    //     1 2 | 0 3 | 0 0 
-*    //     0 4 | 5 0 | 0 1
-*    //     ---------------
-*    // A = 6 0 | 0 7 | 8 0 
-*    //     0 0 | 3 0 | 2 2
-*    //     ---------------
-*    //     1 0 | 0 0 | 4 3 
-*    //     7 2 | 0 0 | 1 4
-*    int hbsrRowPtr[4] = {0, 3, 6, 8};
-*    int hbsrColInd[8] = {0, 1, 2, 0, 1, 2, 0, 2};
-*    float hbsrVal[32]  = {1.0f, 2.0f, 0.0f, 4.0f, 
-*                            0.0f, 3.0f, 5.0f, 0.0f, 
-*                            0.0f, 0.0f, 0.0f, 1.0f,
-*                            6.0f, 0.0f, 0.0f, 0.0f, 
-*                            0.0f, 7.0f, 3.0f, 0.0f,
-*                            8.0f, 0.0f, 2.0f, 2.0f,
-*                            1.0f, 0.0f, 7.0f, 2.0f,
-*                            4.0f, 3.0f, 1.0f, 4.0f}; 
-*
-*    int m        = 6;
-*    int n        = 6;
-*    int nnz      = 32;
-*    int mb       = 3;
-*    int nb       = 3;
-*    int nnzb     = 8;
-*    int blockDim = 2;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*    int* dbsrRowPtr = nullptr;
-*    int* dbsrColInd = nullptr;
-*    float* dbsrVal = nullptr;
-*    hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
-*    hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
-*    hipMalloc((void**)&dbsrVal, sizeof(float) * blockDim * blockDim * nnzb);
-*
-*    hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrVal, hbsrVal, sizeof(float) * blockDim * blockDim * nnzb, hipMemcpyHostToDevice);
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipsparseSbsr2csr(handle, 
-*                      dir, 
-*                      mb, 
-*                      nb, 
-*                      bsr_descr, 
-*                      dbsrVal, 
-*                      dbsrRowPtr, 
-*                      dbsrColInd, 
-*                      blockDim, 
-*                      csr_descr, 
-*                      dcsrVal, 
-*                      dcsrRowPtr, 
-*                      dcsrColInd);
-*
-*    hipFree(dbsrRowPtr);
-*    hipFree(dbsrColInd);
-*    hipFree(dbsrVal);
-*    
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*
-*    hipsparseDestroyMatDescr(csr_descr);
-*    hipsparseDestroyMatDescr(bsr_descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_bsr2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT
