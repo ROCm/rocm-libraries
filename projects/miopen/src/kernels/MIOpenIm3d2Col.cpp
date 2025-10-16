@@ -84,7 +84,8 @@ extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
         out_d_size * out_h_size * out_w_size * wei_d_size * wei_h_size * wei_w_size * im_c_size;
 
     unsigned int gtid = blockIdx.x * blockDim.x + threadIdx.x;
-    for(unsigned tid = gtid; tid < col_size; tid += blockDim.x)
+    unsigned int global_size = blockDim.x * gridDim.x;
+    for(unsigned tid = gtid; tid < col_size; tid += global_size)
     {
         // "col" matrix row and colume id
         unsigned col_i = tid / (out_d_size * out_h_size * out_w_size);
