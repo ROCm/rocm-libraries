@@ -44,7 +44,7 @@
 #  define THRUST_CPP_DIALECT _CCCL_STD_VER
 
 // Define THRUST_COMPILER_DEPRECATION macro:
-#  if _CCCL_COMPILER(MSVC)
+#  if _CCCL_COMPILER(MSVC) && !_CCCL_COMPILER(NVRTC)
 #    define THRUST_COMP_DEPR_IMPL(msg) _CCCL_PRAGMA(message(__FILE__ ":" _CCCL_TO_STRING(__LINE__) ": warning: " #msg))
 #  else // clang / gcc:
 #    define THRUST_COMP_DEPR_IMPL(msg) _CCCL_PRAGMA(GCC warning #msg)
@@ -125,7 +125,7 @@ THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019(19.20 / 16.0 / 14.20), MSVC 2017);
 #  endif // !THRUST_COMPILER(MSVC)
 
 // Define THRUST_COMPILER_DEPRECATION macro:
-#  if THRUST_COMPILER(MSVC)
+#  if THRUST_COMPILER(MSVC) && !THRUST_COMPILER(NVRTC)
 #    define THRUST_COMP_DEPR_IMPL(msg) \
       THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " #msg))
 #  else // clang / gcc:
