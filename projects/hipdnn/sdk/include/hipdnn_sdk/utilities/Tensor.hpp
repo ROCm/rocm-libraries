@@ -54,15 +54,20 @@ public:
     virtual const std::vector<int64_t>& strides() const = 0;
 
     virtual void* rawHostData() = 0;
+    virtual void* rawDeviceData() = 0;
+    virtual void markDeviceModified() = 0;
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
+    virtual size_t elementSize() const = 0;
+    virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
     int64_t getIndex(Args... indices) const
@@ -118,6 +123,21 @@ public:
         return memory().hostData();
     }
 
+    void* rawDeviceData() override
+    {
+        return memory().deviceData();
+    }
+
+    void markDeviceModified() override
+    {
+        memory().markDeviceModified();
+    }
+
+    void* hostDataOffsetFromIndex(int64_t index) override
+    {
+        return memory().hostData() + index;
+    }
+
     const void* hostDataOffsetFromIndex(int64_t index) const override
     {
         return memory().hostData() + index;
@@ -170,9 +190,13 @@ public:
         data[index] = value;
     }
 
+    size_t elementSize() const override
+    {
+        return sizeof(T);
+    }
+
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
-    virtual void fillWithData(const T* data, size_t maxElementsCopied) = 0;
 
 protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,
@@ -271,11 +295,12 @@ public:
         return _memory;
     }
 
-    void fillWithData(const T* data, size_t maxElementsCopied) override
+    size_t fillWithData(const void* data, size_t maxBytesCopied) override
     {
-        size_t elementsCopied = std::min(maxElementsCopied, _memory.count());
+        size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
         _memory.markHostModified();
-        std::memcpy(_memory.hostData(), data, elementsCopied * sizeof(T));
+        std::memcpy(_memory.hostData(), data, bytesCopied);
+        return bytesCopied;
     }
 
     void fillWithValue(T value) override

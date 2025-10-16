@@ -8,8 +8,10 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/Visitor.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
 #include <type_traits>
 #include <variant>
@@ -37,8 +39,7 @@ struct DatatypeFromTensor<Tensor<T>>
     using Type = T;
 };
 
-template <class T>
-void fillTensorFromFile(Tensor<T>& tensor, std::filesystem::path const& path)
+inline void fillTensorFromFile(ITensor& tensor, std::filesystem::path const& path)
 {
 
     std::ifstream fileInputStream(path, std::ios::binary);
@@ -50,7 +51,7 @@ void fillTensorFromFile(Tensor<T>& tensor, std::filesystem::path const& path)
     auto vec = std::vector<unsigned char>(std::istreambuf_iterator<char>(fileInputStream),
                                           std::istreambuf_iterator<char>{});
 
-    tensor.fillWithData(reinterpret_cast<T*>(vec.data()), vec.size() / sizeof(T));
+    tensor.fillWithData(vec.data(), vec.size());
 }
 }
 
@@ -62,17 +63,17 @@ template <class T>
 using DataTypeFromTensor =
     typename detail::DatatypeFromTensor<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
 
-inline TensorVariant
+inline std::unique_ptr<ITensor>
     tensorFromFileAndAttributes(std::filesystem::path const& filepath,
                                 hipdnn_sdk::data_objects::TensorAttributes const& attributes)
 {
     std::vector<int64_t> dims(attributes.dims()->begin(), attributes.dims()->end());
     std::vector<int64_t> strides(attributes.strides()->begin(), attributes.strides()->end());
 
-    auto createTensor = [&](auto dataType) -> TensorVariant {
+    auto createTensor = [&](auto dataType) {
         using DataType = std::remove_const_t<decltype(dataType)>;
 
-        auto tensor = std::make_unique<Tensor<DataType>>(dims, strides);
+        auto tensor = std::unique_ptr<ITensor>(new Tensor<DataType>(dims, strides));
 
         detail::fillTensorFromFile(*tensor, filepath);
 
@@ -86,7 +87,7 @@ inline TensorVariant
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    TensorVariantMap tensorMap;
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> tensorMap;
     std::vector<int64_t> outputTensorUids;
 
     const data_objects::Graph& graph() const
@@ -104,24 +105,83 @@ struct GraphAndTensorMap
 
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
-        for(auto& [uid, tensorVariant] : tensorMap)
+        for(auto& [uid, tensor] : tensorMap)
         {
-            hipdnnPluginDeviceBuffer_t deviceBuffer;
-            deviceBuffer.uid = uid;
-            std::visit([&](auto& tensor) { deviceBuffer.ptr = tensor->memory().deviceData(); },
-                       tensorVariant);
+            hipdnnPluginDeviceBuffer_t deviceBuffer{uid, tensor->rawDeviceData()};
             deviceBuffers.push_back(deviceBuffer);
         }
         return deviceBuffers;
     }
 
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> extractAndClearOutputTensorData()
+    {
+        std::unordered_map<int64_t, std::unique_ptr<ITensor>> outputTensorMap;
+
+        auto tensorAttributeMap = graphWrapper().getTensorMap();
+        for(int64_t uid : outputTensorUids)
+        {
+            auto dataType = tensorAttributeMap[uid]->data_type();
+            auto& outputTensorPtr = tensorMap[uid];
+
+            auto zeroedTensorPtr = std::visit(
+                [&](auto dataType) {
+                    using DataType = decltype(dataType);
+                    auto tensorPtr = std::unique_ptr<ITensor>(
+                        new Tensor<DataType>(outputTensorPtr->dims(), outputTensorPtr->strides()));
+                    tensorPtr->fillTensorWithValue(0.f);
+                    return tensorPtr;
+                },
+                test_utilities::datatypeToNativeVariant(dataType));
+
+            std::swap(zeroedTensorPtr, outputTensorPtr);
+
+            outputTensorMap[uid] = std::move(zeroedTensorPtr);
+        }
+
+        return outputTensorMap;
+    }
+
+    bool validateTensors(std::unordered_map<int64_t, std::unique_ptr<ITensor>>& referenceTensors,
+                         float absTolerance,
+                         float relTolerance)
+    {
+        auto tensorAttributeMap = graphWrapper().getTensorMap();
+
+        for(auto& mapPair : referenceTensors)
+        {
+            auto uid = mapPair.first;
+            auto& referenceTensorPtr = mapPair.second;
+
+            auto dataType = tensorAttributeMap[uid]->data_type();
+            auto validatorFunc = Visitor{
+                [&](auto dataType) {
+                    using DataType = decltype(dataType);
+
+                    auto validator = test_utilities::CpuFpReferenceValidation<DataType>{
+                        static_cast<DataType>(absTolerance), static_cast<DataType>(relTolerance)};
+                    return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
+                },
+                [&](int) {
+                    throw std::runtime_error("validateTensors: Cannot validate integer tensors");
+                    return false;
+                }};
+            bool passedValidation
+                = std::visit(validatorFunc, test_utilities::datatypeToNativeVariant(dataType));
+            if(!passedValidation)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     std::unordered_map<int64_t, void*> hostBufferMap()
     {
         std::unordered_map<int64_t, void*> bufferMap;
-        for(auto& [uid, tensorVariant] : tensorMap)
+        for(auto& [uid, tensor] : tensorMap)
         {
-            bufferMap[uid] = std::visit(
-                [](auto& tensor) -> void* { return tensor->memory().hostData(); }, tensorVariant);
+            bufferMap[uid] = tensor->rawHostData();
         }
 
         return bufferMap;
@@ -173,7 +233,7 @@ inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path
 
     auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
-    std::unordered_map<int64_t, TensorVariant> tensorMap;
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> tensorMap;
     for(auto attributes : *graph->tensors())
     {
         auto tensorPath

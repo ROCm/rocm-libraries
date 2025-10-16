@@ -27,6 +27,7 @@ class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<
 {
 protected:
     GraphAndTensorMap _graphAndTensors;
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
@@ -34,56 +35,19 @@ protected:
         auto const& path = GetParam();
 
         _graphAndTensors = loadGraphAndTensors(path);
+        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 };
 
 TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
 {
-    auto const& graph = _graphAndTensors.graph();
-    ASSERT_EQ(graph.nodes()->size(), 1);
-
-    ASSERT_EQ(graph.nodes()->begin()->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
-
-    auto const& batchnormInferenceNode
-        = *graph.nodes()->begin()->attributes_as_BatchnormInferenceAttributes();
-
-    int64_t yIndex = batchnormInferenceNode.y_tensor_uid();
-    TensorVariant& yTensorVariant = _graphAndTensors.tensorMap.at(yIndex);
-
-    auto yTensorReferenceVariant = std::visit(
-        [](auto& yTensor) -> TensorVariant {
-            using DataType = DataTypeFromTensor<decltype(*yTensor)>;
-            auto ret = std::make_unique<hipdnn_sdk::utilities::Tensor<DataType>>(
-                yTensor->dims(), yTensor->strides());
-            ret->fillWithValue(static_cast<DataType>(0.f));
-            std::swap(ret, yTensor);
-
-            return ret;
-        },
-        yTensorVariant);
-
     auto tensorMap = _graphAndTensors.hostBufferMap();
     EXPECT_EQ(tensorMap.size(), 6);
 
     CpuReferenceGraphExecutor().execute(
         _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
 
-    auto validateResults = hipdnn_sdk::utilities::Visitor{
-        [](std::unique_ptr<hipdnn_sdk::utilities::Tensor<int>>&) { FAIL(); },
-        [&](auto& yTensor) {
-            using DataType = DataTypeFromTensor<decltype(*yTensor)>;
-
-            CpuFpReferenceValidation<DataType> cpuRefValidation(static_cast<DataType>(0.02f),
-                                                                static_cast<DataType>(0.02f));
-            yTensor->memory().markDeviceModified();
-            auto& yTensorReference
-                = std::get<std::unique_ptr<hipdnn_sdk::utilities::Tensor<DataType>>>(
-                    yTensorReferenceVariant);
-            EXPECT_TRUE(cpuRefValidation.allClose(yTensorReference->memory(), yTensor->memory()));
-        }};
-
-    std::visit(validateResults, yTensorVariant);
+    EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, 0.02f, 0.02f));
 }
 
 INSTANTIATE_TEST_SUITE_P(

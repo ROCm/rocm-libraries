@@ -49,6 +49,8 @@ TEST(TestFillTensorFromFile, Valid)
     ASSERT_NO_THROW(detail::fillTensorFromFile(tensor, filename));
 
     ASSERT_EQ(tensor.memory().count(), values.size());
+
+    // TODO refactor to use upcoming iterators
     for(size_t i = 0; i < values.size(); i++)
     {
         EXPECT_EQ(values[i], tensor.memory().hostData()[i]);
@@ -76,18 +78,36 @@ TEST(TestLoadGraphAndTensors, Valid)
     expectedAttributes[4] = {1, 3, 1, 1}; // bias
     expectedAttributes[5] = {2, 3, 4, 5}; // y
 
-    for(const auto& [uid, value] : res.tensorMap)
+    for(const auto& [uid, tensorPtr] : res.tensorMap)
     {
-        auto& tensor = std::get<std::unique_ptr<Tensor<float>>>(value);
-        EXPECT_EQ(expectedAttributes[uid], tensor->dims());
+        EXPECT_EQ(expectedAttributes[uid], tensorPtr->dims());
     }
 
     auto deviceBuffers = res.deviceBuffers();
     EXPECT_EQ(deviceBuffers.size(), res.tensorMap.size());
     for(auto db : deviceBuffers)
     {
-        auto& tensor = std::get<std::unique_ptr<Tensor<float>>>(res.tensorMap.at(db.uid));
-        EXPECT_EQ(tensor->memory().deviceData(), db.ptr);
+        auto& tensorPtr = res.tensorMap.at(db.uid);
+        EXPECT_EQ(tensorPtr->rawDeviceData(), db.ptr);
     }
+}
+
+TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
+{
+    std::filesystem::path filepath = utilities::getCurrentExecutableDirectory()
+                                     / "../lib/reference_data/BatchnormForwardInference.json";
+
+    auto res = loadGraphAndTensors(filepath);
+
+    auto outputMap = res.extractAndClearOutputTensorData();
+
+    ASSERT_EQ(outputMap.size(), res.outputTensorUids.size());
+
+    for(auto id : res.outputTensorUids)
+    {
+        EXPECT_EQ(outputMap.count(id), 1);
+    }
+
+    // TODO: Expand tests once iterator is complete
 }
 }

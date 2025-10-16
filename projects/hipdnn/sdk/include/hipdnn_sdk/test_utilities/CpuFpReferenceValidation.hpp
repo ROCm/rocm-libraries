@@ -33,7 +33,7 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(const ITensor& reference, const ITensor& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())

@@ -86,10 +86,11 @@ public:
         throwNotSupported();
     }
 
-    void fillWithData([[maybe_unused]] const T* data,
-                      [[maybe_unused]] size_t maxElementsCopied) override
+    size_t fillWithData([[maybe_unused]] const void* data,
+                        [[maybe_unused]] size_t maxBytesCopied) override
     {
         throwNotSupported();
+        return 0;
     }
 
 private:
