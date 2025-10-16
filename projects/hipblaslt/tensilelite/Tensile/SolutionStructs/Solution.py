@@ -1000,6 +1000,7 @@ class Solution(collections.abc.Mapping):
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
+      state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
 
     computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
@@ -1447,6 +1448,7 @@ class Solution(collections.abc.Mapping):
         "StreamK": not state["StreamK"],
         "StreamKAtomic": not state["StreamKAtomic"],
         "StreamKXCCMapping": not state["StreamKXCCMapping"],
+        "StreamKFixupTreeReduction": not state["StreamKFixupTreeReduction"],
         "DebugStreamK": not state["DebugStreamK"],
         "WorkGroupReduction": not state["WorkGroupReduction"],
         "ConvertAfterDS": not state["ConvertAfterDS"],
@@ -3300,6 +3302,7 @@ class Solution(collections.abc.Mapping):
     hasCMS,_ = hasCustomSchedule(state)
     state["UseCustomMainLoopSchedule"] = hasCMS
 
+    state["InternalSupportParams"]["UseSFC"] = (len(state["SpaceFillingAlgo"]) > 0)
 
   ########################################
   @ staticmethod

@@ -42,7 +42,7 @@ if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
   set(CMAKE_MATRICES_DIR ${PROJECT_BINARY_DIR}/matrices CACHE STRING "Matrices directory.")
   file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
 
-  if(NOT TARGET rocsparse)
+  if(NOT TARGET rocsparse AND NOT BUILD_CLIENTS_ONLY)
     set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/../deps/convert.cpp CACHE STRING "Convert tool mtx2csr.")
     include(${CMAKE_SOURCE_DIR}/../cmake/ClientMatrices.cmake)
   else()
@@ -402,6 +402,9 @@ target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprec
 
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(rocsparse-test PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+endif()
 
 # Add OpenMP if available
 apply_omp_settings(rocsparse-test)

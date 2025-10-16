@@ -132,8 +132,6 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
 | ROCROLLER_ENABLE_CPPCHECK                 | OFF     | Enable cppcheck                                           |
 | ROCROLLER_MRISAS_DIR                      | `<build>/GPUArchitectureGenerator/amd-mrisa` | MRISA XML directory |
 | ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF    | ON      | Use pregenerated GPU architecture YAML files              |
-| MXDATAGENERATOR_GIT_TAG                   | see root CMakeLists.txt | mxDataGenerator tag/commit hash           |
-| MXDATAGENERATOR_GIT_URL                   | https://github.com/ROCm/mxDataGenerator.git | mxDataGenerator repo URL |
 
 ## Running the Tests (from a build directory)
 

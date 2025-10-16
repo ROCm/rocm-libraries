@@ -24,14 +24,13 @@ public:
     ShallowTensor(void* memory,
                   const std::vector<int64_t>& dims,
                   const std::vector<int64_t>& strides)
-        : _memory(memory, TensorBase<T>::calculateItemCount(dims))
-        , _dims(dims)
+        : _dims(dims)
         , _strides(strides)
+        , _elementCount(TensorBase<T>::calculateItemCount(dims))
+        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
-        if(!TensorBase<T>::isPacked(dims, strides))
-        {
-            throw std::invalid_argument("Tensor must be packed");
-        }
+        _memory = ShallowHostOnlyMigratableMemory<T>(
+            memory, TensorBase<T>::calculateElementSpace(dims, strides));
     }
 
     ShallowTensor(const ShallowTensor&) = delete;
@@ -48,6 +47,21 @@ public:
     const std::vector<int64_t>& strides() const override
     {
         return _strides;
+    }
+
+    bool isPacked() const override
+    {
+        return _packed;
+    }
+
+    size_t elementCount() const override
+    {
+        return _elementCount;
+    }
+
+    size_t elementSpace() const override
+    {
+        return _memory.count();
     }
 
     const IMigratableMemory<T>& memory() const override
@@ -82,6 +96,8 @@ private:
     ShallowHostOnlyMigratableMemory<T> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
+    size_t _elementCount;
+    bool _packed;
 };
 
 }
