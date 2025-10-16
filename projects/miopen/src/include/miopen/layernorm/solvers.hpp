@@ -47,6 +47,7 @@ struct LayernormForward final : NormalizationSolver
                              const miopen::layernorm::ProblemDescription& problem) const override;
 };
 
+#if MIOPEN_USE_COMPOSABLEKERNEL
 struct Layernorm2DCKForward final : NormalizationSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<Layernorm2DCKForward>(); }
@@ -66,6 +67,23 @@ struct Layernorm4DCKForward final : NormalizationSolver
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::layernorm::ProblemDescription& problem) const override;
 };
+#else
+struct Layernorm2DCKForward final : NormalizationSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<Layernorm2DCKForward>(); }
+
+    bool IsApplicable(const ExecutionContext&, const miopen::layernorm::ProblemDescription&) const override { return false; }
+    ConvSolution GetSolution(const ExecutionContext&, const miopen::layernorm::ProblemDescription&) const override { return {}; }
+};
+
+struct Layernorm4DCKForward final : NormalizationSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<Layernorm4DCKForward>(); }
+
+    bool IsApplicable(const ExecutionContext&, const miopen::layernorm::ProblemDescription&) const override { return false; }
+    ConvSolution GetSolution(const ExecutionContext&, const miopen::layernorm::ProblemDescription&) const override { return {}; }
+};
+#endif
 
 struct LayernormBackward final : NormalizationSolver
 {

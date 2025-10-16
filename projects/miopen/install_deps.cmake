@@ -126,3 +126,6 @@ cget(ignore pcre)
 # Install dependencies
 cget(install ${CGET_EXTRA_OPTIONS} -U ROCm/rocm-recipes@d7827046100ac0ed8167e16c53999baa126e760d)
 cget(install ${CGET_EXTRA_OPTIONS} -U -f requirements.txt)
+
+# Install composable_kernel with Ninja generator
+cget(install -U qiangpan2/composable_kernel@develop -DCMAKE_BUILD_TYPE=Release -DGPU_TARGETS="gfx1100;gfx1201" -DCK_TILE_USE_WMMA=ON -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja)

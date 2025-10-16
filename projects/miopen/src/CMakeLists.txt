@@ -349,6 +349,13 @@ set( MIOpen_Source
     api/tuning.cpp
 )
 
+if(MIOPEN_USE_CKTILE_COMPOSABLEKERNEL)
+ list(APPEND MIOpen_Source
+        solver/conv/conv_hip_implicit_gemm_3d_channel_last_fwd_wmmaops.cpp
+
+    ) 
+endif()
+
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_heuristics.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
@@ -896,6 +903,14 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+    endif()
+endif()
+
+if(MIOPEN_USE_CKTILE_COMPOSABLEKERNEL)
+    target_compile_definitions(MIOpen PRIVATE MIOPEN_USE_CKTILE_COMPOSABLEKERNEL=1)
+    if(composable_kernel_ck_tile_FOUND)
+        set(MIOPEN_CK_TILE_LINK_FLAGS ${composable_kernel_ck_tile_INCLUDE_DIRS})
+        target_include_directories(MIOpen PRIVATE ${MIOPEN_CK_TILE_LINK_FLAGS})
     endif()
 endif()
 

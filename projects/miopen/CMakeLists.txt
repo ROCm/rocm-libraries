@@ -269,6 +269,7 @@ endif()
 
 # Depend on Composable Kernels
 option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for various operations" On)
+option(MIOPEN_USE_CKTILE_COMPOSABLEKERNEL "Enable MIOpen to use CK tile composable kernels" OFF)
 if(MIOPEN_BACKEND_OPENCL)
     set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
 endif()
@@ -354,6 +355,9 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         else()
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
+    endif()
+    if(MIOPEN_USE_CKTILE_COMPOSABLEKERNEL)
+        find_package(composable_kernel 1.0.0 COMPONENTS ck_tile)
     endif()
     if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)

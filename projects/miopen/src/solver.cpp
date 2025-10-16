@@ -632,6 +632,12 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvHipImplicitGemm3DGroupBwdXdlops{},
                        miopenConvolutionAlgoImplicitGEMM);
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_CKTILE_COMPOSABLEKERNEL
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::ConvHipImplicitGemm3DChannelLastFwdWmmaops{},
+                       miopenConvolutionAlgoImplicitGEMM);
+#endif
     ++id; // removed batchnorm::BnCKFwdInference
     ++id; // removed batchnorm::BnCKBwdBackward
     ++id; // removed batchnorm::BnCKFwdTraining

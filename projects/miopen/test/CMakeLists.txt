@@ -580,7 +580,7 @@ function(add_custom_test NAME)
         BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
         GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
-        SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
+        SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_CKTILE_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
         HIP_ENABLED HIP_DISABLED HIP_NOGPU_ENABLED HIP_NOGPU_DISABLED
     )
     set(oneValueArgs)
@@ -611,6 +611,9 @@ function(add_custom_test NAME)
 
     bool_not_f(${PARSE_SKIP_UNLESS_COMPOSABLEKERNEL} is_composablekernel_check)
     bool_or_f(${is_composablekernel_check} ${MIOPEN_TEST_COMPOSABLEKERNEL} is_composablekernel_check)
+    
+    bool_not_f(${PARSE_SKIP_UNLESS_CKTILE_COMPOSABLEKERNEL} is_cktile_composablekernel_check)
+    bool_or_f(${is_cktile_composablekernel_check} ${MIOPEN_USE_CKTILE_COMPOSABLEKERNEL} is_cktile_composablekernel_check)
 
     set(HIP_TEST_DEFAULT TRUE)
     option_support_check(${PARSE_HIP_ENABLED} ${PARSE_HIP_DISABLED} ${HIP_TEST_DEFAULT} is_hip_check)
@@ -849,6 +852,12 @@ add_custom_test(conv_transposed_bwd_find_2
 
 add_custom_test(conv_transposed_wrw_find_2
     COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
+)
+
+# Custom test for ConvHipImplicitGemm3DChannelLastFwdWmmaops solver
+add_custom_test(smoke_solver_ConvHipImplicitGemm3DChannelLastFwdWmmaops GFX110X_ENABLED SKIP_UNLESS_CKTILE_COMPOSABLEKERNEL HALF_ENABLED
+    ENVIRONMENT MIOPEN_FIND_ENFORCE=SEARCH_DB_UPDATE MIOPEN_DEBUG_TUNING_ITERATIONS_MAX=5 MIOPEN_FIND_MODE=normal MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvHipImplicitGemm3DChannelLastFwdWmmaops
+    COMMAND $<TARGET_FILE:test_conv3d_channel_last_wmmaops> ${MIOPEN_TEST_FLOAT_ARG} --verbose
 )
 
 #Dont install the tests if we are building each test separately

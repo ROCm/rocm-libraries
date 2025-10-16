@@ -168,12 +168,15 @@ int main(int argn, char** args)
         ProblemConfig problem;
 
         ProblemConfig::VisitAll(problem, [&](auto& value, auto) {
-            if constexpr(std::is_convertible_v<decltype(value), int>)
+            using ValueType = std::decay_t<decltype(value)>;
+            if constexpr(std::is_same_v<ValueType, int64_t>)
+                value = sqlite3_column_int64(stmt.get(), col++);
+            else if constexpr(std::is_same_v<ValueType, int>)
                 value = sqlite3_column_int(stmt.get(), col++);
-            else if constexpr(std::is_convertible_v<decltype(value), std::string>)
+            else if constexpr(std::is_same_v<ValueType, std::string>)
                 value = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), col++));
             else
-                static_assert(false, "unsupported type");
+                static_assert(sizeof(ValueType) == 0, "unsupported type");
         });
 
         if(sqlite3_column_count(stmt.get()) != col)
