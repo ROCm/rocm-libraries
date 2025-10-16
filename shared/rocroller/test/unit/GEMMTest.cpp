@@ -1015,7 +1015,7 @@ namespace GEMMDriverTest
     };
 
     class GEMMTestStreamKGPU
-        : public BaseGEMMContextFixture<std::tuple<bool, /* enable TwoTileStreamK */
+        : public BaseGEMMContextFixture<std::tuple<StreamKMode, /* enable TwoTileStreamK */
                                                    bool, /* ldsA */
                                                    bool, /* ldsB */
                                                    bool /* ldsD */>>
@@ -1216,7 +1216,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTest, GPU_BasicGEMMStreamKTwoTileDPFirst)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
     {
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -1273,23 +1273,7 @@ namespace GEMMDriverTest
         std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
-        // for(auto twoTile : {true, false})
-        // {
-        //     gemm.streamKTwoTile = twoTile;
-        //     for(auto loadLDSA : {false, true})
-        //     {
-        //         gemm.loadLDSA = loadLDSA;
-        //         for(auto loadLDSB : {false, true})
-        //         {
-        //             gemm.loadLDSB = loadLDSB;
-        //             for(auto storeLDSD : {false, true})
-        //             {
-        //                 gemm.storeLDSD = storeLDSD;
         basicGEMM<Half>(gemm);
-        //             }
-        //         }
-        //     }
-        // }
     }
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
@@ -1318,26 +1302,19 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        // gemm.streamK = StreamKMode::Standard;
         gemm.k = gemm.macK * 8;
 
         std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
         basicGEMM<Half>(gemm);
-
-        // for(auto twoTile : {false, true})
-        // {
-        //     gemm.streamKTwoTile = twoTile;
-        //     basicGEMM<Half>(gemm);
-        // }
     }
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMFP16StreamK_MultipleFixups test";
         }
 
         GEMMProblem gemm;
@@ -1358,7 +1335,7 @@ namespace GEMMDriverTest
 
         auto numTilesM = 1;
         auto numTilesN = 2;
-        auto numTilesK = 199;
+        auto numTilesK = 297;
 
         gemm.m = numTilesM * gemm.macM;
         gemm.n = numTilesN * gemm.macN;
@@ -1369,18 +1346,10 @@ namespace GEMMDriverTest
         // K dimension into multiple tiles
         ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
 
-        gemm.streamK = true;
-
         std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
         basicGEMM<Half>(gemm);
-
-        // for(auto twoTile : {false, true})
-        // {
-        //     gemm.streamKTwoTile = twoTile;
-        //     basicGEMM<Half>(gemm);
-        // }
     }
 
     TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)

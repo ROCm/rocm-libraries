@@ -52,23 +52,23 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     auto numWGs     = example.getTotalWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
 
-    std::vector<GraphTransformPtr> transforms;
-    transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-    transforms.push_back(std::make_shared<OrderMemory>(false));
-    transforms.push_back(std::make_shared<UpdateParameters>(params));
-    transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-    transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-    transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-    transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-    transforms.push_back(std::make_shared<Simplify>());
-    transforms.push_back(std::make_shared<FuseExpressions>());
-
     SECTION("Standard StreamK Multiple Fixups")
     {
         example.setStreamK(StreamKMode::Standard);
 
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
+
+        std::vector<GraphTransformPtr> transforms;
+        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+        transforms.push_back(std::make_shared<OrderMemory>(false));
+        transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<FuseExpressions>());
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
@@ -94,6 +94,17 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
+        std::vector<GraphTransformPtr> transforms;
+        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+        transforms.push_back(std::make_shared<OrderMemory>(false));
+        transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<FuseExpressions>());
+
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
@@ -117,6 +128,17 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
 
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
+
+        std::vector<GraphTransformPtr> transforms;
+        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+        transforms.push_back(std::make_shared<OrderMemory>(false));
+        transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<FuseExpressions>());
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);

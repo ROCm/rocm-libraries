@@ -201,7 +201,7 @@ namespace rocRollerTest
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
             void setUnroll(unsigned int unrollX, unsigned int unrollY);
-            void setStreamK(bool addStreamK);
+            void setStreamK(rocRoller::StreamKMode streamKMode);
             void setPrefetch(bool prefetch,
                              int  prefetchInFlight,
                              int  prefetchLDSFactor,
