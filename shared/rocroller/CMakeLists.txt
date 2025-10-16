@@ -245,8 +245,6 @@ configure_file(
 )
 target_sources(rocroller PRIVATE "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp")
 
-find_package(LAPACK REQUIRED)
-
 add_subdirectory(lib/source)
 add_subdirectory(lib/include)
 add_subdirectory(GPUArchitectureGenerator)

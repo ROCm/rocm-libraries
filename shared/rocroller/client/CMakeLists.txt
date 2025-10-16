@@ -3,18 +3,15 @@
 
 find_package(BLAS REQUIRED)
 
-find_package(CLI11 QUIET)
-if(NOT CLI11_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            CLI11
-            GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
-            GIT_TAG main
-        )
-        FetchContent_MakeAvailable(CLI11)
-    else()
-        message(FATAL_ERROR "Failed to find CLI11")
-    endif()
+if(ROCROLLER_ENABLE_FETCH)
+    FetchContent_Declare(
+        CLI11
+        GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+        GIT_TAG main
+    )
+    FetchContent_MakeAvailable(CLI11)
+else()
+    find_package(CLI11 REQUIRED)
 endif()
 
 add_executable(rocroller-gemm
@@ -41,7 +38,7 @@ target_link_libraries(rocroller-gemm
         roc::rocroller-interface
         rocroller::common-test-utilities
         CLI11::CLI11
-        ${LAPACK_LIBRARIES}
+        ${BLAS_LIBRARIES}
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -59,7 +56,7 @@ target_link_libraries(rocroller-codegen-stress
         roc::rocroller-interface
         rocroller::common-test-utilities
         CLI11::CLI11
-        ${LAPACK_LIBRARIES}
+        ${BLAS_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
     target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})

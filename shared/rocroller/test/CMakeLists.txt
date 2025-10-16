@@ -1,17 +1,17 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(GTest QUIET)
-if(NOT GTest_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            googletest
-            URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
-        )
-        FetchContent_MakeAvailable(googletest)
-    else()
-        message(FATAL_ERROR "Failed to find googletest")
-    endif()
+find_package(BLAS REQUIRED)
+find_package(OpenMP REQUIRED)
+
+if(ROCROLLER_ENABLE_FETCH)
+   FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
+    )
+    FetchContent_MakeAvailable(googletest)
+else()
+    find_package(GTest REQUIRED)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
@@ -96,9 +96,6 @@ if(ROCROLLER_ENABLE_ASAN)
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
 endif()
-
-find_package(LAPACK REQUIRED)
-find_package(OpenMP REQUIRED)
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     target_compile_definitions(rocroller-tests PRIVATE ROCROLLER_TESTS_USE_YAML_CPP)
