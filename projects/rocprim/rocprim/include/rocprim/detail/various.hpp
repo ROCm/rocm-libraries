@@ -561,27 +561,25 @@ private:
     }
 };
 
-template<class T,
-         class WordType
-         = std::conditional_t<sizeof(T) <= 1, char, std::conditional_t<sizeof(T) <= 2, short, int>>>
-struct alignas(T) type_hidden
+template<class T>
+struct type_wrapper
 {
 private:
-    WordType data[ceiling_div(sizeof(T), sizeof(WordType))];
+    T data;
 
 public:
     ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
     static auto create(T& item)
     {
-        type_hidden ret;
-        __builtin_memcpy(&ret.data, &item, sizeof(T));
+        type_wrapper ret;
+        ret.data = item;
         return ret;
     }
 
     ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
     T unpack()
     {
-        return *std::launder(reinterpret_cast<T*>(&data));
+        return data;
     }
 };
 

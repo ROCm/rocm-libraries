@@ -1086,7 +1086,7 @@ struct onesweep_iteration_helper
     static constexpr unsigned int NKey   = N<Key>::value;
     static constexpr unsigned int NValue = N<Value>::value;
 
-    using v_pack = type_hidden<Value>;
+    using v_pack = type_wrapper<Value>;
 
     union data_storage
     {
