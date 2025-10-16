@@ -8,6 +8,7 @@
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 
 namespace hipdnn_plugin
 {
@@ -29,6 +30,7 @@ public:
         std::set<hipdnn_sdk::data_objects::NodeAttributes> supportedAttributes) const
         = 0;
     virtual const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
+    virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
     virtual const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const
         = 0;
@@ -105,6 +107,32 @@ public:
         return *nodes->Get(index);
     }
 
+    const INodeWrapper& getNodeWrapper(uint32_t index) const override
+    {
+        throwIfNotValid();
+
+        if(_nodeWrappers.empty())
+        {
+            auto nodes = _shallowGraph->nodes();
+            if(nodes == nullptr)
+            {
+                throw std::out_of_range("No nodes in graph");
+            }
+
+            _nodeWrappers.reserve(nodes->size());
+            for(const auto node : *nodes)
+            {
+                _nodeWrappers.push_back(std::make_unique<NodeWrapper>(node));
+            }
+        }
+
+        if(index >= _nodeWrappers.size())
+        {
+            throw std::out_of_range("Index out of range for graph nodes");
+        }
+        return *_nodeWrappers[index];
+    }
+
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
         getTensorMap() const override
     {
@@ -144,6 +172,8 @@ private:
     //lazy init state;
     mutable std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>
         _tensorMap;
+
+    mutable std::vector<std::unique_ptr<INodeWrapper>> _nodeWrappers;
 };
 
 }

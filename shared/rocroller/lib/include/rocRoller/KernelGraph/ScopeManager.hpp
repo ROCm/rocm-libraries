@@ -31,6 +31,7 @@
 #include <vector>
 
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 
 namespace rocRoller::KernelGraph
 {
