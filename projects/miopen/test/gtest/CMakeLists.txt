@@ -11,6 +11,7 @@ if(MIOPEN_USE_ROCBLAS)
 endif()
 
 set(SOURCES
+    main.cpp
     gtest_common.cpp
     log.cpp
     platform.cpp
