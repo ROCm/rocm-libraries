@@ -74,16 +74,16 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                 const TI* __restrict__ y,
                                 const TI* __restrict__ dy,
                                 TO* __restrict__ dx,
-                                const float diff_scale,
-                                const float gamma,
-                                const float beta,
-                                const float alpha,
-                                const TI* __restrict__ bn_scale,
-                                const TI* __restrict__ bn_bias,
-                                TO* __restrict__ dscale,
-                                TO* __restrict__ dbias,
-                                const TI* __restrict__ saved_mean,
-                                const TI* __restrict__ saved_inv_variance,
+                                const TI diff_scale,
+                                const TI gamma,
+                                const TI beta,
+                                const TI alpha,
+                                const float* __restrict__ bn_scale,
+                                const float* __restrict__ bn_bias,
+                                float* __restrict__ dscale,
+                                float* __restrict__ dbias,
+                                const float* __restrict__ saved_mean,
+                                const float* __restrict__ saved_inv_variance,
                                 const float INHW)
 {
     using TI4 = TYPE4<TI>;
@@ -111,10 +111,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
 
     if(lid == 0)
     {
-        lscale = CVT_FLOAT2ACCUM(bn_scale[gid]);
-        lbias  = CVT_FLOAT2ACCUM(bn_bias[gid]);
-        lmean  = CVT_FLOAT2ACCUM(saved_mean[gid]);
-        lvar   = CVT_FLOAT2ACCUM(saved_inv_variance[gid]);
+        lscale = CVT_FP32_2ACCUM(bn_scale[gid]);
+        lbias  = CVT_FP32_2ACCUM(bn_bias[gid]);
+        lmean  = CVT_FP32_2ACCUM(saved_mean[gid]);
+        lvar   = CVT_FP32_2ACCUM(saved_inv_variance[gid]);
     }
     __syncthreads();
     mean         = lmean;
@@ -137,10 +137,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         act_dy,
                                         bn_y,
                                         act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
                 dy_values[n] = bn_dy[0];
                 db += dy_values[n];
                 batch_values[n] = xhat;
@@ -159,10 +159,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         act_dy,
                                         bn_y,
                                         act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
                 dy_values[NLOOPM] = bn_dy[0];
             }
             else
@@ -203,7 +203,7 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                 index     = nidx * CHANNELS * H * W + chwid;
                 tmp1      = BATCH_SIZE * H * W * dy_values[n] - db;
                 tmp2      = -batch_values[n] * ds;
-                tmp3      = p_scale * inv_variance * INHW;
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
             nidx  = SNHW + lidihw;
@@ -212,14 +212,14 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
             {
                 tmp1      = BATCH_SIZE * H * W * dy_values[NLOOPM] - db;
                 tmp2      = -batch_values[NLOOPM] * ds;
-                tmp3      = p_scale * inv_variance * INHW;
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
         if(lid == 0)
         {
-            dbias[gid]  = CVT_ACCUM2FLOAT(db);
-            dscale[gid] = CVT_ACCUM2FLOAT(ds);
+            dbias[gid]  = CVT_ACCUM2FP32(db);
+            dscale[gid] = CVT_ACCUM2FP32(ds);
         }
     }
     else if constexpr(VARIANT == 1)
@@ -256,10 +256,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     p_act_dy,
                                     p_bn_y,
                                     p_act_y,
-                                    CVT_FP32_2ACCUM(diff_scale),
-                                    CVT_FP32_2ACCUM(gamma),
-                                    CVT_FP32_2ACCUM(beta),
-                                    CVT_FP32_2ACCUM(alpha));
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
 
             db += p_bn_dy[0];
             ds += xhat4.x * p_bn_dy[0];
@@ -270,10 +270,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     p_act_dy,
                                     p_bn_y,
                                     p_act_y,
-                                    CVT_FP32_2ACCUM(diff_scale),
-                                    CVT_FP32_2ACCUM(gamma),
-                                    CVT_FP32_2ACCUM(beta),
-                                    CVT_FP32_2ACCUM(alpha));
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
 
             db += p_bn_dy[0];
             ds += xhat4.y * p_bn_dy[0];
@@ -284,10 +284,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     p_act_dy,
                                     p_bn_y,
                                     p_act_y,
-                                    CVT_FP32_2ACCUM(diff_scale),
-                                    CVT_FP32_2ACCUM(gamma),
-                                    CVT_FP32_2ACCUM(beta),
-                                    CVT_FP32_2ACCUM(alpha));
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
 
             db += p_bn_dy[0];
             ds += xhat4.z * p_bn_dy[0];
@@ -298,10 +298,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     p_act_dy,
                                     p_bn_y,
                                     p_act_y,
-                                    CVT_FP32_2ACCUM(diff_scale),
-                                    CVT_FP32_2ACCUM(gamma),
-                                    CVT_FP32_2ACCUM(beta),
-                                    CVT_FP32_2ACCUM(alpha));
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
 
             db += p_bn_dy[0];
             ds += xhat4.w * p_bn_dy[0];
@@ -337,10 +337,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         p_act_dy,
                                         p_bn_y,
                                         p_act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
 
                 db += p_bn_dy[0];
                 ds += xhat4.x * p_bn_dy[0];
@@ -351,10 +351,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         p_act_dy,
                                         p_bn_y,
                                         p_act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
 
                 db += p_bn_dy[0];
                 ds += xhat4.y * p_bn_dy[0];
@@ -365,10 +365,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         p_act_dy,
                                         p_bn_y,
                                         p_act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
 
                 db += p_bn_dy[0];
                 ds += xhat4.z * p_bn_dy[0];
@@ -379,10 +379,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         p_act_dy,
                                         p_bn_y,
                                         p_act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
 
                 db += p_bn_dy[0];
                 ds += xhat4.w * p_bn_dy[0];
@@ -405,12 +405,12 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
         }
 
         p_scale = lscale;
-        tmp3    = p_scale * inv_variance * INHW;
+        tmp3    = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
         __syncthreads();
         if(lid == 0)
         {
-            dbias[gid]  = CVT_ACCUM2FLOAT(db);
-            dscale[gid] = CVT_ACCUM2FLOAT(ds);
+            dbias[gid]  = CVT_ACCUM2FP32(db);
+            dscale[gid] = CVT_ACCUM2FP32(ds);
         }
 
         FLOAT_ACCUM values[MAX_READ];
@@ -431,10 +431,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         act_dy,
                                         bn_y,
                                         act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
                 tmp1      = BATCH_SIZE * H * W * bn_dy[0] - db;
                 tmp2      = -xhat * ds;
                 values[j] = tmp3 * (tmp2 + tmp1);
@@ -470,10 +470,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                             act_dy,
                                             bn_y,
                                             act_y,
-                                            CVT_FP32_2ACCUM(diff_scale),
-                                            CVT_FP32_2ACCUM(gamma),
-                                            CVT_FP32_2ACCUM(beta),
-                                            CVT_FP32_2ACCUM(alpha));
+                                            CVT_FLOAT2ACCUM(diff_scale),
+                                            CVT_FLOAT2ACCUM(gamma),
+                                            CVT_FLOAT2ACCUM(beta),
+                                            CVT_FLOAT2ACCUM(alpha));
 
                     tmp1      = BATCH_SIZE * H * W * bn_dy[0] - db;
                     tmp2      = -xhat * ds;
@@ -515,10 +515,10 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         act_dy,
                                         bn_y,
                                         act_y,
-                                        CVT_FP32_2ACCUM(diff_scale),
-                                        CVT_FP32_2ACCUM(gamma),
-                                        CVT_FP32_2ACCUM(beta),
-                                        CVT_FP32_2ACCUM(alpha));
+                                        CVT_FLOAT2ACCUM(diff_scale),
+                                        CVT_FLOAT2ACCUM(gamma),
+                                        CVT_FLOAT2ACCUM(beta),
+                                        CVT_FLOAT2ACCUM(alpha));
 
                 if constexpr(BATCH_SIZE < MAX_N)
                 {
@@ -579,22 +579,22 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                             act_dy,
                                             bn_y,
                                             act_y,
-                                            CVT_FP32_2ACCUM(diff_scale),
-                                            CVT_FP32_2ACCUM(gamma),
-                                            CVT_FP32_2ACCUM(beta),
-                                            CVT_FP32_2ACCUM(alpha));
+                                            CVT_FLOAT2ACCUM(diff_scale),
+                                            CVT_FLOAT2ACCUM(gamma),
+                                            CVT_FLOAT2ACCUM(beta),
+                                            CVT_FLOAT2ACCUM(alpha));
 
                     tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
                     tmp2 = -xhat * ds;
                 }
-                tmp3      = p_scale * inv_variance * INHW;
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
         if(lid == 0)
         {
-            dbias[gid]  = db;
-            dscale[gid] = ds;
+            dbias[gid]  = CVT_ACCUM2FP32(db);
+            dscale[gid] = CVT_ACCUM2FP32(ds);
         }
     }
 }
@@ -604,16 +604,16 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
                          const INPUT_TYPE* __restrict__ y,
                          const INPUT_TYPE* __restrict__ dy,
                          OUTPUT_TYPE* __restrict__ dx,
-                         const float diff_scale,
-                         const float gamma,
-                         const float beta,
-                         const float alpha,
-                         const INPUT_TYPE* __restrict__ bn_scale,
-                         const INPUT_TYPE* __restrict__ bn_bias,
-                         OUTPUT_TYPE* __restrict__ dscale,
-                         OUTPUT_TYPE* __restrict__ dbias,
-                         const INPUT_TYPE* __restrict__ saved_mean,
-                         const INPUT_TYPE* __restrict__ saved_inv_variance,
+                         const INPUT_TYPE diff_scale,
+                         const INPUT_TYPE gamma,
+                         const INPUT_TYPE beta,
+                         const INPUT_TYPE alpha,
+                         const float* __restrict__ bn_scale,
+                         const float* __restrict__ bn_bias,
+                         float* __restrict__ dscale,
+                         float* __restrict__ dbias,
+                         const float* __restrict__ saved_mean,
+                         const float* __restrict__ saved_inv_variance,
                          const float INHW)
 {
     activbwdspatial<INPUT_TYPE, OUTPUT_TYPE>(x,

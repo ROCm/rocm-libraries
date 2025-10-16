@@ -177,10 +177,6 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"INPUT_TYPE", input_dtype},
             {"OUTPUT_TYPE", output_dtype}};
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
-        if(input_desc.GetType() == miopenHalf)
-        {
-            kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
-        }
 
         result.construction_params.push_back(kernel);
     }
