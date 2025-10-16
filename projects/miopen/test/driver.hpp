@@ -175,6 +175,7 @@ struct test_driver
     bool disabled_cache    = false;
     bool dry_run           = false;
     int config_iter_start  = 0;
+    int config_iter_end    = -1;
     int iteration          = 0;
 
     argument& get_argument(const std::string& s)
@@ -209,6 +210,9 @@ struct test_driver
           {"--config-iter-start", "-i"},
           "index of config at which to start a test."
           "Can be used to restart a test after a failing config.");
+        v(config_iter_end,
+          {"--config-iter-end", "-e"},
+          "index of config at which to end a test (exclusive).");
     }
 
     struct per_arg
@@ -937,7 +941,8 @@ struct test_driver
     template <class Derived>
     void base_run()
     {
-        if(this->iteration >= this->config_iter_start)
+        if(this->iteration >= this->config_iter_start &&
+           (this->config_iter_end < 0 || this->iteration < this->config_iter_end))
         {
             std::cout << "Iteration: " << this->iteration << std::endl;
             if(this->dry_run)
