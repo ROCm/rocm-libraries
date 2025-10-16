@@ -28,7 +28,7 @@
  * Test suite utilities.
  */
 
-#include <cblas.h>
+#include "cblas.h"
 
 #include "common/Utilities.hpp"
 
