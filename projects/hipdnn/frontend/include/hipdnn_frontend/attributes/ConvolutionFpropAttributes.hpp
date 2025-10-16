@@ -34,10 +34,11 @@ public:
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
     // Convolution parameters
-    std::vector<int64_t> pre_padding;
-    std::vector<int64_t> post_padding;
+    std::vector<int64_t> pre_padding; // NOLINT(readability-identifier-naming)
+    std::vector<int64_t> post_padding; // NOLINT(readability-identifier-naming)
     std::vector<int64_t> stride;
     std::vector<int64_t> dilation;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     ConvolutionMode math_mode = ConvolutionMode::CROSS_CORRELATION;
 
     // Getters for tensors

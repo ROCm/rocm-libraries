@@ -39,6 +39,44 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
+    bool allClose(const ITensor& reference, const ITensor& implementation) override
+    {
+        if(reference.elementCount() != implementation.elementCount()
+           || reference.dims() != implementation.dims())
+        {
+            return false;
+        }
+
+        if(reference.elementCount() == 0)
+        {
+            return true;
+        }
+
+        double squareDifference = 0.0;
+        double maxRefMagnitude = 0.0;
+        double maxImplMagnitude = 0.0;
+
+        iterateAlongDimensions(reference.dims(), [&](const std::vector<int64_t>& indices) {
+            auto refIdx = reference.getIndex(indices);
+            auto implIdx = implementation.getIndex(indices);
+            T refValueT = *static_cast<const T*>(reference.hostDataOffsetFromIndex(refIdx));
+            T implValueT = *static_cast<const T*>(implementation.hostDataOffsetFromIndex(implIdx));
+
+            auto refValue = static_cast<double>(refValueT);
+            auto implValue = static_cast<double>(implValueT);
+
+            auto diff = refValue - implValue;
+            squareDifference += diff * diff;
+
+            // Track maximum magnitudes
+            maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
+            maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
+        });
+
+        return checkRmsError(
+            squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
+    }
+
     bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
     {
         if(reference.count() != implementation.count())
@@ -75,6 +113,15 @@ public:
             maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
         }
 
+        return checkRmsError(squareDifference, maxRefMagnitude, maxImplMagnitude, elementCount);
+    }
+
+private:
+    bool checkRmsError(double squareDifference,
+                       double maxRefMagnitude,
+                       double maxImplMagnitude,
+                       size_t elementCount) const
+    {
         // Find the maximum magnitude between reference and implementation
         double maxMagnitude
             = std::max({maxRefMagnitude, maxImplMagnitude, std::numeric_limits<double>::min()});
@@ -92,7 +139,6 @@ public:
         return relativeRmsError <= _relativeTolerance;
     }
 
-private:
     // Tolerance for comparison
     double _relativeTolerance;
 };

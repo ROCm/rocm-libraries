@@ -339,59 +339,7 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *              \p csrRowPtr, \p csrColInd, \p buffer pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Dense matrix in column order
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float hdense_A[15] = {1.0f, 0.0f, 6.0f, 2.0f, 4.0f, 0.0f, 0.0f, 5.0f, 0.0f, 3.0f, 0.0f, 7.0f, 0.0f, 0.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int lda       = m;
-*    float threshold = 4.0f;
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * lda * n);
-*    hipMemcpy(ddense_A, hdense_A, sizeof(float) * lda * n, hipMemcpyHostToDevice);
-*
-*    // Allocate sparse CSR matrix
-*    int* dcsrRowPtr = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*
-*    size_t bufferSize;
-*    hipsparseSpruneDense2csr_bufferSize(handle, m, n, ddense_A, lda, &threshold, descr, nullptr, dcsrRowPtr, nullptr, &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnz_A;
-*    hipsparseSpruneDense2csrNnz(handle, m, n, ddense_A, lda, &threshold, descr, dcsrRowPtr, &nnz_A, dbuffer);
-*
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipsparseSpruneDense2csr(handle, m, n, ddense_A, lda, &threshold, descr, dcsrVal, dcsrRowPtr, dcsrColInd, dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(ddense_A);
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_prune_dense2csr.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

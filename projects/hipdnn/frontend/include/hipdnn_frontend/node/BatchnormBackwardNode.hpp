@@ -124,16 +124,14 @@ public:
         return {};
     }
 
-    void gather_hipdnn_tensor_ids(std::unordered_set<int64_t>& usedIds) const override
+    void gather_hipdnn_tensor_ids(std::unordered_set<int64_t>& usedIds,
+                                  std::unordered_set<int64_t>& duplicateIds) const override
     {
-        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensor_ids(usedIds);
+        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensor_ids(usedIds, duplicateIds);
 
         for(auto& tensor : attributes.peer_stats)
         {
-            if(tensor && tensor->has_uid())
-            {
-                usedIds.insert(tensor->get_uid());
-            }
+            processTensorUid(tensor, usedIds, duplicateIds);
         }
     }
 

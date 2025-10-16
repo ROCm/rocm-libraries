@@ -7,6 +7,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -52,19 +53,19 @@ protected:
 
     void runConvFwdGraph(const ConvTestCase& testCase,
                          hipdnn_sdk::data_objects::DataType dataType,
-                         DataType epsilon)
+                         DataType tolerance)
     {
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
-        PinnedTensor<DataType> xTensor(testCase._xDims, _layout);
+        PinnedTensor<DataType> xTensor(testCase.xDims, _layout);
         deviceBuffers.push_back(generateRandomDeviceBuffer(
-            xTensor, 1, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed));
+            xTensor, 1, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed));
 
-        PinnedTensor<DataType> wTensor(testCase._wDims, _layout);
+        PinnedTensor<DataType> wTensor(testCase.wDims, _layout);
         deviceBuffers.push_back(generateRandomDeviceBuffer(
-            wTensor, 2, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed));
+            wTensor, 2, static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed));
 
-        PinnedTensor<DataType> yTensor(testCase._yDims, _layout);
+        PinnedTensor<DataType> yTensor(testCase.yDims, _layout);
         deviceBuffers.push_back(generateEmptyDeviceBuffer(yTensor, 3));
 
         auto convBuilder = createValidConvFwdGraph(xTensor.dims(),
@@ -73,10 +74,10 @@ protected:
                                                    wTensor.strides(),
                                                    yTensor.dims(),
                                                    yTensor.strides(),
-                                                   testCase._convPrePadding,
-                                                   testCase._convPostPadding,
-                                                   testCase._convStride,
-                                                   testCase._convDilation,
+                                                   testCase.convPrePadding,
+                                                   testCase.convPostPadding,
+                                                   testCase.convStride,
+                                                   testCase.convDilation,
                                                    dataType);
 
         hipdnnPluginConstData_t opGraph;
@@ -89,16 +90,16 @@ protected:
         engineConfig.size = engineConfigBuilder.GetSize();
 
         hipdnnPluginStatus_t status;
-        size_t workspaceSize;
-        status
-            = hipdnnEnginePluginGetWorkspaceSize(_handle, &engineConfig, &opGraph, &workspaceSize);
-        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-        hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
-
         hipdnnEnginePluginExecutionContext_t executionContext;
         status = hipdnnEnginePluginCreateExecutionContext(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+        size_t workspaceSize;
+        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+            _handle, executionContext, &workspaceSize);
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+        hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 
         status = hipdnnEnginePluginExecuteOpGraph(_handle,
                                                   executionContext,
@@ -114,20 +115,20 @@ protected:
 
         Tensor<DataType> xTensorCpu(xTensor.dims(), _layout);
         xTensorCpu.fillWithRandomValues(
-            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> wTensorCpu(wTensor.dims(), _layout);
         wTensorCpu.fillWithRandomValues(
-            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase._seed);
+            static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> yTensorCpu(yTensor.dims(), _layout);
 
         CpuFpReferenceConvolutionImpl<DataType, float>::convFwdInference(xTensorCpu,
                                                                          wTensorCpu,
                                                                          yTensorCpu,
-                                                                         testCase._convStride,
-                                                                         testCase._convDilation,
-                                                                         testCase._convPrePadding);
+                                                                         testCase.convStride,
+                                                                         testCase.convDilation,
+                                                                         testCase.convPrePadding);
 
-        CpuFpReferenceValidation<DataType> cpuRefValidationInput(epsilon, epsilon);
+        CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
         EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu.memory(), yTensor.memory()));
     }
@@ -158,7 +159,8 @@ public:
 TEST_P(TestGpuMiopenConvFwdExecuteGraphNchwFp32, Correctness)
 {
     const ConvTestCase& testCase = GetParam();
-    runConvFwdGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, 4e-6f);
+    runConvFwdGraph(
+        testCase, hipdnn_sdk::data_objects::DataType::FLOAT, conv::getToleranceFwd<float>());
 }
 
 INSTANTIATE_TEST_SUITE_P(,

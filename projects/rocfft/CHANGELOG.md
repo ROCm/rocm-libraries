@@ -3,6 +3,12 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
+## rocFFT 1.0.36 (unreleased)
+
+### Resolved issues
+
+* Fixed potential division by zero when constructing plans using dimensions of length 1.
+
 ## rocFFT 1.0.35 for ROCM 7.1.0
 
 ### Optimized
