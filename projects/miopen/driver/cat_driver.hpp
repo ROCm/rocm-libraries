@@ -113,12 +113,12 @@ int32_t mloCatForwardRunHost_upd(const std::vector<miopenTensorDescriptor_t>& in
     size_t outer_size               = 1;
     size_t inner_size               = 1;
     const size_t output_dim_size    = shape[dim];
-    for(size_t i = 0; i < dim; i++)
+    for(size_t i = 0; i < dim; ++i)
     {
         outer_size *= shape[i];
     }
 
-    for(size_t i = dim + 1; i < shape.size(); i++)
+    for(size_t i = dim + 1; i < shape.size(); ++i)
     {
         inner_size *= shape[i];
     }
@@ -134,9 +134,9 @@ int32_t mloCatForwardRunHost_upd(const std::vector<miopenTensorDescriptor_t>& in
         const size_t copy_size = inner_size * dim_size;
         for(size_t o = 0; o < outer_size; o++)
         {
-            const size_t copy_size_by_o = copy_size * o;
+            const size_t input_offset = copy_size * o;
             const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
-            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
+            std::copy_n(&input[input_offset], copy_size, &outputhost[output_offset]);
         }
         output_start_offset += copy_size;
     }
@@ -164,12 +164,12 @@ int32_t mloCatForwardRunHost_upd_mt(const std::vector<miopenTensorDescriptor_t>&
     size_t outer_size               = 1;
     size_t inner_size               = 1;
     const size_t output_dim_size    = shape[dim];
-    for(size_t i = 0; i < dim; i++)
+    for(size_t i = 0; i < dim; ++i)
     {
         outer_size *= shape[i];
     }
 
-    for(size_t i = dim + 1; i < shape.size(); i++)
+    for(size_t i = dim + 1; i < shape.size(); ++i)
     {
         inner_size *= shape[i];
     }
@@ -183,9 +183,9 @@ int32_t mloCatForwardRunHost_upd_mt(const std::vector<miopenTensorDescriptor_t>&
         const size_t dim_size  = miopen::deref(inputDescs[i]).GetLengths()[dim];
         const size_t copy_size = inner_size * dim_size;
         par_ford(outer_size)([&](size_t o){
-            const size_t copy_size_by_o = copy_size * o;
+            const size_t input_offset = copy_size * o;
             const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
-            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
+            std::copy_n(&input[input_offset], copy_size, &outputhost[output_offset]);
         });
         output_start_offset += copy_size;
     });
@@ -213,12 +213,12 @@ int32_t mloCatForwardRunHost_upd_mt_2(const std::vector<miopenTensorDescriptor_t
     size_t outer_size               = 1;
     size_t inner_size               = 1;
     const size_t output_dim_size    = shape[dim];
-    for(size_t i = 0; i < dim; i++)
+    for(size_t i = 0; i < dim; ++i)
     {
         outer_size *= shape[i];
     }
 
-    for(size_t i = dim + 1; i < shape.size(); i++)
+    for(size_t i = dim + 1; i < shape.size(); ++i)
     {
         inner_size *= shape[i];
     }
@@ -233,9 +233,9 @@ int32_t mloCatForwardRunHost_upd_mt_2(const std::vector<miopenTensorDescriptor_t
         const size_t copy_size = inner_size * dim_size;
         for (size_t o = 0; o < outer_size; ++o)
         {
-            const size_t copy_size_by_o = copy_size * o;
+            const size_t input_offset = copy_size * o;
             const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
-            std::copy_n(&input[copy_size_by_o], copy_size, &outputhost[output_offset]);
+            std::copy_n(&input[input_offset], copy_size, &outputhost[output_offset]);
         }
         output_start_offset += copy_size;
     });
