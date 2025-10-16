@@ -329,11 +329,6 @@ public:
         return _packed;
     }
 
-    Tensor copy()
-    {
-        return Tensor(_memory.copy(), _dims, _strides);
-    }
-
 private:
     void validateDimsAndStridesSameSize() const
     {
@@ -364,18 +359,6 @@ private:
     std::vector<int64_t> _strides;
     size_t _elementCount;
     bool _packed;
-
-    // Constructor for copy
-    Tensor(MigratableMemory<T>&& memory,
-           const std::vector<int64_t>& dims,
-           const std::vector<int64_t>& strides)
-        : _memory(std::move(memory))
-        , _dims(dims)
-        , _strides(strides)
-        , _elementCount(TensorBase<T>::calculateItemCount(dims))
-        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
-    {
-    }
 };
 
 template <typename T>
