@@ -3,9 +3,9 @@
 
 cmake_minimum_required(VERSION 3.24.4)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(Origami VERSION 1.0.0 LANGUAGES CXX)
+project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(ORIGAMI_STANDALONE ON)
 else()
     set(ORIGAMI_STANDALONE OFF)
@@ -30,7 +30,7 @@ else()
     add_library(origami STATIC)
 endif()
 
-rocm_set_soversion(origami ${PROJECT_VERSION_MAJOR})
+rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
