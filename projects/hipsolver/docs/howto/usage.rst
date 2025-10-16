@@ -30,7 +30,7 @@ the documentation for the corresponding backend libraries.
 Multi-level logging in hipSOLVER
 ============================================
 
-hipSOLVER exposes the rocSOLVER logging functionality. Upon handle creation, hipSOLVER retrieves the environment variables
+hipSOLVER exposes the rocSOLVER logging functionality. Upon handle creation, hipSOLVER retrieves the logging environment variables
 using ``std::getenv``.
 
 To enable hipSOLVER logging for the default, refactor, and sparse APIs respectively, use the following environment variables:
