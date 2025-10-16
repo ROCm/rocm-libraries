@@ -471,6 +471,7 @@ namespace TensileLite
             bool wgm              = true;
             bool staggerU         = true;
             bool useUniversalArgs = true;
+            bool useSFC           = false;
         };
 
         struct ProblemType

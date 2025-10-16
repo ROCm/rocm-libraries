@@ -1090,7 +1090,7 @@ namespace TensileLite
             {
                 internalArg1 = wgm;
             }
-            else if(internalArgsSupport.version == 2)
+            else if(internalArgsSupport.version == 2 && !internalArgsSupport.useSFC)
             {
                 // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
                 //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
@@ -1105,6 +1105,10 @@ namespace TensileLite
                     wgmxccg = pAMDGPU->computeUnitCount;
                 }
                 internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+            }
+            else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
+            {
+              internalArg1 = wgm;
             }
         }
 
@@ -3045,7 +3049,7 @@ namespace TensileLite
         {
             size_t batch = problem.d().sizes()[2];
             size_t tiles = problem.getNumTiles(sizeMapping, 1) * batch;
-            return tiles * sizeMapping.synchronizerSizePerWG;
+            return tiles * sizeMapping.synchronizerSizePerWG * sizeof(int);
         }
         return 0;
     }

@@ -7,12 +7,14 @@ subtree_to_project_map = {
     "projects/hipblaslt": "blas",
     "projects/hipcub": "prim",
     "projects/hiprand": "rand",
+    "projects/hipsolver": "solver",
+    "projects/hipsparse": "sparse",
     "projects/rocblas": "blas",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
-    "projects/rocthrust": "prim",
+    "projects/rocsolver": "solver",
     "projects/rocsparse": "sparse",
-    "projects/hipsparse": "sparse",
+    "projects/rocthrust": "prim",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
@@ -42,6 +44,11 @@ additional_options = {
     "sparse": {
         "cmake_options": "-DTHEROCK_ENABLE_SPARSE=ON",
         "project_to_test": "rocsparse, hipsparse",
+        "project_to_add": "blas"
+    },
+    "solver": {
+        "cmake_options": "-DTHEROCK_ENABLE_SOLVER=ON",
+        "project_to_test": "rocsolver, hipsolver",
         "project_to_add": "blas"
     }
 }
