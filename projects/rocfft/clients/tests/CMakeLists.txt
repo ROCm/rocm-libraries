@@ -245,7 +245,7 @@ option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
   # Attempt to find a config version, which provides openmp_LIB_DIR.
   find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+  if( NOT OPENMP_FOUND OR NOT DEFINED openmp_LIB_DIR )
      # Fall-back to module mode.
      find_package( OpenMP MODULE REQUIRED )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
