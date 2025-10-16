@@ -290,6 +290,13 @@ namespace rocRoller
                         {
                             Throw<FatalError>("Can't (de)serialize pointer values.");
                         }
+                        else if constexpr(std::is_same_v<U, Buffer>)
+                        {
+                            iot::mapRequired(io, "value.desc0", theVal.desc0);
+                            iot::mapRequired(io, "value.desc0", theVal.desc1);
+                            iot::mapRequired(io, "value.desc0", theVal.desc2);
+                            iot::mapRequired(io, "value.desc0", theVal.desc3);
+                        }
                         else
                         {
                             iot::mapRequired(io, "value", theVal);
