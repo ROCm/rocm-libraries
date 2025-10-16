@@ -57,6 +57,10 @@ TEST_F(CPU_HandleHipDevice_NONE, NegativeDeviceIdThrowsWithCorrectMessage)
         std::string error_msg = ex.what();
         EXPECT_NE(error_msg.find("Error setting device"), std::string::npos);
         EXPECT_NE(error_msg.find("-10"), std::string::npos);
+        
+        // Clear any HIP error triggered by asking for an invalid device ordinal
+        hipGetLastError();
+        hipExtGetLastError();
     }
 }
 
