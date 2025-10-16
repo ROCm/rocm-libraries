@@ -561,6 +561,30 @@ private:
     }
 };
 
+template<class T,
+         class WordType
+         = std::conditional_t<sizeof(T) <= 1, char, std::conditional_t<sizeof(T) <= 2, short, int>>>
+struct alignas(T) type_hidden
+{
+private:
+    WordType data[ceiling_div(sizeof(T), sizeof(WordType))];
+
+public:
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    static auto create(T& item)
+    {
+        type_hidden ret;
+        __builtin_memcpy(&ret.data, &item, sizeof(T));
+        return ret;
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T unpack()
+    {
+        return *std::launder(reinterpret_cast<T*>(&data));
+    }
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

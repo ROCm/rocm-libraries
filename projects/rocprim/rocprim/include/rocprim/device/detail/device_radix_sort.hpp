@@ -1086,6 +1086,8 @@ struct onesweep_iteration_helper
     static constexpr unsigned int NKey   = N<Key>::value;
     static constexpr unsigned int NValue = N<Value>::value;
 
+    using v_pack = type_hidden<Value>;
+
     union data_storage
     {
         typename radix_rank_type::storage_type rank;
@@ -1095,7 +1097,7 @@ struct onesweep_iteration_helper
             union
             {
                 Key   ordered_block_keys[BlockSize * NKey];
-                Value ordered_block_values[BlockSize * NValue];
+                v_pack ordered_block_values[BlockSize * NValue];
             };
         };
     };
@@ -1341,7 +1343,7 @@ struct onesweep_iteration_helper
                     const int offset = ranks[i] - x;
                     if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))
                     {
-                        storage.ordered_block_values[offset] = values[i];
+                        storage.ordered_block_values[offset] = v_pack::create(values[i]);
                     }
                 }
 
@@ -1353,7 +1355,7 @@ struct onesweep_iteration_helper
                     const unsigned int rank = x + n * BlockSize + flat_id;
                     if(((ItemsPerThread % NValue == 0) && IsFull) || rank < valid_items)
                     {
-                        const Value  value = storage.ordered_block_values[rank - x];
+                        const Value  value = storage.ordered_block_values[rank - x].unpack();
                         const Offset global_offset
                             = storage.global_digit_offsets[digits[n + j * NValue]];
                         values_output[rank + global_offset] = value;
