@@ -214,8 +214,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     versionISA = kernel["ISA"]
-    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-        printExit(f"Version is None or [0, 0, 0] for kernel {kernel}")
+    if kernel["KernelLanguage"] == "Assembly":
+      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
     currentIsa = versionISA
 
     maxVmcnt = globalParameters["AsmCaps"][currentIsa]["MaxVmcnt"]
@@ -3712,8 +3713,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     versionISA = kernel["ISA"]
     # tPrint(1, f"versionISA: {versionISA}")
-    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-      raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+    if kernel["KernelLanguage"] == "Assembly":
+      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
 
     self.staggerU = kernel["StaggerU"]
     if self.staggerU:
@@ -4280,8 +4282,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.useInitAccVgprOpt = False
     # enable for the following conditions
     versionISA = kernel["ISA"]
-    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-      raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+    if kernel["KernelLanguage"] == "Assembly":
+      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
 
     if kernel["EnableMatrixInstruction"] and (kernel["PrefetchGlobalRead"] == 1 or kernel["PrefetchGlobalRead"] == 2) \
        and globalParameters["AsmCaps"][versionISA]["HasMFMA_constSrc"] \
@@ -5400,8 +5403,9 @@ for codeObjectFileName in codeObjectFileNames:
         
         versionISA = kernel["ISA"]
         self.version = versionISA
-        if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-          raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+        if kernel["KernelLanguage"] == "Assembly":
+          if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+            raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
         self.version = tuple(versionISA)
 
         if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:

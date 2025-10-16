@@ -362,8 +362,9 @@ class  MFMAInst (Inst):
        self.endLine = ""
 
        versionISA = kernel["ISA"]
-       if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-         raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+       if kernel["KernelLanguage"] == "Assembly":
+        if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+          raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
        self.version = versionISA
 
        self.kernel  = kernel
@@ -419,8 +420,9 @@ class  MacInst (Inst):
        self.endLine = ""
 
        versionISA = kernel["ISA"]
-       if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-         raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+       if kernel["KernelLanguage"] == "Assembly":
+        if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+          raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
        self.version = versionISA
 
        self.kernel  = kernel

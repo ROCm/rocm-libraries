@@ -845,11 +845,13 @@ class KernelWriterAssembly(KernelWriter):
 
     if "ISA" in kernel:
       versionISA = kernel["ISA"]
-      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-        raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
+      if kernel["KernelLanguage"] == "Assembly":
+        if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+          raise ValueError(f"Version is None or [0, 0, 0] for kernel {kernel}")
       self.version = versionISA
     else:
       raise ValueError(f"ISA not found in kernel {kernel}")
+
     if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
       defaultIsa = (9,0,0)
       print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

@@ -209,6 +209,13 @@ def parseLibraryLogicData(data, srcFile="?"):
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
+
+        # Common.tPrint(1, f"solutionState: {str(solutionState)}")
+        versionISA = solutionState["ISA"]
+        if solutionState["KernelLanguage"] == "Assembly":
+            if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+                raise ValueError(f"Version is None or [0, 0, 0] for kernel {str(solutionState)} from {srcFile}")
+
         solutionObject = Solution(solutionState)
 
         if solutionObject["ProblemType"] != problemType:

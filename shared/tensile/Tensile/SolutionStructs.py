@@ -1742,8 +1742,9 @@ class Solution(collections.abc.Mapping):
       # else:
       #   state['ISA'] = [0,0,0]
     versionISA = state['ISA']
-    if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
-      raise ValueError(f"Version is None or [0, 0, 0] for kernel {state}")
+    if state["KernelLanguage"] == "Assembly":
+      if versionISA is None or versionISA == [0, 0, 0] or versionISA == (0, 0, 0) or versionISA == "[0, 0, 0]" or versionISA == "":
+        raise ValueError(f"Version is None or [0, 0, 0] for kernel {state}")
 
     if "CodeObjectVersion" not in state:
       if "CodeObjectVersion" in config:
