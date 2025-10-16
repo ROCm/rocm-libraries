@@ -53,7 +53,7 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
     auto c_index = H * W * xgid;
 
     // move across the sections of an image in the mini_batch stack
-    for(auto img_offset = 0; img_offset < H * W; img_offset += LOCAL_SIZE_Y)
+    for(auto img_offset = 0; img_offset < H * W; img_offset += GRID_SIZE_Y)
     {
         auto img_index = img_offset + ygid;
         if(img_index < H * W)
