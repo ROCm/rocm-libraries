@@ -892,7 +892,7 @@ namespace rocRoller
 
                 // NOTE: a dimension might not have any dangling MacroTileNumber.
                 //       This happens when workgroupMapping (RemapOutputTiles)
-                //       applied as M & N dimensions get flattened int a new MTN.
+                //       applied as M & N dimensions get flattened int a new MacroTileNumber.
                 accumInfo.tileNumberCoords[dimension]
                     = graph.coordinates.findElements(danglingTileNumberPredicate)
                           .to<std::unordered_set>();
