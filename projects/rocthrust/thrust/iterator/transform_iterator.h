@@ -42,10 +42,13 @@
 #endif // no system header
 
 // #include the details first
+#include <thrust/detail/construct_at.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/transform_iterator.inl>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -240,7 +243,26 @@ public:
       , m_f(other.functor())
   {}
 
-  transform_iterator& operator=(const transform_iterator&) = default;
+  THRUST_HOST_DEVICE transform_iterator& operator=(transform_iterator const& other)
+  {
+    super_t::operator=(other);
+    if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_assignable, AdaptableUnaryFunction))
+    {
+      m_f = other.m_f;
+    }
+    else if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction))
+    {
+      ::internal::__destroy_at(&m_f);
+      ::internal::__construct_at(&m_f, other.m_f);
+    }
+    else
+    {
+      static_assert(THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction),
+                    "Cannot use thrust::transform_iterator with a functor that is neither copy constructible nor "
+                    "copy assignable");
+    }
+    return *this;
+  }
 
   /*! This method returns a copy of this \p transform_iterator's \c AdaptableUnaryFunction.
    *  \return A copy of this \p transform_iterator's \c AdaptableUnaryFunction.
