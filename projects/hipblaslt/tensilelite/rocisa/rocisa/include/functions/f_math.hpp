@@ -631,6 +631,93 @@ namespace rocisa
         return module;
     }
 
+    // Use fp64 reciprocal instruction to compute integer division.
+    // This gives accurate results for dividends up to 2^24 and divisors up to 2^16.
+    template <typename QREG, typename DREG, typename DIVREG, typename RREG>
+    std::shared_ptr<Module> scalarUInt24DivideAndRemainder(QREG                qReg,
+                                                           DREG                dReg,
+                                                           DIVREG              divReg,
+                                                           RREG                rReg,
+                                                           ContinuousRegister& tmpVgprRes,
+                                                           int                 wavewidth,
+                                                           bool                doRemainder = true,
+                                                           bool                doQuotient = true,
+                                                           const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("scalarUInt24DivideAndRemainder");
+
+        auto qRegSgpr   = sgpr(qReg);
+        auto rRegSgpr   = sgpr(rReg);
+        auto dRegSgpr   = sgpr(dReg);
+        auto divRegSgpr = sgpr(divReg);
+
+        std::string dComment = comment.empty() ? qRegSgpr->toString() + " = " + dRegSgpr->toString()
+                                                     + " / " + divRegSgpr->toString()
+                                               : comment;
+
+        std::string rComment = "";
+        if(doRemainder)
+        {
+            rComment = comment.empty() ? sgpr(rReg)->toString() + " = " + dRegSgpr->toString()
+                                             + " % " + divRegSgpr->toString()
+                                       : comment;
+        }
+
+        if(tmpVgprRes.size < 4)
+        {
+            throw std::runtime_error("Invalid tmpVgprRes, must be at least 4");
+        }
+        auto tmpVgpr  = tmpVgprRes.idx;
+        auto tmpVgpr1 = tmpVgprRes.idx + 2;
+
+        auto pEXEC = MAKE(EXEC);
+
+        module->addT<VCvtU32toF64>(vgpr(tmpVgpr, 2), divRegSgpr, std::nullopt, dComment);
+        module->addT<VRcpF64>(vgpr(tmpVgpr, 2), vgpr(tmpVgpr, 2), dComment);
+        module->addT<VCvtU32toF64>(vgpr(tmpVgpr1, 2), dRegSgpr, std::nullopt, dComment);
+        module->addT<VMulF64>(vgpr(tmpVgpr, 2), vgpr(tmpVgpr, 2), vgpr(tmpVgpr1, 2), std::nullopt, dComment);
+        module->addT<VCvtF64toU32>(vgpr(tmpVgpr), vgpr(tmpVgpr, 2), std::nullopt, dComment);
+
+        module->addT<VMulLOU32>(vgpr(tmpVgpr + 1), vgpr(tmpVgpr), divRegSgpr, dComment);
+        module->addT<VSubU32>(vgpr(tmpVgpr1), dRegSgpr, vgpr(tmpVgpr + 1), dComment);
+        module->addT<VCmpXGeU32>(pEXEC, vgpr(tmpVgpr1), divRegSgpr, std::nullopt, dComment);
+        module->addT<VAddU32>(vgpr(tmpVgpr), vgpr(tmpVgpr), 1, dComment);
+
+        auto resetExec = [module, pEXEC](int wavewidth) {
+            if(wavewidth == 64)
+            {
+                module->addT<SMovB64>(pEXEC, -1, "Reset exec");
+            }
+            else
+            {
+                module->addT<SMovB32>(pEXEC, -1, "Reset exec");
+            }
+        };
+        resetExec(wavewidth);
+
+        if(doRemainder)
+        {
+            module->addT<VMulLOU32>(vgpr(tmpVgpr + 1), vgpr(tmpVgpr), divRegSgpr, dComment);
+            module->addT<VSubU32>(vgpr(tmpVgpr1), dRegSgpr, vgpr(tmpVgpr + 1), dComment);
+        }
+
+        if(doQuotient)
+        {
+            module->addT<VReadfirstlaneB32>(qRegSgpr, vgpr(tmpVgpr), "quotient");
+        }
+        else
+        {
+            module->addT<SNop>(0);
+        }
+
+        if(doRemainder)
+        {
+            module->addT<VReadfirstlaneB32>(sgpr(rReg), vgpr(tmpVgpr1), "remainder");
+        }
+
+        return module;
+    }
+
     template <typename QREG, typename DREG, typename DIVREG, typename RREG>
     std::shared_ptr<Module> scalarUInt32DivideAndRemainder(QREG                qReg,
                                                            DREG                dReg,

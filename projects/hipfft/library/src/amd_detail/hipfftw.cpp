@@ -392,8 +392,22 @@ namespace
         {
             internal_execute(plan_creation_input, plan_creation_output);
         }
-        // TODO:
-        // void execute(new_in, new_out) const {...}
+
+        void new_array_execute(void* new_user_exec_in, void* new_user_exec_out)
+        {
+            const auto new_exec_placement = new_user_exec_in == new_user_exec_out
+                                                ? rocfft_placement_inplace
+                                                : rocfft_placement_notinplace;
+            if(plan_placement != new_exec_placement)
+            {
+                throw hipfftw_invalid_arg("I/O data pointers used at execution must use the same "
+                                          "placement as defined at plan creation.");
+            }
+            hipfftw_data_ptr_bundle<!hipfftw_owns_it> new_exec_in(new_user_exec_in);
+            hipfftw_data_ptr_bundle<!hipfftw_owns_it> new_exec_out(new_user_exec_out);
+            set_io_device_buffers_for_execution(new_exec_in, new_exec_out);
+            internal_execute(new_exec_in, new_exec_out);
+        }
 
         template <rocfft_transform_type dft_type, size_t rank, typename T, size_t batch_rank>
         void init(const std::array<T, rank>&                                          lengths_rm,
@@ -1248,12 +1262,110 @@ catch(...)
     return;
 }
 
+void fftw_execute_dft(const fftw_plan plan, fftw_complex* in, fftw_complex* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(is_real(plan->plan_dft_type))
+        throw hipfftw_invalid_arg(
+            "this function rejects plans created for real DFT(s), i.e., plans created by any of "
+            "the fftw_plan_*_r2c or fftw_plan_*_c2r functions.");
+    plan->new_array_execute(in, out);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
+void fftw_execute_dft_r2c(const fftw_plan plan, double* in, fftw_complex* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(plan->plan_dft_type != rocfft_transform_type_real_forward)
+        throw hipfftw_invalid_arg("this function requires a plan for real forward DFT(s), i.e., a "
+                                  "plan created by any of the fftw_plan_*_r2c functions.");
+    plan->new_array_execute(in, out);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
+void fftw_execute_dft_c2r(const fftw_plan plan, fftw_complex* in, double* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(plan->plan_dft_type != rocfft_transform_type_real_inverse)
+        throw hipfftw_invalid_arg("this function requires a plan for real backward DFT(s), i.e., a "
+                                  "plan created by any of the fftw_plan_*_c2r functions.");
+    plan->new_array_execute(in, out);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
 void fftwf_execute(const fftwf_plan plan)
 try
 {
     if(!plan)
         throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
     plan->execute();
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
+void fftwf_execute_dft(const fftwf_plan plan, fftwf_complex* in, fftwf_complex* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(is_real(plan->plan_dft_type))
+        throw hipfftw_invalid_arg(
+            "this function rejects plans created for real DFT(s), i.e., plans created by any of "
+            "the fftwf_plan_*_r2c or fftwf_plan_*_c2r functions.");
+    plan->new_array_execute(in, out);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
+void fftwf_execute_dft_r2c(const fftwf_plan plan, float* in, fftwf_complex* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(plan->plan_dft_type != rocfft_transform_type_real_forward)
+        throw hipfftw_invalid_arg("this function requires a plan for real forward DFT(s), i.e., a "
+                                  "plan created by any of the fftwf_plan_*_r2c functions.");
+    plan->new_array_execute(in, out);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return;
+}
+
+void fftwf_execute_dft_c2r(const fftwf_plan plan, fftwf_complex* in, float* out)
+try
+{
+    if(!plan)
+        throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
+    if(plan->plan_dft_type != rocfft_transform_type_real_inverse)
+        throw hipfftw_invalid_arg("this function requires a plan for real backward DFT(s), i.e., a "
+                                  "plan created by any of the fftwf_plan_*_c2r functions.");
+    plan->new_array_execute(in, out);
 }
 catch(...)
 {

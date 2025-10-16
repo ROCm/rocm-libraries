@@ -3,6 +3,12 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
+## (Unreleased) hipSPARSE 4.2.0
+
+### Added
+
+* Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
+
 ## hipSPARSE 4.1.0 for ROCm 7.1.0
 
 ### Added
