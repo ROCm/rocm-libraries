@@ -39,7 +39,7 @@ if(ROCROLLER_ENABLE_LLVM)
     target_include_directories(GPUArchitectureGenerator PUBLIC "${LLVM_INCLUDE_DIRS}")
 else()
     target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_USE_YAML_CPP)
-    target_link_libraries(GPUArchitectureGenerator PRIVATE  ${YAML_CPP_LIBRARIES})
+    target_link_libraries(GPUArchitectureGenerator PRIVATE yaml-cpp::yaml-cpp)
 endif()
 
 target_include_directories(GPUArchitectureGenerator
