@@ -56,7 +56,7 @@ public:
     FSLockFile(const fs::path& path_) : path(path_)
     {
         lockfile_path = path.string() + ".fslock";
-        hardlink_path = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." +
+        unique_handle = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." +
                         std::to_string(getpid());
     }
 
@@ -105,22 +105,43 @@ public:
         return acquired;
     }
 
+    bool clear_stale_lock()
+    {
+        constexpr const auto timeout = std::chrono::milliseconds(5);
+        auto last_write_time = fs::last_write_time(lockfile_path);
+        auto chrono_last_write = std::chrono::file_clock::to_sys(last_write_time);
+        auto now = std::chrono::system_clock::now();
+        auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - chrono_last_write);
+        if(age > timeout)
+        {
+            MIOPEN_LOG_I2("Removing Stale Lock < " << lockfile_path.string());
+            fs::remove(lockfile_path);
+            return true;
+        }
+        return false;
+    }
+
     bool try_lock_hardlink()
     {
         std::error_code ec;
 
-        if(!fs::exists(hardlink_path))
+        if(!fs::exists(unique_handle))
         {
-            if(!std::ofstream{hardlink_path})
-                MIOPEN_THROW("Error creating file <" + hardlink_path + "> for locking.");
-            fs::permissions(hardlink_path, FS_ENUM_PERMS_ALL);
+            if(!std::ofstream{unique_handle})
+                MIOPEN_THROW("Error creating file <" + unique_handle + "> for locking.");
+            fs::permissions(unique_handle, FS_ENUM_PERMS_ALL);
         }
 
-        create_hard_link(hardlink_path, lockfile_path, ec);
+        create_hard_link(unique_handle, lockfile_path, ec);
         if(ec.value() == 0)
         {
-            if(fs::hard_link_count(hardlink_path) == 2)
+            if(fs::hard_link_count(unique_handle) == 2)
                 return true;
+        }
+        else
+        {
+            clear_stale_lock();
         }
 
         return false;
@@ -128,21 +149,21 @@ public:
 
     void unlock_hardlink()
     {
-        MIOPEN_LOG_I2("Unlock hardlink < " << hardlink_path.string());
-        fs::remove(hardlink_path);
+        MIOPEN_LOG_I2("Unlock hardlink < " << unique_handle.string());
+        fs::remove(unique_handle);
     }
 
     void unlock()
     {
         MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
         fs::remove(lockfile_path);
-        fs::remove(hardlink_path);
+        fs::remove(unique_handle);
     }
 
 private:
     fs::path path;
     fs::path lockfile_path;
-    fs::path hardlink_path;
+    fs::path unique_handle;
 };
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
