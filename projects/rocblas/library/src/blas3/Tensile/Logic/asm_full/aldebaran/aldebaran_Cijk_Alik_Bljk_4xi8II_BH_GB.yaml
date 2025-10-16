@@ -73,6 +73,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -230,6 +231,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -387,6 +389,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -548,6 +551,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -705,6 +709,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -866,6 +871,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -1027,6 +1033,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 8
@@ -1188,6 +1195,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 8
@@ -1349,6 +1357,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 8
@@ -1510,6 +1519,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 8
@@ -1671,6 +1681,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 8
@@ -1832,6 +1843,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 16
@@ -1993,6 +2005,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 16
@@ -2154,6 +2167,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -2315,6 +2329,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -2476,6 +2491,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -2637,6 +2653,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -2798,6 +2815,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -2959,6 +2977,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3120,6 +3139,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3281,6 +3301,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3442,6 +3463,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3603,6 +3625,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3764,6 +3787,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -3925,6 +3949,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4086,6 +4111,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4247,6 +4273,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4408,6 +4435,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4569,6 +4597,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4730,6 +4759,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -4891,6 +4921,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5052,6 +5083,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5213,6 +5245,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5374,6 +5407,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5535,6 +5569,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5696,6 +5731,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -5857,6 +5893,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6018,6 +6055,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6179,6 +6217,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6340,6 +6379,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6501,6 +6541,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6662,6 +6703,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6823,6 +6865,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -6984,6 +7027,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -7145,6 +7189,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -7306,6 +7351,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -7467,6 +7513,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -7628,6 +7675,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -7789,6 +7837,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -7950,6 +7999,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8111,6 +8161,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8272,6 +8323,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8433,6 +8485,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8594,6 +8647,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8755,6 +8809,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -8916,6 +8971,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -9077,6 +9133,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 16
@@ -9238,6 +9295,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 16
@@ -9399,6 +9457,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -9560,6 +9619,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -9721,6 +9781,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -9882,6 +9943,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -10043,6 +10105,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -10204,6 +10267,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -10365,6 +10429,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -10526,6 +10591,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -10687,6 +10753,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -10848,6 +10915,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11009,6 +11077,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11170,6 +11239,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11331,6 +11401,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11492,6 +11563,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11653,6 +11725,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -11814,6 +11887,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -11975,6 +12049,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 4
@@ -12136,6 +12211,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Source
     LSCA: 2
@@ -12297,6 +12373,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -12458,6 +12535,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -12619,6 +12697,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -12780,6 +12859,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -12941,6 +13021,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -13102,6 +13183,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -13263,6 +13345,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -13425,6 +13508,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -13587,6 +13671,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -13749,6 +13834,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -13911,6 +13997,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -14073,6 +14160,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -14235,6 +14323,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
@@ -14397,6 +14486,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -14559,6 +14649,7 @@
     GlobalWriteVectorWidth: 4
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 8
@@ -14721,6 +14812,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 16
@@ -14883,6 +14975,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     KernelLanguage: Assembly
     LSCA: 32
