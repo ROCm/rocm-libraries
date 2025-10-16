@@ -27,6 +27,7 @@ trigger:
     - cmake
     - shared/mxdatagenerator
     - shared/rocroller
+    - shared/origami
     - projects/hipblas-common
     - projects/hipblaslt
     - projects/rocprim
@@ -50,6 +51,7 @@ pr:
     - cmake
     - shared/mxdatagenerator
     - shared/rocroller
+    - shared/origami
     - projects/hipblas-common
     - projects/hipblaslt
     - projects/rocprim
