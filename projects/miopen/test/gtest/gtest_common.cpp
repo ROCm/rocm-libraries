@@ -99,7 +99,7 @@ Gpu GetDevGpuType()
 
 const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
 {
-    static_assert(Gpu::gfx120X == Gpu::gfxLast);
+    static_assert(Gpu::gfx115X == Gpu::gfxLast);
 
     // https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html
     static const std::multimap<Gpu, DevDescription> known_devs = {
@@ -129,8 +129,8 @@ const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
         {Gpu::gfx110X, {"gfx1101", 30}},
         {Gpu::gfx110X, {"gfx1102", 16}},
         {Gpu::gfx115X, {"gfx1151", 32}},
-        {Gpu::gfx120X, {"gfx1201", 32}},
-        {Gpu::gfx120X, {"gfx1201", 28}}
+        {Gpu::gfx120X, {"gfx1200", 28}},
+        {Gpu::gfx120X, {"gfx1201", 32}}
         // clang-format on
     };
     return known_devs;
