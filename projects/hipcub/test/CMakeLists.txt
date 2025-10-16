@@ -61,7 +61,6 @@ add_subdirectory(hipcub)
 if(BUILD_CODE_COVERAGE)
     add_custom_target(
     coverage_analysis
-    DEPENDS hipcub-test
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipcub-coverage_%p.profraw" ctest --output-on-failure
