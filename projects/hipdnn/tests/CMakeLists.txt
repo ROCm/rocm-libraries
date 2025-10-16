@@ -14,8 +14,15 @@ set(HIPDNN_TEST_INCLUDE_DIRS
     CACHE INTERNAL "Common test include directories"
 )
 
-if(HIP_DNN_BUILD_BACKEND)
+# Test plugins are used by both frontend and backend tests.
+if(HIP_DNN_BUILD_FRONTEND OR HIP_DNN_BUILD_BACKEND)
     add_subdirectory(test_plugins)
+endif()
+
+if(HIP_DNN_BUILD_BACKEND)
     add_subdirectory(backend)
+endif()
+
+if(HIP_DNN_BUILD_FRONTEND)
     add_subdirectory(frontend)
 endif()

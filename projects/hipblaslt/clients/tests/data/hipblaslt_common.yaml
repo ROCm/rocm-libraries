@@ -567,6 +567,7 @@ Arguments:
   - norm_check_assert: c_bool
   - swizzle_a: c_bool
   - swizzle_b: c_bool
+  - dump_matrix: c_bool
   - scaleABlockRowSize: c_uint32
   - scaleABlockColSize: c_uint32
   - scaleBBlockRowSize: c_uint32
@@ -676,6 +677,7 @@ Defaults:
   norm_check_assert: true
   swizzle_a: false
   swizzle_b: false
+  dump_matrix: false
   scaleABlockRowSize: 32
   scaleABlockColSize: 1
   scaleBBlockRowSize: 1

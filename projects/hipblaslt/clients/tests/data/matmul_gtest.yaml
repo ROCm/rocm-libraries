@@ -1938,7 +1938,7 @@ Tests:
   alpha: 1
   beta: [ 0, 2 ]
   use_ext: [1]
-  use_ext_setproblem: [1]
+  use_ext_setproblem: [0, 1]
   bias_vector: 1
   bias_type: [f32_r]
   unit_check: 1

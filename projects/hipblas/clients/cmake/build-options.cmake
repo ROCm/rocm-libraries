@@ -9,6 +9,13 @@
 # presented in the superbuild GUI, but then passed into the ExternalProject as -D
 # parameters, which would already define them.
 
+include(CMakeDependentOption)
+
+# Clients utilize rocblas fortran API and a fortran compiler
+if( NOT BUILD_FORTRAN_CLIENTS )
+  cmake_dependent_option( BUILD_FORTRAN_CLIENTS "Build hipBLAS clients requiring Fortran capabilities" ON "NOT WIN32" OFF )
+endif( )
+
 if( NOT BUILD_CLIENTS_TESTS )
   option( BUILD_CLIENTS_TESTS "Build hipBLAS unit tests" OFF )
 endif( )
