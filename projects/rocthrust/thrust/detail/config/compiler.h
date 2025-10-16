@@ -206,6 +206,11 @@
 #    define THRUST_HAS_CUDA_COMPILER 1
 #  endif
 
+#  if defined(THRUST_HAS_CUDA_COMPILER) && THRUST_CUDACC_BELOW(12) && !defined(THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12)
+#    error "CUDA versions below 12 are not supported." \
+"Define THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12 to suppress this message."
+#  endif
+
 // Convert parameter to string
 #  define THRUST_TO_STRING2(_STR) #_STR
 #  define THRUST_TO_STRING(_STR)  THRUST_TO_STRING2(_STR)

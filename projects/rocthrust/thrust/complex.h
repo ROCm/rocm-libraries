@@ -343,11 +343,7 @@ public:
   }
 
 private:
-#if THRUST_CUDA_COMPILER(NVCC, <, 11, 7)
-  struct __align__(sizeof(T) * 2) storage
-#else // THRUST_CUDA_COMPILER(NVCC, <, 11, 7))
   struct alignas(sizeof(T) * 2) storage
-#endif //  THRUST_CUDA_COMPILER(NVCC, <, 11, 7))
   {
     T x; /**< @brief The first \p complex. */
     T y; /**< @brief The second \p complex. */

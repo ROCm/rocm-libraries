@@ -54,17 +54,13 @@
 
 // NVCC below 11.3 does not support nodiscard on friend operators
 // It always fails with clang
-#  if THRUST_CUDACC_BELOW(11, 3) || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  if THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #    define THRUST_NODISCARD_FRIEND friend
 #  else
 #    define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
 #  endif
 
-#  if THRUST_CUDACC_BELOW(11, 3)
-#    define THRUST_ALIAS_ATTRIBUTE(...)
-#  else
-#    define THRUST_ALIAS_ATTRIBUTE(...) __VA_ARGS__
-#  endif
+#  define THRUST_ALIAS_ATTRIBUTE(...) __VA_ARGS__
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
