@@ -469,7 +469,7 @@ class ProblemPredicate(Properties.Predicate):
                 if state["NumElementsPerBatchStore"] != 0:
                     valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
                 else:
-                    valuepredicates.append(1)
+                    valuepredicates.append(state["NumElementsPerThread"])
                 valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
                 valuepredicates.append(state["GlobalSplitU"])
 
@@ -609,9 +609,9 @@ class SizeMapping:
         if d['_GlobalAccumulation'] == 'PartialsBuffer':
             globalAccum = 4
         pgr = int(d['PrefetchGlobalRead'])
-        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1']        \
-                                    * ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else 1        \
-                                    * ceil(d["NumThreads"] / d["WavefrontSize"])))
+        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1'])        \
+                                    * (ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else d['NumElementsPerThread'])        \
+                                    * ceil(d["NumThreads"] / d["WavefrontSize"]))
 
 
         # Converts list of list specified in SFCWGM to a 32bit signed integer that is passed to the WGM arg
