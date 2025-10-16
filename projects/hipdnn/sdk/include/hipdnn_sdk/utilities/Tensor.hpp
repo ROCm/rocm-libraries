@@ -51,7 +51,7 @@ class TensorBase;
 class ITensor;
 
 // Type-erased iterator for ITensor polymorphic iteration
-class TypeErasedIterator
+class ITensorIterator
 {
 public:
     // Iterator traits for STL compatibility
@@ -62,35 +62,33 @@ public:
     using reference = void*;
 
     // Default constructor
-    TypeErasedIterator() = default;
+    ITensorIterator() = default;
 
     // Template constructor for non-const iterator
     template <typename T>
-    TypeErasedIterator(TensorBase<T>* tensor, std::vector<int64_t> indices, bool isEnd = false)
+    ITensorIterator(TensorBase<T>* tensor, std::vector<int64_t> indices, bool isEnd = false)
         : _impl(std::make_unique<IteratorModel<T, false>>(tensor, std::move(indices), isEnd))
     {
     }
 
     // Template constructor for const iterator
     template <typename T>
-    TypeErasedIterator(const TensorBase<T>* tensor,
-                       std::vector<int64_t> indices,
-                       bool isEnd = false)
+    ITensorIterator(const TensorBase<T>* tensor, std::vector<int64_t> indices, bool isEnd = false)
         : _impl(std::make_unique<IteratorModel<T, true>>(tensor, std::move(indices), isEnd))
     {
     }
 
     // Copy constructor
-    TypeErasedIterator(const TypeErasedIterator& other)
+    ITensorIterator(const ITensorIterator& other)
         : _impl(other._impl ? other._impl->clone() : nullptr)
     {
     }
 
     // Move constructor
-    TypeErasedIterator(TypeErasedIterator&&) = default;
+    ITensorIterator(ITensorIterator&&) = default;
 
     // Copy assignment
-    TypeErasedIterator& operator=(const TypeErasedIterator& other)
+    ITensorIterator& operator=(const ITensorIterator& other)
     {
         if(this != &other)
         {
@@ -100,7 +98,7 @@ public:
     }
 
     // Move assignment
-    TypeErasedIterator& operator=(TypeErasedIterator&&) = default;
+    ITensorIterator& operator=(ITensorIterator&&) = default;
 
     // Dereference - returns void*
     void* operator*() const
@@ -113,7 +111,7 @@ public:
     }
 
     // Prefix increment
-    TypeErasedIterator& operator++()
+    ITensorIterator& operator++()
     {
         if(_impl)
         {
@@ -123,15 +121,15 @@ public:
     }
 
     // Postfix increment
-    TypeErasedIterator operator++(int)
+    ITensorIterator operator++(int)
     {
-        TypeErasedIterator temp = *this;
+        ITensorIterator temp = *this;
         ++(*this);
         return temp;
     }
 
     // Comparison operators
-    bool operator==(const TypeErasedIterator& other) const
+    bool operator==(const ITensorIterator& other) const
     {
         if(!_impl && !other._impl)
         {
@@ -144,7 +142,7 @@ public:
         return _impl->equals(other._impl.get());
     }
 
-    bool operator!=(const TypeErasedIterator& other) const
+    bool operator!=(const ITensorIterator& other) const
     {
         return !(*this == other);
     }
@@ -315,10 +313,10 @@ public:
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
-    virtual TypeErasedIterator begin() = 0;
-    virtual TypeErasedIterator end() = 0;
-    virtual TypeErasedIterator begin() const = 0;
-    virtual TypeErasedIterator end() const = 0;
+    virtual ITensorIterator begin() = 0;
+    virtual ITensorIterator end() = 0;
+    virtual ITensorIterator begin() const = 0;
+    virtual ITensorIterator end() const = 0;
 
     virtual bool isPacked() const = 0;
 
@@ -402,28 +400,28 @@ public:
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
 
-    TypeErasedIterator begin() override
+    ITensorIterator begin() override
     {
         std::vector<int64_t> startIndices(dims().size(), 0);
-        return TypeErasedIterator(this, startIndices, false);
+        return ITensorIterator(this, startIndices, false);
     }
 
-    TypeErasedIterator end() override
+    ITensorIterator end() override
     {
         std::vector<int64_t> endIndices(dims().size(), 0);
-        return TypeErasedIterator(this, endIndices, true);
+        return ITensorIterator(this, endIndices, true);
     }
 
-    TypeErasedIterator begin() const override
+    ITensorIterator begin() const override
     {
         std::vector<int64_t> startIndices(dims().size(), 0);
-        return TypeErasedIterator(this, startIndices, false);
+        return ITensorIterator(this, startIndices, false);
     }
 
-    TypeErasedIterator end() const override
+    ITensorIterator end() const override
     {
         std::vector<int64_t> endIndices(dims().size(), 0);
-        return TypeErasedIterator(this, endIndices, true);
+        return ITensorIterator(this, endIndices, true);
     }
 
 protected:

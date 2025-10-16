@@ -12,7 +12,7 @@ namespace hipdnn_sdk::utilities
 template <typename T>
 class TensorSpan;
 
-// The iterator that wraps TypeErasedIterator
+// The iterator that wraps ITensorIterator
 template <typename T, bool IsConst = false>
 class TensorSpanIterator
 {
@@ -25,7 +25,7 @@ public:
     using pointer = std::conditional_t<IsConst, const T*, T*>;
 
     // Constructor
-    explicit TensorSpanIterator(TypeErasedIterator iter)
+    explicit TensorSpanIterator(ITensorIterator iter)
         : _iter(std::move(iter))
     {
     }
@@ -70,7 +70,7 @@ public:
     }
 
 private:
-    TypeErasedIterator _iter; // Wraps the type-erased iterator
+    ITensorIterator _iter; // Wraps the type-erased iterator
 };
 
 template <typename T>
