@@ -427,7 +427,7 @@ if( ROCFFT_MPI_ENABLE )
 
     if ( ROCFFT_CRAY_MPI_ENABLE )
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
@@ -440,7 +440,7 @@ if( ROCFFT_MPI_ENABLE )
   	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
