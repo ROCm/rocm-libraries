@@ -25,6 +25,24 @@ For more details on how to use the API methods, see the client code samples in t
 `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples>`_ or
 the documentation for the corresponding backend libraries.
 
+.. _multilevel_logging:
+
+Multi-level logging in hipSOLVER
+============================================
+
+hipSOLVER exposes the rocSOLVER logging functionality. Upon handle creation, hipSOLVER retrieves the environment variables
+using ``std::getenv``.
+
+To enable hipSOLVER logging for the default, refactor, and sparse APIs respectively, use the following environment variables:
+
+.. code-block:: bash
+
+   HIPSOLVER_ENABLE_ROCSOLVER_LOGGING=1
+   HIPSOLVER_REFACTOR_ENABLE_ROCSOLVER_LOGGING=1
+   HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING=1
+
+For more details on how to configure the logging output, see :doc:`rocSOLVER logging <rocsolver:howto/logging>`.
+
 .. _porting:
 
 Porting cuSOLVER applications to hipSOLVER
