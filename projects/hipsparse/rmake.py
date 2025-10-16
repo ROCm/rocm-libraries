@@ -55,6 +55,9 @@ def parse_args():
                         help='Verbose build (optional, default: False)')
     parser.add_argument('--matrices-dir', dest='matrices_dir', type=str, required=False, default=None,
                         help='Path to directory containing matrices')
+    # hipsparse    
+    parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
+                        help='Build only clients with a pre-built library')
     parser.add_argument('--rocsparse-path', dest='rocsparse_path', type=str, required=False, default=None,
                         help='Set specific path to custom build rocSPARSE (optional)')
 
@@ -211,6 +214,9 @@ def config_cmd():
             shell=False)
 
         cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{matrices_dir}\"')
+
+    if args.clients_only:
+        cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:
