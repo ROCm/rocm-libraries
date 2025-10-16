@@ -59,7 +59,7 @@ target_link_libraries(rocroller-codegen-stress
         roc::rocroller-interface
         rocroller::common-test-utilities
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
+        ${LAPACK_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
     target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})
