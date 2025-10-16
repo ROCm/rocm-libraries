@@ -78,6 +78,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [0, 0, 0]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -251,6 +252,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
+    ISA: [0, 0, 0]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
