@@ -184,7 +184,8 @@ template <typename T>
 std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
 {
     // create an array of input tensor shapes to test
-    int shapes_to_test[10][4] = {{64, 128, 56, 56},
+    int shapes_to_test[10][4] = {// from resnet50
+                                 {64, 128, 56, 56},
                                  {64, 2048, 7, 7},
                                  {64, 256, 14, 14},
                                  {64, 256, 28, 28},
