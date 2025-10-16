@@ -233,34 +233,20 @@ TEST(TestPointwiseValidation, BitsetConsistencyBinary)
 
 TEST(TestPointwiseValidation, AllModesAccountedFor)
 {
-    // Only UNSET is intentionally unclassified - all other modes must be categorized
-    std::set<PointwiseMode> allowedUnclassified = {PointwiseMode::UNSET};
+    // UNSET is a special case - it should NOT be classified
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::UNSET));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::UNSET));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::UNSET));
 
-    // Iterate through all pointwise modes
-    for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
+    // All other modes MUST be classified as unary, binary, or ternary
+    for(size_t i = 1; i < POINTWISE_MODE_COUNT; ++i) // Start from 1 to skip UNSET
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        // Check if mode is classified
-        bool isUnary = isUnaryPointwiseMode(mode);
-        bool isBinary = isBinaryPointwiseMode(mode);
-        bool isTernary = isTernaryPointwiseMode(mode);
-        bool isClassified = isUnary || isBinary || isTernary;
+        bool isClassified = isUnaryPointwiseMode(mode) || isBinaryPointwiseMode(mode)
+                            || isTernaryPointwiseMode(mode);
 
-        // Check if mode is in the whitelist
-        bool isAllowedUnclassified = allowedUnclassified.count(mode) > 0;
-
-        if(isAllowedUnclassified)
-        {
-            // Whitelisted modes should NOT be classified
-            EXPECT_FALSE(isClassified)
-                << "Mode " << static_cast<int>(mode) << " is whitelisted but is classified";
-        }
-        else
-        {
-            // All other modes MUST be classified
-            EXPECT_TRUE(isClassified) << "Mode " << static_cast<int>(mode)
-                                      << " must be classified as unary, binary, or ternary";
-        }
+        EXPECT_TRUE(isClassified) << "Mode " << static_cast<int>(mode)
+                                  << " must be classified as unary, binary, or ternary";
     }
 }
