@@ -70,8 +70,8 @@ if(BUILD_CODE_COVERAGE)
     coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
-    COMMAND ${CMAKE_COMMAND} -E env ctest --output-on-failure
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMAND ctest --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/test/hipcub
   )
 
   find_program(
