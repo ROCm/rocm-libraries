@@ -24,20 +24,22 @@
  *
  *******************************************************************************/
 
+#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
-#include "batchnorm_functions.h"
+#endif
+#include "float_types.h"
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    MIOpenBatchNormFwdInferPerActivationEst(const _FLOAT* __restrict in,
-                                            _FLOAT* __restrict out,
-                                            const _FLOAT_PREC* __restrict estimatedMean,
-                                            const _FLOAT_PREC* __restrict estimatedVariance,
-                                            const _FLOAT_PREC* __restrict scale,
-                                            const _FLOAT_PREC* __restrict bias,
-                                            double epsilon,
+    MIOpenBatchNormFwdInferPerActivationEst(const FLOAT* __restrict in,
+                                            FLOAT* __restrict out,
+                                            const FLOAT_ACCUM* __restrict estimatedMean,
+                                            const FLOAT_ACCUM* __restrict estimatedVariance,
+                                            const FLOAT_ACCUM* __restrict scale,
+                                            const FLOAT_ACCUM* __restrict bias,
+                                            const double epsilon,
                                             unsigned int c,
                                             unsigned int hw,
                                             unsigned int batchSize,
@@ -48,39 +50,76 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidx = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tidy = blockIdx.y * blockDim.y + threadIdx.y;
 
+    // decide vector sizes based on problem layout
+    unsigned int vecSizeX, vecSizeY;
+    if constexpr(MIO_LAYOUT_NHWC)
+    {
+        vecSizeX = MIO_BN_VEC_SIZE;
+        vecSizeY = 1;
+    }
+    else // NCHW layout
+    {
+        vecSizeX = 1;
+        vecSizeY = MIO_BN_VEC_SIZE;
+    }
+
     // skip execution for out-of-bound threads
-    if(tidx * VEC_SIZE_X >= c || tidy * VEC_SIZE_Y >= hw)
+    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw)
     {
         return;
     }
 
     // indices for current thread
-    unsigned int adjIndex = (tidx * cStride * VEC_SIZE_X) + (tidy * hwStride * VEC_SIZE_Y);
-    unsigned int batchIndex = adjIndex;
+    unsigned int adjIndex = (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
 
     // batch parameters and values for current thread
-    _FLOAT_PREC_LS mean = *(reinterpret_cast<const _FLOAT_PREC_LS*>(estimatedMean + adjIndex));
-    _FLOAT_PREC_LS variance  = *(reinterpret_cast<const _FLOAT_PREC_LS*>(estimatedVariance + adjIndex));
-    _FLOAT_PREC_LS pscale   = *(reinterpret_cast<const _FLOAT_PREC_LS*>(scale + adjIndex));
-    _FLOAT_PREC_LS pbias    = *(reinterpret_cast<const _FLOAT_PREC_LS*>(bias + adjIndex));
-    _FLOAT_PREC_LS invVariance = rsqrt(fabs(variance + (_FLOAT_PREC_LS)(epsilon)));
-    _FLOAT_PREC_LS inhat;
-    _FLOAT_LS value;
+    FLOAT_ACCUM mean[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM variance[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pscale[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pbias[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
+#pragma unroll
+    for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+    {
+        mean[i]     = estimatedMean[adjIndex + i];
+        variance[i] = estimatedVariance[adjIndex + i];
+        pscale[i]   = scale[adjIndex + i];
+        pbias[i]    = bias[adjIndex + i];
+    }
+#pragma unroll
+    for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+    {
+        invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
+    }
+    FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
+    FLOAT value[MIO_BN_VEC_SIZE];
 
     // loop over the batches
-    for (unsigned int n = 0; n < batchSize; ++n)
+#pragma unroll 2
+    for (unsigned int n = 0; n < MIO_BN_N; ++n)
     {
         // load input value
-        batchIndex += n * batchStride;
-        value = *(reinterpret_cast<const _FLOAT_LS*>(in + batchIndex));
+        const unsigned int batchIndex = (n * batchStride) + adjIndex;
+#pragma unroll
+        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        {
+            value[i] = in[batchIndex + i];
+        }
 
         // perform batchnorm operation
-        inhat = FLOAT2FLOATPREC_VEC(value);
-        inhat = (inhat - mean) * invVariance;
-        inhat = fma(pscale, inhat, pbias);
-        value = FLOATPREC2FLOAT_VEC(inhat);
+#pragma unroll
+        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        {
+            inhat[i] = (static_cast<FLOAT_ACCUM>(value[i]) - mean[i]) * invVariance[i];
+            inhat[i] = fma(pscale[i], inhat[i], pbias[i]);
+            value[i] = static_cast<FLOAT>(inhat[i]);
+        }
 
         // write output value
-        *(reinterpret_cast<_FLOAT_LS*>(out + batchIndex)) = value;
+#pragma unroll
+        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        {
+            out[batchIndex + i] = value[i];
+        }
     }
 }
