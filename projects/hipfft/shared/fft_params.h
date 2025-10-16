@@ -1702,7 +1702,8 @@ public:
             bool       samestride = true;
             for(unsigned int i = 0; i < stridesize; ++i)
             {
-                if(istride[i] != ostride[i])
+                // (strides are irrelevant for unit lengths)
+                if(istride[i] != ostride[i] && length[i] > 1)
                     samestride = false;
             }
             if((transform_type == fft_transform_type_complex_forward
@@ -1742,7 +1743,7 @@ public:
 
             if((transform_type == fft_transform_type_real_forward
                 || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1))
+               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
             {
                 // In-place real/complex transforms require unit strides.
                 if(verbose)
