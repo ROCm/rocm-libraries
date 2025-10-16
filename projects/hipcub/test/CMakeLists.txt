@@ -20,6 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -51,6 +52,12 @@ function(add_relative_test test_name test_target)
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     endif()
+    if(BUILD_CODE_COVERAGE)
+      set_tests_properties(${test_name} PROPERTIES
+        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+      )
+    endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
 endfunction()
@@ -61,9 +68,9 @@ add_subdirectory(hipcub)
 if(BUILD_CODE_COVERAGE)
     add_custom_target(
     coverage_analysis
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/coverage-report
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/hipcub-coverage_%p.profraw" ctest --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
+    COMMAND ${CMAKE_COMMAND} -E env ctest --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
@@ -86,9 +93,9 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(
     coverage
     DEPENDS coverage_analysis
-    COMMAND ${LLVM_PROFDATA} merge -sparse ${CMAKE_BINARY_DIR}/coverage-report/profraw/hipcub-coverage_*.profraw -o ${CMAKE_BINARY_DIR}/coverage-report/hipcub.profdata
-    COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hipcub.profdata
-    COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hipcub.profdata -format=html -output-dir=${CMAKE_BINARY_DIR}/coverage-report
+    COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
