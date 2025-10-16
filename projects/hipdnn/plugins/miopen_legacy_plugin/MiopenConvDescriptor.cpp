@@ -64,6 +64,17 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.conv_mode());
 }
 
+MiopenConvDescriptor::MiopenConvDescriptor(
+    size_t spatialDimCount, const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes)
+{
+    createDescriptorInternal(spatialDimCount,
+                             attributes.pre_padding(),
+                             attributes.post_padding(),
+                             attributes.stride(),
+                             attributes.dilation(),
+                             attributes.conv_mode());
+}
+
 MiopenConvDescriptor::MiopenConvDescriptor(MiopenConvDescriptor&& other) noexcept
     : _descriptor(other._descriptor)
 {

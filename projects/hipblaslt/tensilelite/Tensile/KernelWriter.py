@@ -254,6 +254,7 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
+  freeSgprVarPool                        = set()
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
@@ -285,6 +286,8 @@ class StateValues:
   perIterLocalWriteCanSkip: List[int]    = field(init=False)
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
+
+  WGMTransformLevels: int                = -1
 
   # Epilogue states
   preloadScaleA = False
@@ -1825,6 +1828,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not forceNoTileCode:
       module.add(self.graWorkGroup(kernel, tensorParametersA, tensorParametersB))
 
+
     self.dontAppendCode = forceNoTileCode
 
     tPM = tensorParametersA["tpsMetadata"]
@@ -1837,6 +1841,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StreamK"] != 0:
       module.add(self.localReadAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
       module.add(self.localWriteAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
+
+    module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
 
     # tile assignments
     module.addComment1("global read addresses: tile offset assignment a")
@@ -1921,6 +1927,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.addComment1("global read addresses: shift metadata")
           module.add(self.graMetadataShift(kernel, tensorParametersB))
 
+    # addresses
+    if not forceNoTileCode:
+      module.addComment1("global read addresses: addresses a")
+      module.add(self.graAddresses(kernel, tensorParametersA))
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+        module.addComment1("global read addresses: addresses metadata")
+        module.add(self.graAddresses(kernel, tPM))
+      module.addComment1("global read addresses: addresses b")
+      module.add(self.graAddresses(kernel, tensorParametersB))
+
+    # workgoup SGPRs no longer needed
+
+    module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+
     # final offsets
     module.addComment1("global read addresses: final offsets a")
     module.add(self.graFinalOffsets(kernel, tensorParametersA))
@@ -1934,16 +1954,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(self.graFinalOffsets(kernel, tensorParametersB))
     self.dontAppendCode = False
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
-
-    # addresses
-    if not forceNoTileCode:
-      module.addComment1("global read addresses: addresses a")
-      module.add(self.graAddresses(kernel, tensorParametersA))
-      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        module.addComment1("global read addresses: addresses metadata")
-        module.add(self.graAddresses(kernel, tPM))
-      module.addComment1("global read addresses: addresses b")
-      module.add(self.graAddresses(kernel, tensorParametersB))
 
     # Add increment code
     gsuComponent = Component.GSU.find(self)
@@ -2489,7 +2499,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     pflr     = self.states.numItersPLR  # how many pf already done above
 
-
     # Store instruction streams across all iterations
     MfmaCodeAllIters = Module()
     LRSwapAAllIters = Module()
@@ -2779,10 +2788,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
+
+
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
-    module.add(loopComponent.openPersistentLoop(self, kernel))
 
+    module.add(loopComponent.openPersistentLoop(self, kernel))
     module.add(self.setupNewTile(kernel, tensorParametersA, tensorParametersB, isOptNLL=False))
 
     if self.do["executeToPrefetchEnd"]:
@@ -2794,6 +2805,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
         module.add(self.openShadowInit())
+        # SrdD/SrdC are used starting now, remove from sgpr pool
+        self.removeSgprVarFromPool("SrdD")
+        self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
         if self.states.doShadowInit == 2:
           module.add(self.initC(kernel)) # initC while waiting for global reads
@@ -2956,6 +2970,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # second GR buffer check for DTV
       isDTVGRSecondBuf = True if isDTV else False
       module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
+
       loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SSubU32(dst=loopCounter, src0=loopCounter, \
@@ -3041,6 +3056,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.lastVgprForReads - self.states.lastValuAB, "address vgpr")
     module.addComment1("Tail: add address/G2L vgpr [%u...%u) to pool" % \
         (self.states.lastValuAB, self.states.lastVgprForReads))
+
+    self.removeSgprVarFromPool("SrdWS")
 
     if not kernel["NoTailLoop"]:
       ########################################
@@ -4697,6 +4714,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
 
+    # the sgprs overlap with wg ids
     if self.states.doShadowInit and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
@@ -4826,8 +4844,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("StreamKIterEnd", 1)
       self.defineSgpr("StreamKLocalStart", 1)
       self.defineSgpr("StreamKLocalEnd", 1)
+      if len(kernel["SpaceFillingAlgo"]):
+        self.defineSgpr("StreamKTileID", 1)
       if kernel["StreamKAtomic"] == 0:
         self.defineSgpr("SrdWS", 4, 4)
+
+    # These SGPRs aren't used right away, add them to spr pool temporarily
+    if self.states.doShadowInit and kernel["BufferStore"]:
+      self.addSgprVarToPool("SrdC")
+    if kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
+      self.addSgprVarToPool("SrdWS")
 
     #------------------------
     # Registers defined below this point are not available in the post-loop
@@ -5114,6 +5140,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def defineAndResources(self, kernel, tPA, tPB, tPM):
+    return ""
+
+  ##############################################################################
+  # Allocate GR Address Resources
+  ##############################################################################
+  @abc.abstractmethod
+  def removeGRSrdVariableSgprsFromPool(self, kernel):
+    return ""
+
+  ##############################################################################
+  # Allocate GR Address Resources
+  ##############################################################################
+  @abc.abstractmethod
+  def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
 
   ##############################################################################
