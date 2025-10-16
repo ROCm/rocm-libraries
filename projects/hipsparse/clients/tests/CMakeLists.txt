@@ -188,6 +188,10 @@ target_compile_options(hipsparse-test PRIVATE -Wno-unused-command-line-argument 
 # Internal common header
 target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(hipsparse-test PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+endif()
+
 # Target link libraries
 target_link_libraries(hipsparse-test PRIVATE GTest::gtest roc::hipsparse)
 
