@@ -86,7 +86,7 @@ if(BUILD_CODE_COVERAGE)
 
   add_custom_target(
     coverage
-    DEPENDS code_cov_tests
+    DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipcub-coverage_*.profraw -o ./coverage-report/hipcub.profdata
     COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata
     COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=html -output-dir=coverage-report
