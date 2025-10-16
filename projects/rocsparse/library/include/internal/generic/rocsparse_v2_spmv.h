@@ -233,6 +233,59 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
                                    size_t                      buffer_size_in_bytes,
                                    void*                       buffer,
                                    rocsparse_error*            error);
+
+/*! \ingroup generic_module
+ *  \brief Set extra residual parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_set_extra sets arrays of gamma scalars and z vectors
+ *  for residual computation. The computation will be:
+ *  y = alpha * op(A) * x + beta * y + sum(gamma[i] * z[i])
+ *
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[in]
+ *  num_extras      number of extra terms (gamma/z pairs).
+ *  @param[in]
+ *  gamma_types     array of data types for gamma scalars.
+ *  @param[in]
+ *  gamma_ptrs      array of pointers to gamma scalars.
+ *  @param[in]
+ *  z_types         array of data types for z vectors.
+ *  @param[in]
+ *  z_ptrs          array of pointers to z vectors.
+ *  @param[out]
+ *  error           error output (optional).
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ *  \retval rocsparse_status_invalid_value invalid parameters.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr descr,
+                                          rocsparse_int        num_extras,
+                                          rocsparse_datatype*  gamma_types,
+                                          const void**         gamma_ptrs,
+                                          rocsparse_datatype*  z_types,
+                                          const void**         z_ptrs,
+                                          rocsparse_status*    error);
+
+/*! \ingroup generic_module
+ *  \brief Clear extra residual parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_clear_extra clears the extra parameters set by
+ *  rocsparse_spmv_set_extra.
+ *
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_clear_extra(rocsparse_spmv_descr descr);
+
 #ifdef __cplusplus
 }
 #endif

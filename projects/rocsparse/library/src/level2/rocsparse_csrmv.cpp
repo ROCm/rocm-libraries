@@ -49,6 +49,8 @@ namespace rocsparse
                                         const void*,
                                         const void*,
                                         void*,
+                                        const void*,
+                                        const void*,
                                         bool,
                                         bool);
 
@@ -68,6 +70,7 @@ namespace rocsparse
                            typename rocsparse::indextype_traits<J>::type_t, \
                            typename rocsparse::datatype_traits<A>::type_t,  \
                            typename rocsparse::datatype_traits<X>::type_t,  \
+                           typename rocsparse::datatype_traits<Y>::type_t,  \
                            typename rocsparse::datatype_traits<Y>::type_t>  \
     }
     // clang-format on
@@ -416,6 +419,10 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                   const void*               beta_device_host,
                                   rocsparse_datatype        y_datatype,
                                   void*                     y,
+                                  rocsparse_datatype        gamma_device_host_datatype,
+                                  const void*               gamma_device_host,
+                                  rocsparse_datatype        z_datatype,
+                                  const void*               z,
                                   bool                      fallback_algorithm)
 {
 
@@ -446,6 +453,8 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                 x,
                                 beta_device_host,
                                 y,
+                                gamma_device_host,
+                                z,
                                 force_conj,
                                 fallback_algorithm));
 

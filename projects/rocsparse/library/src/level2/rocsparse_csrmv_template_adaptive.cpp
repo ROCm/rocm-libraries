@@ -501,7 +501,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(gamma);
-        if(alpha != 0 || beta != 1)
+        if(alpha != 0 || beta != 1 || gamma != 0)
         {
             rocsparse::
                 csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, WG_SIZE>(
