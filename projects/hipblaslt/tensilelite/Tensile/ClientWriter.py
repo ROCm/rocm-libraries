@@ -242,6 +242,9 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
   if globalParameters["KeepBuildTmp"]:
     callCreateLibraryCmd += " --keep-build-tmp"
 
+  if globalParameters["NoEnableAsmComments"]:
+    callCreateLibraryCmd += " --no-enable-asm-comments"
+
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
   callCreateLibraryCmd += " --cxx-compiler=" + cxxCompiler
