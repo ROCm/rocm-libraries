@@ -269,7 +269,10 @@ struct hipfftw_funcs;
                                  print_plan,                                         \
                                  set_timelimit,                                      \
                                  cost,                                               \
-                                 flops);                                             \
+                                 flops,                                              \
+                                 execute_dft,                                        \
+                                 execute_dft_r2c,                                    \
+                                 execute_dft_c2r);                                   \
         }                                                                            \
         /* disable copies and moves */                                               \
         hipfftw_funcs(const hipfftw_funcs&) = delete;                                \
@@ -301,6 +304,9 @@ struct hipfftw_funcs;
         HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, set_timelimit)   \
         HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, cost)            \
         HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, flops)           \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft)     \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_r2c) \
+        HIPFFTW_DECLARE_DYNAMICALLY_LOADED_FUNCTION_POINTER(prefix, execute_dft_c2r) \
         static const hipfftw_funcs& get_instance()                                   \
         {                                                                            \
             static const hipfftw_funcs instance;                                     \
@@ -444,6 +450,59 @@ static std::string hipfftw_creation_options_to_string(hipfftw_plan_creation_func
         break;
     }
     return ret.str();
+}
+
+enum class hipfftw_plan_execution_func
+{
+    EXECUTE,
+    EXECUTE_DFT,
+    EXECUTE_DFT_R2C,
+    EXECUTE_DFT_C2R,
+    DEFAULT
+};
+
+static const std::vector<hipfftw_plan_execution_func> hipfftw_plan_execution_func_candidates
+    = {hipfftw_plan_execution_func::EXECUTE,
+       hipfftw_plan_execution_func::EXECUTE_DFT,
+       hipfftw_plan_execution_func::EXECUTE_DFT_R2C,
+       hipfftw_plan_execution_func::EXECUTE_DFT_C2R,
+       hipfftw_plan_execution_func::DEFAULT};
+
+static bool hipfftw_execution_func_is_well_defined(hipfftw_plan_execution_func exec_func)
+{
+    return std::find(hipfftw_plan_execution_func_candidates.begin(),
+                     hipfftw_plan_execution_func_candidates.end(),
+                     exec_func)
+           != hipfftw_plan_execution_func_candidates.end();
+}
+
+static std::string hipfftw_execution_option_to_string(hipfftw_plan_execution_func execution_option)
+{
+    if(!hipfftw_execution_func_is_well_defined(execution_option))
+        throw std::invalid_argument(
+            "invalid execution_option for hipfftw_execution_option_to_string");
+
+    switch(execution_option)
+    {
+    case hipfftw_plan_execution_func::EXECUTE:
+        return "execute";
+        break;
+    case hipfftw_plan_execution_func::EXECUTE_DFT:
+        return "execute_dft";
+        break;
+    case hipfftw_plan_execution_func::EXECUTE_DFT_R2C:
+        return "execute_dft_r2c";
+        break;
+    case hipfftw_plan_execution_func::EXECUTE_DFT_C2R:
+        return "execute_dft_c2r";
+        break;
+    case hipfftw_plan_execution_func::DEFAULT:
+        return "default_execution";
+        break;
+    default:
+        throw std::runtime_error("hipfftw_execution_option_to_string: internal error encountered "
+                                 "(unexpected value for execution_option)");
+    }
 }
 
 template <
@@ -1032,6 +1091,22 @@ public:
     {
         return can_create_plan_with(hipfftw_plan_creation_func::ANY);
     }
+    bool can_use_execution_option(hipfftw_plan_execution_func exec_option) const
+    {
+        if(!hipfftw_execution_func_is_well_defined(exec_option))
+            throw std::invalid_argument(
+                "invalid exec_option for hipfftw_helper::can_use_execution_option");
+
+        if(exec_option == hipfftw_plan_execution_func::DEFAULT
+           || exec_option == hipfftw_plan_execution_func::EXECUTE)
+            return true;
+        if(is_complex(dft_kind))
+            return exec_option == hipfftw_plan_execution_func::EXECUTE_DFT;
+        else if(dft_kind == fft_transform_type_real_forward)
+            return exec_option == hipfftw_plan_execution_func::EXECUTE_DFT_R2C;
+        else
+            return exec_option == hipfftw_plan_execution_func::EXECUTE_DFT_C2R;
+    }
     // create a token consistent with other tests to enable kernel precompilation
     // for valid cases, and/or capturing all required details about members otherwise
     std::string token() const
@@ -1156,8 +1231,14 @@ public:
         return make_plan<make_reference_plan>(in, out, chosen_option);
     }
 
-    void execute(void* execute_in, void* execute_out) const
+    void execute(void*                       execute_in,
+                 void*                       execute_out,
+                 hipfftw_plan_execution_func exec_option
+                 = hipfftw_plan_execution_func::DEFAULT) const
     {
+        if(!hipfftw_execution_func_is_well_defined(exec_option))
+            throw std::invalid_argument("invalid exec_option for hipfftw_helper::execute");
+
         if(!plan_bundle || plan_bundle->plan_token != token())
         {
             // plan is not created or possibly not up-to-date
@@ -1165,14 +1246,32 @@ public:
         }
 
         const auto& hipfftw_impl = hipfftw_funcs<prec>::get_instance();
-        if(execute_in == plan_bundle->creation_io.first
-           && execute_out == plan_bundle->creation_io.second)
+        if(exec_option == hipfftw_plan_execution_func::EXECUTE
+           || (execute_in == plan_bundle->creation_io.first
+               && execute_out == plan_bundle->creation_io.second
+               && exec_option == hipfftw_plan_execution_func::DEFAULT))
         {
             hipfftw_impl.execute(plan_bundle->plan);
         }
         else
         {
-            throw std::runtime_error("New-array execution functions not implemented yet.");
+            if(exec_option == hipfftw_plan_execution_func::EXECUTE_DFT
+               || (is_complex(dft_kind) && exec_option == hipfftw_plan_execution_func::DEFAULT))
+                hipfftw_impl.execute_dft(plan_bundle->plan,
+                                         static_cast<hipfftw_complex_t<prec>*>(execute_in),
+                                         static_cast<hipfftw_complex_t<prec>*>(execute_out));
+            else if(exec_option == hipfftw_plan_execution_func::EXECUTE_DFT_R2C
+                    || (dft_kind == fft_transform_type_real_forward
+                        && exec_option == hipfftw_plan_execution_func::DEFAULT))
+                hipfftw_impl.execute_dft_r2c(plan_bundle->plan,
+                                             static_cast<hipfftw_real_t<prec>*>(execute_in),
+                                             static_cast<hipfftw_complex_t<prec>*>(execute_out));
+            else if(exec_option == hipfftw_plan_execution_func::EXECUTE_DFT_C2R
+                    || (dft_kind == fft_transform_type_real_inverse
+                        && exec_option == hipfftw_plan_execution_func::DEFAULT))
+                hipfftw_impl.execute_dft_c2r(plan_bundle->plan,
+                                             static_cast<hipfftw_complex_t<prec>*>(execute_in),
+                                             static_cast<hipfftw_real_t<prec>*>(execute_out));
         }
     }
 
