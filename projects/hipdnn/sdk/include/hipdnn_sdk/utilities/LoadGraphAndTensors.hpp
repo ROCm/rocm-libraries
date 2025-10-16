@@ -94,6 +94,11 @@ struct GraphAndTensorMap
         return *data_objects::GetGraph(graphBuffer.data());
     }
 
+    hipdnn_plugin::GraphWrapper graphWrapper() const
+    {
+        return hipdnn_plugin::GraphWrapper{graphBuffer.data(), graphBuffer.size()};
+    }
+
     std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers()
     {
 

@@ -8,6 +8,21 @@
 
 using namespace hipdnn_sdk::utilities;
 
+TEST(TestTensor, Swap)
+{
+    Tensor<float> tensorA({2, 2});
+    Tensor<float> tensorB{{2}};
+    tensorA.fillWithValue(1.f);
+    tensorB.fillWithValue(2.f);
+
+    std::swap(tensorA, tensorB);
+
+    ASSERT_EQ(tensorA.dims().size(), 1);
+    ASSERT_EQ(tensorB.dims().size(), 2);
+    ASSERT_EQ(tensorA.memory().hostData()[0], 2.f);
+    ASSERT_EQ(tensorB.memory().hostData()[0], 1.f);
+}
+
 TEST(TestTensor, BasicRowMajorUsage)
 {
     Tensor<float> tensor({1, 2, 3, 4});

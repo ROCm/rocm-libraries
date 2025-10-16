@@ -6,6 +6,9 @@
 namespace hipdnn_sdk::utilities
 {
 
+// Struct is initialized with a list of functors
+// Typically passed to std:visit to provide the overloads for different
+// variant values
 template <class... Ts>
 struct Visitor : Ts...
 {
