@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#if MIOPEN_BACKEND_HIP
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
@@ -23,3 +25,5 @@ int main(int argc, char** argv)
 
     return RUN_ALL_TESTS();
 }
+
+#endif
