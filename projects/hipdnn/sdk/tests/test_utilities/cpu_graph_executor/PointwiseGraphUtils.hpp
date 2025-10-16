@@ -40,7 +40,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     // Create input tensor attribute
     auto inputStrides = generateStrides(inputDims, layout.strideOrder);
-    auto inputDimsCopy = inputDims;
+    const auto& inputDimsCopy = inputDims;
     auto inputAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input", hipdnn_frontend::fromSdkType(input0DataType), inputDimsCopy, inputStrides);
     inputAttr.set_uid(uid++);
@@ -94,7 +94,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     // Create input tensor attributes
     auto input1Strides = generateStrides(input1Dims, layout.strideOrder);
-    auto input1DimsCopy = input1Dims;
+    const auto& input1DimsCopy = input1Dims;
     auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input1", hipdnn_frontend::fromSdkType(input0DataType), input1DimsCopy, input1Strides);
     input1Attr.set_uid(uid++);
@@ -102,7 +102,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
 
     auto input2Strides = generateStrides(input2Dims, layout.strideOrder);
-    auto input2DimsCopy = input2Dims;
+    const auto& input2DimsCopy = input2Dims;
     auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input2", hipdnn_frontend::fromSdkType(input1DataType), input2DimsCopy, input2Strides);
     input2Attr.set_uid(uid++);
