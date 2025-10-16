@@ -68,6 +68,11 @@ inline __HOST_DEVICE__ half fabs(half num)
     return hipdnn_sdk::utilities::fp16::habs(num);
 }
 
+inline __HOST_DEVICE__ half abs(half num)
+{
+    return hipdnn_sdk::utilities::fp16::habs(num);
+}
+
 inline __HOST_DEVICE__ half max(half a, half b)
 {
     return hipdnn_sdk::utilities::fp16::hmax(a, b);

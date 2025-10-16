@@ -3302,6 +3302,7 @@ class Solution(collections.abc.Mapping):
     hasCMS,_ = hasCustomSchedule(state)
     state["UseCustomMainLoopSchedule"] = hasCMS
 
+    state["InternalSupportParams"]["UseSFC"] = (len(state["SpaceFillingAlgo"]) > 0)
 
   ########################################
   @ staticmethod

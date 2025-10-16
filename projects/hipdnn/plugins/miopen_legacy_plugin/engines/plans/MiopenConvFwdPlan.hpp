@@ -36,12 +36,15 @@ public:
     const MiopenTensor& y() const;
     const MiopenConvDescriptor& conv() const;
 
+    bool validTensors() const;
+
 private:
     size_t _spatialDimCount;
     MiopenTensor _x;
     MiopenTensor _w;
     MiopenTensor _y;
     MiopenConvDescriptor _conv;
+    bool _tensorsValid;
 };
 
 class ConvFwdPlan : public IPlan

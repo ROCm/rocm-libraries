@@ -11,8 +11,4 @@ find_dependency(hipdnn_backend CONFIG REQUIRED)
 # Include the targets file
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
 
-# Forward the SDK variables for convenience (if frontend is only included)
-set(HIPDNN_PLUGIN_ENGINE_SUBDIR "${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
-set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
-
 check_required_components(hipdnn_frontend)

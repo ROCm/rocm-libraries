@@ -170,12 +170,12 @@ namespace TensileLite
     };
 
     /**
- * Represents a single kernel or set of kernels that can perform a single
- * tensor contraction.
- *
- * Can generate `KernelInvocation` objects to solve a particular problem
- * given a set of `ContractionInputs`.
- */
+     * Represents a single kernel or set of kernels that can perform a single
+     * tensor contraction.
+     *
+     * Can generate `KernelInvocation` objects to solve a particular problem
+     * given a set of `ContractionInputs`.
+     */
     class ContractionSolution : public Solution
     {
     public:
@@ -184,8 +184,8 @@ namespace TensileLite
         using GroupedInputs = ContractionGroupedInputs;
 
         /**
-  * Indicate a solution is equally or estimatedly matched.
-  */
+         * Indicate a solution is equally or estimatedly matched.
+         */
         enum class MatchingTag
         {
             Equal,
@@ -215,11 +215,6 @@ namespace TensileLite
             return kernelName;
         }
         virtual bool isFallbackForHW(Hardware const&) const;
-
-        bool isStreamK() const
-        {
-            return sizeMapping.streamK > 0;
-        }
 
         //! Estimates based on problem size, solution tile, and  machine hardware
         //! charz:
@@ -274,26 +269,13 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
-        struct TAMetricProblemScore
-        {
-            Granularities granularites;
-
-            int CUs = 0;
-
-            double summationPerformance = 0.0;
-
-            double M;
-            double N;
-            double K;
-        };
-
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
 
         /**
-   * Calculate required workspace size.
-   */
+         * Calculate required workspace size.
+         */
         size_t requiredWorkspaceSize(Problem const& problem, Hardware const& hardware) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
                                                 Hardware const&             hardware) const;
@@ -321,28 +303,15 @@ namespace TensileLite
                                                       double totalGranularity,
                                                       int    globalSplitU) const;
 
-        TAMetricProblemScore computeProblemScore(
-            Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const;
-
-        double computeTileAwareMetric(TAMetricProblemScore pp,
-                                      TAMetricProblemScore ppReference) const;
-
-        double computeTAMScore(Problem const&  problem,
-                               Hardware const& hardware,
-                               double          model_M,
-                               double          model_N,
-                               double          model_K,
-                               double          model_NumBatches) const;
-
         /**
-   * Calculate the projected performance based on granularity loss.
-   */
+         * Calculate the projected performance based on granularity loss.
+         */
         ProjectedPerformance projectedPerformance(Problem const&  problem,
                                                   Hardware const& hardware) const;
 
         /**
-   * Generate a set of kernel calls to solve a particular problem.
-   */
+         * Generate a set of kernel calls to solve a particular problem.
+         */
         virtual std::vector<KernelInvocation> solve(ContractionProblem const& problem,
                                                     ProblemInputs const&      inputs,
                                                     Hardware const&           hardware,
@@ -502,6 +471,7 @@ namespace TensileLite
             bool wgm              = true;
             bool staggerU         = true;
             bool useUniversalArgs = true;
+            bool useSFC           = false;
         };
 
         struct ProblemType
