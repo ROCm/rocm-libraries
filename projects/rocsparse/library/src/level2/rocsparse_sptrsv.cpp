@@ -347,7 +347,7 @@ namespace rocsparse
         *local_alpha = alpha;
         if(scalar_datatype != compute_datatype)
         {
-            // Convert scalars from scalar_datatype to compute_datatype
+            // Convert scalars from scalar_datatype to compute_datatype.
             switch(handle->pointer_mode)
             {
             case rocsparse_pointer_mode_host:
