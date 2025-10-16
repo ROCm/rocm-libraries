@@ -24,10 +24,15 @@
 #include <gtest/gtest.h>
 
 __global__
-void write_target_arch(rocrand_impl::host::target_arch* dest_arch)
+void write_target_arch([[maybe_unused]] rocrand_impl::host::target_arch host_arch,
+                       int* __restrict__ result)
 {
+#if !defined(__SPIRV__)
     constexpr auto arch = rocrand_impl::host::get_device_arch();
-    *dest_arch          = arch;
+    *result = arch == host_arch;
+#else
+    *result = -1;
+#endif
 }
 
 static constexpr rocrand_rng_type dummy_rng_type = rocrand_rng_type(0);
@@ -79,19 +84,26 @@ TEST(rocrand_config_dispatch_tests, host_matches_device)
     rocrand_impl::host::target_arch host_arch;
     HIP_CHECK(rocrand_impl::host::get_device_arch(stream, host_arch));
 
-    rocrand_impl::host::target_arch* device_arch_ptr;
-    HIP_CHECK(hipMallocHelper(&device_arch_ptr, sizeof(*device_arch_ptr)));
+    int* result_ptr = nullptr;
+    HIP_CHECK(hipMallocHelper(&result_ptr, sizeof(result_ptr)));
 
-    hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr);
+    hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, host_arch, result_ptr);
     HIP_CHECK(hipGetLastError());
 
-    rocrand_impl::host::target_arch device_arch;
-    HIP_CHECK(hipMemcpy(&device_arch, device_arch_ptr, sizeof(device_arch), hipMemcpyDeviceToHost));
+    int result = -1;
+    HIP_CHECK(hipMemcpy(&result, result_ptr, sizeof(result), hipMemcpyDeviceToHost));
 
-    ASSERT_NE(host_arch, rocrand_impl::host::target_arch::invalid);
-    ASSERT_EQ(host_arch, device_arch);
+    if(result != -1)
+    {
+        ASSERT_NE(host_arch, rocrand_impl::host::target_arch::invalid);
+        ASSERT_EQ(result, 1);
+    }
+    else
+    {
+        GTEST_SKIP() << "SPIR-V build: result is null; skipping arch match assertion.";
+    }
 
-    HIP_CHECK(hipFree(device_arch_ptr));
+    HIP_CHECK(hipFree(result_ptr));
 }
 
 TEST(rocrand_config_dispatch_tests, parse_common_architectures)
