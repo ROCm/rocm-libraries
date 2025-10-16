@@ -85,18 +85,7 @@ TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/t
 
 ## Gardener Rotation
 
-Week | North America | Europe / India / APAC
----- | ------- | ---------
-Jun 30, 2025 | ellosel | marbre
-July 7, 2025 | geomin12 | kkyang
-July 14, 2025 | jhawk-commits | N/A
-Aug 05, 2025 | amd-aakash | N/A
-Aug 12, 2025 | eidenyoshida | N/A
-Aug 19, 2025 | stanleytsang-amd | N/A
-Aug 26, 2025 | rahulc-gh | N/A
-Sep 02, 2025 | paveltc | N/A
-Sep 09, 2025 | adickin-amd | N/A
-Sep 16, 2025 | araravik-psd | N/A
+[Confluence doc for Gardener Rotation](http://u.amd.com/rocm-libraries-gardeners)
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 

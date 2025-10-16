@@ -90,16 +90,16 @@ protected:
         engineConfig.size = engineConfigBuilder.GetSize();
 
         hipdnnPluginStatus_t status;
-        size_t workspaceSize;
-        status
-            = hipdnnEnginePluginGetWorkspaceSize(_handle, &engineConfig, &opGraph, &workspaceSize);
-        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-        hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
-
         hipdnnEnginePluginExecutionContext_t executionContext;
         status = hipdnnEnginePluginCreateExecutionContext(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+        size_t workspaceSize;
+        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+            _handle, executionContext, &workspaceSize);
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+        hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 
         status = hipdnnEnginePluginExecuteOpGraph(_handle,
                                                   executionContext,

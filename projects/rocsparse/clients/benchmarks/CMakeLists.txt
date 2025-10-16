@@ -214,6 +214,9 @@ target_compile_options(rocsparse-bench PRIVATE -Wno-deprecated -Wno-unused-comma
 
 # Internal common header
 target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(rocsparse-bench PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+endif()
 
 # Add OpenMP if available
 apply_omp_settings(rocsparse-bench)

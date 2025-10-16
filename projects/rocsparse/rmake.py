@@ -212,13 +212,8 @@ def config_cmd():
             fatal("Could not detect GPU as requested. Not continuing.")
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
- #   if args.clients_only:
- #       if args.library_dir_installed:
- #           library_dir = args.library_dir_installed
- #       else:
- #           library_dir = f"{rocm_path}/rocblas"
- #       cmake_lib_dir = cmake_path(library_dir)
- #       cmake_options.append( f"-DSKIP_LIBRARY=ON -DROCBLAS_LIBRARY_DIR={cmake_lib_dir}" )
+    if args.clients_only:
+        cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
 
 
 

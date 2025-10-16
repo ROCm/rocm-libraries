@@ -399,6 +399,27 @@ hipdnnPluginStatus_t
     });
 }
 
+hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    size_t* workspaceSize)
+{
+    LOG_API_ENTRY("handle={:p}, executionContext={:p}, workspaceSize={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<const void*>(executionContext),
+                  static_cast<void*>(workspaceSize));
+
+    return hipdnn_plugin::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+        throwIfNull(executionContext);
+        throwIfNull(workspaceSize);
+
+        *workspaceSize = executionContext->plan().getWorkspaceSize(*handle);
+
+        LOG_API_SUCCESS(apiName, "workspaceSize={}", *workspaceSize);
+    });
+}
+
 hipdnnPluginStatus_t
     hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
                                      hipdnnEnginePluginExecutionContext_t executionContext,
