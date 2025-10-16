@@ -148,6 +148,19 @@ class SIA1(SIA):
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
               firstIter, lastLc, isNGLL)
 
+class SIA0(SIA):
+    kernel = {"ScheduleIterAlg": 0}
+    def __call__(self):
+        assert False
+
+    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
+        # Get schedule information
+        numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParams(kernel)
+        numLocalWritesPerSched = numLocalWriteModPerIter
+        itemsGRToSchedLater, lastLoadIter = noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode)
+        # Schedule local write
+        noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
+
 ################################################################################
 ################################################################################
 ###

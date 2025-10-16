@@ -411,6 +411,7 @@ inline std::map<std::string, int>
                        isDebug);
 
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
+    rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
 
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);

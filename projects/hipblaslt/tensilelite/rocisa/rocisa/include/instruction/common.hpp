@@ -1993,6 +1993,39 @@ namespace rocisa
         bool waitAll;
     };
 
+    struct SWaitTensorcnt : public Instruction
+    {
+        SWaitTensorcnt(int tensorcnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , tensorcnt(tensorcnt)
+        {
+        }
+
+        SWaitTensorcnt(const SWaitTensorcnt& other)
+            : Instruction(other)
+            , tensorcnt(other.tensorcnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitTensorcnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {tensorcnt};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment("s_wait_tensorcnt " + std::to_string(tensorcnt));
+        }
+
+    private:
+        int tensorcnt;
+    };
+
     /*
         GFX12:
         +-----------------------+-----------------+---------+-----+-----------+-----------------+--------+---------+
