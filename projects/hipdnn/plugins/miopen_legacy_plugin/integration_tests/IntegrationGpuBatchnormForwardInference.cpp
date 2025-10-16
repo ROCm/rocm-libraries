@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -12,8 +13,10 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -123,7 +126,10 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        const std::array<const char*, 1> paths = {PLUGIN_PATH};
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
@@ -217,6 +223,8 @@ protected:
         }
 
         yTensorAttr->set_data_type(inputDataType);
+        yTensorAttr->set_dim(graphTensorBundle.yTensor.dims());
+        yTensorAttr->set_stride(graphTensorBundle.yTensor.strides());
 
         // Validate and build graph
         auto result = graph->validate();
@@ -258,8 +266,7 @@ protected:
             1e-3);
     }
 
-    void runBatchnormTest(InputType tolerance = 1e-4f,
-                          const TensorLayout& layout = TensorLayout::NCHW)
+    void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         TestCaseType testCase = this->GetParam();
 
@@ -378,7 +385,7 @@ std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp32, Correctness)
 {
-    runBatchnormTest(1e-6f, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -387,7 +394,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNchwBfp16, Correctness)
 {
-    runBatchnormTest(1e-2_bf, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -396,7 +403,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp16, Correctness)
 {
-    runBatchnormTest(1e-2_h, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -405,7 +412,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp32, Correctness)
 {
-    runBatchnormTest(1e-6f, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<float>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -414,7 +421,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcBfp16, Correctness)
 {
-    runBatchnormTest(1e-2_bf, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -423,7 +430,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp16, Correctness)
 {
-    runBatchnormTest(1e-2_h, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<half>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -432,7 +439,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp32, Correctness)
 {
-    runBatchnormTest(1e-6f, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -441,7 +448,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwBfp16, Correctness)
 {
-    runBatchnormTest(1e-2_bf, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -450,7 +457,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp16, Correctness)
 {
-    runBatchnormTest(1e-2_h, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -459,7 +466,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp32, Correctness)
 {
-    runBatchnormTest(1e-6f, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<float>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -468,7 +475,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcBfp16, Correctness)
 {
-    runBatchnormTest(1e-2_bf, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -477,7 +484,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp16, Correctness)
 {
-    runBatchnormTest(1e-2_h, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceInference<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

@@ -7,9 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
+      test_type:
         type: string
-
 
 permissions:
   contents: read
@@ -21,7 +20,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:044b113562629f4bd2ec5d2e64b32eee11562d48fb1a75d7493daec9dd8d8292
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:2f3ebd0beb04c449fdb36933e54bdc69483b914fb9005594d3fc9444c206b54b
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -40,7 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 9b736076099e591f7835119aa22f99b244a68639 # 2025-09-30 commit
+          ref: 5542f136fe57cd1c485dd369277ef0613fd919b9 # 2025-10-15 commit
 
       - name: Install python deps
         run: |
@@ -76,7 +75,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
@@ -129,3 +128,4 @@ jobs:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
+      test_type: ${{ inputs.test_type }}

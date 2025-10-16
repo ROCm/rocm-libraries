@@ -35,6 +35,7 @@ add_executable(hipdnn_frontend_tests
     TestTensorValueAttributes.cpp
     TestTypes.cpp
     TestUtilities.cpp
+    TestTopologicalSortingUtils.cpp
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
