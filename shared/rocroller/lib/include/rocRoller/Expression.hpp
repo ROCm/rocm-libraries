@@ -591,7 +591,7 @@ namespace rocRoller
         struct Concatenate : Nary
         {
             constexpr static inline auto            Type       = Category::Value;
-            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
+            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes{};
             constexpr static inline int             Complexity = 1;
 
             VariableType destinationType;
