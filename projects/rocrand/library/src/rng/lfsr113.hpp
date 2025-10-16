@@ -423,8 +423,10 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                auto generate_lfsr113_kernel = [&](auto arch, auto... args)
-                { generate_lfsr113<ConfigProvider, is_dynamic, T, Distribution, arch>(args...); };
+                auto generate_lfsr113_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_lfsr113<ConfigProvider, is_dynamic, T, Distribution, arch>(args...);
+                };
                 return system_type::template launch<ConfigProvider, T, is_dynamic>(
                     generate_lfsr113_kernel,
                     target_arch,

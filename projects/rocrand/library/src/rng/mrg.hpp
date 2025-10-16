@@ -388,7 +388,8 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                auto generate_mrg_kernel = [&](auto arch, auto... args) {
+                auto generate_mrg_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
                     generate_mrg<ConfigProvider, is_dynamic, engine_type, T, Distribution, arch>(
                         args...);
                 };

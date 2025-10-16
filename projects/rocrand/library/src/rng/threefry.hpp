@@ -355,8 +355,10 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            auto generate_threefry_kernel = [&](auto arch, auto... args)
-            { generate_threefry<engine_type, T, Distribution, arch>(args...); };
+            auto generate_threefry_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
+                generate_threefry<engine_type, T, Distribution, arch>(args...);
+            };
 
             status = dynamic_dispatch(
                 m_order,

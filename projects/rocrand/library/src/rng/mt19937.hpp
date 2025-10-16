@@ -875,7 +875,8 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                auto jump_ahead_mt19937_kernel = [&](auto arch, auto... args) {
+                auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
                     jump_ahead_mt19937<jump_ahead_thread_count, ConfigProvider, is_dynamic, arch>(
                         args...);
                 };
@@ -902,21 +903,23 @@ public:
         system_type::free(d_mt19937_jump);
 
         // This kernel is not actually tuned for ordering, but config is needed for device-side compile time check of the generator count
-        dynamic_dispatch(m_order,
-                         [&, this](auto is_dynamic)
-                         {
-                             auto init_engines_mt19937_kernel = [&](auto arch, auto... args)
-                             { init_engines_mt19937<ConfigProvider, is_dynamic, arch>(args...); };
-                             status = system_type::template launch<ConfigProvider>(
-                                 init_engines_mt19937_kernel,
-                                 target_arch,
-                                 dim3(config.blocks),
-                                 dim3(config.threads),
-                                 0,
-                                 m_stream,
-                                 m_engines,
-                                 d_engines);
-                         });
+        dynamic_dispatch(
+            m_order,
+            [&, this](auto is_dynamic)
+            {
+                auto init_engines_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    init_engines_mt19937<ConfigProvider, is_dynamic, arch>(args...);
+                };
+                status = system_type::template launch<ConfigProvider>(init_engines_mt19937_kernel,
+                                                                      target_arch,
+                                                                      dim3(config.blocks),
+                                                                      dim3(config.threads),
+                                                                      0,
+                                                                      m_stream,
+                                                                      m_engines,
+                                                                      d_engines);
+            });
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             system_type::free(d_engines);
@@ -1016,7 +1019,8 @@ public:
             dynamic_dispatch(m_order,
                              [&, this](auto is_dynamic)
                              {
-                                 auto generate_short_mt19937_kernel = [&](auto arch, auto... args) {
+                                 auto generate_short_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                                 {
                                      generate_short_mt19937<ConfigProvider,
                                                             is_dynamic,
                                                             T,
@@ -1053,7 +1057,8 @@ public:
             dynamic_dispatch(m_order,
                              [&, this](auto is_dynamic)
                              {
-                                 auto generate_long_mt19937_kernel = [&](auto arch, auto... args) {
+                                 auto generate_long_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                                 {
                                      generate_long_mt19937<ConfigProvider,
                                                            is_dynamic,
                                                            T,

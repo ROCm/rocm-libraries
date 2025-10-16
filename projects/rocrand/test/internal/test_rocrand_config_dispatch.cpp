@@ -29,6 +29,7 @@ void write_target_arch([[maybe_unused]] rocrand_impl::host::target_arch host_arc
 {
 #if !defined(__SPIRV__)
     constexpr auto arch = rocrand_impl::host::get_device_arch();
+
     *result = arch == host_arch;
 #else
     *result = -1;

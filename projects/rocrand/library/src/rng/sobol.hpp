@@ -727,7 +727,7 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            auto generate_sobol_host_kernel = [&](auto arch, auto... args)
+            auto generate_sobol_host_kernel = [&] __host__ __device__(auto arch, auto... args)
             {
                 generate_sobol_host<output_per_thread,
                                     Scrambled,

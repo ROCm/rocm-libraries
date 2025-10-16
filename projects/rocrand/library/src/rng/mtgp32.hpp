@@ -517,8 +517,10 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                auto generate_mtgp_kernel = [&](auto arch, auto... args)
-                { generate_mtgp<ConfigProvider, is_dynamic, T, Distribution, arch>(args...); };
+                auto generate_mtgp_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_mtgp<ConfigProvider, is_dynamic, T, Distribution, arch>(args...);
+                };
                 return system_type::template launch<ConfigProvider, T, is_dynamic>(
                     generate_mtgp_kernel,
                     target_arch,
