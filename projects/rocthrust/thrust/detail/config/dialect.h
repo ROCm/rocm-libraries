@@ -27,6 +27,7 @@
 #  define THRUST_CONSTEXPR_CXX20 _CCCL_CONSTEXPR_CXX20
 #  define THRUST_CONSTEXPR_CXX23 _CCCL_CONSTEXPR_CXX23
 #  define THRUST_IF_CONSTEXPR    _CCCL_IF_CONSTEXPR
+#  define THRUST_TRAIT           _CCCL_TRAIT
 
 #else
 
@@ -56,6 +57,8 @@
 #  else // ^^^ _CCCL_NO_IF_CONSTEXPR ^^^ / vvv !_CCCL_NO_IF_CONSTEXPR vvv
 #    define THRUST_IF_CONSTEXPR if constexpr
 #  endif // !_CCCL_NO_IF_CONSTEXPR
+
+#  define THRUST_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
 
 #endif
 
