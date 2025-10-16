@@ -41,7 +41,7 @@ target_link_libraries(rocroller-gemm
         roc::rocroller-interface
         rocroller::common-test-utilities
         CLI11::CLI11
-        ${BLAS_LIBRARIES}
+        ${LAPACK_LIBRARIES}
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
