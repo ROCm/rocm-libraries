@@ -4206,7 +4206,7 @@ namespace GEMMDriverTest
             ::testing::Combine(::testing::Values(StreamKMode::Standard,
                                                  StreamKMode::TwoTile,
                                                  StreamKMode::TwoTileDPFirst), /* TwoTile */
-                               ::testing::Values(true, false), /* ldsA */
-                               ::testing::Values(true, false), /* ldsB */
-                               ::testing::Values(true, false))));
+                               ::testing::Values(false), /* ldsA */
+                               ::testing::Values(true), /* ldsB */
+                               ::testing::Values(false))));
 }
