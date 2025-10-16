@@ -24,21 +24,17 @@ enum class MemoryLocation
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
-template <typename T>
 class IMigratableMemory
 {
 public:
     virtual ~IMigratableMemory() = default;
 
-    virtual T* hostData() = 0;
-    virtual T* hostDataAsync() = 0;
-    virtual const T* hostData() const = 0;
-    virtual const T* hostDataAsync() const = 0;
     virtual void* deviceData() = 0;
     virtual void* deviceDataAsync() = 0;
 
     virtual void markHostModified() = 0;
     virtual void markDeviceModified() = 0;
+    virtual bool isModified() const = 0;
 
     virtual size_t count() const = 0;
     virtual bool empty() const = 0;
@@ -48,10 +44,22 @@ public:
     virtual void clear() = 0;
 };
 
+template <typename T>
+class MigratableMemoryBase : public IMigratableMemory
+{
+public:
+    ~MigratableMemoryBase() override = default;
+
+    virtual T* hostData() = 0;
+    virtual T* hostDataAsync() = 0;
+    virtual const T* hostData() const = 0;
+    virtual const T* hostDataAsync() const = 0;
+};
+
 // NOLINTEND(portability-template-virtual-member-function)
 
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
-class MigratableMemory : public IMigratableMemory<T>
+class MigratableMemory : public MigratableMemoryBase<T>
 {
     static_assert(std::is_base_of_v<IHostAllocator<T>, HostAlloc>,
                   "HostAlloc must derive from IHostAllocator<T>");
@@ -191,6 +199,7 @@ public:
         _hostValid = true;
         _deviceValid = false;
         _currentLocation = MemoryLocation::HOST;
+        _lastModifiedLocation = MemoryLocation::HOST;
     }
 
     // Mark memory as modified on device
@@ -199,6 +208,12 @@ public:
         _deviceValid = true;
         _hostValid = false;
         _currentLocation = MemoryLocation::DEVICE;
+        _lastModifiedLocation = MemoryLocation::DEVICE;
+    }
+
+    bool isModified() const override
+    {
+        return _lastModifiedLocation != MemoryLocation::NONE;
     }
 
     size_t count() const override
@@ -223,6 +238,7 @@ public:
         _itemSize = 0;
         _totalSize = 0;
         _currentLocation = MemoryLocation::NONE;
+        _lastModifiedLocation = MemoryLocation::NONE;
         _hostValid = false;
         _deviceValid = false;
     }
@@ -355,6 +371,7 @@ private:
     size_t _itemSize;
     size_t _totalSize;
     MemoryLocation _currentLocation{MemoryLocation::NONE};
+    MemoryLocation _lastModifiedLocation{MemoryLocation::NONE};
     bool _hostValid{false};
     bool _deviceValid{false};
     hipStream_t _stream{nullptr};

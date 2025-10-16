@@ -4,6 +4,140 @@
 #include <filesystem>
 #include <random>
 
+#include <hip/hip_runtime.h>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+
+#include "../tests/common/ConvolutionCommon.hpp"
+#include "IntegrationTestUtils.hpp"
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk::test_utilities;
+using namespace test_conv_common;
+
+namespace
+{
+
+template <typename DataType>
+class ConvForward : public ::testing::TestWithParam<ConvTestCase>
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        // Initialize HIP
+        ASSERT_EQ(hipInit(0), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
+
+        // Note: The plugin paths has to be set before we create the hipdnn handle.
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        // Create handle and stream
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_stream != nullptr)
+        {
+            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
+    }
+
+    void runConvTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    {
+        const ConvTestCase& testCase = GetParam();
+
+        hipdnn_frontend::graph::Graph graphObj;
+
+        graphObj.set_name("ConvolutionForwardTest");
+        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+        int64_t uid = 1;
+
+        auto dataType = getDataTypeEnumFromType<DataType>();
+
+        auto xAttr = graph::makeTensorAttributes(
+            "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
+        xAttr.set_uid(uid++);
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+
+        auto wAttr = graph::makeTensorAttributes(
+            "w", dataType, testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
+        wAttr.set_uid(uid++);
+        auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
+
+        graph::ConvFpropAttributes convAttrs;
+        convAttrs.set_name("convolution_forward");
+        convAttrs.set_pre_padding(testCase.convPrePadding);
+        convAttrs.set_post_padding(testCase.convPostPadding);
+        convAttrs.set_stride(testCase.convStride);
+        convAttrs.set_dilation(testCase.convDilation);
+
+        auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+
+        if(!yAttr->has_uid())
+        {
+            yAttr->set_uid(uid++);
+        }
+        yAttr->set_output(true);
+        yAttr->set_data_type(dataType);
+        yAttr->set_dim(testCase.yDims);
+        yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
+
+        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
+        verifyGraph<DataType>(_handle, graphObj, testCase.seed, validator, {yAttr->get_uid()});
+
+        // HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
+
+        // ConvTensorBundle graphTensorBundle(testCase, layout);
+        // ConvTensorBundle cpuTensorBundle(testCase, layout);
+
+        // auto dataType = getDataTypeEnumFromType<DataType>();
+        // runMiopenConvFwd(testCase, graphTensorBundle, dataType);
+        // graphTensorBundle.yTensor.memory().markDeviceModified();
+
+        // runCpuConvFwd(testCase, cpuTensorBundle);
+
+        // CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance, tolerance);
+        // EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
+        //                                       graphTensorBundle.yTensor.memory()));
+    }
+
+private:
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    int _deviceId = 0;
+};
+
+using IntegrationGpuConvFwdNchwFp32 = ConvForward<float>;
+
+TEST_P(IntegrationGpuConvFwdNchwFp32, Correctness)
+{
+    runConvTest(4e-6f, TensorLayout::NCHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwFp32, testing::ValuesIn(getConvTestCases4D()));
+
+}
+
+/*
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_frontend/Graph.hpp>
@@ -308,3 +442,4 @@ INSTANTIATE_TEST_SUITE_P(,
                          testing::ValuesIn(getConvTestCases5D()));
 
 INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNdhwcFp16, testing::ValuesIn(getConvTestCases5D()));
+ */

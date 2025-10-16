@@ -17,7 +17,7 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 
 template <class T>
-class CpuFpReferenceValidation : public IReferenceValidation<T>
+class CpuFpReferenceValidation : public IReferenceValidation
 {
 public:
     CpuFpReferenceValidation(T absoluteTolerance = std::numeric_limits<T>::epsilon(),
@@ -33,7 +33,7 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(const ITensor& reference, const ITensor& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -73,7 +73,7 @@ public:
         return result;
     }
 
-    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
+    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
     {
         if(reference.count() != implementation.count())
         {

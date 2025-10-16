@@ -25,7 +25,7 @@ using namespace hipdnn_sdk::utilities;
 // RMS check is only relative tolerance based. We recommend using cpu_fp_reference_validation
 // instead, but this class can be used to compare with MIOpen tolerance checks.
 template <class T>
-class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation<T>
+class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation
 {
 public:
     CpuFpReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
@@ -39,7 +39,7 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(const ITensor& reference, const ITensor& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -77,7 +77,7 @@ public:
             squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
     }
 
-    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
+    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
     {
         if(reference.count() != implementation.count())
         {

@@ -42,12 +42,22 @@ struct GraphTensorBundle
         it->second->fillTensorWithRandomValues(min, max, seed);
     }
 
-    std::unordered_map<int64_t, void*> toVariantPack()
+    std::unordered_map<int64_t, void*> toHostVariantPack()
     {
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [id, tensorPtr] : tensors)
         {
             variantPack[id] = tensorPtr->rawHostData();
+        }
+        return variantPack;
+    }
+
+    std::unordered_map<int64_t, void*> toDeviceVariantPack()
+    {
+        std::unordered_map<int64_t, void*> variantPack;
+        for(auto& [id, tensorPtr] : tensors)
+        {
+            variantPack[id] = tensorPtr->rawDeviceData();
         }
         return variantPack;
     }

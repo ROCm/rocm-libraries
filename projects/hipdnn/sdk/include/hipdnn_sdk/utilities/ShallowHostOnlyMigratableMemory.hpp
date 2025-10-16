@@ -16,7 +16,7 @@ namespace utilities
 {
 
 template <class T>
-class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
+class ShallowHostOnlyMigratableMemory : public MigratableMemoryBase<T>
 {
 public:
     explicit ShallowHostOnlyMigratableMemory(void* shallowMemory = nullptr, size_t count = 0)
@@ -83,6 +83,11 @@ public:
     void markDeviceModified() override
     {
         throwNotSupported();
+    }
+
+    bool isModified() const override
+    {
+        return false;
     }
 
     size_t count() const override

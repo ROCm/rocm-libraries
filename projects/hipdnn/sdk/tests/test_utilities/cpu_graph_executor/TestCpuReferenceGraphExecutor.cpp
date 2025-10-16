@@ -48,7 +48,7 @@ public:
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toVariantPack();
+        auto variantPack = tensorBundle.toHostVariantPack();
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
