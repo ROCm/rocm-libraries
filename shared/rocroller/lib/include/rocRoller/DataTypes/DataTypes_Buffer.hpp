@@ -36,26 +36,10 @@ namespace rocRoller
 {
     struct Buffer
     {
-        uint32_t desc0;
-        uint32_t desc1;
-        uint32_t desc2;
-        uint32_t desc3;
-
-        Buffer()
-            : desc0(0)
-            , desc1(0)
-            , desc2(0)
-            , desc3(0)
-        {
-        }
-
-        Buffer(uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3)
-            : desc0(d0)
-            , desc1(d1)
-            , desc2(d2)
-            , desc3(d3)
-        {
-        }
+        uint32_t desc0 = 0;
+        uint32_t desc1 = 0;
+        uint32_t desc2 = 0;
+        uint32_t desc3 = 0;
     };
 
     inline std::ostream& operator<<(std::ostream& os, const Buffer& buf)
