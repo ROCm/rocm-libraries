@@ -147,7 +147,6 @@ class LocalReadVALU(LocalRead):
 
         return imod, pack
 
-
 class LocalReadMFMA(LocalRead):
     kernel = {"EnableMatrixInstruction": True}
 
@@ -831,10 +830,10 @@ class LocalReadMFMA(LocalRead):
                         else:
                             ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
                         LocalReadX = instruction.getInst(highBits)
-                        if kernel["UseF32XEmulation"] and kernel["UseDirect32XEmulation"] and (valuiIdx % 8) < 4:
+                        if kernel["UseDirect32XEmulation"] and (valuiIdx % 8) < 4:
                             index = baseValuiIdx // 2 + rIdx
                             destVgpr      = vgpr("Valu%s_T%u_I%u+%u"%(tc, bufferIdx, iui, index), blockWidth)
-                        localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds))
+                        localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
                         # TODO - handle vector-load
                         with writer.allocTmpSgpr(1) as tmpSgprInfo:
                             tmpSgpr = tmpSgprInfo.idx

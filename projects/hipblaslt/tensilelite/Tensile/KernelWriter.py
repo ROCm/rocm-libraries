@@ -1463,16 +1463,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
               if kernel["UseF32XEmulation"]:
-                numPacks = 128
-                found = False
-                for j in range(numPacks):
-                  if packItems and not found:
-                    item = packItems.pop(0)
-                    iterCode.add(item)
-                    itemStr = str(item)
-                    if "__TF32_1_B" in itemStr or "__TF32_2_B" in itemStr:
-                      found = True
-                    curPackIdx += 1
+                tmp = []
+                curPackIdx += KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
+                for n in tmp:
+                  iterCode.add(n)
               else:
                 for j in range(instPerPackB):
                   if packItems:
@@ -1490,7 +1484,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   break
               if kernel["UseF32XEmulation"]:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
-                numDummy = 1 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 2
+                numDummy = 0 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 1
                 for numd in range(numDummy):
                   iterCode.add(SNop(waitState=0, comment="VALU packing writes to be consumed by matrix instruction"))
           else:
@@ -3345,6 +3339,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.addComment1("local read inc b")
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
+
+        module.add(pack[0])
+        pack[0] = Module()
 
         if kernel["EnableMatrixInstruction"]:
           # always use vregSetIdx=0 for DirectToVgpr + tail loop
