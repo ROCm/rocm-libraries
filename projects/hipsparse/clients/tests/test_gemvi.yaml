@@ -21,12 +21,45 @@
 #
 # ########################################################################
 
-include: test_axpyi.yaml
+---
+include: hipsparse_common.yaml
 
-include: test_bsrmv.yaml
-include: test_bsrsv2.yaml
-include: test_csrmv.yaml
-include: test_csrsv2.yaml
-include: test_gemvi.yaml
-include: test_hybmv.yaml
+Tests:
+- name: gemvi_bad_arg
+  category: pre_checkin
+  function: gemvi_bad_arg
+  precision: *single_double_precisions_complex_real
 
+- name: gemvi
+  category: quick
+  function: gemvi
+  precision: *single_double_precisions_complex_real
+  M: [1291]
+  N: [724]
+  nnz: [237]
+  alpha: [-0.5, 2.0]
+  alphai: [-0.2]
+  beta: [0.5, 0.0]
+  betai: [1.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+# - name: gemvi
+#   category: pre_checkin
+#   function: gemvi
+#   precision: *single_double_precisions_complex_real
+#   M: 1
+#   N: 1
+#   alpha: [0.5]
+#   alphai: [-0.2]
+#   beta: [0.7]
+#   betai: [1.7]
+#   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+#   filename: [nos1,
+#              nos2,
+#              nos3,
+#              nos4,
+#              nos5,
+#              nos6,
+#              nos7]
