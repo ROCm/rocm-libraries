@@ -70,8 +70,13 @@ else()
   find_package(FFTW3f CONFIG QUIET )
   if( FFTW3_FOUND AND FFTW3f_FOUND )
     message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
-    get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-    get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+    if ( NOT WIN32 )
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+    else()
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+    endif()
 
     # Look for omp (preferred) or thread libraries. These are not a
     # hard requirement, but are nice to have to make FFTW run faster.
