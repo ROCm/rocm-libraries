@@ -345,9 +345,9 @@ namespace rocRollerTest::Graphs
         m_problem.unrollY = unrollY;
     }
 
-    void GEMM::setStreamK(bool addStreamK)
+    void GEMM::setStreamK(StreamKMode streamKMode)
     {
-        m_problem.streamK = addStreamK;
+        m_problem.streamK = streamKMode;
     }
 
     void GEMM::setProblem(GEMMProblem const& problem)

@@ -1216,7 +1216,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
+    TEST_P(GEMMTest, GPU_BasicGEMMStreamKTwoTileDPFirst)
     {
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -1270,7 +1270,7 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+        std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
         // for(auto twoTile : {true, false})
@@ -1318,10 +1318,10 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
+        // gemm.streamK = StreamKMode::Standard;
+        gemm.k = gemm.macK * 8;
 
-        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+        std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
         basicGEMM<Half>(gemm);
@@ -1371,7 +1371,7 @@ namespace GEMMDriverTest
 
         gemm.streamK = true;
 
-        std::tie(gemm.streamKTwoTile, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
+        std::tie(gemm.streamK, gemm.loadLDSA, gemm.loadLDSB, gemm.storeLDSD)
             = std::get<1>(GetParam());
 
         basicGEMM<Half>(gemm);
@@ -4232,9 +4232,12 @@ namespace GEMMDriverTest
     INSTANTIATE_TEST_SUITE_P(
         GEMMTestStreamK,
         GEMMTestStreamKGPU,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Combine(::testing::Values(true, false), /* TwoTile */
-                                              ::testing::Values(true, false), /* ldsA */
-                                              ::testing::Values(true, false), /* ldsB */
-                                              ::testing::Values(true, false))));
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(StreamKMode::Standard,
+                                                 StreamKMode::TwoTile,
+                                                 StreamKMode::TwoTileDPFirst), /* TwoTile */
+                               ::testing::Values(true, false), /* ldsA */
+                               ::testing::Values(true, false), /* ldsB */
+                               ::testing::Values(true, false))));
 }

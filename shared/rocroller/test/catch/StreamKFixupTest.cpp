@@ -48,21 +48,9 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     example.setMFMA(32, 32, 2, 1);
     example.setUseLDS(false, false, false);
     example.setPrefetch(false, 0, 0, false);
-    example.setStreamK(true);
 
-    auto kgraph = example.getKernelGraph();
-    auto params = example.getCommandParameters();
-
-    // auto problem = example.getProblem();
-    auto numWGs = example.getTotalWorkgroupSize();
-    std::cout << "numWGs: " << numWGs << std::endl;
+    auto numWGs     = example.getTotalWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
-
-    // params->unrollK           = 4;
-    // params->prefetch          = true;
-    // params->prefetchInFlight  = 2;
-    // params->prefetchLDSFactor = 2;
-    // params->prefetchMixMemOps = true;
 
     std::vector<GraphTransformPtr> transforms;
     transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
@@ -74,56 +62,76 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
     transforms.push_back(std::make_shared<Simplify>());
     transforms.push_back(std::make_shared<FuseExpressions>());
-    // transforms.push_back(std::make_shared<ConnectWorkgroups>(
-    //     context.get(), params->workgroupMappingDim, params->workgroupRemapXCC));
-    // transforms.push_back(std::make_shared<UnrollLoops>(params, context.get()));
-    // transforms.push_back(std::make_shared<FuseLoops>());
-    // transforms.push_back(std::make_shared<RemoveDuplicates>());
-    // transforms.push_back(std::make_shared<OrderEpilogueBlocks>());
-    // transforms.push_back(std::make_shared<CleanLoops>());
-    // transforms.push_back(std::make_shared<AddPrefetch>(params, context.get()));
-    // transforms.push_back(std::make_shared<AddComputeIndex>());
 
-    for(auto& t : transforms)
-        kgraph = kgraph.transform(t);
-
-    std::ofstream outFile0("graph0.dot"); // Create and open a file
-
-    outFile0 << kgraph.toDOT();
-
-    SECTION("Basic StreamK Multiple Fixups")
+    SECTION("Standard StreamK Multiple Fixups")
     {
-        kgraph
-            = kgraph.transform(std::make_shared<AddStreamK>(params->loopOverOutputTilesDimensions,
-                                                            rocRoller::XLOOP,
-                                                            rocRoller::KLOOP,
-                                                            false,
-                                                            numWGsExpr,
-                                                            params,
-                                                            context.get()));
+        example.setStreamK(StreamKMode::Standard);
 
-        std::ofstream outFile1("graph1.dot"); // Create and open a file
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
+
+        for(auto& t : transforms)
+            kgraph = kgraph.transform(t);
+
+        std::ofstream outFile0("graph0-standard.dot"); // Create and open a file
+
+        outFile0 << kgraph.toDOT();
+
+        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
+            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+
+        std::ofstream outFile1("graph1-standard.dot"); // Create and open a file
         outFile1 << kgraph.toDOT();
 
-        std::ofstream outFile2("graph2-mapper.dot"); // Create and open a file
+        std::ofstream outFile2("graph2-mapper-standard.dot"); // Create and open a file
         outFile2 << kgraph.toDOT(true);
     }
 
     SECTION("TwoTile StreamK Multiple Fixups")
     {
-        kgraph
-            = kgraph.transform(std::make_shared<AddStreamK>(params->loopOverOutputTilesDimensions,
-                                                            rocRoller::XLOOP,
-                                                            rocRoller::KLOOP,
-                                                            true,
-                                                            numWGsExpr,
-                                                            params,
-                                                            context.get()));
+        example.setStreamK(StreamKMode::TwoTile);
 
-        std::ofstream outFile1("graph3.dot"); // Create and open a file
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
+
+        for(auto& t : transforms)
+            kgraph = kgraph.transform(t);
+
+        std::ofstream outFile0("graph0-2tile.dot"); // Create and open a file
+
+        outFile0 << kgraph.toDOT();
+
+        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
+            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+
+        std::ofstream outFile1("graph1-2tile.dot"); // Create and open a file
         outFile1 << kgraph.toDOT();
 
-        std::ofstream outFile2("graph4-mapper.dot"); // Create and open a file
+        std::ofstream outFile2("graph2-mapper-2tile.dot"); // Create and open a file
+        outFile2 << kgraph.toDOT(true);
+    }
+
+    SECTION("TwoTileDPFirst StreamK Multiple Fixups")
+    {
+        example.setStreamK(StreamKMode::TwoTileDPFirst);
+
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
+
+        for(auto& t : transforms)
+            kgraph = kgraph.transform(t);
+
+        std::ofstream outFile0("graph0-dpfirst.dot"); // Create and open a file
+
+        outFile0 << kgraph.toDOT();
+
+        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
+            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+
+        std::ofstream outFile1("graph1-dpfirst.dot"); // Create and open a file
+        outFile1 << kgraph.toDOT();
+
+        std::ofstream outFile2("graph2-dpfirst-mapper.dot"); // Create and open a file
         outFile2 << kgraph.toDOT(true);
     }
 }
