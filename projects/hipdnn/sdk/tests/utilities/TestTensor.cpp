@@ -207,7 +207,7 @@ TEST(TestTensor, FillWithData)
 {
     std::vector<int> data{0, 1, 2, 3};
     Tensor<int> tensor({2, 2});
-    tensor.fillWithData(data.data(), data.size());
+    tensor.fillWithData(data.data(), data.size() * sizeof(int));
 
     for(size_t i = 0; i < data.size(); i++)
     {
