@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <ostream>
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>
 #endif

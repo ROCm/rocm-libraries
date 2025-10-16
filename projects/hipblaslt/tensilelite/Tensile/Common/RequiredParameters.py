@@ -79,6 +79,7 @@ def getRequiredParametersMin() -> set:
         'PreloadKernArgs',
         'ScheduleIterAlg',
         'SourceSwap',
+        'SpaceFillingAlgo',
         'StorePriorityOpt',
         'StoreRemapVectorWidth',
         'StoreSyncOpt',
