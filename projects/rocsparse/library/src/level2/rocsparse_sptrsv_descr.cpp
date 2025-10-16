@@ -137,12 +137,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     *descr = new _rocsparse_sptrsv_descr();
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
-
+// LCOV_EXCL_STOP
 extern "C" rocsparse_status rocsparse_destroy_sptrsv_descr(rocsparse_sptrsv_descr descr)
 try
 {
@@ -152,8 +153,10 @@ try
         delete descr;
     }
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

@@ -124,6 +124,12 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_input& p)
     p = (rocsparse_sptrsv_input)-1;
 }
 
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_output& p)
+{
+    p = (rocsparse_sptrsv_output)-1;
+}
+
 //
 // Convenience.
 //
@@ -453,6 +459,23 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
             }
         }
     }
+
+    {
+        rocsparse_sptrsv_output output             = rocsparse_sptrsv_output_zero_pivot_position;
+        size_t                  data_size_in_bytes = sizeof(int64_t);
+        void*                   data               = (void*)0x4;
+        static constexpr int    nex                = 2;
+        static const int        ex[nex]            = {4, 5};
+        select_bad_arg_analysis(rocsparse_sptrsv_get_output,
+                                nex,
+                                ex,
+                                handle,
+                                sptrsv_descr,
+                                output,
+                                data,
+                                data_size_in_bytes,
+                                p_error);
+    }
 }
 
 template <typename I, typename J, typename T>
@@ -573,6 +596,31 @@ void testing_sptrsv_csr(const Arguments& arg)
 
     rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
+    int64_t          analysis_zero_pivot;
+    rocsparse_status analysis_pivot_status
+        = rocsparse_sptrsv_get_output(handle,
+                                      sptrsv_descr,
+                                      rocsparse_sptrsv_output_zero_pivot_position,
+                                      &analysis_zero_pivot,
+                                      sizeof(analysis_zero_pivot),
+                                      p_error);
+    if(analysis_pivot_status != rocsparse_status_zero_pivot)
+    {
+        CHECK_ROCSPARSE_ERROR(analysis_pivot_status);
+    }
+    // check consistency.
+    if((analysis_pivot_status == rocsparse_status_zero_pivot) && (analysis_zero_pivot == -1))
+    {
+        std::cout << "inconsistent zero pivot detected during analysis " << std::endl;
+        CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
+
+    if((analysis_pivot_status != rocsparse_status_zero_pivot) && (analysis_zero_pivot != -1))
+    {
+        std::cout << "inconsistent zero pivot detected during analysis " << std::endl;
+        CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
+
     if(arg.unit_check)
     {
 
@@ -596,9 +644,45 @@ void testing_sptrsv_csr(const Arguments& arg)
                             &analysis_pivot,
                             &solve_pivot);
 
+        if(analysis_zero_pivot != analysis_pivot)
+        {
+            std::cout << "analysis pivot failed: reference analysis pivot position = "
+                      << analysis_pivot << ", calculated zero pivot position "
+                      << analysis_zero_pivot << std::endl;
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+
         const bool comparable = (analysis_pivot == -1 && solve_pivot == -1);
         rocsparse_clients::sptrsv_compute(
             handle, sptrsv_descr, A, x, y, rocsparse_pointer_mode_host, halpha, p_error);
+
+        int64_t          solve_zero_pivot;
+        rocsparse_status solve_pivot_status
+            = rocsparse_sptrsv_get_output(handle,
+                                          sptrsv_descr,
+                                          rocsparse_sptrsv_output_zero_pivot_position,
+                                          &solve_zero_pivot,
+                                          sizeof(solve_zero_pivot),
+                                          p_error);
+        // check consistency.
+        if((solve_pivot_status == rocsparse_status_zero_pivot) && (solve_zero_pivot == -1))
+        {
+            std::cout << "inconsistent zero pivot detected during solve " << std::endl;
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        }
+
+        if((solve_pivot_status != rocsparse_status_zero_pivot) && (solve_zero_pivot != -1))
+        {
+            std::cout << "inconsistent zero pivot detected during solve " << std::endl;
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+        }
+
+        if(solve_zero_pivot != solve_pivot)
+        {
+            std::cout << "solve pivot failed: reference solve pivot position = " << solve_pivot
+                      << ", calculated zero pivot position " << solve_zero_pivot << std::endl;
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {

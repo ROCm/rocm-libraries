@@ -204,6 +204,7 @@ try
         sptrsv_descr->set_operation(op);
         return rocsparse_status_success;
     }
+        // LCOV_EXCL_START
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
@@ -211,6 +212,7 @@ catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sptrsv_get_output(rocsparse_handle        handle,
                                                         rocsparse_sptrsv_descr  sptrsv_descr,
@@ -248,6 +250,7 @@ try
 
         return rocsparse_status_success;
     }
+        // LCOV_EXCL_START
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
@@ -255,6 +258,7 @@ catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -314,11 +318,9 @@ namespace rocsparse
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            // LCOV_EXCL_STOP
         }
         }
 
-        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         // LCOV_EXCL_STOP
     }
@@ -331,16 +333,16 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_datatype scalar_datatype  = descr->get_scalar_datatype();
         const rocsparse_datatype compute_datatype = descr->get_compute_datatype();
-        if(rocsparse::enum_utils::is_invalid(scalar_datatype))
-        {
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   "invalid scalar datatype");
-        }
-        if(rocsparse::enum_utils::is_invalid(compute_datatype))
-        {
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   "invalid compute datatype");
-        }
+
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((rocsparse::enum_utils::is_invalid(scalar_datatype))
+                                                   ? rocsparse_status_invalid_value
+                                                   : rocsparse_status_success,
+                                               "invalid scalar datatype");
+
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((rocsparse::enum_utils::is_invalid(compute_datatype))
+                                                   ? rocsparse_status_invalid_value
+                                                   : rocsparse_status_success,
+                                               "invalid compute datatype");
 
         *local_alpha = alpha;
         if(scalar_datatype != compute_datatype)
@@ -361,11 +363,14 @@ namespace rocsparse
                 *local_alpha = handle->alpha;
                 break;
             }
+                // LCOV_EXCL_START
             }
+            // LCOV_EXCL_STOP
         }
 
         return rocsparse_status_success;
     }
+
     static rocsparse_status sptrsv(rocsparse_handle            handle,
                                    rocsparse_sptrsv_descr      sptrsv_descr,
                                    rocsparse_const_spmat_descr A,
@@ -379,6 +384,13 @@ namespace rocsparse
         const rocsparse_format       format         = A->format;
         const rocsparse_operation    operation      = sptrsv_descr->get_operation();
         const rocsparse_sptrsv_stage previous_stage = sptrsv_descr->get_stage();
+        const rocsparse_sptrsv_alg   alg            = sptrsv_descr->get_alg();
+
+        ROCSPARSE_CHECKARG(1,
+                           sptrsv_descr,
+                           rocsparse::enum_utils::is_invalid(alg),
+                           rocsparse_status_invalid_value);
+
         switch(sptrsv_stage)
         {
         case rocsparse_sptrsv_stage_analysis:
@@ -392,7 +404,9 @@ namespace rocsparse
                     "invalid stage, the stage rocsparse_sptrsv_stage_analysis has already "
                     "been "
                     "executed");
+                // LCOV_EXCL_START
             }
+                // LCOV_EXCL_STOP
 
             case rocsparse_sptrsv_stage_compute:
             {
@@ -402,15 +416,17 @@ namespace rocsparse
                     "called "
                     "after "
                     "the stage rocsparse_sptrsv_stage_compute");
+                // LCOV_EXCL_START
             }
             }
+            // LCOV_EXCL_STOP
 
             const rocsparse_analysis_policy analysis_policy = sptrsv_descr->get_analysis_policy();
-            if(rocsparse::enum_utils::is_invalid(analysis_policy))
-            {
-                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                       "invalid analysis_policy");
-            }
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (rocsparse::enum_utils::is_invalid(analysis_policy))
+                    ? rocsparse_status_invalid_value
+                    : rocsparse_status_success,
+                "invalid analysis_policy");
 
             switch(format)
             {
@@ -525,21 +541,19 @@ namespace rocsparse
             {
                 // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-                // LCOV_EXCL_STOP
             }
             }
+            // LCOV_EXCL_STOP
         }
         case rocsparse_sptrsv_stage_compute:
         {
 
-            if(previous_stage == ((rocsparse_sptrsv_stage)-1))
-            {
-                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-                    rocsparse_status_invalid_value,
-                    "invalid stage, the stage rocsparse_sptrsv_stage_analysis must be executed "
-                    "before "
-                    "the stage rocsparse_sptrsv_stage_compute");
-            }
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (previous_stage == ((rocsparse_sptrsv_stage)-1)) ? rocsparse_status_invalid_value
+                                                                 : rocsparse_status_success,
+                "invalid stage, the stage rocsparse_sptrsv_stage_analysis must be executed "
+                "before "
+                "the stage rocsparse_sptrsv_stage_compute");
 
             const void* alpha = sptrsv_descr->get_scalar_alpha();
 
@@ -616,12 +630,10 @@ namespace rocsparse
             {
                 // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-                // LCOV_EXCL_STOP
             }
             }
         }
         }
-        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         // LCOV_EXCL_STOP
     }
