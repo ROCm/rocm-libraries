@@ -279,6 +279,15 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, glc",
                           isDebug);
+    rv["HasSC0Modifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, sc0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, sc0",
+                          isDebug);
     rv["HasDLCModifier"]
         = tryAssembler(isaVersion,
                        assemblerPath,

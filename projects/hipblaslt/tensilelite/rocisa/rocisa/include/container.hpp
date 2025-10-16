@@ -139,7 +139,6 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasGLCModifier   = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
@@ -147,13 +146,13 @@ namespace rocisa
             {
                 kStr += " offset:" + std::to_string(offset12);
             }
-            if(hasGLCModifier && glc)
+            if(glc)
             {
-                kStr += " " + getGlcBitName(hasGLCModifier);
+                kStr += " " + getGlcBitName();
             }
-            if(hasGLCModifier && slc)
+            if(slc)
             {
-                kStr += " " + getSlcBitName(hasGLCModifier);
+                kStr += " " + getSlcBitName();
             }
             if(hasDLCModifier && dlc)
             {
@@ -208,7 +207,7 @@ namespace rocisa
             return kStr;
         }
 
-        int  offset;
+        int offset;
     };
 
     struct MUBUFModifiers : public Container
@@ -256,8 +255,6 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasGLCModifier   = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-            auto        hasSLCModifier   = rocIsa::getInstance().getAsmCaps()["HasSLCModifier"];
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             auto        hasNTModifier    = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
@@ -266,13 +263,13 @@ namespace rocisa
             {
                 kStr += " offen offset:" + std::to_string(offset12);
             }
-            if(hasGLCModifier && glc)
+            if(glc)
             {
-                kStr += " " + getGlcBitName(hasGLCModifier);
+                kStr += " " + getGlcBitName();
             }
-            if(hasGLCModifier && slc)
+            if(slc)
             {
-                kStr += " " + getSlcBitName(hasGLCModifier);
+                kStr += " " + getSlcBitName();
             }
             if(hasDLCModifier && dlc)
             {
@@ -337,7 +334,6 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasGLCModifier   = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
@@ -345,9 +341,9 @@ namespace rocisa
             {
                 kStr += " offset:" + std::to_string(offset);
             }
-            if(hasGLCModifier && glc)
+            if(!hasSCOPEModifier && glc)
             {
-                kStr += " " + getGlcBitName(hasGLCModifier);
+                kStr += " glc";
             }
             if(hasDLCModifier && dlc)
             {
