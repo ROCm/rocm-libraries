@@ -284,6 +284,7 @@ class StateValues:
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
   tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
 
@@ -560,6 +561,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings):
     numPacked = 0
+    if numPack == 0:
+      numPack = 999
     for n in range(numPack):
       if srcPackItems:
         numPacked += 1
@@ -971,14 +974,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
           if kernel["UseDirect32XEmulation"]:
+            # none needed for direct
             instPerPackA = 0
             instPerPackB = 0
           else:
-            instPerPackA = 26
-            instPerPackB = 26
+            instPerPackA = self.states.numPackCvt
+            instPerPackB = self.states.numPackCvt
           while packAItems or packBItems:
-            KernelWriter._packItemsConditional(128, packAItems, packItems, ["__TF32_1", "__TF32_2"])
-            KernelWriter._packItemsConditional(128, packBItems, packItems, ["__TF32_1", "__TF32_2"])
+            KernelWriter._packItemsConditional(instPerPackA, packAItems, packItems, ["__TF32_1", "__TF32_2"])
+            KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, ["__TF32_1", "__TF32_2"])
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1444,7 +1448,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if not schedulePackConsiderMetadata:
               if kernel["UseF32XEmulation"]:
                 tmp = []
-                curPackIdx += KernelWriter._packItemsConditional(128, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
+                curPackIdx += KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
                 for n in tmp:
                   iterCode.add(n)
               else:
@@ -4623,6 +4627,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
       if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
         kernel["UseDirect32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = True
       else:
         #align 64 bit
         vgprIdx = ((vgprIdx+1)//2)*2

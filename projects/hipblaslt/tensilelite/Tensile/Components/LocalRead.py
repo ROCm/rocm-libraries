@@ -384,8 +384,8 @@ class LocalReadMFMA(LocalRead):
 
                                     # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
                                     if kernel["UseDot2F32XEmulation"]:
-                                        packCode.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vgpr(vHi0)))
-                                        packCode.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vgpr(vHi0)))
+                                        packCode.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
+                                        packCode.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
                                     else:
                                         packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi0, comment="begin"+str(valuiIdx)))
                                         packCode.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmpvgpr[0])))
@@ -878,6 +878,8 @@ class LocalReadMFMA(LocalRead):
 
                                 elif kernel["ProblemType"]["DataType"].isSingle():
                                     localReadCode.add(writer.assert_eq( dbgVgpr, 1.0) )
+                    if needPack:
+                        writer.states.numPackCvt = len(packCode.flatitems())
         # DTV case, do not return local read code.
         if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]:
             imod = Module("LocalReadDo%s_I%s (Empty)" % (tP["tensorChar"],iui))
