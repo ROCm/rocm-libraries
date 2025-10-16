@@ -11,13 +11,16 @@ if(MIOPEN_USE_ROCBLAS)
 endif()
 
 set(SOURCES
-    main_hip.cpp
     gtest_common.cpp
     log.cpp
     platform.cpp
     conv_common.cpp
     unit_conv_solver.cpp
     )
+
+if(MIOPEN_BACKEND_HIP)
+  list(APPEND SOURCES main_hip.cpp)
+endif()
 
 if(MIOPEN_BACKEND_OPENCL)
   set(SKIP_TESTS dumpTensorTest.cpp)
