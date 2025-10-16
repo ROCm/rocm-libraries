@@ -193,7 +193,7 @@ if(ROCROLLER_ENABLE_YAML_CPP)
         find_package(yaml-cpp REQUIRED)
     endif()
    
-    target_link_libraries(rocroller PUBLIC ${YAML_CPP_LIBRARIES})
+    target_link_libraries(rocroller PUBLIC  yaml-cpp::yaml-cpp)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
 endif()
 
