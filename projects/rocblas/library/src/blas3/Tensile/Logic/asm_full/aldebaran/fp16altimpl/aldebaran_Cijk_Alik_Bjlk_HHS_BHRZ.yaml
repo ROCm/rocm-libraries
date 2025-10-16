@@ -112,7 +112,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -7442,7 +7442,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -7699,7 +7699,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -7956,7 +7956,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -8217,7 +8217,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -8474,7 +8474,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source

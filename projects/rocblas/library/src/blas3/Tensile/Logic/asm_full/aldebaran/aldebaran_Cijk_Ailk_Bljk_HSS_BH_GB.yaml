@@ -10622,7 +10622,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -10833,7 +10833,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -11044,7 +11044,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -11255,7 +11255,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -11466,7 +11466,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -11677,7 +11677,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -11892,7 +11892,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -12103,7 +12103,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -12314,7 +12314,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -12529,7 +12529,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -12740,7 +12740,7 @@
     GlobalWriteVectorWidth: 2
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -12955,7 +12955,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -13166,7 +13166,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -13377,7 +13377,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -13588,7 +13588,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -13803,7 +13803,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -14018,7 +14018,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -14229,7 +14229,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -14440,7 +14440,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -14651,7 +14651,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -14866,7 +14866,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -15081,7 +15081,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -15292,7 +15292,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -15503,7 +15503,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -15718,7 +15718,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -15929,7 +15929,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -16140,7 +16140,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -16355,7 +16355,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
@@ -16570,7 +16570,7 @@
     GlobalWriteVectorWidth: 1
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [0, 0, 0]
+    ISA: [9, 0, 10]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Source
