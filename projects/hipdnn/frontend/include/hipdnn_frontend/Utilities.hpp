@@ -75,6 +75,15 @@ inline TensorAttributes
         .set_stride(tensor.strides());
 }
 
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             DataType dataType,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
+        strides);
+}
+
 }
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)

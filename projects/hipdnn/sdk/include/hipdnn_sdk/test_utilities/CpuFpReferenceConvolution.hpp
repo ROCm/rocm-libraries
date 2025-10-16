@@ -197,7 +197,7 @@ public:
         const auto& weightDims = weight.dims();
         const auto& outputDims = gradOutput.dims();
 
-        int64_t nBatch = outputDims[0];
+        int64_t nBatch = inputDims[0];
         int64_t totalOutputChannels = weightDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = weightDims[1]; // C
 

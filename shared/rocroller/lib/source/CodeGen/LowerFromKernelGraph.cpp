@@ -1116,6 +1116,7 @@ namespace rocRoller
                 auto [macTileTag, macTile]     = m_graph->getDimension<MacroTile>(tag);
                 auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);
                 auto [simdBlockTag, simdBlock] = m_graph->getDimension<Adhoc>(tag, 0);
+                auto oMacTileTag               = m_graph->mapper.get(tag, NaryArgument::DEST);
 
                 const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
@@ -1186,8 +1187,19 @@ namespace rocRoller
                 if(packedVariableType && !m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
-                    auto temp         = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, exchange.varType, numVgpr, allocOptions);
+                    Register::ValuePtr temp;
+                    if(m_context->registerTagManager()->hasRegister(oMacTileTag))
+                    {
+                        temp = m_context->registerTagManager()->getRegister(oMacTileTag);
+                    }
+                    else
+                    {
+                        temp = Register::Value::Placeholder(m_context,
+                                                            Register::Type::Vector,
+                                                            exchange.varType,
+                                                            numVgpr,
+                                                            allocOptions);
+                    }
                     for(auto index = 0; index < numVgpr; index++)
                         co_yield generateOp<Expression::BitFieldExtract>(
                             temp->element({index}),
@@ -1197,8 +1209,6 @@ namespace rocRoller
                     vgpr = temp;
                 }
 
-                auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
-
                 if(m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag),
@@ -1206,11 +1216,12 @@ namespace rocRoller
                 }
                 else
                 {
-                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag),
-                                ShowValue(oMacTileTag));
                     AssertFatal(vgpr->registerCount() == numVgpr);
 
-                    m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                    if(!m_context->registerTagManager()->hasRegister(oMacTileTag))
+                    {
+                        m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                    }
 
                     if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
                     {

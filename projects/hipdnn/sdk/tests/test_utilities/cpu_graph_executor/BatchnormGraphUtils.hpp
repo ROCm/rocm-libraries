@@ -153,46 +153,51 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     return std::make_tuple(graph, variantPack);
 }
 
-template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
-    buildBatchnormFwdInferenceGraph(
-        BatchnormFwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
-        hipdnn_sdk::data_objects::DataType inputDataType,
-        hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType)
+inline std::shared_ptr<hipdnn_frontend::graph::Graph>
+    buildBatchnormFwdInferenceGraph(hipdnn_sdk::data_objects::DataType inputDataType,
+                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+                                    const std::vector<int64_t>& dims,
+                                    const TensorLayout& layout,
+                                    bool isOutputVirtual = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceTest");
 
+    auto strides = generateStrides(dims, layout.strideOrder);
+
+    auto derivedDims = getDerivedShape(dims);
+    auto derivedStrides = generateStrides(derivedDims);
+
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "X", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.xTensor);
+        "x", hipdnn_frontend::fromSdkType(inputDataType), dims, strides);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "scale", hipdnn_frontend::fromSdkType(scaleBiasDataType), tensorBundle.scaleTensor);
+        "scale", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
     scaleAttr.set_uid(uid++);
     auto scaleTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), tensorBundle.biasTensor);
+        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), derivedDims, derivedStrides);
     biasAttr.set_uid(uid++);
     auto biasTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
     auto meanAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "mean", hipdnn_frontend::fromSdkType(meanVarianceDataType), tensorBundle.meanTensor);
+        "mean", hipdnn_frontend::fromSdkType(meanVarianceDataType), derivedDims, derivedStrides);
     meanAttr.set_uid(uid++);
     auto meanTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(meanAttr));
 
     auto varianceAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "variance",
+        "invVariance",
         hipdnn_frontend::fromSdkType(meanVarianceDataType),
-        tensorBundle.invVarianceTensor);
+        derivedDims,
+        derivedStrides);
     varianceAttr.set_uid(uid++);
     auto varianceTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(varianceAttr));
@@ -207,16 +212,13 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         yTensorAttr->set_uid(uid++);
     }
+    yTensorAttr->set_name("Y");
     yTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(inputDataType));
+    yTensorAttr->set_dim(dims);
+    yTensorAttr->set_stride(strides);
+    yTensorAttr->set_is_virtual(isOutputVirtual);
 
-    auto variantPack = tensorBundle.createVariantPack(*xTensorAttr,
-                                                      *scaleTensorAttr,
-                                                      *biasTensorAttr,
-                                                      *meanTensorAttr,
-                                                      *varianceTensorAttr,
-                                                      *yTensorAttr);
-
-    return std::make_tuple(graph, variantPack);
+    return graph;
 }
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
