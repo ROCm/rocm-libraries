@@ -953,7 +953,13 @@ validParameters = { # we need to make sure this matches develop
     #  0: Do prefetch for local read only
     #  1: Do prefetch for pack code
     # CMS (UseCustomMainLoopSchedule) case, this is internally set and setting it from yaml will not change CMS config
-    "UsePLRPack": [0,1]
+    "UsePLRPack": [0,1],
+    # Enable tensor data mover for VM -> LDS
+    # 0: Disable
+    # 1: Use TDM for A
+    # 2: Use TDM for B
+    # 3: Use TDM for both A and B
+    "TDMInst": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {
