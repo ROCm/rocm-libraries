@@ -555,6 +555,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
       globalReadIncBCode, isNGLL)
 
   ##############################################################################
+  # packItemsConditional: pack src items into dst items until numPack or searchString is found
+  # returns number of items packed
+  ##############################################################################
+  def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings):
+    numPacked = 0
+    for n in range(numPack):
+      if srcPackItems:
+        numPacked += 1
+        item = srcPackItems.pop(0)
+        dstPackItems.append(item)
+        itemStr = str(item)
+        for string in searchStrings:
+          if string in itemStr:
+            return numPacked
+    return numPacked
+
+  ##############################################################################
   # Schedule work into the each unroll loop iteration
   # localReadCode is the local reads for this loop iteration
   #  (returned by localReadDo). The instructions in localReadCode
@@ -960,23 +977,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             instPerPackA = 26
             instPerPackB = 26
           while packAItems or packBItems:
-            found = False
-            for n in range(128):
-              if packAItems and not found:
-                item = packAItems.pop(0)
-                itemStr = str(item)
-                if "__TF32_1" in itemStr or "__TF32_2" in itemStr:
-                  found = True
-                packItems.append(item)
-            
-            found = False
-            for n in range(128):
-              if packBItems and not found:
-                item = packBItems.pop(0)
-                itemStr = str(item)
-                if "__TF32_1" in itemStr or "__TF32_2" in itemStr:
-                  found = True
-                packItems.append(item)
+            KernelWriter._packItemsConditional(128, packAItems, packItems, ["__TF32_1", "__TF32_2"])
+            KernelWriter._packItemsConditional(128, packBItems, packItems, ["__TF32_1", "__TF32_2"])
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1441,16 +1443,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
           if not schedulePackConsiderMetadata:
               if kernel["UseF32XEmulation"]:
-                numPacks = 128
-                found = False
-                for j in range(numPacks):
-                  if packItems and not found:
-                    item = packItems.pop(0)
-                    iterCode.add(item)
-                    itemStr = str(item)
-                    if "__TF32_1_A" in itemStr or "__TF32_2_A" in itemStr:
-                      found = True
-                    curPackIdx += 1
+                tmp = []
+                curPackIdx += KernelWriter._packItemsConditional(128, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
+                for n in tmp:
+                  iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
                 for j in range(instPerPackA):

@@ -159,6 +159,48 @@ class LocalReadMFMA(LocalRead):
         srcAddr = vgpr("LocalReadAddr%s+%u" %(tc, num))
         return offset_val, srcAddr
 
+    # 8 registers were read in fp32. Write to 2 of 4 registers with high bits
+    # Input: vgprValuA/B_X/T_ i ... i + 7 -> FP32
+    # Output: vgprValuA/B_X_ i .. i + 3 -> BF16 High bits
+    def pack4HiBits(self, kernel, tct, index, bufferIdx, baseValuiIdx, iui, writer, module, tmpvgpr):
+        valOffset = baseValuiIdx + index
+        v0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset))
+        v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset))
+        v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset))
+        v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset))
+        src0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset), 2)
+        src1 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset), 2)
+        dst0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, baseValuiIdx + index // 2))
+        dst1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, baseValuiIdx + index // 2))
+        if index % 8 == 0: # First half of registers use tmp registers
+            if not kernel["UseDirect32XEmulation"]:
+                # First half of the registers will be overwritten. Store FP32 values in tmp
+                overlap = True
+                while overlap == True:
+                    val1 = writer.vgprPool.checkOutAligned(2, 2)
+                    val2 = writer.vgprPool.checkOutAligned(2, 2)
+                    overlap = False
+                    if baseValuiIdx not in writer.states.tmpvgpr:
+                        writer.states.tmpvgpr[baseValuiIdx] = []
+                    if tct == "B":
+                        overlap |= val1 in writer.states.tmpvgpr[baseValuiIdx]
+                        overlap |= val2 in writer.states.tmpvgpr[baseValuiIdx]
+                    tmpvgpr.append(val1)
+                    tmpvgpr.append(val2)
+                module.add(VMovB64(dst=vgpr(val1, 2), src=src0))
+                module.add(VMovB64(dst=vgpr(val2, 2), src=src1))
+            else:
+                # First half of registers are stored in TX registers
+                v0 = vgpr("Valu%s_T%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset // 2))
+                v1 = vgpr("Valu%s_T%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset // 2))
+                v2 = vgpr("Valu%s_T%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset // 2))
+                v3 = vgpr("Valu%s_T%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset // 2))
+        module.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
+        commentStr = ""
+        if (index % 8) == 4:
+            commentStr = "__TF32_1_"+tct
+        module.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
+
 
     """
     Local Read: Do It A/B
@@ -167,8 +209,6 @@ class LocalReadMFMA(LocalRead):
     """
     def __call__(self, writer, kernel, bufferIdx, iui, epsi, tP):
         imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"],iui))
-        tmpvgprFP32 = []
-        tmpvgprForReads = []
 
         tc = tP["tensorChar"]
         if tc == "A":
@@ -206,6 +246,7 @@ class LocalReadMFMA(LocalRead):
         enableLDSTr = tP["enableLDSTr"]
         numReadsPerUnroll = ceil(tP["bpeDS"] * kernel["MIInputPerThread%s"%tc] / int(unrollBlockWidth * bpr))
         numVgpr  = int(ceil(blockWidth))
+        tmpvgprFP32 = []
         if tc == 'A':
             lrvwTile = writer.states.lrvwTileA
         elif tc == 'B':
@@ -289,8 +330,6 @@ class LocalReadMFMA(LocalRead):
 
                         if needPack or numSplitMetadata:
                             if kernel["UseF32XEmulation"]:
-                                vectorWidthA  = kernel["VectorWidthA"]
-
                                 # Pack data 0-7 with layout:
                                 # Val+0: bf16 high (0,1)
                                 # Val+1: bf16 high (2,3)
@@ -301,66 +340,27 @@ class LocalReadMFMA(LocalRead):
                                 # Val+6: bf16 low  (4,5)
                                 # Val+7: bf16 low  (6,7)
 
-                                def pack4HiBits(tct, index):
-                                    valOffset = baseValuiIdx + index
-                                    v0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset))
-                                    v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset))
-                                    v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset))
-                                    v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset))
-                                    src0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset), 2)
-                                    src1 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset), 2)
-                                    dst0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, baseValuiIdx + index/2))
-                                    dst1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, baseValuiIdx + index/2))
-                                    if index % 8 == 0:
-                                        if not kernel["UseDirect32XEmulation"]:
-                                            overlap = True
-                                            while overlap == True:
-                                                val1 = writer.vgprPool.checkOutAligned(2, 2)
-                                                val2 = writer.vgprPool.checkOutAligned(2, 2)
-                                                overlap = False
-                                                if baseValuiIdx not in writer.states.tmpvgpr:
-                                                    writer.states.tmpvgpr[baseValuiIdx] = []
-                                                if tc == "B":
-                                                    overlap |= val1 in writer.states.tmpvgpr[baseValuiIdx]
-                                                    overlap |= val2 in writer.states.tmpvgpr[baseValuiIdx]
-                                                tmpvgprFP32.append(val1)
-                                                tmpvgprFP32.append(val2)
-                                            tmpvgprForReads.append(val1)
-                                            packCode.add(VMovB64(dst=vgpr(val1, 2), src=src0))
-                                            packCode.add(VMovB64(dst=vgpr(val2, 2), src=src1))
-                                        else:
-                                            v0 = vgpr("Valu%s_T%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset/2))
-                                            v1 = vgpr("Valu%s_T%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset/2))
-                                            v2 = vgpr("Valu%s_T%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset/2))
-                                            v3 = vgpr("Valu%s_T%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset/2))
-                                    packCode.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
-                                    commentStr = ""
-                                    if (index % 8) == 4:
-                                        commentStr = "__TF32_1_"+tc
-                                    packCode.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
-
+                                # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
+                                if valuiIdx % 8 == 0:
+                                    self.pack4HiBits(kernel, tc, 0, bufferIdx, baseValuiIdx, iui, writer, packCode, tmpvgprFP32)
+                                    self.pack4HiBits(kernel, tc, 4, bufferIdx, baseValuiIdx, iui, writer, packCode, tmpvgprFP32)
                                 if valuiIdx % 4 == 0:
-                                    if valuiIdx % 8 == 0:
-                                        pack4HiBits(tc, 0)
-                                        pack4HiBits(tc, 4)
-                                    numTmpForCVTSubTF32 = 1
                                     tmpvgpr =[]
-                                    for i in range(numTmpForCVTSubTF32):
-                                        val = writer.vgprPool.checkOut(1)
-                                        tmpvgpr.append(val)
-                                        if kernel["UseDirect32XEmulation"]:
-                                            if not baseValuiIdx in writer.states.tmpvgpr:
-                                                writer.states.tmpvgpr[baseValuiIdx] = []
-                                        if tc == "B":
-                                            while val in writer.states.tmpvgpr[baseValuiIdx]:
-                                                val = writer.vgprPool.checkOut(1)
-                                                tmpvgpr.append(val)
-                                        else:
-                                            if not val in writer.states.tmpvgpr[baseValuiIdx]:
-                                                writer.states.tmpvgpr[baseValuiIdx].append(val)
+                                    val = writer.vgprPool.checkOut(1)
+                                    tmpvgpr.append(val)
+                                    # tmp vgprs need to be unique across A/B, so we store in writer state
+                                    if kernel["UseDirect32XEmulation"]:
+                                        if not baseValuiIdx in writer.states.tmpvgpr:
+                                            writer.states.tmpvgpr[baseValuiIdx] = []
+                                    # store vgpr state on A, release on B. Assumes A, B ordering which seems to always be the case.
+                                    if tc == "B":
+                                        while val in writer.states.tmpvgpr[baseValuiIdx]:
+                                            val = writer.vgprPool.checkOut(1)
+                                            tmpvgpr.append(val)
+                                    else:
+                                        if not val in writer.states.tmpvgpr[baseValuiIdx]:
+                                            writer.states.tmpvgpr[baseValuiIdx].append(val)
 
-                                    offset = baseValuiIdx
-                                    vgprCvtOffset = 0
                                     if (valuiIdx % 8) == 0:
                                         if kernel["UseDirect32XEmulation"]:
                                             tmpIdx = len(tmpvgprFP32) - 4
@@ -379,9 +379,10 @@ class LocalReadMFMA(LocalRead):
                                         v1t = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx))
                                         v2t = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
                                         v3t = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
-                                    vHi0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + offset))
-                                    vHi1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + offset))
+                                    vHi0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + baseValuiIdx))
+                                    vHi1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + baseValuiIdx))
 
+                                    # Compute low bits = fp32(highBF16(A/B)) - fp32(A/B)
                                     if kernel["UseDot2F32XEmulation"]:
                                         packCode.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vgpr(vHi0)))
                                         packCode.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vgpr(vHi0)))
@@ -409,7 +410,8 @@ class LocalReadMFMA(LocalRead):
                                         writer.vgprPool.checkIn(tmp)
                                     tmpvgpr = []
 
-                                if rIdx == numReadsPerUnroll - 1: # Last iteration
+                                # on last iteration, store lower bits in last 4 registers
+                                if rIdx == numReadsPerUnroll - 1:
                                     if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
                                         if kernel["UseDirect32XEmulation"]:
                                             v0 = vgpr("Valu%s_T%u_I%u+%u+0"%(tc, bufferIdx, iui, baseValuiIdx // 2))
@@ -436,11 +438,13 @@ class LocalReadMFMA(LocalRead):
                                             while index >= 0:
                                                 tmp = tmpvgprFP32[index]
                                                 index -= 1
+                                                # if A, write tmp vgpr to writer state
                                                 if tc == "A":
                                                     if baseValuiIdx not in writer.states.tmpvgpr:
                                                         writer.states.tmpvgpr[baseValuiIdx] = []
                                                     if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
                                                         writer.states.tmpvgpr[baseValuiIdx].append(tmp)
+                                            # if B, free tmp vgpr from writer state
                                             if tc == "B":
                                                 if baseValuiIdx in writer.states.tmpvgpr:
                                                     writer.states.tmpvgpr[baseValuiIdx] = []
@@ -448,11 +452,13 @@ class LocalReadMFMA(LocalRead):
                                             while len(tmpvgprFP32):
                                                 tmp = tmpvgprFP32.pop()
                                                 writer.vgprPool.checkIn(tmp)
+                                            # if A, write tmp vgpr to writer state
                                             if tc == "A":
                                                 if baseValuiIdx not in writer.states.tmpvgpr:
                                                     writer.states.tmpvgpr[baseValuiIdx] = []
                                                 if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
                                                     writer.states.tmpvgpr[baseValuiIdx].append(tmp)
+                                            # if B, free tmp vgpr from writer state
                                             elif tc == "B":
                                                 if baseValuiIdx in writer.states.tmpvgpr:
                                                     writer.states.tmpvgpr[baseValuiIdx] = []
@@ -880,6 +886,7 @@ class LocalReadMFMA(LocalRead):
         if (tP["isA"] or tP["isB"]) and kernel["enableGLTr%s"%tc]:
             pack = Module("Pack%s_I%s (Empty)" % (tP["tensorChar"],iui))
 
+        # free any remaining tmp vgprs from emulation
         if kernel["UseDirect32XEmulation"]:
             while len(tmpvgprFP32):
                 tmp = tmpvgprFP32.pop()
