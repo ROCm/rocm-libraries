@@ -68,6 +68,11 @@ inline __HOST_DEVICE__ hip_bfloat16 fabs(hip_bfloat16 num)
     return hipdnn_sdk::utilities::bfp16::habs(num);
 }
 
+inline __HOST_DEVICE__ hip_bfloat16 abs(hip_bfloat16 num)
+{
+    return hipdnn_sdk::utilities::bfp16::habs(num);
+}
+
 inline __HOST_DEVICE__ hip_bfloat16 max(hip_bfloat16 a, hip_bfloat16 b)
 {
     return hipdnn_sdk::utilities::bfp16::hmax(a, b);

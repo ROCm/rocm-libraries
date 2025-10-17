@@ -337,6 +337,57 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+inline flatbuffers::FlatBufferBuilder
+    createValidConvWrwGraph(const std::vector<int64_t>& xDims = {4, 4, 4, 4},
+                            const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
+                            const std::vector<int64_t>& dwDims = {4, 4, 1, 1},
+                            const std::vector<int64_t>& dwStrides = {4, 1, 1, 1},
+                            const std::vector<int64_t>& dyDims = {4, 4, 4, 4},
+                            const std::vector<int64_t>& dyStrides = {64, 16, 4, 1},
+                            const std::vector<int64_t>& convPrePadding = {0, 0},
+                            const std::vector<int64_t>& convPostPadding = {0, 0},
+                            const std::vector<int64_t>& convStrides = {1, 1},
+                            const std::vector<int64_t>& convDilation = {1, 1},
+                            DataType dataType = DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", dataType, &xStrides, &xDims));
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 2, "dy", dataType, &dyStrides, &dyDims));
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 3, "dw", dataType, &dwStrides, &dwDims));
+
+    auto convAttributes = CreateConvolutionWrwAttributesDirect(builder,
+                                                               1, // x tensor uid
+                                                               2, // dy tensor uid
+                                                               3, // w tensor uid
+                                                               &convPrePadding,
+                                                               &convPostPadding,
+                                                               &convStrides,
+                                                               &convDilation,
+                                                               ConvMode::CROSS_CORRELATION);
+
+    std::vector<::flatbuffers::Offset<Node>> nodes;
+    auto node = CreateNodeDirect(
+        builder, "conv_wrw", NodeAttributes::ConvolutionWrwAttributes, convAttributes.Union());
+    nodes.push_back(node);
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 // TODO: Replace with a createValidPointwiseGraph function once one is made and tested
 // This may be useful to keep in general though, as it has distinct and non-null values for all fields
 inline flatbuffers::FlatBufferBuilder createPointwiseGraph()

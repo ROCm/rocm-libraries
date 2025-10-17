@@ -32,7 +32,15 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "Node attributes are not of the expected type");
         }
-        return *static_cast<const T*>(attributes());
+
+        auto* attr = attributes();
+        if(attr == nullptr)
+        {
+            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "Node attributes are null");
+        }
+
+        return *static_cast<const T*>(attr);
     }
 };
 
