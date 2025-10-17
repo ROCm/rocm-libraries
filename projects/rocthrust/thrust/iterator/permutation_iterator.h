@@ -182,10 +182,6 @@ private:
     return *(m_element_iterator + *this->base());
   }
 
-#if THRUST_COMPILER(MSVC2017)
-  THRUST_DIAG_POP
-#endif // THRUST_COMPILER(MSVC2017)
-
   // make friends for the copy constructor
   template <typename, typename>
   friend class permutation_iterator;

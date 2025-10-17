@@ -140,11 +140,7 @@ public:
 
   /*! Default constructor does nothing.
    */
-#if THRUST_COMPILER(MSVC2017)
-  inline THRUST_HOST_DEVICE zip_iterator() {}
-#else // ^^^ THRUST_COMPILER(MSVC2017) ^^^ / vvv !THRUST_COMPILER(MSVC2017) vvv
   zip_iterator() = default;
-#endif // !THRUST_COMPILER(MSVC2017)
 
   /*! This constructor creates a new \p zip_iterator from a
    *  \p tuple of iterators.

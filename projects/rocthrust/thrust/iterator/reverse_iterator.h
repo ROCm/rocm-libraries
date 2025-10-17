@@ -163,11 +163,7 @@ private:
 public:
   /*! Default constructor does nothing.
    */
-#if THRUST_COMPILER(MSVC2017)
-  THRUST_HOST_DEVICE reverse_iterator() {}
-#else // ^^^ THRUST_COMPILER(MSVC2017) ^^^ / vvv !THRUST_COMPILER(MSVC2017) vvv
   reverse_iterator() = default;
-#endif // !THRUST_COMPILER(MSVC2017)
 
   /*! \p Constructor accepts a \c BidirectionalIterator pointing to a range
    *  for this \p reverse_iterator to reverse.
