@@ -212,7 +212,13 @@ set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
-set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml)
+set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml 
+                         test_doti.yaml 
+                         test_dotci.yaml
+                         test_sctr.yaml
+                         test_roti.yaml
+                         test_gthr.yaml
+                         test_gthrz.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")

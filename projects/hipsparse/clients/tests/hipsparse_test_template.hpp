@@ -170,8 +170,9 @@ namespace
         };
 
         template <typename I, typename T>
-        struct test_call<I, T, typename std::enable_if<std::is_integral<I>::value>::type>
-            /*typename std::enable_if<check_t::template is_type_valid<I, T>()>::type>*/
+        struct test_call<I,
+                         T,
+                         typename std::enable_if<check_t::template is_valid_type<I, T>()>::type>
             : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, T>
         {
         };
@@ -195,8 +196,7 @@ namespace
         struct test_call<I,
                          J,
                          T,
-                         typename std::enable_if<check_t::template is_valid_type<T>()>::type>
-            //  typename std::enable_if<check_t::template is_type_valid<I, J, T>()>::type>
+                         typename std::enable_if<check_t::template is_valid_type<I, J, T>()>::type>
             : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, J, T>
         {
         };
