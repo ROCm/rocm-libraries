@@ -55,7 +55,7 @@ public:
     FSLockFile() {}
     FSLockFile(const fs::path& path_) : path(path_)
     {
-        lock_held = false;
+        lock_held     = false;
         lockfile_path = path.string() + ".fslock";
         unique_handle = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." +
                         std::to_string(getpid());
@@ -109,11 +109,10 @@ public:
     bool clear_stale_lock()
     {
         constexpr const auto timeout = std::chrono::milliseconds(5);
-        auto last_write_time = fs::last_write_time(lockfile_path);
-        auto chrono_last_write = std::chrono::file_clock::to_sys(last_write_time);
-        auto now = std::chrono::system_clock::now();
-        auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - chrono_last_write);
+        auto last_write_time         = fs::last_write_time(lockfile_path);
+        auto chrono_last_write       = std::chrono::file_clock::to_sys(last_write_time);
+        auto now                     = std::chrono::system_clock::now();
+        auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - chrono_last_write);
         if(age > timeout)
         {
             MIOPEN_LOG_I2("Removing Stale Lock < " << lockfile_path.string());
@@ -128,7 +127,9 @@ public:
         MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
         while(lock_held)
         {
-            fs::last_write_time(unique_handle, fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()));
+            fs::last_write_time(
+                unique_handle,
+                fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()));
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
@@ -151,7 +152,7 @@ public:
             if(fs::hard_link_count(unique_handle) == 2)
             {
                 lock_held = true;
-                std::thread([this](){this->refresh_lock();}).detach();
+                std::thread([this]() { this->refresh_lock(); }).detach();
                 return true;
             }
         }
