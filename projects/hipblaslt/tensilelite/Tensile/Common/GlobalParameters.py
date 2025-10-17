@@ -290,7 +290,7 @@ globalParameters["AsmDebug"] = (
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
-globalParameters["NoEnableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
+globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
