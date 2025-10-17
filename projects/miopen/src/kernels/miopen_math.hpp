@@ -78,7 +78,14 @@ __forceinline__ __device__ _Float16 tan(_Float16 x)
 }
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
-    return static_cast<_Float16>(tanhf(static_cast<float>(x)));
+    // tanh(x) = (e^(2x) - 1) / (e^(2x) + 1)
+    __half h     = __half(x);
+    __half two   = __half(2.0f);
+    __half one   = __half(1.0f);
+    __half e2x   = hexp(__hmul(two, h));
+    __half num   = __hsub(e2x, one);
+    __half denom = __hadd(e2x, one);
+    return __hdiv(num, denom);
 }
 
 } // namespace miopen
