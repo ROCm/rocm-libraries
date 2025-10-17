@@ -1096,8 +1096,8 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                Key   ordered_block_keys[BlockSize * NKey];
-                v_pack ordered_block_values[BlockSize * NValue];
+                Key   ordered_block_keys[BlockSize * NKey + 1];
+                v_pack ordered_block_values[BlockSize * NValue + 1];
             };
         };
     };
@@ -1267,11 +1267,12 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    const int offset = ranks[i] - x;
-                    if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
-                    {
-                        storage.ordered_block_keys[offset] = keys[i];
-                    }
+                    int offset = ranks[i] - x;
+                    offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NKey)
+                                     ? offset
+                                     : BlockSize * NKey;
+
+                    storage.ordered_block_keys[offset] = keys[i];
                 }
             }
 
@@ -1340,11 +1341,12 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    const int offset = ranks[i] - x;
-                    if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))
-                    {
-                        storage.ordered_block_values[offset] = v_pack::create(values[i]);
-                    }
+                    int offset = ranks[i] - x;
+                    offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NValue)
+                                     ? offset
+                                     : BlockSize * NValue;
+
+                    storage.ordered_block_values[offset] = v_pack::create(values[i]);
                 }
 
                 ::rocprim::syncthreads();
