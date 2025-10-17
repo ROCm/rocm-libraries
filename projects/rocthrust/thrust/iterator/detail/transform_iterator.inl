@@ -25,10 +25,18 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/functional/actor.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#include _THRUST_STD_INCLUDE(type_traits)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(functional)
+#else
+#  include <utility>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -38,19 +46,43 @@ class transform_iterator;
 namespace detail
 {
 
+template <class UnaryFunc, class Iterator>
+struct transform_iterator_reference
+{
+  // by default, dereferencing the iterator yields the same as the function.
+  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<iterator_value_t<Iterator>>()));
+};
+
+// for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
+// See the implementation of transform_iterator<...>::dereference() for several comments on why this is necessary.
+template <typename T, class Iterator>
+struct transform_iterator_reference<identity<T>, Iterator>
+{
+  using type = T;
+};
+template <class Iterator>
+struct transform_iterator_reference<identity<>, Iterator>
+{
+  using type = iterator_value_t<Iterator>;
+};
+template <class Iterator>
+struct transform_iterator_reference<::internal::identity, Iterator>
+{
+  using type = iterator_value_t<Iterator>;
+};
+template <typename Eval, class Iterator>
+struct transform_iterator_reference<functional::actor<Eval>, Iterator>
+{
+  using type = _THRUST_STD::remove_reference_t<decltype(_THRUST_STD::declval<functional::actor<Eval>>()(
+    _THRUST_STD::declval<iterator_value_t<Iterator>>()))>;
+};
+
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
 template <class UnaryFunc, class Iterator, class Reference, class Value>
 struct make_transform_iterator_base
 {
 private:
-  // FIXME(bgruber): the next line should be correct, but thrust::identity<T> lies and advertises a ::return_type of T,
-  // while its operator() returns const T& (which __invoke_of correctly detects), which causes transform_iterator to
-  // crash (or cause UB) during dereferencing. Check the test `thrust.test.dereference` for the OMP and TBB backends.
-  // using wrapped_func_ret_t = _THRUST_STD::__invoke_of<UnaryFunc, iterator_value_t<Iterator>>;
-  using wrapped_func_ret_t = result_of_adaptable_function<UnaryFunc(iterator_value_t<Iterator>)>;
-
-  // By default, dereferencing the iterator yields the same as the function.
-  using reference  = typename ia_dflt_help<Reference, wrapped_func_ret_t>::type;
+  using reference  = typename ia_dflt_help<Reference, transform_iterator_reference<UnaryFunc, Iterator>>::type;
   using value_type = typename ia_dflt_help<Value, ::internal::remove_cvref<reference>>::type;
 
 public:
