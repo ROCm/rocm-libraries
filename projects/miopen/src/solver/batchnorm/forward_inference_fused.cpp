@@ -56,6 +56,10 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
         return false;
     if(desc.op_map.at(1)->kind() != miopenFusionOpActivForward)
         return false;
+    if(!(problem.IsFp32() || problem.IsFp16()))
+        return false;
+    if(!(problem.Is2D() && problem.IsLayoutNCHW()))
+        return false;
     return true;
 }
 
