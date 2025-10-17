@@ -261,6 +261,23 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
+        struct BitfieldCombine : Binary
+        {
+            unsigned srcOffset = 0u;
+            unsigned dstOffset = 0u;
+            unsigned width     = 0u;
+
+            // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
+            std::optional<bool> srcIsZero = std::nullopt;
+            // if dstIsZero sets to true, that means bits [dstOffset:dstOffset+width-1] are 0
+            std::optional<bool> dstIsZero = std::nullopt;
+
+            constexpr static inline auto                Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes     EvalTimes{};
+            constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 4;
+        };
+
         /*
          * SRConversion performs a stochastic rounding conversion.
          * The lhs is the value to be converted, the rhs is the seed
@@ -563,7 +580,7 @@ namespace rocRoller
 
         /**
          * @brief Perform bitwise concatenation among all operands.
-         * 
+         *
          * Each operand must be dword aligned and the total number of operands'
          * registers must be equal to the number of registers for
          * 'destinationType'.
@@ -577,7 +594,7 @@ namespace rocRoller
             constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
             constexpr static inline int             Complexity = 1;
 
-            DataType destinationType = DataType::None;
+            VariableType destinationType;
 
             inline Concatenate& copyParams(const Concatenate& other)
             {

@@ -31,6 +31,8 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -214,7 +216,11 @@ namespace rocRoller
             virtual void emptyCache() override;
 
         private:
-            std::vector<Entry> m_entries;
+            using ReaderLock = std::shared_lock<std::shared_mutex>;
+            using WriterLock = std::unique_lock<std::shared_mutex>;
+
+            mutable std::shared_mutex m_entriesLock;
+            std::vector<Entry>        m_entries;
 
             /**
              * Finds an entry among the registered entries (classes).  This is the fallback for if there
@@ -223,7 +229,9 @@ namespace rocRoller
             template <typename T, bool Debug = false>
             Entry const& findEntry(T&& arg) const;
 
+            mutable std::shared_mutex                                   m_entryCacheLock;
             mutable std::unordered_map<Argument, Entry>                 m_entryCache;
+            mutable std::shared_mutex                                   m_instanceCacheLock;
             mutable std::unordered_map<Argument, std::shared_ptr<Base>> m_instanceCache;
         };
 

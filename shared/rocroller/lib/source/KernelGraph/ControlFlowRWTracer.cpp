@@ -50,64 +50,31 @@ namespace rocRoller::KernelGraph
         template <Expression::CUnary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.arg)
-            {
-                call(expr.arg);
-            }
+            call(expr.arg);
         }
 
         template <Expression::CBinary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.rhs)
-            {
-                call(expr.rhs);
-            }
+            call(expr.lhs);
+            call(expr.rhs);
         }
 
         void operator()(Expression::ScaledMatrixMultiply const& expr)
         {
-            if(expr.matA)
-            {
-                call(expr.matA);
-            }
-            if(expr.matB)
-            {
-                call(expr.matB);
-            }
-            if(expr.matC)
-            {
-                call(expr.matC);
-            }
-            if(expr.scaleA)
-            {
-                call(expr.scaleA);
-            }
-            if(expr.scaleB)
-            {
-                call(expr.scaleB);
-            }
+            call(expr.matA);
+            call(expr.matB);
+            call(expr.matC);
+            call(expr.scaleA);
+            call(expr.scaleB);
         }
 
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {
-            if(expr.lhs)
-            {
-                call(expr.lhs);
-            }
-            if(expr.r1hs)
-            {
-                call(expr.r1hs);
-            }
-            if(expr.r2hs)
-            {
-                call(expr.r2hs);
-            }
+            call(expr.lhs);
+            call(expr.r1hs);
+            call(expr.r2hs);
         }
 
         template <Expression::CNary Expr>
@@ -181,8 +148,8 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        if(control < 0 || coordinate < 0)
-            return;
+        AssertFatal(control > 0 && coordinate > 0);
+
         m_trace.push_back({control, coordinate, rw});
 
         if(m_graph.coordinates.getElementType(coordinate) == Graph::ElementType::Node)
@@ -604,8 +571,7 @@ namespace rocRoller::KernelGraph
         auto src = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, src, ReadWrite::READ);
 
-        auto dst
-            = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+        auto dst = m_graph.mapper.get(tag, NaryArgument::DEST);
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 

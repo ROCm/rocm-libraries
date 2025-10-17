@@ -24,6 +24,7 @@ set(REGRESSION_TESTS
     test_batched_gemm_softmax_gemm_permute_bf16
     test_batched_gemm_bias_softmax_gemm_permute_bf16
     test_grouped_gemm_splitk
+    test_batched_gemm_b_scale_wmma
     test_reduce_no_index
     test_reduce_with_index
     test_convnd_fwd
@@ -38,8 +39,10 @@ set(REGRESSION_TESTS
     test_conv_tensor_rearrange
     test_gemm_mx
     test_ck_tile_batched_transpose
+    test_ck_tile_fmha_bwd_fp32
     test_ck_tile_fmha_bwd_bf16
     test_ck_tile_fmha_bwd_fp16
+    test_ck_tile_fmha_fwd_fp32
     test_ck_tile_fmha_fwd_bf16
     test_ck_tile_fmha_fwd_fp16
     test_ck_tile_fmha_fwd_fp8
@@ -255,6 +258,7 @@ add_subdirectory(batched_gemm_reduce)
 add_subdirectory(batched_gemm_gemm)
 add_subdirectory(batched_gemm_softmax_gemm)
 add_subdirectory(batched_gemm_softmax_gemm_permute)
+add_subdirectory(batched_gemm_b_scale)
 add_subdirectory(grouped_gemm)
 add_subdirectory(reduce)
 add_subdirectory(convnd_fwd)
