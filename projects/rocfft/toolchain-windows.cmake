@@ -31,8 +31,12 @@ else()
   set(rocm_bin "C:/hip/bin")
 endif()
 
-set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
-set(CMAKE_C_COMPILER "${rocm_bin}/clang.exe")
+if( NOT DEFINED CMAKE_CXX_COMPILER )
+  set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
+endif()
+if( NOT DEFINED CMAKE_C_COMPILER )
+  set(CMAKE_C_COMPILER "${rocm_bin}/clang.exe")
+endif()
 
 # our usage flags
 set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -DWIN32 -D_CRT_SECURE_NO_WARNINGS")
