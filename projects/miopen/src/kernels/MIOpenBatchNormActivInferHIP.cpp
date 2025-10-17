@@ -31,9 +31,13 @@
 
 #include "activation_functions.hpp"
 #include "float_types.h"
+#include "vector_types.hpp"
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
+
+// define types for vectorized loads/stores
+using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIOPEN_READ_UNIT>::type;
 
 extern "C" __global__ void __launch_bounds__(blockSize)
     MIOpenBatchNormActivInferSpatialEst(const FLOAT_ACCUM alpha,
@@ -76,11 +80,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         const unsigned int index = n_i * MIO_BN_CHW + c_offset + hw_i * MIOPEN_READ_UNIT;
 
         // load the input data
-#pragma unroll
-        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
-        {
-            data[i] = in[index + i];
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(data)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + index));
 
         // perform batch norm and activation
         FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
@@ -94,10 +95,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         ActivationFunction(actRes, bnRes, gamma, beta, alpha);
 
         // write the output data
+        if constexpr(MIOPEN_USE_FP16)
+        { // In this situation, FLOAT_ACCUM is FP32 whereas FLOAT is FP16
+          // So, we cannot perform a vectorized store
 #pragma unroll
-        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            {
+                out[index + i] = static_cast<FLOAT>(actRes[i]);
+            }
+        }
+        else
         {
-            out[index + i] = static_cast<FLOAT>(actRes[i]);
+            // perform a vectorized store of the output data as FLOAT and FLOAT_ACCUM are same
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(actRes));
         }
     }
 }
@@ -152,11 +163,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         const unsigned int index = n_i * MIO_BN_CHW + chw_i;
 
         // load the input data
-#pragma unroll
-        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
-        {
-            data[i] = in[index + i];
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(data)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + index));
 
         // perform batch norm and activation
         FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
@@ -171,10 +179,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         ActivationFunction(actRes, bnRes, gamma, beta, alpha);
 
         // write the output data
+        if constexpr(MIOPEN_USE_FP16)
+        { // In this situation, FLOAT_ACCUM is FP32 whereas FLOAT is FP16
+          // So, we cannot perform a vectorized store
 #pragma unroll
-        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            {
+                out[index + i] = static_cast<FLOAT>(actRes[i]);
+            }
+        }
+        else
         {
-            out[index + i] = static_cast<FLOAT>(actRes[i]);
+            // perform a vectorized store of the output data as FLOAT and FLOAT_ACCUM are same
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(actRes));
         }
     }
 }
