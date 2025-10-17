@@ -33,4 +33,8 @@ pp_3d_kernels = [
         NS(length=[60,60,60], dims=[0,2], factors=[[6,10],[6,10]], factors_pp=[[6],[10]], threads_per_transform=[10,10], threads_per_transform_pp=[1,1], workgroup_size=[20,100], direct_to_from_reg=[False,False], precision=['dp']),
         # single-precision
         NS(length=[160,72,72], dims=[0,2], factors=[[4,10,4],[8,3,3]], factors_pp=[[4],[3,3,2]], threads_per_transform=[4,6], threads_per_transform_pp=[1,1], workgroup_size=[32,108], direct_to_from_reg=[False,False], precision=['sp']),
+        NS(length=[72,72,72], dims=[0,2], factors=[[8,3,3],[8,3,3]], factors_pp=[[4],[3,3,2]], threads_per_transform=[3,6], threads_per_transform_pp=[1,1], workgroup_size=[27,108], direct_to_from_reg=[False,False], precision=['sp']),
+        NS(length=[160,80,72], dims=[0,2], factors=[[4,10,4],[8,3,3]], factors_pp=[[4],[5,4]], threads_per_transform=[4,8], threads_per_transform_pp=[1,1], workgroup_size=[32,160], direct_to_from_reg=[False,False], precision=['sp']),
+        NS(length=[160,80,80], dims=[0,2], factors=[[4,10,4],[10,8]], factors_pp=[[4],[5,4]], threads_per_transform=[4,5], threads_per_transform_pp=[1,1], workgroup_size=[32,100], direct_to_from_reg=[False,False], precision=['sp']),
+        NS(length=[96,96,96], dims=[0,2], factors=[[6,4,4],[6,4,4]], factors_pp=[[4],[3,8]], threads_per_transform=[4,4], threads_per_transform_pp=[1,1], workgroup_size=[24,96], direct_to_from_reg=[False,False], precision=['sp']),
 ]
