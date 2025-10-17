@@ -189,8 +189,8 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         " Example: gfx942/Equality/* for building equality of gfx942 only",
     )
     argParser.add_argument(
-        "--no-enable-asm-comments",
-        dest="NoEnableAsmComments",
+        "--disable-asm-comments",
+        dest="DisableAsmComments",
         action="store_true",
         default=False,
         help="Disable assembly comments in generated assembly code"
