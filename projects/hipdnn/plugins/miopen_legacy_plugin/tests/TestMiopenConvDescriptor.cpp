@@ -506,3 +506,72 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationWrw)
     EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
                  hipdnn_plugin::HipdnnPluginException);
 }
+
+TEST(TestMiopenConvDescriptor, AcceptsValidGroupCount)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1));
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 2));
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 4));
+}
+
+TEST(TestMiopenConvDescriptor, VerifiesGroupCountSetCorrectly)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+    int groupCount = 4;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, groupCount);
+
+    int returnedGroupCount = 0;
+    miopenStatus_t status
+        = miopenGetConvolutionGroupCount(convDesc.convDescriptor(), &returnedGroupCount);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(returnedGroupCount, groupCount);
+}
+
+TEST(TestMiopenConvDescriptor, ThrowsOnInvalidGroupCount)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 0),
+                 hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, -1),
+                 hipdnn_plugin::HipdnnPluginException);
+}

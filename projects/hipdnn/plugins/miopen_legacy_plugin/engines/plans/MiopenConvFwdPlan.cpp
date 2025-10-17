@@ -21,14 +21,13 @@ ConvFwdParams::ConvFwdParams(
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
     , _w(miopen_utils::createTensor(tensorMap, attributes.w_tensor_uid()))
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
-    , _conv(_spatialDimCount, attributes)
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
     const auto& attrY = miopen_utils::findTensorAttributes(tensorMap, _y.uid());
-
     const auto groupCount = miopen_utils::calculateGroupCount(attrX, attrW);
-    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_conv.convDescriptor(), groupCount));
+
+    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, groupCount);
 
     _tensorsValid = (!attrX.virtual_() && !attrW.virtual_() && !attrY.virtual_());
 }
