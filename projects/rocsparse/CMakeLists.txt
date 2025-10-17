@@ -203,7 +203,7 @@ find_package(rocprim 4.0.0 REQUIRED)
 
 # Find rocblas package
 if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas 4.1.0 QUIET)
+  find_package(rocblas 5.0.0 REQUIRED)
 else()
   message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
