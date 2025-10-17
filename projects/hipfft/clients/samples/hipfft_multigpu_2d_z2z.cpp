@@ -73,7 +73,7 @@ int main()
     }
 
     // Define list of GPUs to use
-    std::array<int, 2> gpus = {0, 1};
+    std::vector<int> gpus = {0, 1};
 
     // Create the multi-gpu plan
     hipLibXtDesc* desc; // input descriptor
