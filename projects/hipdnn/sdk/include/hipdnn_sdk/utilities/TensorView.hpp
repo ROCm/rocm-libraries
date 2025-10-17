@@ -9,7 +9,7 @@ namespace hipdnn_sdk::utilities
 {
 
 template <typename T, bool IsConst = false>
-class TensorSpanIterator
+class TensorViewIterator
 {
 public:
     using iterator_category = std::forward_iterator_tag;
@@ -19,7 +19,7 @@ public:
     using pointer = std::conditional_t<IsConst, const T*, T*>;
 
     // Constructor
-    explicit TensorSpanIterator(ITensorIterator<IsConst> iter)
+    explicit TensorViewIterator(ITensorIterator<IsConst> iter)
         : _iter(std::move(iter))
     {
     }
@@ -35,25 +35,25 @@ public:
         return static_cast<pointer>(ptr);
     }
 
-    TensorSpanIterator& operator++()
+    TensorViewIterator& operator++()
     {
         ++_iter;
         return *this;
     }
 
-    TensorSpanIterator operator++(int)
+    TensorViewIterator operator++(int)
     {
-        TensorSpanIterator temp = *this;
+        TensorViewIterator temp = *this;
         ++_iter;
         return temp;
     }
 
-    bool operator==(const TensorSpanIterator& other) const
+    bool operator==(const TensorViewIterator& other) const
     {
         return _iter == other._iter;
     }
 
-    bool operator!=(const TensorSpanIterator& other) const
+    bool operator!=(const TensorViewIterator& other) const
     {
         return _iter != other._iter;
     }
@@ -63,14 +63,14 @@ private:
 };
 
 template <typename T, bool IsConst = false>
-class TensorSpan
+class TensorView
 {
 public:
-    using iterator = TensorSpanIterator<T, IsConst>;
-    using const_iterator = TensorSpanIterator<T, true>;
+    using iterator = TensorViewIterator<T, IsConst>;
+    using const_iterator = TensorViewIterator<T, true>;
     using tensor_reference = std::conditional_t<IsConst, const ITensor&, ITensor&>;
 
-    explicit TensorSpan(tensor_reference tensor)
+    explicit TensorView(tensor_reference tensor)
         : _tensor(tensor)
     {
     }
@@ -114,6 +114,6 @@ private:
 };
 
 template <typename T>
-using ConstTensorSpan = TensorSpan<T, true>;
+using ConstTensorView = TensorView<T, true>;
 
 }

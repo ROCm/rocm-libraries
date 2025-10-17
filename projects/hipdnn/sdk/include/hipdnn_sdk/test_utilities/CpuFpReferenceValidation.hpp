@@ -6,7 +6,7 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
-#include <hipdnn_sdk/utilities/TensorSpan.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
@@ -43,13 +43,13 @@ public:
         }
         bool result = true;
 
-        ConstTensorSpan<T> refSpan(reference);
-        ConstTensorSpan<T> implSpan(implementation);
+        ConstTensorView<T> refView(reference);
+        ConstTensorView<T> implView(implementation);
 
-        auto refItr = refSpan.begin();
-        auto implItr = implSpan.begin();
+        auto refItr = refView.begin();
+        auto implItr = implView.begin();
 
-        while(refItr != refSpan.end() && implItr != implSpan.end())
+        while(refItr != refView.end() && implItr != implView.end())
         {
             T refValue = *refItr;
             T implValue = *implItr;

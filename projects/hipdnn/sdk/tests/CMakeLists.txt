@@ -32,7 +32,7 @@ add_executable(hipdnn_sdk_tests
     utilities/TestShapeUtilities.cpp
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
-    utilities/TestTensorSpan.cpp
+    utilities/TestTensorView.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp

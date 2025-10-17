@@ -11,7 +11,7 @@
 
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
-#include <hipdnn_sdk/utilities/TensorSpan.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 
 namespace hipdnn_sdk
 {
@@ -57,13 +57,13 @@ public:
         double maxRefMagnitude = 0.0;
         double maxImplMagnitude = 0.0;
 
-        ConstTensorSpan<T> refSpan(reference);
-        ConstTensorSpan<T> implSpan(implementation);
+        ConstTensorView<T> refView(reference);
+        ConstTensorView<T> implView(implementation);
 
-        auto refItr = refSpan.begin();
-        auto implItr = implSpan.begin();
+        auto refItr = refView.begin();
+        auto implItr = implView.begin();
 
-        while(refItr != refSpan.end() && implItr != implSpan.end())
+        while(refItr != refView.end() && implItr != implView.end())
         {
             T refValueT = *refItr;
             T implValueT = *implItr;
