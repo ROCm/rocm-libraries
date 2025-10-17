@@ -249,17 +249,22 @@ set( rocfft-test_link_libs
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
   # Attempt to find a config version, which provides openmp_LIB_DIR.
-  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR )
      # Fall-back to module mode.
-     find_package( OpenMP REQUIRED )
+     find_package( OpenMP MODULE REQUIRED )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
   else()
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )
+  if( TARGET OpenMP::omp )
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::omp )
+  else()
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::OpenMP_CXX )
+  endif()
+  list( APPEND rocfft-test_link_libs ${ROCFFT_OPENMP_LIBRARY} )
 
   set_target_properties( rocfft-test PROPERTIES
      BUILD_RPATH "{$BUILD_RPATH}"
@@ -427,7 +432,7 @@ if( ROCFFT_MPI_ENABLE )
 
     if ( ROCFFT_CRAY_MPI_ENABLE )
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
@@ -440,7 +445,7 @@ if( ROCFFT_MPI_ENABLE )
   	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
