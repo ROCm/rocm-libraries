@@ -851,7 +851,7 @@ pushd .
   fi
 
   if [[ "${enable_asm_comments}" == false ]]; then
-    tensile_opt="${tensile_opt} -DTENSILELITE_DISABLE_ASM_COMMENTS=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_ENABLE_ASM_COMMENTS=OFF"
   fi
 
   cmake_common_options="${cmake_common_options} ${tensile_opt}"
