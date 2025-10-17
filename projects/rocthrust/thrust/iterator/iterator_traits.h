@@ -39,7 +39,11 @@
 #  pragma system_header
 #endif // no system header
 
-#include <iterator>
+#if THRUST_COMPILER(NVRTC)
+#  include _THRUST_STD_INCLUDE(iterator)
+#else // THRUST_COMPILER(NVRTC)
+#  include <iterator>
+#endif // THRUST_COMPILER(NVRTC)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -47,7 +51,12 @@ THRUST_NAMESPACE_BEGIN
  *  interface for querying the properties of iterators at compile-time.
  */
 template <typename T>
-struct iterator_traits : std::iterator_traits<T>
+struct iterator_traits
+    :
+#if THRUST_COMPILER(NVRTC)
+    ::cuda
+#endif // THRUST_COMPILER(NVRTC)
+    ::std::iterator_traits<T>
 {};
 
 template <typename Iterator>

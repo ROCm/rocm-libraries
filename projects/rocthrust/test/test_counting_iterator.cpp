@@ -41,7 +41,7 @@ TEST(CountingIteratorTests, TestIteratorTraits)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using It       = _THRUST_STD::iterator_traits<thrust::counting_iterator<int>>;
-  using category = thrust::detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
+  using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 

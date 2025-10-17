@@ -36,7 +36,6 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(functional)
-#  include <functional>
 #else
 #  include <thrust/detail/type_traits.h>
 
