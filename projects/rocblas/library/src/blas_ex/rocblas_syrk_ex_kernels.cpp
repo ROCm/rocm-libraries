@@ -52,10 +52,11 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                       rocblas_int       batch_count)
 {
 
-    constexpr bool BATCHED = false;
-    constexpr bool HERM    = false;
+    constexpr bool BATCHED    = false;
+    constexpr bool HERM       = false;
+    constexpr bool FORCEDGEMM = true;
 
-    size_t size = rocblas_internal_syrk_herk_workspace<T, true>(handle, n, k, batch_count);
+    size_t size = rocblas_internal_syrk_herk_workspace<T, FORCEDGEMM>(handle, n, k, batch_count);
 
     //Allocate Workspace memory
     auto w_mem = handle->device_malloc(size);
@@ -63,12 +64,6 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         return rocblas_status_memory_error;
 
     hipStream_t rocblas_stream = handle->get_stream();
-    // Copy over alpha and beta
-    Tex alpha_h;
-    Tex beta_h;
-    RETURN_IF_ROCBLAS_ERROR(rocblas_copy_alpha_beta_to_host_if_on_device(
-        handle, alpha_in, beta_in, alpha_h, beta_h, k));
-    auto saved_pointer_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
 
     // Note: alpha and beta always copied over to host by now
     if(*beta_in == 1 && (k == 0 || *alpha_in == 0))

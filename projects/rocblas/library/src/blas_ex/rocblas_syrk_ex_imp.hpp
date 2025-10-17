@@ -26,6 +26,7 @@
 #include "logging.hpp"
 #include "rocblas.h"
 #include "rocblas_block_sizes.h"
+#include "rocblas_gemm_ex.hpp"
 #include "utility.hpp"
 
 namespace
@@ -53,16 +54,24 @@ namespace
         if(handle->is_device_memory_size_query())
         {
             //If rocblas_use_only_gemm is true then it is required to allocate extra workspace memory
-            if(true) //rocblas_use_only_gemm<T>(handle, n, k))
+            static bool constexpr FORCEGEMM = true;
+            if(FORCEGEMM) //rocblas_use_only_gemm<T>(handle, n, k))
             {
                 if(!n)
                     return rocblas_status_size_unchanged;
-                size_t size = rocblas_internal_syrk_herk_workspace<double>(handle, n, k, 1); // TODO
+                size_t size
+                    = rocblas_internal_syrk_herk_workspace<double, FORCEGEMM>(handle, n, k, 1);
                 return handle->set_optimal_device_memory_size(size);
             }
-            // else
-            //RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle);
+            else
+                RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle);
         }
+
+        // Copy alpha and beta to host if on device
+        rocblas_union_t alpha_h, beta_h;
+        RETURN_IF_ROCBLAS_ERROR(rocblas_copy_alpha_beta_to_host_if_on_device(
+            handle, alpha, beta, alpha_h, beta_h, k, compute_type));
+        auto saved_pointer_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
 
         auto                    layer_mode     = handle->layer_mode;
         auto                    check_numerics = handle->check_numerics;
