@@ -54,13 +54,13 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
     const auto i = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
-    if(i < ldw && j < order)
+    if(i < order && j < ldw)
     {
         T *Ap, *Wp;
         Wp = tmptr + b * strideW;
         Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
 
-        Wp[i + j * ldw] = Ap[i + j * lda];
+        Wp[j + i * ldw] = Ap[j + i * lda];
     }
 }
 
@@ -80,13 +80,13 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
     const auto i = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
-    if(i < ldw && j < order)
+    if(i < order && j < ldw)
     {
         T *Ap, *Wp;
         Wp = tmptr + b * strideW;
         Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
 
-        Ap[i + j * lda] -= Wp[i + j * ldw];
+        Ap[j + i * lda] -= Wp[j + i * ldw];
     }
 }
 
@@ -313,8 +313,8 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    rocblas_int blocksx = (order - 1) / 32 + 1;
-    rocblas_int blocksy = (ldw - 1) / 32 + 1;
+    rocblas_int blocksy = (order - 1) / 32 + 1;
+    rocblas_int blocksx = (ldw - 1) / 32 + 1;
     ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
@@ -586,8 +586,8 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    rocblas_int blocksx = (order - 1) / 32 + 1;
-    rocblas_int blocksy = (ldw - 1) / 32 + 1;
+    rocblas_int blocksy = (order - 1) / 32 + 1;
+    rocblas_int blocksx = (ldw - 1) / 32 + 1;
     ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
