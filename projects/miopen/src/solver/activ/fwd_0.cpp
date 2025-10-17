@@ -108,7 +108,6 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
-        {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
     };
 
     if(problem.GetXDesc().GetType() == miopenFloat)
@@ -164,6 +163,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
                 {
                     kernel(params.x,
                            params.y,
+                           static_cast<int>(map_size_aligned),
                            gamma,
                            beta,
                            alpha,
@@ -191,6 +191,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
 
                     kernel(params.x,
                            params.y,
+                           static_cast<int>(map_size_aligned),
                            gamma,
                            beta,
                            alpha,

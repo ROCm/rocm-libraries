@@ -207,7 +207,6 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
         {"MIOPEN_NRN_OP_ID", static_cast<int>(imode)},
         {"MIOPEN_N_PIXS_OFF", N_PIXS_OFF},
         {"MIOPEN_MAP_SZ", map_size},
-        {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
         {"MIOPEN_READ_UNIT", read_unit},
     };
 
@@ -257,6 +256,7 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
             visit_float(xDesc.GetType(), [&](auto as_float) {
                 k(params.x,
                   params.y,
+                  static_cast<int>(map_size_aligned),
                   as_float(params.gamma),
                   as_float(params.beta),
                   as_float(params.alpha),

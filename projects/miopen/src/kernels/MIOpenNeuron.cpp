@@ -50,6 +50,7 @@
 
 extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
                                                FP_TYPE* top,
+                                               const int map_size_aligned,
                                                FP_TYPE gamma,
                                                FP_TYPE beta,
                                                FP_TYPE alpha,
@@ -59,7 +60,7 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
     const unsigned int tid   = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int index = tid * MIOPEN_READ_UNIT;
 
-    if(tid >= MIOPEN_MAP_SZ_ALIGNED)
+    if(tid >= map_size_aligned)
         return;
 
     FP_TYPE data[MIOPEN_READ_UNIT];
@@ -77,6 +78,7 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
 
 extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
                                                  FP_TYPE* top,
+                                                 const int map_size_aligned,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
                                                  FP_TYPE alpha,
@@ -88,7 +90,7 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if(x_id >= MIOPEN_MAP_SZ_ALIGNED)
+    if(x_id >= map_size_aligned)
         return;
 
     uint bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
@@ -111,6 +113,7 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
                                                const FP_TYPE* top_diff,
                                                const FP_TYPE* bot,
                                                const FP_TYPE* top,
+                                               const int map_size_aligned,
                                                FP_TYPE diff_scale,
                                                FP_TYPE gamma,
                                                FP_TYPE beta,
@@ -123,7 +126,7 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int index              = tid * MIOPEN_READ_UNIT;
 
-    if(tid >= MIOPEN_MAP_SZ_ALIGNED)
+    if(tid >= map_size_aligned)
         return;
 
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
@@ -149,6 +152,7 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
                                                  const FP_TYPE* top_diff,
                                                  const FP_TYPE* bot,
                                                  const FP_TYPE* top,
+                                                 const int map_size_aligned,
                                                  FP_TYPE diff_scale,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
@@ -165,7 +169,7 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if(x_id >= MIOPEN_MAP_SZ_ALIGNED)
+    if(x_id >= map_size_aligned)
         return;
 
     uint bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;
@@ -198,6 +202,7 @@ __launch_bounds__(
     MIOPEN_NRN_GROUP_SZ0* MIOPEN_NRN_GROUP_SZ1* MIOPEN_NRN_GROUP_SZ2) extern "C" __global__
     void MIOpenNeuronFwd(const FP_TYPE* bot,
                          FP_TYPE* top,
+                         const int map_size_aligned,
                          FP_TYPE gamma,
                          FP_TYPE beta,
                          FP_TYPE alpha,
@@ -206,7 +211,7 @@ __launch_bounds__(
 {
     const unsigned int x = blockIdx.x * MIOPEN_NRN_GROUP_SZ0 + threadIdx.x; // channel x
 
-    if(x >= MIOPEN_MAP_SZ_ALIGNED)
+    if(x >= map_size_aligned)
         return;
 
     FP_TYPE data[MIOPEN_READ_UNIT];
@@ -238,7 +243,7 @@ __launch_bounds__(
 
     if constexpr(MIOPEN_N_PIXS_OFF > 0)
     {
-        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        if(x == map_size_aligned - 1)
         {
             int i = 0;
 #pragma unroll
@@ -300,7 +305,7 @@ __launch_bounds__(
 
     if constexpr(MIOPEN_N_PIXS_OFF > 0)
     {
-        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        if(x == map_size_aligned - 1)
         {
 #pragma unroll
             for(int i = 0; i < MIOPEN_N_PIXS_OFF; ++i)
@@ -324,6 +329,7 @@ __launch_bounds__(
                          const FP_TYPE* top_diff,
                          const FP_TYPE* bot_data,
                          const FP_TYPE* top_data,
+                         const int map_size_aligned,
                          FP_TYPE diff_scale,
                          FP_TYPE gamma,
                          FP_TYPE beta,
@@ -335,7 +341,7 @@ __launch_bounds__(
 {
     const unsigned int x = blockIdx.x * MIOPEN_NRN_GROUP_SZ0 + threadIdx.x;
 
-    if(x >= MIOPEN_MAP_SZ_ALIGNED)
+    if(x >= map_size_aligned)
         return;
 
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
@@ -419,7 +425,7 @@ __launch_bounds__(
 
     if constexpr(MIOPEN_N_PIXS_OFF > 0)
     {
-        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        if(x == map_size_aligned - 1)
         {
             int i = 0;
 #pragma unroll
@@ -489,7 +495,7 @@ __launch_bounds__(
 
     if constexpr(MIOPEN_N_PIXS_OFF > 0)
     {
-        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        if(x == map_size_aligned - 1)
         {
 #pragma unroll
             for(int i = 0; i < MIOPEN_N_PIXS_OFF; ++i)
