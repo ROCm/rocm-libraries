@@ -83,16 +83,16 @@ size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr
 // miopenSetConvolutionGroupCount needs to be called after initializing the tensor descriptor,
 // and before getting the workspace size.
 // MIOpen API takes a standard int.
-int calculateGroupCount(const hipdnn_sdk::data_objects::TensorAttributes& inputTensor,
-                        const hipdnn_sdk::data_objects::TensorAttributes& weightTensor)
+int calculateGroupCount(const std::vector<int64_t>& inputDims,
+                        const std::vector<int64_t>& weightDims)
 {
-    if(inputTensor.dims()->size() < 2 || weightTensor.dims()->size() < 2)
+    if(inputDims.size() < 2 || weightDims.size() < 2)
     {
         return 1;
     }
 
-    auto inChannels = inputTensor.dims()->Get(1);
-    auto wChannels = weightTensor.dims()->Get(1);
+    auto inChannels = inputDims[1];
+    auto wChannels = weightDims[1];
 
     if(wChannels == 0 || inChannels % wChannels != 0)
     {

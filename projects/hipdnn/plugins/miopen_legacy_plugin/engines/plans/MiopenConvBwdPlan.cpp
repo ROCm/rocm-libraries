@@ -4,6 +4,7 @@
 #include <array>
 
 #include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -25,7 +26,10 @@ ConvBwdParams::ConvBwdParams(
     const auto& attrDX = miopen_utils::findTensorAttributes(tensorMap, _dx.uid());
     const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
-    const auto groupCount = miopen_utils::calculateGroupCount(attrDX, attrW);
+    
+    auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDX.dims());
+    auto weightDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, attributes, groupCount);
 
