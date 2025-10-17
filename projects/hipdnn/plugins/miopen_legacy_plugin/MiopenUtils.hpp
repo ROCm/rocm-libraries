@@ -53,6 +53,8 @@ MiopenTensor createTensor(
 
 size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr);
 
+int calculateGroupCount(const hipdnn_sdk::data_objects::TensorAttributes& inputTensor,
+                        const hipdnn_sdk::data_objects::TensorAttributes& weightTensor);
 }
 
 }

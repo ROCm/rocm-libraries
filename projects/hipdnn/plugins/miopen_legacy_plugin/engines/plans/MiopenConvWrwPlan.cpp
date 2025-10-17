@@ -27,6 +27,9 @@ ConvWrwParams::ConvWrwParams(
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
 
+    const auto groupCount = miopen_utils::calculateGroupCount(attrX, attrDW);
+    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_conv.convDescriptor(), groupCount));
+
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
 
