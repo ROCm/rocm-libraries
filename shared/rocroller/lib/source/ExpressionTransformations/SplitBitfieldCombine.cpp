@@ -146,11 +146,20 @@ namespace rocRoller
                     uint32_t      overlapStart = std::max(combineStartBit, dwordStartBit);
                     uint32_t      overlapEnd   = std::min(combineEndBit, dwordEndBit);
                     uint32_t      overlapWidth = overlapEnd - overlapStart + 1;
+                    uint32_t      srcOffset    = expr.srcOffset + (overlapStart - combineStartBit);
+                    uint32_t      dstOffset    = overlapStart - dwordStartBit;
+
+                    ExpressionPtr srcDWord = expr.lhs;
+                    if (resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize) {
+                        srcDWord = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
+                        srcOffset = 0;
+                    }
+
                     ExpressionPtr subBitfieldCombine
-                        = bfc(expr.lhs,
+                        = bfc(srcDWord,
                               dstDWord,
-                              expr.srcOffset + (overlapStart - combineStartBit),
-                              overlapStart - dwordStartBit,
+                              srcOffset,
+                              dstOffset,
                               overlapWidth);
 
                     fields.push_back(subBitfieldCombine);
@@ -238,7 +247,7 @@ namespace rocRoller
                             srcSize);
 
                 // No need to split if destination size is less than or equal to 32 bits
-                if(dstSize <= dwordSize)
+                if(dstSize <= dwordSize && srcSize <= dwordSize)
                     return std::make_shared<Expression>(cpy);
 
                 std::vector<ExpressionPtr> fields = splitBitfield(cpy, dstSize, dwordSize);

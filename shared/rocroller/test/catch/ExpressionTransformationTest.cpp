@@ -999,10 +999,42 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         auto expr = bfc(reg64, zero128, 0, 0, 64);
 
         std::vector<Expression::ExpressionPtr> operands{
-            bfc(reg64, zero32, 0, 0, 32), bfc(reg64, zero32, 32, 0, 32), zero32, zero32};
+            bfc(bfe(DataType::UInt32, reg64, 0, 32), zero32, 0, 0, 32),
+            bfc(bfe(DataType::UInt32, reg64, 32, 32), zero32, 0, 0, 32),
+            zero32,
+            zero32};
         auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
 
         // TODO: The two first operands could be simplified into reg64
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine 32bit across src dword boundary register into of 128bit constant")
+    {
+        auto expr = bfc(reg64, zero128, 16, 0, 32);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            bfc(bfe(DataType::UInt32, reg64, 16, 32), zero32, 0, 0, 32),
+            zero32,
+            zero32,
+            zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine 32bit across src dword boundary register into of 128bit constant across dst "
+            "dword boundary")
+    {
+        auto expr = bfc(reg64, zero128, 16, 16, 32);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            bfc(bfe(DataType::UInt32, reg64, 16, 16), zero32, 0, 16, 16),
+            bfc(bfe(DataType::UInt32, reg64, 32, 16), zero32, 0, 0, 16),
+            zero32,
+            zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
