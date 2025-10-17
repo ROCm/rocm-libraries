@@ -283,6 +283,16 @@ namespace rocRoller
         co_yield Instruction::Comment(command->argInfo());
     }
 
+    CommandArgumentPtr findArgumentByName(std::vector<CommandArgumentPtr> const& arguments,
+                                          std::string const&                     argName)
+    {
+        auto it = std::ranges::find_if(arguments, [&](auto x) { return x->name() == argName; });
+
+        if(it == arguments.end())
+            return nullptr;
+        return *it;
+    }
+
     void CommandKernel::generateKernelGraph(std::string name)
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
@@ -355,42 +365,29 @@ namespace rocRoller
 
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
 
-        Expression::ExpressionPtr workgroupMappingValue = nullptr;
         if(m_commandParameters->workgroupMappingDim.has_value())
         {
-            Expression::ExpressionPtr size;
+            auto wgmArg = findArgumentByName(m_command->getArguments(), rocRoller::WGM);
+            AssertFatal(wgmArg != nullptr,
+                        "Can not find WGM Command argument required for workgroup mapping.");
 
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::WGM;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find WGM Command argument required for workgroup mapping.");
-                size = std::make_shared<Expression::Expression>(*it);
-            }
-            Expression::enableDivideBy(size, m_context);
-
-            workgroupMappingValue = size;
+            transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
+                m_commandParameters->workgroupMappingDim,
+                std::make_shared<Expression::Expression>(wgmArg)));
         }
-        transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
-            m_commandParameters->workgroupMappingDim, workgroupMappingValue));
 
         if(m_commandParameters->streamK)
         {
-            Expression::ExpressionPtr numWGsExpr;
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::NUMWGS;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find numWGs Command argument required for StreamK kernels.");
-                numWGsExpr = std::make_shared<Expression::Expression>(*it);
-            }
+            auto numWGsArg = findArgumentByName(m_command->getArguments(), rocRoller::NUMWGS);
+            AssertFatal(numWGsArg != nullptr,
+                        "Can not find numWGs Command argument required for StreamK kernels.");
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_context, m_commandParameters, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+                m_context,
+                m_commandParameters,
+                rocRoller::XLOOP,
+                rocRoller::KLOOP,
+                std::make_shared<Expression::Expression>(numWGsArg)));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
