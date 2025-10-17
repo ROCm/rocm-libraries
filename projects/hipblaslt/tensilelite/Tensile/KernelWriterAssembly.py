@@ -4875,6 +4875,7 @@ class KernelWriterAssembly(KernelWriter):
       do = doA if  tc == "A" else doB
       strSize = "SizeI" if tc == "A" else "SizeJ"
       strMacroTile = "MacroTile0" if tc == "A" else "MacroTile1"
+      strWG = "WorkGroup0" if tc == "A" else "WorkGroup1"
       tP = tPA if tc == "A" else tPB
       nlp = nlpA if tc == "A" else nlpB
       nlc = nlcA if tc == "A" else nlcB
@@ -4897,19 +4898,21 @@ class KernelWriterAssembly(KernelWriter):
       loopIdx = self.states.unrollIdx
       if do:
         imod.addComment("Calculate %s %% %s"%(strSize, strMacroTile))
-        imod.add(scalarStaticDivideAndRemainder(sTmp0, sTmp0, sgpr(strSize), \
-                                                kernel[strMacroTile], \
-                                                ContinuousRegister(sx2Tmp0, 2), 1))
-        imod.add(SCmpEQU32(src0=sgpr(sTmp0), src1=0, comment=""))
-        imod.add(SCMovB32(dst=sgpr(sTmp0), src=kernel[strMacroTile]))
+        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(strWG), src1=kernel[strMacroTile], \
+                         comment="Calculate the remaining dimension along I/J direction."))
+        imod.add(SSubU32(dst=sgpr(sTmp0), src0=sgpr(strSize), src1=sgpr(sTmp0), \
+                         comment="Calculate the remaining dimension along I/J direction."))
+        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=tP["bpeGR"], \
+                         comment="In bytes"))
         imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel["DepthU"] - 1), \
-                         comment="Calculate how many sizes along L direction in tail"))
+                         comment="Calculate the remaining dimension along L direction."))
         imod.add(SLShiftRightB32(dst=sgpr(sx2Tmp1), shiftHex=hex(log2(lsc)), \
                                  src=sgpr(sTmp1), comment="Divided by lsc(%s)"%(lsc)))
-        imod.add(SMulI32(dst=sgpr(sTmp2), src0=sgpr(sTmp0), src1=sgpr(sTmp1), \
-                         comment="Calculate total valid elements number of last tile"))
-        imod.add(SMulI32(dst=sgpr(sValidBytes), src0=sgpr(sTmp2), src1=tP["bpeGR"], \
-                         comment="Total valid bytes"))
+        imod.add(self.s_mul_u64_u32(sgpr(sValidBytes), sgpr(sReloadFlag), sgpr(sTmp0), sgpr(sTmp1), \
+                               comment="Calculate total number of valid elements."))
+        imod.add(SCmpGtU32(src0=sgpr(sReloadFlag), src1=0))
+        imod.add(SCMovB32(dst=sgpr(sValidBytes), src=hex(0xFFFFFFFF), \
+                          comment="If valid elements > max(U32), set the value to max"))
 
         if (kernel[strWSGR] == 0):
           tmpSgpr = sTmp0

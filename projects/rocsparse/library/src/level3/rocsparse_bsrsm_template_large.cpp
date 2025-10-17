@@ -31,17 +31,17 @@
 
 namespace rocsparse
 {
-#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                               \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),    \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                   \
-                                       dim3(wfsize, bsize / wfsize),                            \
-                                       0,                                                       \
-                                       stream,                                                  \
-                                       dir,                                                     \
-                                       nnzb,                                                    \
-                                       (const rocsparse_int*)bsrsm_info->get_transposed_perm(), \
-                                       bsr_val,                                                 \
-                                       bsrt_val,                                                \
+#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),  \
+                                       dim3((wfsize * nnzb - 1) / bsize + 1),                 \
+                                       dim3(wfsize, bsize / wfsize),                          \
+                                       0,                                                     \
+                                       stream,                                                \
+                                       dir,                                                   \
+                                       nnzb,                                                  \
+                                       (const rocsparse_int*)trm_info->get_transposed_perm(), \
+                                       bsr_val,                                               \
+                                       bsrt_val,                                              \
                                        block_dim)
 
 #define LAUNCH_BSRSM_GTHR(bsize, wfsize, dim) \
@@ -100,27 +100,27 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                 \
-    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                    \
-    dim3 bsrsm_threads(NCOL* M_);                                                       \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                       \
-                                       bsrsm_blocks,                                    \
-                                       bsrsm_threads,                                   \
-                                       0,                                               \
-                                       stream,                                          \
-                                       mb,                                              \
-                                       nrhs,                                            \
-                                       local_bsr_row_ptr,                               \
-                                       local_bsr_col_ind,                               \
-                                       local_bsr_val,                                   \
-                                       block_dim,                                       \
-                                       Xt,                                              \
-                                       ldimX,                                           \
-                                       done_array,                                      \
-                                       (const rocsparse_int*)bsrsm_info->get_row_map(), \
-                                       (rocsparse_int*)info->zero_pivot,                \
-                                       descr->base,                                     \
-                                       descr->diag_type,                                \
+#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                          \
+    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                             \
+    dim3 bsrsm_threads(NCOL* M_);                                                                \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                                \
+                                       bsrsm_blocks,                                             \
+                                       bsrsm_threads,                                            \
+                                       0,                                                        \
+                                       stream,                                                   \
+                                       mb,                                                       \
+                                       nrhs,                                                     \
+                                       local_bsr_row_ptr,                                        \
+                                       local_bsr_col_ind,                                        \
+                                       local_bsr_val,                                            \
+                                       block_dim,                                                \
+                                       Xt,                                                       \
+                                       ldimX,                                                    \
+                                       done_array,                                               \
+                                       (const rocsparse_int*)trm_info->get_row_map(),            \
+                                       (rocsparse_int*)info->get_bsrsm_info()->get_zero_pivot(), \
+                                       descr->base,                                              \
+                                       descr->diag_type,                                         \
                                        dir);
 
         hipStream_t stream = handle->stream;
@@ -150,19 +150,18 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb * narrays, stream));
 
-        const rocsparse::trm_info_t* bsrsm_info
-            = (descr->fill_mode == rocsparse_fill_mode_upper)
-                  ? ((trans_A == rocsparse_operation_none) ? info->bsrsm_upper_info
-                                                           : info->bsrsmt_upper_info)
-                  : ((trans_A == rocsparse_operation_none) ? info->bsrsm_lower_info
-                                                           : info->bsrsmt_lower_info);
+        auto bsrsm_info = info->get_bsrsm_info();
+        auto trm_info   = info->get_bsrsm_info(trans_A, descr->fill_mode);
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             static const rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-                info->zero_pivot, &max, sizeof(rocsparse_int), hipMemcpyHostToDevice, stream));
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(bsrsm_info->get_zero_pivot(),
+                                               &max,
+                                               sizeof(rocsparse_int),
+                                               hipMemcpyHostToDevice,
+                                               stream));
         }
 
         rocsparse_fill_mode fill_mode = descr->fill_mode;
@@ -176,12 +175,12 @@ namespace rocsparse
 
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_template(
                     handle, mb * block_dim, nrhs, alpha, B, ldb, Xt, ldimX));
             }
             else
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_template(
                     handle, mb * block_dim, nrhs, *alpha, B, ldb, Xt, ldimX));
             }
         }
@@ -216,8 +215,8 @@ namespace rocsparse
 
             LAUNCH_BSRSM_GTHR(256, 64, block_dim);
 
-            local_bsr_row_ptr = (const rocsparse_int*)bsrsm_info->get_transposed_row_ptr();
-            local_bsr_col_ind = (const rocsparse_int*)bsrsm_info->get_transposed_col_ind();
+            local_bsr_row_ptr = (const rocsparse_int*)trm_info->get_transposed_row_ptr();
+            local_bsr_col_ind = (const rocsparse_int*)trm_info->get_transposed_col_ind();
             local_bsr_val     = (const T*)bsrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
