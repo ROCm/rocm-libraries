@@ -43,14 +43,21 @@ namespace rocRoller::Graph
 
     void HypergraphIncidenceContainer::deleteTag(int tag)
     {
+        auto srcs = getSrcs(tag);
+        auto dsts = getDsts(tag);
+
         m_incidenceBySrc.erase(tag);
         m_incidenceByDst.erase(tag);
 
-        for(auto& connections : m_incidenceBySrc)
-            std::erase(connections.second, tag);
+        for(auto src : srcs)
+        {
+            AssertFatal(std::erase(m_incidenceBySrc.at(src), tag) > 0);
+        }
 
-        for(auto& connections : m_incidenceByDst)
-            std::erase(connections.second, tag);
+        for(auto dst : dsts)
+        {
+            AssertFatal(std::erase(m_incidenceByDst.at(dst), tag) > 0);
+        }
     }
 
     std::vector<int> HypergraphIncidenceContainer::getSrcs(int tag) const
