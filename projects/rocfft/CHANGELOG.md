@@ -7,7 +7,8 @@ Documentation for rocFFT is available at
 
 ### Optimized
 
-* Removed a potential unnecessary global transpose operation from 3D multi-GPU pencil decompositions.
+* Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
+* Enabled optimization of 3D pencil decompositions for single-process multi-GPU transforms.
 
 ### Resolved issues
 
