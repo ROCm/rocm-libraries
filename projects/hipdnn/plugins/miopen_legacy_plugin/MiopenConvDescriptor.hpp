@@ -17,13 +17,13 @@ public:
     MiopenConvDescriptor() = default;
     MiopenConvDescriptor(size_t spatialDimCount,
                          const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-                         int groupCount = 1);
+                         int groupCount);
     MiopenConvDescriptor(size_t spatialDimCount,
                          const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes,
-                         int groupCount = 1);
+                         int groupCount);
     MiopenConvDescriptor(size_t spatialDimCount,
                          const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-                         int groupCount = 1);
+                         int groupCount);
 
     MiopenConvDescriptor(const MiopenConvDescriptor&) = delete;
     MiopenConvDescriptor& operator=(const MiopenConvDescriptor&) = delete;
