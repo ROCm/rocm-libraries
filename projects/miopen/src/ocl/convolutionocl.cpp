@@ -1580,16 +1580,13 @@ void ConvolutionBackwardBias(const Handle& handle,
 
 bool EnvEnableTF32()
 {
-    // disable TF32 by default temporarily until we fully complete this feature.
-    // so either one is set to true, we enable TF32
-    // TODO:(LYM) change back
     bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
     bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);
     if(bool_miopen != bool_nvidia)
         MIOPEN_LOG_I2("TF32_OVERRIDE is set to different values for MIOPEN_TF32_OVERRIDE ("
                       << bool_miopen << ") and NVIDIA_TF32_OVERRIDE (" << bool_nvidia
-                      << "). TF32 will be treated as enabled."); // TODO:(LYM) back to disabled
-    return bool_miopen || bool_nvidia;                           // TODO:(LYM) back to disabled
+                      << "). TF32 will be treated as disabled.");
+    return bool_miopen && bool_nvidia;
 }
 
 } // namespace miopen

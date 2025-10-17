@@ -339,10 +339,8 @@ std::string ProblemDescription::ComputeWeightsLayout() const { return ComputeLay
 void ProblemDescription::InitEnableTF32()
 {
     /* true only when both EnableTF32() and (MathType==Default) are true. */
-    // temporarily disable TF32 until we fully complete this feature.
-    // TODO:(LYM) change back to &&
-    if((miopen::EnvEnableTF32() || (conv.GetMathType() == miopenMathDefault)))
-        enable_tf32 = true;
+    if(!(miopen::EnvEnableTF32() && (conv.GetMathType() == miopenMathDefault)))
+        enable_tf32 = false;
     MIOPEN_LOG_I2("enable_tf32: " << (enable_tf32 ? "true" : "false"));
 }
 

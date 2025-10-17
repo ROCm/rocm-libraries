@@ -53,10 +53,8 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
 
-// disable TF32 by default temporarily until we fully complete this feature.
-// TODO:(LYM) change back
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE, 0);
-MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 0);
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE, 1);
+MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 1);
 
 namespace miopen {
 
@@ -141,9 +139,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionAttribute
 
     class MathType
     {
-        // temporary set default to pedantic until we fully complete this feature.
-        // TODO:(LYM) change back
-        miopenMathType_t value = miopenMathPedantic;
+        miopenMathType_t value = miopenMathDefault;
         friend struct ConvolutionAttribute;
 
     public:

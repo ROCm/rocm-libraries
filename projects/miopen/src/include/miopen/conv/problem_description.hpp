@@ -436,7 +436,7 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    mutable bool enable_tf32              = false;
+    mutable bool enable_tf32              = true;
 };
 
 } // namespace conv
