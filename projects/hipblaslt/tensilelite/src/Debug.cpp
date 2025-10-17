@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -115,11 +115,6 @@ namespace TensileLite
         return m_value2 & 0x1;
     }
 
-    bool Debug::enableDebugSelection() const
-    {
-        return m_debugSelection;
-    }
-
     bool Debug::useStreamKDataParrallel() const
     {
         return m_dataParallel;
@@ -155,11 +150,6 @@ namespace TensileLite
         return m_gridbasedTopSols;
     }
 
-    bool Debug::printStreamKGridInfo() const
-    {
-        return m_value & 0x80000;
-    }
-
     bool Debug::gridBasedKDTree() const
     {
         return m_gridbasedKdTree;
@@ -190,10 +180,6 @@ namespace TensileLite
         const char* naive = std::getenv("TENSILE_NAIVE_SEARCH");
         if(naive)
             m_naivePropertySearch = strtol(naive, nullptr, 0) != 0;
-
-        const char* db_select = std::getenv("TENSILE_TAM_SELECTION_ENABLE");
-        if(db_select)
-            m_debugSelection = strtol(db_select, nullptr, 0) != 0;
 
         const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
         if(exp_streamkDP)

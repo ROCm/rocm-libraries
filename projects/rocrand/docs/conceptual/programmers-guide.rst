@@ -36,6 +36,8 @@ The following quasi-random number generators are available:
 *  Scrambled Sobol32
 *  Scrambled Sobol64
 
+For more information about the generator types, see :doc:`generator-types`.
+
 Ordering
 ========
 

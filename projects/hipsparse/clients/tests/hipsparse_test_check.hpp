@@ -50,4 +50,16 @@ public:
         }
         return false;
     };
+
+    template <typename I, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && is_valid_type<T>();
+    };
+
+    template <typename I, typename J, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<T>();
+    };
 };

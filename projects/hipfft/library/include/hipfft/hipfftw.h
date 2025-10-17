@@ -72,6 +72,12 @@ HIPFFT_EXPORT void fftw_cleanup();
 HIPFFT_EXPORT void fftwf_cleanup();
 HIPFFT_EXPORT void fftw_execute(const fftw_plan plan);
 HIPFFT_EXPORT void fftwf_execute(const fftwf_plan plan);
+HIPFFT_EXPORT void fftw_execute_dft(const fftw_plan plan, fftw_complex* in, fftw_complex* out);
+HIPFFT_EXPORT void fftwf_execute_dft(const fftwf_plan plan, fftwf_complex* in, fftwf_complex* out);
+HIPFFT_EXPORT void fftw_execute_dft_r2c(const fftw_plan plan, double* in, fftw_complex* out);
+HIPFFT_EXPORT void fftwf_execute_dft_r2c(const fftwf_plan plan, float* in, fftwf_complex* out);
+HIPFFT_EXPORT void fftw_execute_dft_c2r(const fftw_plan plan, fftw_complex* in, double* out);
+HIPFFT_EXPORT void fftwf_execute_dft_c2r(const fftwf_plan plan, fftwf_complex* in, float* out);
 
 // Basic plans
 HIPFFT_EXPORT fftw_plan
