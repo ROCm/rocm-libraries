@@ -293,9 +293,12 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         conv::ProblemDescription tmp{in, wei, out, conv, dir};
     }
     conv.group_count = group_cnt;
-    prob_desc        = conv::ProblemDescription{in, wei, out, conv, dir};
     if(precision == miopenFloat)
-        prob_desc.SetEnableTF32((attrs[sz - 2] == "TF32") ? true : false);
+    {
+        const auto math_type_ = (attrs[sz - 2] == "TF32") ? miopenMathDefault : miopenMathPedantic;
+        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
+    }
+    prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};
 }
 
 struct FDBVal

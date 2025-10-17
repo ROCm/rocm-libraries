@@ -416,7 +416,6 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     void SetupFloats(ExecutionContext& ctx) const;
 
     void InitEnableTF32();
-    void SetEnableTF32(bool enable) const { enable_tf32 = enable; };
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
@@ -436,7 +435,7 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    mutable bool enable_tf32              = true;
+    bool enable_tf32                      = true;
 };
 
 } // namespace conv
