@@ -187,7 +187,8 @@ void TestTransformIteratorReferenceAndValueType()
     (void) it_tr_tid;
 
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
-    static_assert(is_same<decltype(it_tr_cid)::reference, bool&&>::value, ""); // inferred, like forward
+    static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
+                                                                             // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
@@ -220,7 +221,8 @@ void TestTransformIteratorReferenceAndValueType()
     (void) it_tr_tid;
 
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
-    static_assert(is_same<decltype(it_tr_cid)::reference, bool&&>::value, ""); // inferred, like forward
+    static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
+                                                                             // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
@@ -258,7 +260,8 @@ void TestTransformIteratorReferenceAndValueType()
     (void) it_tr_tid;
 
     auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
-    static_assert(is_same<decltype(it_tr_cid)::reference, bool&&>::value, ""); // inferred, like forward
+    static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
+                                                                             // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
@@ -270,11 +273,10 @@ void TestTransformIteratorIdentity()
   thrust::device_vector<int> v(3, 42);
 
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
-  // FIXME(bgruber): fix transform_iterator to get these tests compiling:
-  // ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<>{}), 42);
-  // ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
-  // using namespace thrust::placeholders;
-  // ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _1), 42);
+  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<>{}), 42);
+  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
+  using namespace thrust::placeholders;
+  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _1), 42);
 }
 
 DECLARE_UNITTEST(TestTransformIteratorIdentity);

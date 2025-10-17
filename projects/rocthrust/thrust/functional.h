@@ -524,7 +524,6 @@ using _THRUST_STD::bit_xor;
 template <typename T = void>
 struct identity
 {
-  // FIXME(bgruber): we cannot remove this yet, because transform_iterator depends on it
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
