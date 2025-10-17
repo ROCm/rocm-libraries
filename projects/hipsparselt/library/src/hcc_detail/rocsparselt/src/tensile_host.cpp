@@ -343,7 +343,8 @@ namespace
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
 
-        tensileProblem.setSparse(prob.sparseA ? 1 : 2);
+        // Workaround: metadata layout
+        tensileProblem.setSparse(prob.sparseA ? 1 : 2, 0);
 
         // set Actvation
         tensileProblem.setActivationType(TensileLite::ActivationType::All);
