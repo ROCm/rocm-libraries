@@ -42,8 +42,10 @@ namespace miopen {
 
 struct ExecutionContext;
 
-MIOPEN_INTERNALS_EXPORT std::string
-EncodeDataTypesForKey(miopenDataType_t in, miopenDataType_t weights, miopenDataType_t out);
+MIOPEN_INTERNALS_EXPORT std::string EncodeDataTypesForKey(miopenDataType_t in,
+                                                          miopenDataType_t weights,
+                                                          miopenDataType_t out,
+                                                          bool use_tf32);
 
 template <class TElement>
 constexpr auto GetDHW(unsigned spatial_dims, const std::vector<TElement>& data)
@@ -395,8 +397,10 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
     {
         f(self.GetInLayout(), "layout");
-        std::string data_type = EncodeDataTypesForKey(
-            self.GetInDataType(), self.GetWeightsDataType(), self.GetOutDataType());
+        std::string data_type = EncodeDataTypesForKey(self.GetInDataType(),
+                                                      self.GetWeightsDataType(),
+                                                      self.GetOutDataType(),
+                                                      self.EnableTF32());
         f(data_type, "data_type");
         f(self.GetDirectionStr(), "direction");
     }
@@ -412,6 +416,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     void SetupFloats(ExecutionContext& ctx) const;
 
     void InitEnableTF32();
+    void SetEnableTF32(bool enable) const { enable_tf32 = enable; };
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
@@ -431,7 +436,7 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    bool enable_tf32                      = false;
+    mutable bool enable_tf32              = false;
 };
 
 } // namespace conv

@@ -36,11 +36,18 @@
 
 namespace miopen {
 
-std::string
-EncodeDataTypesForKey(miopenDataType_t in, miopenDataType_t weights, miopenDataType_t out)
+std::string EncodeDataTypesForKey(miopenDataType_t in,
+                                  miopenDataType_t weights,
+                                  miopenDataType_t out,
+                                  bool use_tf32)
 {
     if(in == weights && in == out)
-        return GetDataTypeName(in);
+    {
+        if(in == miopenFloat && use_tf32)
+            return "TF32";
+        else
+            return GetDataTypeName(in);
+    }
     return GetDataTypeName(in) + GetDataTypeName(weights) + GetDataTypeName(out);
 }
 
@@ -186,7 +193,9 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         ss << 'x' << GetWeightsLayout();
         ss << 'x' << GetOutLayout();
     }
-    ss << 'x' << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    ss << 'x'
+       << EncodeDataTypesForKey(
+              GetInDataType(), GetWeightsDataType(), GetOutDataType(), EnableTF32());
 
     std::ostringstream optional;
     if(const auto ct = GetInCastType())
@@ -239,7 +248,7 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         stream << sep << GetWeightsLayout();
         stream << sep << GetOutLayout();
     }
-    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType(), EnableTF32());
     stream << sep << GetDirectionStr();
 
     // clang-format on
@@ -332,8 +341,8 @@ void ProblemDescription::InitEnableTF32()
     /* true only when both EnableTF32() and (MathType==Default) are true. */
     // temporarily disable TF32 until we fully complete this feature.
     // TODO:(LYM) change back to &&
-    if(!(miopen::EnvEnableTF32() || (conv.GetMathType() == miopenMathDefault)))
-        enable_tf32 = false;
+    if((miopen::EnvEnableTF32() || (conv.GetMathType() == miopenMathDefault)))
+        enable_tf32 = true;
     MIOPEN_LOG_I2("enable_tf32: " << (enable_tf32 ? "true" : "false"));
 }
 

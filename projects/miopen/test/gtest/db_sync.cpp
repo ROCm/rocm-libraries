@@ -145,7 +145,7 @@ miopenTensorLayout_t GetLayoutFromString(const std::string& layout)
 }
 miopenDataType_t GetDataTypeFromString(const std::string& data_type)
 {
-    if(data_type == "FP32")
+    if(data_type == "FP32" || data_type == "TF32")
         return miopenFloat;
     else if(data_type == "FP16")
         return miopenHalf;
@@ -294,6 +294,8 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     }
     conv.group_count = group_cnt;
     prob_desc        = conv::ProblemDescription{in, wei, out, conv, dir};
+    if(precision == miopenFloat)
+        prob_desc.SetEnableTF32((attrs[sz - 2] == "TF32") ? true : false);
 }
 
 struct FDBVal
