@@ -38,21 +38,19 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_COMPILER(HIP)
 
-#  if THRUST_COMPILER(HIP)
+#  include <thrust/system/hip/config.h>
 
-#    include <thrust/system/hip/config.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/util.h>
+#  include <thrust/system/hip/future.h>
 
-#    include <thrust/distance.h>
-#    include <thrust/iterator/iterator_traits.h>
-#    include <thrust/system/hip/detail/async/customization.h>
-#    include <thrust/system/hip/detail/util.h>
-#    include <thrust/system/hip/future.h>
+#  include _THRUST_STD_INCLUDE(type_traits)
 
-#    include _THRUST_STD_INCLUDE(type_traits)
-
-#    include <type_traits>
+#  include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. ExclusiveSum instead of ExcScan
 
@@ -146,6 +144,4 @@ auto async_exclusive_scan(
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_COMPILER(HIP)
-
-#endif // C++14
+#endif // THRUST_COMPILER(HIP)

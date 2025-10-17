@@ -337,14 +337,6 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1()
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestNot1);
 
-// GCC 11 fails to build this test case with a spurious error in a
-// very specific scenario:
-// - GCC 11
-// - CPP system for both host and device
-// - C++11 dialect
-#if !(THRUST_COMPILER(GCC, >=, 11) && THRUST_COMPILER(GCC, <, 12) && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP \
-      && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP && THRUST_CPP_DIALECT == 2011)
-
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot2()
 {
@@ -361,7 +353,5 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot2()
   ASSERT_EQUAL(output, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestNot2);
-
-#endif // Weird GCC11 failure case
 
 THRUST_DIAG_POP

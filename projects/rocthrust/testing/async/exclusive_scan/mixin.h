@@ -19,12 +19,10 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/async/scan.h>
+#include <thrust/scan.h>
 
-#  include <thrust/async/scan.h>
-#  include <thrust/scan.h>
-
-#  include <async/mixin.h>
+#include <async/mixin.h>
 
 namespace testing
 {
@@ -128,5 +126,3 @@ struct simple
 } // namespace exclusive_scan
 } // namespace async
 } // namespace testing
-
-#endif // C++14

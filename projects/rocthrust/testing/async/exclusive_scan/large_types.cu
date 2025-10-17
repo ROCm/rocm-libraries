@@ -23,11 +23,9 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
-#  include <unittest/special_types.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
+#include <unittest/special_types.h>
 
 // This test is an adaptation of TestScanWithLargeTypes from scan.cu.
 
@@ -73,7 +71,5 @@ struct test_large_types
   }
 };
 DECLARE_UNITTEST(test_large_types);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP

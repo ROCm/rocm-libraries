@@ -17,13 +17,11 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/event.h>
 
-#  include <thrust/event.h>
-
-#  include "test_param_fixtures.hpp"
-#  include "test_real_assertions.hpp"
-#  include "test_utils.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(EventTests, FullTestsParams);
 
@@ -177,5 +175,3 @@ TEST(EventTests, test_event_when_all)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#endif

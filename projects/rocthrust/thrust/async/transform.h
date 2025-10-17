@@ -30,13 +30,11 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <thrust/detail/select_system.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/type_traits.h>
-#  include <thrust/event.h>
-#  include <thrust/system/detail/adl/async/transform.h>
+#include <thrust/detail/select_system.h>
+#include <thrust/detail/static_assert.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/event.h>
+#include <thrust/system/detail/adl/async/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -143,5 +141,3 @@ THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 } // namespace async
 
 THRUST_NAMESPACE_END
-
-#endif

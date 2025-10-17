@@ -30,16 +30,14 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <thrust/detail/execution_policy.h>
-#  include <thrust/detail/select_system.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/type_traits.h>
-#  include <thrust/future.h>
-#  include <thrust/system/detail/adl/async/scan.h>
-#  include <thrust/type_traits/is_execution_policy.h>
-#  include <thrust/type_traits/logical_metafunctions.h>
+#include <thrust/detail/execution_policy.h>
+#include <thrust/detail/select_system.h>
+#include <thrust/detail/static_assert.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/future.h>
+#include <thrust/system/detail/adl/async/scan.h>
+#include <thrust/type_traits/is_execution_policy.h>
+#include <thrust/type_traits/logical_metafunctions.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -312,5 +310,3 @@ THRUST_INLINE_CONSTANT exclusive_scan_detail::exclusive_scan_fn exclusive_scan{}
 } // namespace async
 
 THRUST_NAMESPACE_END
-
-#endif

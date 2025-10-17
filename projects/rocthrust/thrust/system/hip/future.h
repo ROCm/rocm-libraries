@@ -16,10 +16,8 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/system/hip/pointer.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/pointer.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -74,6 +72,4 @@ THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
 
-#  include <thrust/system/hip/detail/future.inl>
-
-#endif // C++14
+#include <thrust/system/hip/detail/future.inl>

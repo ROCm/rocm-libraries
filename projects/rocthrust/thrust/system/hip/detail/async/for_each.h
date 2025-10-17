@@ -40,19 +40,17 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_COMPILER(HIP)
 
-#  if THRUST_COMPILER(HIP)
+#  include <thrust/system/hip/config.h>
 
-#    include <thrust/system/hip/config.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/future.h>
 
-#    include <thrust/distance.h>
-#    include <thrust/iterator/iterator_traits.h>
-#    include <thrust/system/hip/detail/async/customization.h>
-#    include <thrust/system/hip/detail/parallel_for.h>
-#    include <thrust/system/hip/future.h>
-
-#    include <type_traits>
+#  include <type_traits>
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
@@ -130,6 +128,4 @@ auto async_for_each(execution_policy<DerivedPolicy>& policy, ForwardIt first, Se
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_COMPILER(HIP)
-
-#endif
+#endif // THRUST_COMPILER(HIP)

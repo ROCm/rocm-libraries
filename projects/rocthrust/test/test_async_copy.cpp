@@ -24,16 +24,14 @@
 // need to suppress deprecation warnings inside a lot of thrust headers
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/async/copy.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/limits.h>
 
-#  include <thrust/async/copy.h>
-#  include <thrust/device_vector.h>
-#  include <thrust/host_vector.h>
-#  include <thrust/limits.h>
-
-#  include "test_param_fixtures.hpp"
-#  include "test_real_assertions.hpp"
-#  include "test_utils.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 using BuiltinNumericTypes = ::testing::Types<
   Params<char>,
@@ -52,17 +50,17 @@ using BuiltinNumericTypes = ::testing::Types<
 
 TESTS_DEFINE(AsyncCopyTests, BuiltinNumericTypes);
 
-#  define DEFINE_ASYNC_COPY_CALLABLE(name, ...)                                                \
-    struct THRUST_PP_CAT2(name, _fn)                                                           \
-    {                                                                                          \
-      template <typename ForwardIt, typename Sentinel, typename OutputIt>                      \
-      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output) const \
-        THRUST_RETURNS(::thrust::async::copy(                                                  \
-          __VA_ARGS__ THRUST_PP_COMMA_IF(THRUST_PP_ARITY(__VA_ARGS__)) THRUST_FWD(first),      \
-          THRUST_FWD(last),                                                                    \
-          THRUST_FWD(output)))                                                                 \
-    };                                                                                         \
-    /**/
+#define DEFINE_ASYNC_COPY_CALLABLE(name, ...)                                                \
+  struct THRUST_PP_CAT2(name, _fn)                                                           \
+  {                                                                                          \
+    template <typename ForwardIt, typename Sentinel, typename OutputIt>                      \
+    THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output) const \
+      THRUST_RETURNS(::thrust::async::copy(                                                  \
+        __VA_ARGS__ THRUST_PP_COMMA_IF(THRUST_PP_ARITY(__VA_ARGS__)) THRUST_FWD(first),      \
+        THRUST_FWD(last),                                                                    \
+        THRUST_FWD(output)))                                                                 \
+  };                                                                                         \
+  /**/
 
 DEFINE_ASYNC_COPY_CALLABLE(invoke_async_copy);
 
@@ -74,7 +72,7 @@ DEFINE_ASYNC_COPY_CALLABLE(invoke_async_copy_device_to_host, thrust::device, thr
 DEFINE_ASYNC_COPY_CALLABLE(invoke_async_copy_host_to_host, thrust::host, thrust::host);
 DEFINE_ASYNC_COPY_CALLABLE(invoke_async_copy_device_to_device, thrust::device, thrust::device);
 
-#  undef DEFINE_ASYNC_COPY_CALLABLE
+#undef DEFINE_ASYNC_COPY_CALLABLE
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -335,29 +333,29 @@ TYPED_TEST(AsyncCopyTests, test_async_copy_trivially_relocatable_elements_roundt
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#  define ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, FILE_, LINE_)                  \
-    {                                                                                                     \
-      threw_status THRUST_PP_CAT2(__s, LINE_) = did_not_throw;                                            \
-      try                                                                                                 \
-      {                                                                                                   \
-        EXPR;                                                                                             \
-      }                                                                                                   \
-      catch (EXCEPTION_TYPE const& THRUST_PP_CAT2(__e, LINE_))                                            \
-      {                                                                                                   \
-        if (VALUE == THRUST_PP_CAT2(__e, LINE_))                                                          \
-          THRUST_PP_CAT2(__s, LINE_) = threw_right_type;                                                  \
-        else                                                                                              \
-          THRUST_PP_CAT2(__s, LINE_) = threw_right_type_but_wrong_value;                                  \
-      }                                                                                                   \
-      catch (...)                                                                                         \
-      {                                                                                                   \
-        THRUST_PP_CAT2(__s, LINE_) = threw_wrong_type;                                                    \
-      }                                                                                                   \
-      check_assert_throws(THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE), FILE_, LINE_); \
-    }
+#define ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, FILE_, LINE_)                  \
+  {                                                                                                     \
+    threw_status THRUST_PP_CAT2(__s, LINE_) = did_not_throw;                                            \
+    try                                                                                                 \
+    {                                                                                                   \
+      EXPR;                                                                                             \
+    }                                                                                                   \
+    catch (EXCEPTION_TYPE const& THRUST_PP_CAT2(__e, LINE_))                                            \
+    {                                                                                                   \
+      if (VALUE == THRUST_PP_CAT2(__e, LINE_))                                                          \
+        THRUST_PP_CAT2(__s, LINE_) = threw_right_type;                                                  \
+      else                                                                                              \
+        THRUST_PP_CAT2(__s, LINE_) = threw_right_type_but_wrong_value;                                  \
+    }                                                                                                   \
+    catch (...)                                                                                         \
+    {                                                                                                   \
+      THRUST_PP_CAT2(__s, LINE_) = threw_wrong_type;                                                    \
+    }                                                                                                   \
+    check_assert_throws(THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE), FILE_, LINE_); \
+  }
 
-#  define ASSERT_THROWS_EQ(EXPR, EXCEPTION_TYPE, VALUE) \
-    ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, __FILE__, __LINE__)
+#define ASSERT_THROWS_EQ(EXPR, EXCEPTION_TYPE, VALUE) \
+  ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, __FILE__, __LINE__)
 
 template <typename T>
 THRUST_HOST void test_async_copy_after()
@@ -436,7 +434,5 @@ TYPED_TEST(AsyncCopyTests, test_async_copy_after_test)
 
 // TODO: H->D copy, then dependent D->H copy (round trip).
 // Can't do this today because we can't do cross-system with explicit policies.
-
-#endif
 
 THRUST_SUPPRESS_DEPRECATED_POP

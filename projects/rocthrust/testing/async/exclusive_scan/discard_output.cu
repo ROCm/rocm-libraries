@@ -23,10 +23,8 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
 
 // Compilation test with discard iterators. No runtime validation is actually
 // performed, other than testing whether the algorithm completes without
@@ -58,7 +56,5 @@ struct test_discard
   }
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_discard, NumericTypes);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP

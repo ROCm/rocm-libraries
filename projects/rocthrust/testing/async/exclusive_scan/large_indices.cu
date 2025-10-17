@@ -23,22 +23,20 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/device_free.h>
+#include <thrust/device_malloc.h>
+#include <thrust/device_ptr.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/detail/device_system_tag.h>
+#include <thrust/iterator/detail/iterator_facade_category.h>
+#include <thrust/optional.h>
 
-#  include <thrust/device_free.h>
-#  include <thrust/device_malloc.h>
-#  include <thrust/device_ptr.h>
-#  include <thrust/functional.h>
-#  include <thrust/iterator/detail/device_system_tag.h>
-#  include <thrust/iterator/detail/iterator_facade_category.h>
-#  include <thrust/optional.h>
+#include <cinttypes>
+#include <cstdint>
+#include <iostream>
 
-#  include <cinttypes>
-#  include <cstdint>
-#  include <iostream>
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
 
 // This test is an adaptation of TestInclusiveScanWithBigIndices from scan.cu.
 
@@ -265,7 +263,5 @@ void test_large_indices_custom_scan_op()
   testing::async::test_policy_overloads<custom_bin_op_invoker>::run(1ll << 33);
 }
 DECLARE_UNITTEST(test_large_indices_custom_scan_op);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP

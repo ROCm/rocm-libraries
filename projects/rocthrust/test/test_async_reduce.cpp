@@ -26,16 +26,14 @@
 // need to suppress deprecation warnings inside several thrust headers
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/async/copy.h>
+#include <thrust/async/reduce.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
-#  include <thrust/async/copy.h>
-#  include <thrust/async/reduce.h>
-#  include <thrust/device_vector.h>
-#  include <thrust/host_vector.h>
-
-#  include "test_param_fixtures.hpp"
-#  include "test_real_assertions.hpp"
-#  include "test_utils.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(AsyncReduceTests, NumericalTestsParams);
 template <typename T>
@@ -47,48 +45,48 @@ struct custom_plus
   }
 };
 
-#  define DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...) \
-    template <typename T>                                                                \
-    struct NAME                                                                          \
-    {                                                                                    \
-      MEMBERS                                                                            \
-                                                                                         \
-      NAME()                                                                             \
-      {                                                                                  \
-        CTOR                                                                             \
-      }                                                                                  \
-                                                                                         \
-      ~NAME()                                                                            \
-      {                                                                                  \
-        DTOR                                                                             \
-      }                                                                                  \
-                                                                                         \
-      template <typename Event>                                                          \
-      void validate_event(Event& e)                                                      \
-      {                                                                                  \
-        THRUST_UNUSED_VAR(e);                                                            \
-        VALIDATE                                                                         \
-      }                                                                                  \
-                                                                                         \
-      template <typename ForwardIt, typename Sentinel>                                   \
-      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last)                    \
-        THRUST_DECLTYPE_RETURNS(::thrust::async::reduce(__VA_ARGS__))                    \
-    };                                                                                   \
-    /**/
+#define DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...) \
+  template <typename T>                                                                \
+  struct NAME                                                                          \
+  {                                                                                    \
+    MEMBERS                                                                            \
+                                                                                       \
+    NAME()                                                                             \
+    {                                                                                  \
+      CTOR                                                                             \
+    }                                                                                  \
+                                                                                       \
+    ~NAME()                                                                            \
+    {                                                                                  \
+      DTOR                                                                             \
+    }                                                                                  \
+                                                                                       \
+    template <typename Event>                                                          \
+    void validate_event(Event& e)                                                      \
+    {                                                                                  \
+      THRUST_UNUSED_VAR(e);                                                            \
+      VALIDATE                                                                         \
+    }                                                                                  \
+                                                                                       \
+    template <typename ForwardIt, typename Sentinel>                                   \
+    THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last)                    \
+      THRUST_DECLTYPE_RETURNS(::thrust::async::reduce(__VA_ARGS__))                    \
+  };                                                                                   \
+  /**/
 
-#  define DEFINE_ASYNC_REDUCE_INVOKER(NAME, ...)                                                     \
-    DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(                                                            \
-      NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
-    /**/
+#define DEFINE_ASYNC_REDUCE_INVOKER(NAME, ...)                                                     \
+  DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(                                                            \
+    NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
+  /**/
 
-#  define DEFINE_SYNC_REDUCE_INVOKER(NAME, ...)                                                                     \
-    template <typename T>                                                                                           \
-    struct NAME                                                                                                     \
-    {                                                                                                               \
-      template <typename ForwardIt, typename Sentinel>                                                              \
-      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last) THRUST_RETURNS(::thrust::reduce(__VA_ARGS__)) \
-    };                                                                                                              \
-    /**/
+#define DEFINE_SYNC_REDUCE_INVOKER(NAME, ...)                                                                     \
+  template <typename T>                                                                                           \
+  struct NAME                                                                                                     \
+  {                                                                                                               \
+    template <typename ForwardIt, typename Sentinel>                                                              \
+    THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last) THRUST_RETURNS(::thrust::reduce(__VA_ARGS__)) \
+  };                                                                                                              \
+  /**/
 
 DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker, THRUST_FWD(first), THRUST_FWD(last));
 DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker_device, thrust::device, THRUST_FWD(first), THRUST_FWD(last));
@@ -818,7 +816,7 @@ THRUST_HOST void test_async_reduce_allocator_on_then_after()
     // FIXME: The below fails because you can't combine allocator attachment,
     // `.on`, and `.after`.
     // The `#if 0` can be removed once the GTEST_NONFATAL_FAILURE_("Known failure") is resolved.
-#  if 0
+#if 0
     ASSERT_EQ_QUIET(stream1, f2.stream().native_handle());
 
     // This potentially runs concurrently with the copies.
@@ -832,7 +830,7 @@ THRUST_HOST void test_async_reduce_allocator_on_then_after()
 
     thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream0));
     thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream1));
-#  endif
+#endif
   }
 }
 
@@ -1025,7 +1023,5 @@ TEST(AsyncReduceTests, test_async_reduce_bug1886)
   // Print the result
   std::cout << "Sum: (" << thrust::get<0>(result) << ", " << thrust::get<1>(result) << ")" << std::endl;
 }
-
-#endif
 
 THRUST_SUPPRESS_DEPRECATED_POP

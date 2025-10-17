@@ -40,26 +40,24 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_COMPILER(HIP)
 
-#  if THRUST_COMPILER(HIP)
+#  include <thrust/system/hip/config.h>
 
-#    include <thrust/system/hip/config.h>
+#  include <thrust/advance.h>
+#  include <thrust/detail/static_assert.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/async/transform.h>
+#  include <thrust/system/hip/detail/cross_system.h>
+#  include <thrust/system/hip/future.h>
+#  include <thrust/type_traits/is_contiguous_iterator.h>
+#  include <thrust/type_traits/is_trivially_relocatable.h>
+#  include <thrust/type_traits/logical_metafunctions.h>
+#  include <thrust/uninitialized_copy.h>
 
-#    include <thrust/advance.h>
-#    include <thrust/detail/static_assert.h>
-#    include <thrust/distance.h>
-#    include <thrust/iterator/iterator_traits.h>
-#    include <thrust/system/hip/detail/async/customization.h>
-#    include <thrust/system/hip/detail/async/transform.h>
-#    include <thrust/system/hip/detail/cross_system.h>
-#    include <thrust/system/hip/future.h>
-#    include <thrust/type_traits/is_contiguous_iterator.h>
-#    include <thrust/type_traits/is_trivially_relocatable.h>
-#    include <thrust/type_traits/logical_metafunctions.h>
-#    include <thrust/uninitialized_copy.h>
-
-#    include <type_traits>
+#  include <type_traits>
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
@@ -356,6 +354,4 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_COMPILER(HIP)
-
-#endif
+#endif // THRUST_COMPILER(HIP)
