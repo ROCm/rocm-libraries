@@ -740,7 +740,7 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
-        arguments["NoEnableAsmComments"],
+        arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
     )
     stop_wsk = timer()
