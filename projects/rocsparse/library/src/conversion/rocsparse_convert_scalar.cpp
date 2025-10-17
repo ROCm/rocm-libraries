@@ -32,7 +32,7 @@ namespace rocsparse
 {
 
     template <typename S, typename T>
-    __host__ __device__ static void convert_scalar(const void* source, void* target)
+    __host__ static void host_convert_scalar(const void* source, void* target)
     {
         *reinterpret_cast<T*>(target) = static_cast<T>(*reinterpret_cast<const S*>(source));
     }
@@ -41,10 +41,10 @@ namespace rocsparse
                           void (*)(const void*, void*)>
         s_map_host_convert_scalar{
 
-#define DEFINE_CASE(S, T)                                           \
-    {std::pair<rocsparse_datatype, rocsparse_datatype>(S, T),       \
-     convert_scalar<typename rocsparse::datatype_traits<S>::type_t, \
-                    typename rocsparse::datatype_traits<T>::type_t>}
+#define DEFINE_CASE(S, T)                                                \
+    {std::pair<rocsparse_datatype, rocsparse_datatype>(S, T),            \
+     host_convert_scalar<typename rocsparse::datatype_traits<S>::type_t, \
+                         typename rocsparse::datatype_traits<T>::type_t>}
 
             DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_i8_r),
             DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_i8_r),
@@ -92,12 +92,85 @@ namespace rocsparse
 
         };
 
-    convert_scalar_t find_convert_scalar(rocsparse_datatype source_datatype,
-                                         rocsparse_datatype target_datatype)
+    host_convert_scalar_t find_host_convert_scalar(rocsparse_datatype source_datatype,
+                                                   rocsparse_datatype target_datatype)
     {
         const auto& it = rocsparse::s_map_host_convert_scalar.find(
             std::pair(source_datatype, target_datatype));
         return (it != rocsparse::s_map_host_convert_scalar.end()) ? it->second : nullptr;
+    }
+
+    template <typename S, typename T>
+    __launch_bounds__(64) __global__
+        void convert_device_scalars_kernel(const void* source, void* target)
+    {
+        const size_t tid = hipBlockIdx_x * 64 + hipThreadIdx_x;
+        if(tid == 0)
+        {
+            *reinterpret_cast<T*>(target) = static_cast<T>(*reinterpret_cast<const S*>(source));
+        }
+    }
+
+    static const std::map<std::pair<rocsparse_datatype, rocsparse_datatype>,
+                          void (*)(const void*, void*)>
+        s_map_device_convert_scalar{
+
+#define DEFINE_CASE(S, T)                                                          \
+    {std::pair<rocsparse_datatype, rocsparse_datatype>(S, T),                      \
+     convert_device_scalars_kernel<typename rocsparse::datatype_traits<S>::type_t, \
+                                   typename rocsparse::datatype_traits<T>::type_t>}
+
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_i8_r),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_i8_r),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_i8_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_u8_r),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_u8_r),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_u8_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_i32_r),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_i32_r),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_i32_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_u32_r),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_u32_r),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_u32_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_f32_r),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_f32_r),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_f32_r),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_f32_r),
+            DEFINE_CASE(rocsparse_datatype_f64_r, rocsparse_datatype_f32_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_f64_r),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_f64_r),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_f64_r),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_f64_r),
+            DEFINE_CASE(rocsparse_datatype_f32_r, rocsparse_datatype_f64_r),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_f32_c),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_f32_c),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_f32_c),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_f32_c),
+            DEFINE_CASE(rocsparse_datatype_f32_r, rocsparse_datatype_f32_c),
+            DEFINE_CASE(rocsparse_datatype_f64_r, rocsparse_datatype_f32_c),
+
+            DEFINE_CASE(rocsparse_datatype_i8_r, rocsparse_datatype_f64_c),
+            DEFINE_CASE(rocsparse_datatype_u8_r, rocsparse_datatype_f64_c),
+            DEFINE_CASE(rocsparse_datatype_i32_r, rocsparse_datatype_f64_c),
+            DEFINE_CASE(rocsparse_datatype_u32_r, rocsparse_datatype_f64_c),
+            DEFINE_CASE(rocsparse_datatype_f32_r, rocsparse_datatype_f64_c),
+            DEFINE_CASE(rocsparse_datatype_f64_r, rocsparse_datatype_f64_c)
+
+#undef DEFINE_CASE
+
+        };
+    device_convert_scalar_t find_device_convert_scalar(rocsparse_datatype source_datatype,
+                                                       rocsparse_datatype target_datatype)
+    {
+        const auto& it = rocsparse::s_map_device_convert_scalar.find(
+            std::pair(source_datatype, target_datatype));
+        return (it != rocsparse::s_map_device_convert_scalar.end()) ? it->second : nullptr;
     }
 
 }

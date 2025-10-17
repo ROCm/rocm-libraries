@@ -176,6 +176,9 @@ private:
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
             break;
+        case hipdnn_sdk::data_objects::PointwiseMode::MUL:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
+            break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::ReluBackward<ComputeType>{});
