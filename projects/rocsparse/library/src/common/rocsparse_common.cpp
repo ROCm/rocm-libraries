@@ -348,14 +348,14 @@ namespace rocsparse
 }
 
 template <typename I, typename T, typename U>
-rocsparse_status rocsparse::dense_transpose(rocsparse_handle handle,
-                                            I                m,
-                                            I                n,
-                                            U                alpha_device_host,
-                                            const T*         A,
-                                            int64_t          lda,
-                                            T*               B,
-                                            int64_t          ldb)
+rocsparse_status rocsparse::dense_transpose_template(rocsparse_handle handle,
+                                                     I                m,
+                                                     I                n,
+                                                     U                alpha_device_host,
+                                                     const T*         A,
+                                                     int64_t          lda,
+                                                     T*               B,
+                                                     int64_t          ldb)
 {
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense_transpose_kernel<32, 8>),
@@ -372,6 +372,77 @@ rocsparse_status rocsparse::dense_transpose(rocsparse_handle handle,
                                        ldb);
 
     return rocsparse_status_success;
+}
+
+rocsparse_status rocsparse::dense_transpose(rocsparse_handle   handle,
+                                            int64_t            m,
+                                            int64_t            n,
+                                            rocsparse_datatype A_datatype,
+                                            const void*        A,
+                                            int64_t            lda,
+                                            rocsparse_datatype B_datatype,
+                                            void*              B,
+                                            int64_t            ldb)
+{
+    switch(A_datatype)
+    {
+
+    case rocsparse_datatype_bf16_r:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
+    case rocsparse_datatype_f32_r:
+    {
+        static const float s_one = static_cast<float>(1);
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::dense_transpose_template(
+            handle, m, n, s_one, (const float*)A, lda, (float*)B, ldb)));
+        return rocsparse_status_success;
+    }
+    case rocsparse_datatype_f32_c:
+    {
+        static const rocsparse_float_complex s_one = static_cast<rocsparse_float_complex>(1);
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::dense_transpose_template(handle,
+                                                 m,
+                                                 n,
+                                                 s_one,
+                                                 (const rocsparse_float_complex*)A,
+                                                 lda,
+                                                 (rocsparse_float_complex*)B,
+                                                 ldb)));
+        return rocsparse_status_success;
+    }
+    case rocsparse_datatype_f64_r:
+    {
+        static const double s_one = static_cast<double>(1);
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::dense_transpose_template(
+            handle, m, n, s_one, (const double*)A, lda, (double*)B, ldb)));
+        return rocsparse_status_success;
+    }
+    case rocsparse_datatype_f64_c:
+    {
+        static const rocsparse_double_complex s_one = static_cast<rocsparse_double_complex>(1);
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::dense_transpose_template(handle,
+                                                 m,
+                                                 n,
+                                                 s_one,
+                                                 (const rocsparse_double_complex*)A,
+                                                 lda,
+                                                 (rocsparse_double_complex*)B,
+                                                 ldb)));
+        return rocsparse_status_success;
+    }
+    case rocsparse_datatype_i32_r:
+    case rocsparse_datatype_u32_r:
+    case rocsparse_datatype_i8_r:
+    case rocsparse_datatype_u8_r:
+    case rocsparse_datatype_f16_r:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 
 template <typename I, typename T>
@@ -561,15 +632,15 @@ rocsparse_status rocsparse::copy_and_scale(
     return rocsparse_status_success;
 }
 
-#define INSTANTIATE(ITYPE, TTYPE, UTYPE)                                                     \
-    template rocsparse_status rocsparse::dense_transpose(rocsparse_handle handle,            \
-                                                         ITYPE            m,                 \
-                                                         ITYPE            n,                 \
-                                                         UTYPE            alpha_device_host, \
-                                                         const TTYPE*     A,                 \
-                                                         int64_t          lda,               \
-                                                         TTYPE*           B,                 \
-                                                         int64_t          ldb);
+#define INSTANTIATE(I, T, U)                                                                  \
+    template rocsparse_status rocsparse::dense_transpose_template(rocsparse_handle handle,    \
+                                                                  I                m,         \
+                                                                  I                n,         \
+                                                                  U        alpha_device_host, \
+                                                                  const T* A,                 \
+                                                                  int64_t  lda,               \
+                                                                  T*       B,                 \
+                                                                  int64_t  ldb);
 
 INSTANTIATE(int32_t, float, float);
 INSTANTIATE(int32_t, float, const float*);
@@ -590,14 +661,9 @@ INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, const rocsparse_double_complex*);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                                                      \
-    template rocsparse_status rocsparse::dense_transpose_back(rocsparse_handle handle, \
-                                                              ITYPE            m,      \
-                                                              ITYPE            n,      \
-                                                              const TTYPE*     A,      \
-                                                              int64_t          lda,    \
-                                                              TTYPE*           B,      \
-                                                              int64_t          ldb);
+#define INSTANTIATE(I, T)                                      \
+    template rocsparse_status rocsparse::dense_transpose_back( \
+        rocsparse_handle handle, I m, I n, const T* A, int64_t lda, T* B, int64_t ldb);
 
 INSTANTIATE(int32_t, float);
 INSTANTIATE(int32_t, double);
@@ -610,9 +676,8 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                   \
-    template rocsparse_status rocsparse::conjugate( \
-        rocsparse_handle handle, ITYPE length, TTYPE* array);
+#define INSTANTIATE(I, T) \
+    template rocsparse_status rocsparse::conjugate(rocsparse_handle handle, I length, T* array);
 
 INSTANTIATE(int32_t, float);
 INSTANTIATE(int32_t, double);
@@ -625,9 +690,9 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                \
+#define INSTANTIATE(I, T)                        \
     template rocsparse_status rocsparse::valset( \
-        rocsparse_handle handle, ITYPE length, TTYPE value, TTYPE* array);
+        rocsparse_handle handle, I length, T value, T* array);
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int32_t, int64_t);
@@ -635,14 +700,9 @@ INSTANTIATE(int64_t, int32_t);
 INSTANTIATE(int64_t, int64_t);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                                           \
-    template rocsparse_status rocsparse::valset_2d(rocsparse_handle handle, \
-                                                   ITYPE            m,      \
-                                                   ITYPE            n,      \
-                                                   int64_t          ld,     \
-                                                   TTYPE            value,  \
-                                                   TTYPE*           array,  \
-                                                   rocsparse_order  order);
+#define INSTANTIATE(I, T)                           \
+    template rocsparse_status rocsparse::valset_2d( \
+        rocsparse_handle handle, I m, I n, int64_t ld, T value, T* array, rocsparse_order order);
 INSTANTIATE(int32_t, _Float16);
 INSTANTIATE(int32_t, rocsparse_bfloat16);
 INSTANTIATE(int32_t, float);
@@ -679,15 +739,15 @@ INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                     \
+#define INSTANTIATE(I, A, T)                                                                 \
     template rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,             \
-                                                        ITYPE            m,                  \
-                                                        ITYPE            n,                  \
+                                                        I                m,                  \
+                                                        I                n,                  \
                                                         int64_t          ld,                 \
                                                         int64_t          batch_count,        \
                                                         int64_t          stride,             \
-                                                        const TTYPE*     scalar_device_host, \
-                                                        ATYPE*           array,              \
+                                                        const T*         scalar_device_host, \
+                                                        A*               array,              \
                                                         rocsparse_order  order);
 
 INSTANTIATE(int32_t, _Float16, _Float16);
@@ -705,11 +765,11 @@ INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, JTYPE)                                               \
+#define INSTANTIATE(I, J)                                                       \
     template rocsparse_status rocsparse::copy(rocsparse_handle     handle,      \
                                               int64_t              length,      \
-                                              const ITYPE*         in,          \
-                                              JTYPE*               out,         \
+                                              const I*             in,          \
+                                              J*                   out,         \
                                               rocsparse_index_base idx_base_in, \
                                               rocsparse_index_base idx_base_out);
 
@@ -720,12 +780,12 @@ INSTANTIATE(int64_t, int64_t);
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(TTYPE)                                                       \
+#define INSTANTIATE(T)                                                           \
     template rocsparse_status rocsparse::copy_and_scale(rocsparse_handle handle, \
                                                         int64_t          length, \
-                                                        const TTYPE*     in,     \
-                                                        TTYPE*           out,    \
-                                                        const TTYPE*     scalar_device_host);
+                                                        const T*         in,     \
+                                                        T*               out,    \
+                                                        const T*         scalar_device_host);
 
 INSTANTIATE(float);
 INSTANTIATE(double);
