@@ -124,12 +124,22 @@ public:
 
     void refresh_lock()
     {
+        std::error_code ec;
         MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
         while(lock_held)
         {
             fs::last_write_time(
                 unique_handle,
-                fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()));
+                fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()),
+                ec);
+            if(ec.value() != 0)
+                MIOPEN_LOG_I2("File <" << unique_handle << "> "
+                                       << " time update failed. "
+                                          "Error code: "
+                                       << ec.value()
+                                       << ". "
+                                          "Description: '"
+                                       << ec.message() << "'");
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
