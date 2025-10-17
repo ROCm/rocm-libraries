@@ -79,30 +79,6 @@ size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr
     return attr.dims()->size() - 2;
 }
 
-// Utility for calculating group count given weight and input tensors
-// miopenSetConvolutionGroupCount needs to be called after initializing the tensor descriptor,
-// and before getting the workspace size.
-// MIOpen API takes a standard int.
-int calculateGroupCount(const std::vector<int64_t>& inputDims,
-                        const std::vector<int64_t>& weightDims)
-{
-    if(inputDims.size() < 2 || weightDims.size() < 2)
-    {
-        return 1;
-    }
-
-    auto inChannels = inputDims[1];
-    auto wChannels = weightDims[1];
-
-    if(wChannels == 0 || inChannels % wChannels != 0)
-    {
-        // Non-divisible channel dims could be valid for non-grouped convs
-        return 1;
-    }
-
-    return static_cast<int>(inChannels / wChannels);
-}
-
 }
 
 }

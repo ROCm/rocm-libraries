@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
@@ -26,12 +27,12 @@ ConvWrwParams::ConvWrwParams(
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
-    
+
     auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
     auto weightDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
-    const auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
+    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, groupCount);
+    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
 
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }

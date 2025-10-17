@@ -221,5 +221,46 @@ static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
     return fullIndices;
 }
 
+// Utility for calculating group count given weight and input tensors
+// For grouped convolutions, group count = input_channels / weight_channels_per_group
+inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
+                                   const std::vector<int64_t>& weightDims)
+{
+    if(inputDims.size() < 2)
+    {
+        throw std::invalid_argument("Input tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(inputDims.size()));
+    }
+
+    if(weightDims.size() < 2)
+    {
+        throw std::invalid_argument("Weight tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(weightDims.size()));
+    }
+
+    auto inChannels = inputDims[1];
+    auto wChannels = weightDims[1];
+
+    if(inChannels <= 0)
+    {
+        throw std::invalid_argument("Input channels must be positive, but got: "
+                                    + std::to_string(inChannels));
+    }
+
+    if(wChannels <= 0)
+    {
+        throw std::invalid_argument("Weight channels must be positive, but got: "
+                                    + std::to_string(wChannels));
+    }
+
+    if(inChannels % wChannels != 0)
+    {
+        // Non-divisible channel dims could be valid for non-grouped convs
+        return 1;
+    }
+
+    return inChannels / wChannels;
+}
+
 }
 }

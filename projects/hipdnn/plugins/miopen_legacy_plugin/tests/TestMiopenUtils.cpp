@@ -104,39 +104,3 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
 
     EXPECT_THROW(miopen_utils::getSpatialDimCount(*attrPtr1), hipdnn_plugin::HipdnnPluginException);
 }
-
-TEST(TestMiopenUtils, CalculateGroupCountReturnsOneForStandardConvolution)
-{
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 16, 3, 3};
-
-    auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
-    EXPECT_EQ(groupCount, 1);
-}
-
-TEST(TestMiopenUtils, CalculateGroupCountReturnsCorrectValueForGroupedConvolution)
-{
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 8, 3, 3};
-
-    auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
-    EXPECT_EQ(groupCount, 2);
-}
-
-TEST(TestMiopenUtils, CalculateGroupCountReturnsOneForZeroWeightChannels)
-{
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 0, 3, 3};
-
-    auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
-    EXPECT_EQ(groupCount, 1);
-}
-
-TEST(TestMiopenUtils, CalculateGroupCountReturnsOneForNonDivisibleChannels)
-{
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 7, 3, 3};
-
-    auto groupCount = miopen_utils::calculateGroupCount(inputDims, weightDims);
-    EXPECT_EQ(groupCount, 1);
-}
