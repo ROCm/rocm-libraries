@@ -45,50 +45,44 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
-// Forward declaration of TensorBase
+// Forward declaration of TensorBase for ITensorIterator implementation
 template <typename T>
 class TensorBase;
 class ITensor;
 
-// Type-erased iterator for ITensor polymorphic iteration
 template <bool IsConst = false>
 class ITensorIterator
 {
 public:
-    // Iterator traits for STL compatibility
     using iterator_category = std::forward_iterator_tag;
     using value_type = std::conditional_t<IsConst, const void*, void*>;
     using difference_type = std::ptrdiff_t;
     using pointer = std::conditional_t<IsConst, const void*, void*>;
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
-    // Default constructor
     ITensorIterator() = default;
 
-    // Template constructor for non-const iterator
     template <typename T>
     ITensorIterator(TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<IteratorModel<T, false>>(&tensor, std::move(indices), isEnd))
+        : _impl(std::make_unique<InternalTypedTensorIterator<T, false>>(
+              &tensor, std::move(indices), isEnd))
     {
     }
 
-    // Template constructor for const iterator
     template <typename T>
     ITensorIterator(const TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<IteratorModel<T, true>>(&tensor, std::move(indices), isEnd))
+        : _impl(std::make_unique<InternalTypedTensorIterator<T, true>>(
+              &tensor, std::move(indices), isEnd))
     {
     }
 
-    // Copy constructor
     ITensorIterator(const ITensorIterator& other)
         : _impl(other._impl ? other._impl->clone() : nullptr)
     {
     }
 
-    // Move constructor
     ITensorIterator(ITensorIterator&&) = default;
 
-    // Copy assignment
     ITensorIterator& operator=(const ITensorIterator& other)
     {
         if(this != &other)
@@ -98,10 +92,8 @@ public:
         return *this;
     }
 
-    // Move assignment
     ITensorIterator& operator=(ITensorIterator&&) = default;
 
-    // Dereference - returns void*
     value_type operator*() const
     {
         if(!_impl)
@@ -111,7 +103,6 @@ public:
         return _impl->get();
     }
 
-    // Prefix increment
     ITensorIterator& operator++()
     {
         if(_impl)
@@ -121,7 +112,6 @@ public:
         return *this;
     }
 
-    // Postfix increment
     ITensorIterator operator++(int)
     {
         ITensorIterator temp = *this;
@@ -129,7 +119,6 @@ public:
         return temp;
     }
 
-    // Comparison operators
     bool operator==(const ITensorIterator& other) const
     {
         if(!_impl && !other._impl)
@@ -148,7 +137,6 @@ public:
         return !(*this == other);
     }
 
-    // Get current indices (useful for debugging)
     std::vector<int64_t> indices() const
     {
         if(!_impl)
@@ -159,24 +147,22 @@ public:
     }
 
 private:
-    // Internal interface for type-erased operations
-    struct IteratorConcept
+    struct IInternalTypedTensorIterator
     {
-        virtual ~IteratorConcept() = default;
+        virtual ~IInternalTypedTensorIterator() = default;
         virtual void increment() = 0;
         virtual value_type get() = 0;
-        virtual bool equals(const IteratorConcept* other) const = 0;
-        virtual std::unique_ptr<IteratorConcept> clone() const = 0;
+        virtual bool equals(const IInternalTypedTensorIterator* other) const = 0;
+        virtual std::unique_ptr<IInternalTypedTensorIterator> clone() const = 0;
         virtual std::vector<int64_t> getIndices() const = 0;
     };
 
-    // Single template for both const and non-const iterators
     template <typename T, bool IsConstInternal>
-    struct IteratorModel : IteratorConcept
+    struct InternalTypedTensorIterator : IInternalTypedTensorIterator
     {
         using tensor_type = std::conditional_t<IsConstInternal, const TensorBase<T>, TensorBase<T>>;
 
-        IteratorModel(tensor_type* tensor, std::vector<int64_t> indices, bool isEnd)
+        InternalTypedTensorIterator(tensor_type* tensor, std::vector<int64_t> indices, bool isEnd)
             : _tensor(tensor)
             , _indices(std::move(indices))
             , _isEnd(isEnd)
@@ -192,19 +178,17 @@ private:
 
             const auto& dims = _tensor->dims();
 
-            // Increment indices in reverse order (rightmost dimension first)
             for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
             {
                 auto dimIdx = static_cast<size_t>(dim);
                 _indices[dimIdx]++;
                 if(_indices[dimIdx] < dims[dimIdx])
                 {
-                    return; // Successfully incremented
+                    return;
                 }
-                _indices[dimIdx] = 0; // Carry to next dimension
+                _indices[dimIdx] = 0;
             }
 
-            // If we get here, we've incremented past the last element
             _isEnd = true;
         }
 
@@ -225,9 +209,10 @@ private:
             }
         }
 
-        bool equals(const IteratorConcept* other) const override
+        bool equals(const IInternalTypedTensorIterator* other) const override
         {
-            const auto* otherModel = dynamic_cast<const IteratorModel<T, IsConstInternal>*>(other);
+            const auto* otherModel
+                = dynamic_cast<const InternalTypedTensorIterator<T, IsConstInternal>*>(other);
             if(otherModel == nullptr)
             {
                 return false;
@@ -247,9 +232,10 @@ private:
             return _indices == otherModel->_indices;
         }
 
-        std::unique_ptr<IteratorConcept> clone() const override
+        std::unique_ptr<IInternalTypedTensorIterator> clone() const override
         {
-            return std::make_unique<IteratorModel<T, IsConstInternal>>(_tensor, _indices, _isEnd);
+            return std::make_unique<InternalTypedTensorIterator<T, IsConstInternal>>(
+                _tensor, _indices, _isEnd);
         }
 
         std::vector<int64_t> getIndices() const override
@@ -263,7 +249,7 @@ private:
         bool _isEnd;
     };
 
-    std::unique_ptr<IteratorConcept> _impl;
+    std::unique_ptr<IInternalTypedTensorIterator> _impl;
 };
 
 class ITensor
