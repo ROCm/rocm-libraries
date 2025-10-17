@@ -38,6 +38,7 @@ function display_help()
   echo "    [-d|--dependencies] install build dependencies"
   echo "    [-a|--architecture] Set GPU architecture target(s), e.g., all, gfx000, gfx900, gfx906:xnack-;gfx908:xnack-"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+  echo "    [-o|--clients-only] build clients only"
   echo "    [-r]--relocatable] create a package to support relocatable ROCm"
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
   echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
@@ -298,6 +299,7 @@ supported_distro
 install_package=false
 install_dependencies=false
 build_clients=false
+build_clients_only=false
 build_release=true
 build_hip_clang=true
 build_static=false
@@ -325,7 +327,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
- GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
+ GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,clients-only,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicodgrska: -- "$@")
 
 else
   echo "Need a new version of getopt"
@@ -353,6 +355,9 @@ while true; do
             shift ;;
         -c|--clients)
             build_clients=true
+            shift ;;
+        -o|--clients-only)
+            build_clients_only=true
             shift ;;
         -r|--relocatable)
             build_relocatable=true
@@ -617,6 +622,17 @@ pushd .
   # clients
   if [[ "${build_clients}" == true ]]; then
       cmake_client_options+=("-DBUILD_CLIENTS_SAMPLES=ON" "-DBUILD_CLIENTS_TESTS=ON" "-DBUILD_CLIENTS_BENCHMARKS=ON")
+      #
+      # Add matrices_dir if exists.
+      #
+      if ! [[ "${matrices_dir}" == "" ]];then
+          cmake_client_options+=("-DCMAKE_MATRICES_DIR=${matrices_dir}")
+      fi
+  fi
+
+  # clients only
+  if [[ "${build_clients_only}" == true ]]; then
+      cmake_client_options+=("-DBUILD_CLIENTS_ONLY=ON" "-DBUILD_CLIENTS_SAMPLES=ON" "-DBUILD_CLIENTS_TESTS=ON" "-DBUILD_CLIENTS_BENCHMARKS=ON")
       #
       # Add matrices_dir if exists.
       #
