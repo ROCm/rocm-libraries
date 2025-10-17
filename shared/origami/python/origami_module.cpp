@@ -84,7 +84,8 @@ NB_MODULE(origami, m)
         .def_rw("compute_clock_ghz", &hardware_t::compute_clock_ghz)
         .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
         .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
-        .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
+        .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
+        .def_rw("debug_info", &hardware_t::debug_info);
 
     m.def("get_hardware_for_device",
           &hardware_t::get_hardware_for_device,

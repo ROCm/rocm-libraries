@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -12,8 +13,10 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -125,7 +128,10 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        const std::array<const char*, 1> paths = {PLUGIN_PATH};
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
@@ -220,6 +226,8 @@ protected:
             dxTensorAttr->set_uid(uid++);
         }
         dxTensorAttr->set_data_type(inputDataType);
+        dxTensorAttr->set_dim(graphTensorBundle.dxTensor.dims());
+        dxTensorAttr->set_stride(graphTensorBundle.dxTensor.strides());
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];
         if(!dscaleTensorAttr->has_uid())
@@ -277,8 +285,7 @@ protected:
             cpuTensorBundle.dbiasTensor);
     }
 
-    void runBatchnormTest(InputType tolerance = 1e-4f,
-                          const TensorLayout& layout = TensorLayout::NCHW)
+    void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         TestCaseType testCase = this->GetParam();
 
@@ -306,8 +313,8 @@ protected:
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
                                               graphTensorBundle.dxTensor.memory()));
 
-        CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(tolerance,
-                                                                                tolerance);
+        CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(
+            static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
         EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dscaleTensor.memory(),
                                                           graphTensorBundle.dscaleTensor.memory()));
         EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dbiasTensor.memory(),
@@ -410,13 +417,9 @@ std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
 
 } // namespace
 
-// Note:
-// Tolerance ranges are set to be 4e-3f due to batchnorm being numerical unstable for large tensor sizes.
-// MIOpen uses 4e-3f for it's batchnorm tests to verify, but it uses RMS calc instead of allClose type check.
-// You can swap the tests above to use cpu_fp_reference_miopen_rms_validation if you want to match MIOpen's tolerance checks exactly.
 TEST_P(IntegrationGpuBatchnormBackwardNchwFp32, Correctness)
 {
-    runBatchnormTest(4e-3f, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -425,7 +428,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNchwBfp16, Correctness)
 {
-    runBatchnormTest(4e-3_bf, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -434,7 +437,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNchwFp16, Correctness)
 {
-    runBatchnormTest(4e-3_h, TensorLayout::NCHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -443,7 +446,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNhwcFp32, Correctness)
 {
-    runBatchnormTest(4e-3f, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -454,7 +457,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // https://github.com/ROCm/rocm-libraries/pull/1197}
 TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, DISABLED_Correctness)
 {
-    runBatchnormTest(4e-3_bf, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -465,7 +468,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // https://github.com/ROCm/rocm-libraries/pull/1197
 TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, DISABLED_Correctness)
 {
-    runBatchnormTest(4e-3_h, TensorLayout::NHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -474,7 +477,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNcdhwFp32, Correctness)
 {
-    runBatchnormTest(4e-3f, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -483,7 +486,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNcdhwBfp16, Correctness)
 {
-    runBatchnormTest(4e-3_bf, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -492,7 +495,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNcdhwFp16, Correctness)
 {
-    runBatchnormTest(4e-3_h, TensorLayout::NCDHW);
+    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -501,7 +504,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp32, Correctness)
 {
-    runBatchnormTest(4e-3f, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -511,7 +514,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, DISABLED_Correctness)
 {
-    runBatchnormTest(4e-3_bf, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -521,7 +524,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, DISABLED_Correctness)
 {
-    runBatchnormTest(4e-3_h, TensorLayout::NDHWC);
+    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

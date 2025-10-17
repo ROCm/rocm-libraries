@@ -58,6 +58,8 @@ def parse_args():
                         help='Set specific rocm-dev version')
     parser.add_argument(      '--cpu_ref_lib', type=str, required=False, default = "blis",
                         help='Specify library to use for CPU reference code in testing (blis or lapack)')
+    parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
+                        help='Build only clients with a pre-built library')
     # rocsparse
     parser.add_argument('-b', '--rocsparse', dest='rocsparse_version', type=str, required=False, default="",
                         help='Set a specific rocSPARSE vesrion (optional)')
@@ -188,6 +190,9 @@ def config_cmd():
         rocsparse_path_cmake =  f'"{raw_rocsparse_path}"'
 
     cmake_options.append( f"-DROCSPARSE_PATH={args.rocsparse_path}")
+
+    if args.clients_only:
+        cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:

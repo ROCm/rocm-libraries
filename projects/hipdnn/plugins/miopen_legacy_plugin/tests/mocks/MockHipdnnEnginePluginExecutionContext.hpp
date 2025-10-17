@@ -12,14 +12,14 @@
 struct MockHipdnnEnginePluginExecutionContext : public HipdnnEnginePluginExecutionContext
 {
     MockHipdnnEnginePluginExecutionContext()
-        : _mockPlan(std::make_unique<miopen_legacy_plugin::MockPlan>())
+        : mockPlan(std::make_unique<miopen_legacy_plugin::MockPlan>())
     {
     }
 
     miopen_legacy_plugin::IPlan& plan() const override
     {
-        return *_mockPlan;
+        return *mockPlan;
     }
 
-    std::unique_ptr<miopen_legacy_plugin::MockPlan> _mockPlan;
+    std::unique_ptr<miopen_legacy_plugin::MockPlan> mockPlan;
 };

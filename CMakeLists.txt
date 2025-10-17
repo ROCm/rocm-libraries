@@ -22,8 +22,10 @@ set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
+    origami
     # projects
     hipblas-common
+    hipblaslt
     rocprim
     rocrand
 )
@@ -34,7 +36,6 @@ set(UNSUPPORTED_COMPONENTS
     # projects
     composablekernel
     hipblas
-    hipblaslt
     hipcub
     hipfft
     hiprand
@@ -102,6 +103,23 @@ if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
+if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT origami
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(HIPBLASLT_ENABLE_BLIS OFF)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::hipblaslt
+    )
+endif()
+
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocprim
@@ -155,10 +173,6 @@ endif()
 
 if("hiprand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
-endif()
-
-if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "hipblaslt is not yet supported in the superbuild")
 endif()
 
 if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
