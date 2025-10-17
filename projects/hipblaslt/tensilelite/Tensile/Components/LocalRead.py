@@ -344,25 +344,23 @@ class LocalReadMFMA(LocalRead):
                                     self.pack4HiBits(kernel, tc, 0, bufferIdx, baseValuiIdx, iui, writer, packCode, tmpvgprFP32)
                                     self.pack4HiBits(kernel, tc, 4, bufferIdx, baseValuiIdx, iui, writer, packCode, tmpvgprFP32)
                                 if valuiIdx % 4 == 0:
-                                    tmpvgpr =[]
-                                    val = writer.vgprPool.checkOut(1)
-                                    tmpvgpr.append(val)
+                                    tmpvgpr = []
+                                    tmp = writer.vgprPool.checkOut(1)
+                                    tmpvgpr.append(tmp)
                                     # tmp vgprs need to be unique across A/B, so we store in writer state
-                                    if kernel["UseDirect32XEmulation"]:
-                                        if not baseValuiIdx in writer.states.tmpvgpr:
-                                            writer.states.tmpvgpr[baseValuiIdx] = []
+                                    if not baseValuiIdx in writer.states.tmpvgpr:
+                                        writer.states.tmpvgpr[baseValuiIdx] = []
                                     # store vgpr state on A, release on B. Assumes A, B ordering which seems to always be the case.
                                     if tc == "B":
-                                        while val in writer.states.tmpvgpr[baseValuiIdx]:
-                                            val = writer.vgprPool.checkOut(1)
-                                            tmpvgpr.append(val)
+                                        while tmp in writer.states.tmpvgpr[baseValuiIdx]:
+                                            tmp = writer.vgprPool.checkOut(1)
+                                            tmpvgpr.append(tmp)
                                     else:
-                                        if not val in writer.states.tmpvgpr[baseValuiIdx]:
-                                            writer.states.tmpvgpr[baseValuiIdx].append(val)
+                                        if not tmp in writer.states.tmpvgpr[baseValuiIdx]:
+                                            writer.states.tmpvgpr[baseValuiIdx].append(tmp)
 
                                     if (valuiIdx % 8) == 0:
                                         if kernel["UseDirect32XEmulation"]:
-                                            tmpIdx = len(tmpvgprFP32) - 4
                                             v0t = vgpr("Valu%s_T%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx // 2))
                                             v1t = vgpr("Valu%s_T%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx // 2))
                                             v2t = vgpr("Valu%s_T%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx // 2))
@@ -386,27 +384,27 @@ class LocalReadMFMA(LocalRead):
                                         packCode.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vHi0))
                                         packCode.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vHi0))
                                     else:
-                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi0, comment="begin"+str(valuiIdx)))
-                                        packCode.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmpvgpr[0])))
-                                        packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi0, vgprMask=None, vi=1))
-                                        packCode.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmpvgpr[0])))
+                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, comment="begin"+str(valuiIdx)))
+                                        packCode.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
+                                        packCode.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
+                                        packCode.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
 
                                     if kernel["UseDot2F32XEmulation"]:
                                         packCode.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
                                     else:
-                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi1))
-                                        packCode.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmpvgpr[0])))
+                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
+                                        packCode.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
 
                                     # We use cvt+sub pair since dot2 requires adding 4 wait states.
-                                    packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi1, vgprMask=None, vi=1))
-                                    packCode.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmpvgpr[0]), comment="end"))
+                                    packCode.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
+                                    packCode.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
 
                                     if kernel["UseDot2F32XEmulation"]:
-                                        packCode.add(VMovB32(dst=vgpr(tmpvgpr[0]), src=0))
-                                        packCode.add(VMovB32(dst=vgpr(tmpvgpr[0]), src=0))
+                                        packCode.add(VMovB32(dst=vgpr(tmp), src=0))
+                                        packCode.add(VMovB32(dst=vgpr(tmp), src=0))
 
-                                    for tmp in tmpvgpr:
-                                        writer.vgprPool.checkIn(tmp)
+                                    for val in tmpvgpr:
+                                        writer.vgprPool.checkIn(val)
                                     tmpvgpr = []
 
                                 # on last iteration, store lower bits in last 4 registers
