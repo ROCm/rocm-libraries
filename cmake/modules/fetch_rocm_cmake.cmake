@@ -3,14 +3,14 @@ find_package(ROCmCMakeBuildTools QUIET CONFIG)
 if(NOT ROCmCMakeBuildTools_FOUND)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching from source...")
     include(FetchContent)
-    fetchcontent_declare(
+    FetchContent_Declare(
         rocm-cmake GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git GIT_TAG rocm-6.4.3
         GIT_SHALLOW TRUE
     )
 
-    fetchcontent_getproperties(rocm-cmake)
+    FetchContent_GetProperties(rocm-cmake)
     if(NOT rocm-cmake_POPULATED)
-        fetchcontent_populate(rocm-cmake)
+        FetchContent_Populate(rocm-cmake)
         message(
             STATUS
                 "Added ROCm CMake modules path: ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake"
@@ -20,7 +20,6 @@ if(NOT ROCmCMakeBuildTools_FOUND)
 endif()
 
 include(ROCMSetupVersion)
-# include(ROCMClients)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
