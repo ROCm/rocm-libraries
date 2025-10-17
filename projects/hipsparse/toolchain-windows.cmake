@@ -12,8 +12,8 @@ endif()
 
 set(CXX_COMPILER_PATH "${rocm_bin}/clang++.exe")
 set(C_COMPILER_PATH "${rocm_bin}/clang.exe")
-set(CXX_COMPILER_PATH_ALT "${rocm_bin}/../llvm/bin/clang++.exe")
-set(C_COMPILER_PATH_ALT "${rocm_bin}/../llvm/bin/clang.exe")
+set(CXX_COMPILER_PATH_ALT "${rocm_bin}/../lib/llvm/bin/clang++.exe")
+set(C_COMPILER_PATH_ALT "${rocm_bin}/../lib/llvm/bin/clang.exe")
 
 # Check for the first path (preferred)
 if(EXISTS "${CXX_COMPILER_PATH}" AND EXISTS "${C_COMPILER_PATH}")

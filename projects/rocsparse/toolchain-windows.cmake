@@ -34,8 +34,8 @@ endif()
 
 set(CXX_COMPILER_PATH "${rocm_bin}/clang++.exe")
 set(C_COMPILER_PATH "${rocm_bin}/clang.exe")
-set(CXX_COMPILER_PATH_ALT "${rocm_bin}/../llvm/bin/clang++.exe")
-set(C_COMPILER_PATH_ALT "${rocm_bin}/../llvm/bin/clang.exe")
+set(CXX_COMPILER_PATH_ALT "${rocm_bin}/../lib/llvm/bin/clang++.exe")
+set(C_COMPILER_PATH_ALT "${rocm_bin}/../lib/llvm/bin/clang.exe")
 
 # Check for the first path (preferred)
 if(EXISTS "${CXX_COMPILER_PATH}" AND EXISTS "${C_COMPILER_PATH}")
@@ -47,6 +47,9 @@ elseif(EXISTS "${CXX_COMPILER_PATH_ALT}" AND EXISTS "${C_COMPILER_PATH_ALT}")
 else()
     message(WARNING "Compiler was not found. CMAKE_CXX_COMPILER will not be explicitly set.")
 endif()
+
+message("CMAKE_CXX_COMPILER : ${CMAKE_CXX_COMPILER}")
+message("CMAKE_C_COMPILER : ${CMAKE_C_COMPILER}")
 
 if (NOT python)
   set(python "python") # take default for windows
