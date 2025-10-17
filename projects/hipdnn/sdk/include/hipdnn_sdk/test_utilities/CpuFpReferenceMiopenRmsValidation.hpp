@@ -65,8 +65,8 @@ public:
 
         while(refItr != refView.end() && implItr != implView.end())
         {
-            T refValueT = *refItr;
-            T implValueT = *implItr;
+            T refValueT = *refItr++;
+            T implValueT = *implItr++;
 
             auto refValue = static_cast<double>(refValueT);
             auto implValue = static_cast<double>(implValueT);
@@ -77,9 +77,6 @@ public:
             // Track maximum magnitudes
             maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
             maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-
-            refItr++;
-            implItr++;
         }
 
         return checkRmsError(

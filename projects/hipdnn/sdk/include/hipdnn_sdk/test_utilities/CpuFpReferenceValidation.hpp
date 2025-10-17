@@ -51,8 +51,8 @@ public:
 
         while(refItr != refView.end() && implItr != implView.end())
         {
-            T refValue = *refItr;
-            T implValue = *implItr;
+            T refValue = *refItr++;
+            T implValue = *implItr++;
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
@@ -71,8 +71,6 @@ public:
                 result = false;
                 break;
             }
-            ++refItr;
-            ++implItr;
         }
         return result;
     }
