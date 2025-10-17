@@ -19,32 +19,30 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/allocate_unique.h>
+#include <thrust/detail/event_error.h>
+#include <thrust/detail/execute_with_dependencies.h>
+#include <thrust/detail/memory_wrapper.h>
+#include <thrust/detail/static_assert.h>
+#include <thrust/detail/tuple_algorithms.h>
+#include <thrust/detail/type_deduction.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/detail/type_traits/pointer_traits.h>
+#include <thrust/optional.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/future.h>
+#include <thrust/system/hip/memory.h>
+#include <thrust/type_traits/integer_sequence.h>
 
-#  include <thrust/allocate_unique.h>
-#  include <thrust/detail/event_error.h>
-#  include <thrust/detail/execute_with_dependencies.h>
-#  include <thrust/detail/memory_wrapper.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/tuple_algorithms.h>
-#  include <thrust/detail/type_deduction.h>
-#  include <thrust/detail/type_traits.h>
-#  include <thrust/detail/type_traits/pointer_traits.h>
-#  include <thrust/optional.h>
-#  include <thrust/system/hip/detail/get_value.h>
-#  include <thrust/system/hip/detail/util.h>
-#  include <thrust/system/hip/future.h>
-#  include <thrust/system/hip/memory.h>
-#  include <thrust/type_traits/integer_sequence.h>
-
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
-#    include _THRUST_STD_INCLUDE(__memory/addressof.h)
-#    include _THRUST_STD_INCLUDE(__memory/unique_ptr.h)
+#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
+#  include _THRUST_STD_INCLUDE(__memory/unique_ptr.h)
 // clang-format on
-#  endif
+#endif
 
-#  include <type_traits>
+#include <type_traits>
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
@@ -434,12 +432,12 @@ struct async_value : virtual async_signal
   }
 
 // For testing only.
-#  if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
+#if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
   THRUST_HOST virtual raw_const_pointer raw_data() const
   {
     return nullptr;
   }
-#  endif
+#endif
 };
 
 template <typename T, typename Pointer, typename... KeepAlives>
@@ -526,12 +524,12 @@ public:
   }
 
 // For testing only.
-#  if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
+#if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
   THRUST_HOST raw_const_pointer raw_data() const final override
   {
     return raw_pointer_cast(content_);
   }
-#  endif
+#endif
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -646,13 +644,13 @@ public:
     return std::move(value_);
   }
 
-#  if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
+#if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
   // For testing only.
   THRUST_HOST_DEVICE raw_const_pointer data() const
   {
     return _THRUST_STD::addressof(value_);
   }
-#  endif
+#endif
 };
 
 struct THRUST_DEPRECATED unique_eager_event final
@@ -900,7 +898,7 @@ public:
   }
 
 // For testing only.
-#  if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
+#if defined(THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER)
   // Precondition: `true == valid_stream()`.
   THRUST_HOST raw_const_pointer raw_data() const
   {
@@ -911,7 +909,7 @@ public:
 
     return async_signal_->raw_data();
   }
-#  endif
+#endif
 
   THRUST_SUPPRESS_DEPRECATED_PUSH // for thrust::optional
     template <typename X>
@@ -1235,5 +1233,3 @@ THRUST_DEPRECATED THRUST_HOST inline auto capture_as_dependency(unique_eager_eve
 
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
-
-#endif // C++14

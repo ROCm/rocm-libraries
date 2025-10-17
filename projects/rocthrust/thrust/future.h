@@ -30,14 +30,12 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/static_assert.h>
+#include <thrust/execution_policy.h>
 
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/execution_policy.h>
+#include <utility>
 
-#  include <utility>
-
-#  ifndef THRUST_DOXYGEN_INVOKED
+#ifndef THRUST_DOXYGEN_INVOKED
 /*
 // #include the host system's pointer.h header.
 #define __THRUST_HOST_SYSTEM_POINTER_HEADER <__THRUST_HOST_SYSTEM_ROOT/pointer.h>
@@ -46,9 +44,9 @@
 */
 
 // #include the device system's pointer.h header.
-#    define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
-#    include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
-#    undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#  define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
+#  include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#  undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
 
 /*
 // #include the host system's future.h header.
@@ -58,10 +56,10 @@
 */
 
 // #include the device system's future.h header.
-#    define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
-#    include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
-#    undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
-#  endif
+#  define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
+#  include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#  undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#endif
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
@@ -166,10 +164,10 @@ using device_future THRUST_DEPRECATED = device_unique_eager_future<T>;
 struct THRUST_DEPRECATED new_stream_t final
 {};
 
-#  ifndef THRUST_HEADER_MACRO_CHECK
+#ifndef THRUST_HEADER_MACRO_CHECK
 // when building header tests, we get a deprecation warning from cudafe1.stub.c if we deprecate a global variable
 THRUST_DEPRECATED
-#  endif
+#endif
   THRUST_INLINE_CONSTANT new_stream_t new_stream{};
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -180,5 +178,3 @@ using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::when_all;
 
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
-
-#endif

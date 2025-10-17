@@ -347,14 +347,6 @@ TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   ASSERT_EQ(output, ref);
 }
 
-// GCC 11 fails to build this test case with a spurious error in a
-// very specific scenario:
-// - GCC 11
-// - CPP system for both host and device
-// - C++11 dialect
-#if !(THRUST_COMPILER(GCC, >=, 11) && THRUST_COMPILER(GCC, <, 12) && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP \
-      && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP && THRUST_CPP_DIALECT == 2011)
-
 TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -372,7 +364,5 @@ TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   Vector ref{0, 1, 1, 0, 1};
   ASSERT_EQ(output, ref);
 }
-
-#endif // Weird GCC11 failure case
 
 THRUST_DIAG_POP

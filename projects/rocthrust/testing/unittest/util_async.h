@@ -19,15 +19,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/future.h>
 
-#  include <thrust/future.h>
+#include <unittest/unittest.h>
 
-#  include <unittest/unittest.h>
+#define TEST_EVENT_WAIT(e) ::unittest::test_event_wait(e, __FILE__, __LINE__) /**/
 
-#  define TEST_EVENT_WAIT(e) ::unittest::test_event_wait(e, __FILE__, __LINE__) /**/
-
-#  define TEST_FUTURE_VALUE_RETRIEVAL(f) ::unittest::test_future_value_retrieval(f, __FILE__, __LINE__) /**/
+#define TEST_FUTURE_VALUE_RETRIEVAL(f) ::unittest::test_future_value_retrieval(f, __FILE__, __LINE__) /**/
 
 namespace unittest
 {
@@ -78,5 +76,3 @@ THRUST_HOST auto test_future_value_retrieval(Future&& f, std::string const& file
 }
 
 } // namespace unittest
-
-#endif // THRUST_CPP_DIALECT >= 2014

@@ -30,15 +30,13 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <thrust/detail/select_system.h>
-#  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/type_traits.h>
-#  include <thrust/future.h>
-#  include <thrust/system/detail/adl/async/reduce.h>
-#  include <thrust/type_traits/is_execution_policy.h>
-#  include <thrust/type_traits/logical_metafunctions.h>
+#include <thrust/detail/select_system.h>
+#include <thrust/detail/static_assert.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/future.h>
+#include <thrust/system/detail/adl/async/reduce.h>
+#include <thrust/type_traits/is_execution_policy.h>
+#include <thrust/type_traits/logical_metafunctions.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -322,5 +320,3 @@ THRUST_INLINE_CONSTANT reduce_into_detail::reduce_into_fn reduce_into{};
 } // namespace async
 
 THRUST_NAMESPACE_END
-
-#endif

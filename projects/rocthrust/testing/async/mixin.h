@@ -19,21 +19,19 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/sequence.h>
+#include <thrust/type_traits/logical_metafunctions.h>
 
-#  include <thrust/device_vector.h>
-#  include <thrust/host_vector.h>
-#  include <thrust/iterator/constant_iterator.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/iterator/discard_iterator.h>
-#  include <thrust/sequence.h>
-#  include <thrust/type_traits/logical_metafunctions.h>
+#include <tuple>
+#include <type_traits>
 
-#  include <tuple>
-#  include <type_traits>
-
-#  include <unittest/unittest.h>
-#  include <unittest/util_async.h>
+#include <unittest/unittest.h>
+#include <unittest/util_async.h>
 
 // clang-format off
 
@@ -695,5 +693,3 @@ struct noop
 } // namespace mixin
 } // namespace async
 } // namespace testing
-
-#endif // C++14

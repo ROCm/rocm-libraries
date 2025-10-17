@@ -537,7 +537,6 @@ TEST(TupleTests, TestTupleSwap)
   ASSERT_EQ_QUIET(ref, (swappable_tuple) d_v1[0]);
 }
 
-#if THRUST_CPP_DIALECT >= 2017
 TEST(TupleTests, TestTupleStructuredBindings)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -567,4 +566,3 @@ TEST(TupleTests, TestTupleCTAD)
   ASSERT_EQ(b, b2);
   ASSERT_EQ(c, c2);
 }
-#endif // THRUST_CPP_DIALECT >= 2017

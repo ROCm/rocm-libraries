@@ -31,11 +31,6 @@
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
-// GCC 12 + omp + c++11 miscompiles some test cases and emits spurious warnings.
-#if THRUST_COMPILER(GCC, ==, 12) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP && THRUST_CPP_DIALECT == 2011
-#  define THRUST_GCC12_OMP_MISCOMPILE
-#endif
-
 // New GCC, new miscompile. 13 + TBB this time.
 #if THRUST_COMPILER(GCC, ==, 13) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
 #  define THRUST_GCC13_TBB_MISCOMPILE
@@ -132,7 +127,6 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplace)
 }
 
 #ifndef THRUST_GCC13_TBB_MISCOMPILE
-#  ifndef THRUST_GCC12_OMP_MISCOMPILE
 TYPED_TEST(ReplaceTests, TestReplaceCopySimple)
 {
   using Vector = typename TestFixture::input_type;
@@ -150,7 +144,6 @@ TYPED_TEST(ReplaceTests, TestReplaceCopySimple)
   Vector result{4, 5, 4, 3, 5};
   ASSERT_EQ(dest, result);
 }
-#  endif
 #endif
 
 template <typename InputIterator, typename OutputIterator, typename T>

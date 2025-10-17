@@ -45,22 +45,20 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_COMPILER(HIP)
 
-#  if THRUST_COMPILER(HIP)
+#  include <thrust/system/hip/config.h>
 
-#    include <thrust/system/hip/config.h>
+#  include <thrust/detail/execute_with_allocator.h>
+#  include <thrust/detail/type_deduction.h>
+#  include <thrust/mr/allocator.h>
+#  include <thrust/mr/disjoint_sync_pool.h>
+#  include <thrust/mr/host_memory_resource.h>
+#  include <thrust/mr/sync_pool.h>
+#  include <thrust/per_device_resource.h>
+#  include <thrust/system/hip/memory_resource.h>
 
-#    include <thrust/detail/execute_with_allocator.h>
-#    include <thrust/detail/type_deduction.h>
-#    include <thrust/mr/allocator.h>
-#    include <thrust/mr/disjoint_sync_pool.h>
-#    include <thrust/mr/host_memory_resource.h>
-#    include <thrust/mr/sync_pool.h>
-#    include <thrust/per_device_resource.h>
-#    include <thrust/system/hip/memory_resource.h>
-
-#    include <cstdint>
+#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -112,6 +110,4 @@ auto get_async_universal_host_pinned_allocator(thrust::detail::execution_policy_
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_COMPILER(HIP)
-
-#endif
+#endif // THRUST_COMPILER(HIP)

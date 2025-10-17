@@ -23,13 +23,11 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <algorithm>
+#include <limits>
 
-#  include <algorithm>
-#  include <limits>
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
 
 template <typename input_value_type,
           typename output_value_type   = input_value_type,
@@ -61,7 +59,5 @@ struct test_counting_iterator
 // Use built-in types only, counting_iterator doesn't seem to be compatible with
 // the custom_numeric.
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_counting_iterator, UnsignedIntegralTypes);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP

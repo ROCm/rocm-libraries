@@ -17,16 +17,14 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/async/copy.h>
+#include <thrust/async/transform.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
-#  include <thrust/async/copy.h>
-#  include <thrust/async/transform.h>
-#  include <thrust/device_vector.h>
-#  include <thrust/host_vector.h>
-
-#  include "test_param_fixtures.hpp"
-#  include "test_real_assertions.hpp"
-#  include "test_utils.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
@@ -39,49 +37,49 @@ struct divide_by_2
   }
 };
 
-#  define DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...)             \
-    template <typename T>                                                                                     \
-    struct NAME                                                                                               \
-    {                                                                                                         \
-      MEMBERS                                                                                                 \
-                                                                                                              \
-      NAME()                                                                                                  \
-      {                                                                                                       \
-        CTOR                                                                                                  \
-      }                                                                                                       \
-                                                                                                              \
-      ~NAME()                                                                                                 \
-      {                                                                                                       \
-        DTOR                                                                                                  \
-      }                                                                                                       \
-                                                                                                              \
-      template <typename Event>                                                                               \
-      void validate_event(Event& e)                                                                           \
-      {                                                                                                       \
-        THRUST_UNUSED_VAR(e);                                                                                 \
-        VALIDATE                                                                                              \
-      }                                                                                                       \
-                                                                                                              \
-      template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
-      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
-        THRUST_DECLTYPE_RETURNS(::thrust::async::transform(__VA_ARGS__))                                      \
-    };                                                                                                        \
-    /**/
+#define DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...)             \
+  template <typename T>                                                                                     \
+  struct NAME                                                                                               \
+  {                                                                                                         \
+    MEMBERS                                                                                                 \
+                                                                                                            \
+    NAME()                                                                                                  \
+    {                                                                                                       \
+      CTOR                                                                                                  \
+    }                                                                                                       \
+                                                                                                            \
+    ~NAME()                                                                                                 \
+    {                                                                                                       \
+      DTOR                                                                                                  \
+    }                                                                                                       \
+                                                                                                            \
+    template <typename Event>                                                                               \
+    void validate_event(Event& e)                                                                           \
+    {                                                                                                       \
+      THRUST_UNUSED_VAR(e);                                                                                 \
+      VALIDATE                                                                                              \
+    }                                                                                                       \
+                                                                                                            \
+    template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
+    THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
+      THRUST_DECLTYPE_RETURNS(::thrust::async::transform(__VA_ARGS__))                                      \
+  };                                                                                                        \
+  /**/
 
-#  define DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                            \
-    DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(                                                   \
-      NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
-    /**/
+#define DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                            \
+  DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(                                                   \
+    NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
+  /**/
 
-#  define DEFINE_SYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                                      \
-    template <typename T>                                                                                     \
-    struct NAME                                                                                               \
-    {                                                                                                         \
-      template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
-      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
-        THRUST_RETURNS(::thrust::transform(__VA_ARGS__))                                                      \
-    };                                                                                                        \
-    /**/
+#define DEFINE_SYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                                      \
+  template <typename T>                                                                                     \
+  struct NAME                                                                                               \
+  {                                                                                                         \
+    template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
+    THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
+      THRUST_RETURNS(::thrust::transform(__VA_ARGS__))                                                      \
+  };                                                                                                        \
+  /**/
 
 DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(
   transform_unary_async_invoker, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output), THRUST_FWD(op));
@@ -506,5 +504,3 @@ TYPED_TEST(AsyncTransformTests, test_async_transform_using_divide_by_2)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#endif

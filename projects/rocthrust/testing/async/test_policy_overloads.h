@@ -19,15 +19,13 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/type_traits.h>
+#include <thrust/device_allocator.h>
+#include <thrust/future.h>
 
-#  include <thrust/detail/type_traits.h>
-#  include <thrust/device_allocator.h>
-#  include <thrust/future.h>
+#include <string>
 
-#  include <string>
-
-#  include <unittest/unittest.h>
+#include <unittest/unittest.h>
 
 // TODO Cover these cases from testing/async_reduce.cu:
 //   - [x] test_async_reduce_after ("after_future" in test_policy_overloads)
@@ -367,5 +365,3 @@ private:
 
 } // namespace async
 } // namespace testing
-
-#endif // C++14

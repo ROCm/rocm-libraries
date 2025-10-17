@@ -332,7 +332,6 @@ void TestPairSwap()
 }
 DECLARE_UNITTEST(TestPairSwap);
 
-#if THRUST_CPP_DIALECT >= 2017
 void TestPairStructuredBindings()
 {
   const int a = 42;
@@ -356,4 +355,3 @@ void TestPairCTAD(void)
   ASSERT_EQUAL(b, b2);
 }
 DECLARE_UNITTEST(TestPairCTAD);
-#endif // THRUST_CPP_DIALECT >= 2017

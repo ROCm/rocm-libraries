@@ -17,13 +17,11 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/future.h>
 
-#  include <thrust/future.h>
-
-#  include "test_param_fixtures.hpp"
-#  include "test_real_assertions.hpp"
-#  include "test_utils.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 // note: there is no matching THRUST_SUPPRESS_DEPRECATED_POP, so the warning suppression leaks into more content of the
 // generated cudafe1.stub.c file.
@@ -217,5 +215,3 @@ TYPED_TEST(FutureTests, test_future_when_all)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#endif

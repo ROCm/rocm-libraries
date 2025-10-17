@@ -23,10 +23,8 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
 
 namespace
 {
@@ -83,7 +81,5 @@ struct test_stateful_operator
   }
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_stateful_operator, NumericTypes);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP

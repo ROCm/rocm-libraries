@@ -23,12 +23,10 @@
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/type_traits.h>
 
-#  include <thrust/detail/type_traits.h>
-
-#  include <async/exclusive_scan/mixin.h>
-#  include <async/test_policy_overloads.h>
+#include <async/exclusive_scan/mixin.h>
+#include <async/test_policy_overloads.h>
 
 // Verify what happens when calling the algorithm without any namespace
 // qualifiers:
@@ -191,7 +189,5 @@ void test_using_cpo()
   testing::async::test_policy_overloads<invoker>::run(128);
 }
 DECLARE_UNITTEST(test_using_cpo);
-
-#endif // C++14
 
 THRUST_SUPPRESS_DEPRECATED_POP
