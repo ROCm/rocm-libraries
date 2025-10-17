@@ -36,17 +36,27 @@
 
 namespace {
 
+// Non-deterministic test cases (for GPU smoke tests)
 auto GetConvSmokeTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
     return std::vector{
         // clang-format off
-        // Non-deterministic (default)
         TestCase{{datatype, miopenTensorNHWC, {1, 32, 8, 8}},
                  {datatype, miopenTensorNHWC, {32, 32, 1, 1}},
                  datatype, {{0, 0}, {1, 1}, {1, 1}}},
-        // Deterministic enabled
+        // clang-format on
+    };
+}
+
+// Deterministic test case (for CPU deterministic applicability test)
+auto GetConvDeterministicTestCases(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
         TestCase{{datatype, miopenTensorNHWC, {1, 32, 8, 8}},
                  {datatype, miopenTensorNHWC, {32, 32, 1, 1}},
                  datatype, {{0, 0}, {1, 1}, {1, 1}, 1, true}},
@@ -176,7 +186,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams(miopenHalf)),
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDeterministicApplicability_NONE,
-                         testing::Combine(testing::Values(Gpu::None),
-                                          testing::Values(GetConvSmokeTestCases(miopenHalf)[1])));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    CPU_UnitTestConvSolverImplicitGemmBwdXdlopsDeterministicApplicability_NONE,
+    testing::Combine(testing::Values(Gpu::None),
+                     testing::Values(GetConvDeterministicTestCases(miopenHalf)[0])));
