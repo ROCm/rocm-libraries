@@ -70,21 +70,21 @@ constexpr static auto VALUES_BUFFER_SIZE = VARIANT == 0                         
                                                                                 : 1;
 
 template <typename TI, typename TO>
-__device__ void activbwdspatial(const TI* __restrict__ x,
-                                const TI* __restrict__ y,
-                                const TI* __restrict__ dy,
-                                TO* __restrict__ dx,
-                                const TI diff_scale,
-                                const TI gamma,
-                                const TI beta,
-                                const TI alpha,
-                                const float* __restrict__ bn_scale,
-                                const float* __restrict__ bn_bias,
-                                float* __restrict__ dscale,
-                                float* __restrict__ dbias,
-                                const float* __restrict__ saved_mean,
-                                const float* __restrict__ saved_inv_variance,
-                                const float INHW)
+__forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
+                                                const TI* __restrict__ y,
+                                                const TI* __restrict__ dy,
+                                                TO* __restrict__ dx,
+                                                const TI diff_scale,
+                                                const TI gamma,
+                                                const TI beta,
+                                                const TI alpha,
+                                                const float* __restrict__ bn_scale,
+                                                const float* __restrict__ bn_bias,
+                                                float* __restrict__ dscale,
+                                                float* __restrict__ dbias,
+                                                const float* __restrict__ saved_mean,
+                                                const float* __restrict__ saved_inv_variance,
+                                                const float INHW)
 {
     using TI4 = TYPE4<TI>;
 
@@ -260,9 +260,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(gamma),
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
-
             db += p_bn_dy[0];
             ds += xhat4.x * p_bn_dy[0];
+
             p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.y));
             p_bn_y[0]   = bn_y4.y;
             p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.y));
@@ -274,9 +274,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(gamma),
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
-
             db += p_bn_dy[0];
             ds += xhat4.y * p_bn_dy[0];
+
             p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.z));
             p_bn_y[0]   = bn_y4.z;
             p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.z));
@@ -288,9 +288,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(gamma),
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
-
             db += p_bn_dy[0];
             ds += xhat4.z * p_bn_dy[0];
+
             p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.w));
             p_bn_y[0]   = bn_y4.w;
             p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.w));
@@ -302,7 +302,6 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(gamma),
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
-
             db += p_bn_dy[0];
             ds += xhat4.w * p_bn_dy[0];
         }
@@ -319,10 +318,14 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                 act_dy4 = *reinterpret_cast<const TI4*>(&dy[index]);
                 act_y4  = *reinterpret_cast<const TI4*>(&y[index]);
 
-                xhat4.x = (CVT_FLOAT2ACCUM(xread4.x) - mean) * inv_variance;
-                xhat4.y = (CVT_FLOAT2ACCUM(xread4.y) - mean) * inv_variance;
-                xhat4.z = (CVT_FLOAT2ACCUM(xread4.z) - mean) * inv_variance;
-                xhat4.w = (CVT_FLOAT2ACCUM(xread4.w) - mean) * inv_variance;
+                xhat4.x =
+                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.x)) - mean) * inv_variance;
+                xhat4.y =
+                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.y)) - mean) * inv_variance;
+                xhat4.z =
+                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.z)) - mean) * inv_variance;
+                xhat4.w =
+                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.w)) - mean) * inv_variance;
 
                 bn_y4.x = xhat4.x * lscale + lbias;
                 bn_y4.y = xhat4.y * lscale + lbias;
@@ -341,9 +344,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-
                 db += p_bn_dy[0];
                 ds += xhat4.x * p_bn_dy[0];
+
                 p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.y));
                 p_bn_y[0]   = bn_y4.y;
                 p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.y));
@@ -355,9 +358,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-
                 db += p_bn_dy[0];
                 ds += xhat4.y * p_bn_dy[0];
+
                 p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.z));
                 p_bn_y[0]   = bn_y4.z;
                 p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.z));
@@ -369,9 +372,9 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-
                 db += p_bn_dy[0];
                 ds += xhat4.z * p_bn_dy[0];
+
                 p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.w));
                 p_bn_y[0]   = bn_y4.w;
                 p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.w));
@@ -383,7 +386,6 @@ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-
                 db += p_bn_dy[0];
                 ds += xhat4.w * p_bn_dy[0];
             }
