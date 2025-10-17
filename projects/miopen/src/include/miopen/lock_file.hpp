@@ -55,6 +55,7 @@ public:
     FSLockFile() {}
     FSLockFile(const fs::path& path_) : path(path_)
     {
+        lock_held = false;
         lockfile_path = path.string() + ".fslock";
         unique_handle = lockfile_path.string() + "." + boost::asio::ip::host_name() + "." +
                         std::to_string(getpid());
@@ -122,6 +123,17 @@ public:
         return false;
     }
 
+    void refresh_lock()
+    {
+        MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
+        while(lock_held)
+        {
+            fs::last_write_time(unique_handle, fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
+    }
+
     bool try_lock_hardlink()
     {
         std::error_code ec;
@@ -137,7 +149,11 @@ public:
         if(ec.value() == 0)
         {
             if(fs::hard_link_count(unique_handle) == 2)
+            {
+                lock_held = true;
+                std::thread([this](){this->refresh_lock();}).detach();
                 return true;
+            }
         }
         else
         {
@@ -147,20 +163,16 @@ public:
         return false;
     }
 
-    void unlock_hardlink()
-    {
-        MIOPEN_LOG_I2("Unlock hardlink < " << unique_handle.string());
-        fs::remove(unique_handle);
-    }
-
     void unlock()
     {
         MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
+        lock_held = false;
         fs::remove(lockfile_path);
         fs::remove(unique_handle);
     }
 
 private:
+    bool lock_held;
     fs::path path;
     fs::path lockfile_path;
     fs::path unique_handle;
