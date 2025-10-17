@@ -199,11 +199,11 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Find rocprim package
-find_package(rocprim 4.0.0 REQUIRED)
+find_package(rocprim REQUIRED)
 
 # Find rocblas package
 if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas 5.0.0 REQUIRED)
+  find_package(rocblas REQUIRED)
 else()
   message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
