@@ -51,12 +51,14 @@ namespace rocRoller::Graph
 
         for(auto src : srcs)
         {
-            AssertFatal(std::erase(m_incidenceBySrc.at(src), tag) > 0);
+            auto const erased = std::erase(m_incidenceBySrc.at(src), tag);
+            AssertFatal(erased > 0);
         }
 
         for(auto dst : dsts)
         {
-            AssertFatal(std::erase(m_incidenceByDst.at(dst), tag) > 0);
+            auto const erased = std::erase(m_incidenceByDst.at(dst), tag);
+            AssertFatal(erased > 0);
         }
     }
 
