@@ -53,4 +53,19 @@ inline std::vector<std::filesystem::path> filesInDirectoryWithExt(std::filesyste
     return paths;
 }
 
+// Temporary helper function
+inline std::vector<std::filesystem::path>
+    filesInDirectoryWithExtReturnEmptyPathOnThrow(std::filesystem::path const& path,
+                                                  std::string const& ext)
+{
+    try
+    {
+        return filesInDirectoryWithExt(path, ext);
+    }
+    catch(...)
+    {
+        return {""};
+    }
+}
+
 }
