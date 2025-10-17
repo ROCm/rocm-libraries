@@ -383,7 +383,7 @@ namespace rocRoller
                                                 literal(value.desc2),
                                                 literal(value.desc3)};
             return std::make_shared<Expression>(
-                Concatenate{{operands}, {DataType::UInt32, PointerType::Buffer}});
+                Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
         }
 
         template <CCommandArgumentValue T>
