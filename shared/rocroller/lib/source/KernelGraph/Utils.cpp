@@ -259,7 +259,7 @@ namespace rocRoller
             return {dimK, forK};
         }
 
-        int cloneForLoop(KernelGraph& graph, int tag)
+        int cloneForLoop(KernelGraph& graph, int tag, std::optional<std::string> name)
         {
             auto maybeForLoopOp = graph.control.get<CG::ForLoopOp>(tag);
             AssertFatal(maybeForLoopOp, "cloneForLoop is being called on a non-ForLoopOp");
@@ -268,8 +268,11 @@ namespace rocRoller
 
             auto forLoopSize = graph.coordinates.get<CT::ForLoop>(forLoopDim)->size;
 
-            auto clone = rangeFor(
-                graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
+            auto clone = rangeFor(graph,
+                                  forLoopSize,
+                                  name ? *name : maybeForLoopOp->loopName,
+                                  DataType::None,
+                                  forLoopDim);
 
             return clone.second;
         }

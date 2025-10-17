@@ -194,7 +194,7 @@ namespace rocRoller
 
                         // TODO: Only do the K-Loop for now
                         auto fl = kgraph.control.get<ForLoopOp>(*maybeForLoop);
-                        if(fl->loopName != rocRoller::KLOOP)
+                        if(not fl->loopName.starts_with(rocRoller::KLOOP))
                             continue;
 
                         auto forLoopCoord     = getForLoopCoords(*maybeForLoop, kgraph).first;

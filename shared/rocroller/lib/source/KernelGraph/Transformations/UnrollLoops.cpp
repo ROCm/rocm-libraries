@@ -524,7 +524,7 @@ namespace rocRoller
                           .to<std::set>();
                 for(auto ldsLoad : currentLDSLoads)
                 {
-                    if(name == rocRoller::KLOOP)
+                    if(name.starts_with(rocRoller::KLOOP))
                         graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
                 }
             }
@@ -588,9 +588,6 @@ namespace rocRoller
          *
          * Will not create a tail loop if:
          *  - The loop has a known trip count, which is divisible by unrollAmount
-         *  - The loop is contained by another loop which is unrolled.
-         *     - This is due to the FuseLoops transformation not yet being able to
-         *       handle merging multiple tail loops together.
          *  - StreamK is enabled.
          *  - Tail loops are manually disabled.
          *
@@ -669,22 +666,6 @@ namespace rocRoller
                 }
             }
 
-            {
-                auto containingForLoops = graph.control.nodesContaining(loop).filter(
-                    graph.control.isElemType<ForLoopOp>());
-                for(auto containingLoop : containingForLoops)
-                {
-                    if(getUnrollAmount(graph, containingLoop, m_params) > 1)
-                    {
-                        Log::debug("Not adding tail loop for {} because it is contained by {} "
-                                   "which is also unrolled.",
-                                   loop,
-                                   containingLoop);
-                        return std::nullopt;
-                    }
-                }
-            }
-
             auto loopSizeType        = resultVariableType(loopSize);
             auto amount              = Expression::literal(unrollAmount, loopSizeType);
             auto loopSizeRoundedDown = (loopSize / amount) * amount;
@@ -694,7 +675,7 @@ namespace rocRoller
                        toString(loopSize),
                        toString(loopSizeRoundedDown));
 
-            auto tailLoop = cloneForLoop(graph, loop);
+            auto tailLoop = cloneForLoop(graph, loop, rocRoller::KLOOPTAIL);
 
             // Set original loop to end at a multiple of the unroll amount.
             {
