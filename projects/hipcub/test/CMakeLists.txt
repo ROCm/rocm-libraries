@@ -67,7 +67,7 @@ add_subdirectory(hipcub)
 
 if(BUILD_CODE_COVERAGE)
     add_custom_target(
-    coverage_analysis
+    hipcub_coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
     COMMAND ctest --output-on-failure
@@ -91,8 +91,8 @@ if(BUILD_CODE_COVERAGE)
   )
 
   add_custom_target(
-    coverage
-    DEPENDS coverage_analysis
+    hipcub_coverage
+    DEPENDS hipcub_coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
