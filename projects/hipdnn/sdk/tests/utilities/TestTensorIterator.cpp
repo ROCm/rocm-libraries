@@ -97,7 +97,7 @@ TEST(TestTypeErasedIterator, ConstIteration)
     const ITensor* iTensor = &tensor;
 
     int count = 0;
-    for(auto it = iTensor->begin(); it != iTensor->end(); ++it)
+    for(auto it = iTensor->cbegin(); it != iTensor->cend(); ++it)
     {
         const auto* value = static_cast<const double*>(*it);
         EXPECT_DOUBLE_EQ(*value, 3.14);

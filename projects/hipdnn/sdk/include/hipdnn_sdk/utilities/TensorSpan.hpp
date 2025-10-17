@@ -8,10 +8,6 @@
 namespace hipdnn_sdk::utilities
 {
 
-// Forward declaration
-template <typename T>
-class TensorSpan;
-
 // The iterator that wraps ITensorIterator
 template <typename T, bool IsConst = false>
 class TensorSpanIterator
@@ -25,7 +21,7 @@ public:
     using pointer = std::conditional_t<IsConst, const T*, T*>;
 
     // Constructor
-    explicit TensorSpanIterator(ITensorIterator iter)
+    explicit TensorSpanIterator(ITensorIterator<IsConst> iter)
         : _iter(std::move(iter))
     {
     }
@@ -33,8 +29,7 @@ public:
     // Dereference returns typed reference (not void*)
     reference operator*() const
     {
-        void* ptr = *_iter;
-        return *static_cast<pointer>(ptr);
+        return *static_cast<pointer>(*_iter);
     }
 
     pointer operator->() const
@@ -70,51 +65,63 @@ public:
     }
 
 private:
-    ITensorIterator _iter; // Wraps the type-erased iterator
+    ITensorIterator<IsConst> _iter; // Wraps the type-erased iterator
 };
 
-template <typename T>
+template <typename T, bool IsConst = false>
 class TensorSpan
 {
 public:
-    using iterator = TensorSpanIterator<T, false>;
+    using iterator = TensorSpanIterator<T, IsConst>;
     using const_iterator = TensorSpanIterator<T, true>;
+    using tensor_reference = std::conditional_t<IsConst, const ITensor&, ITensor&>;
 
     // Constructor takes a reference to ITensor
-    explicit TensorSpan(ITensor& tensor)
+    explicit TensorSpan(tensor_reference tensor)
         : _tensor(tensor)
-    {
-    }
-
-    // Constructor for const ITensor
-    explicit TensorSpan(const ITensor& tensor)
-        : _tensor(const_cast<ITensor&>(tensor))
     {
     }
 
     // Provide typed iterator access
     iterator begin()
     {
-        return iterator(_tensor.begin());
+        if constexpr(IsConst)
+        {
+            return iterator(_tensor.cbegin());
+        }
+        else
+        {
+            return iterator(_tensor.begin());
+        }
     }
 
     iterator end()
     {
-        return iterator(_tensor.end());
+        if constexpr(IsConst)
+        {
+            return iterator(_tensor.cend());
+        }
+        else
+        {
+            return iterator(_tensor.end());
+        }
     }
 
-    const_iterator begin() const
+    const_iterator cbegin() const
     {
-        return const_iterator(_tensor.begin());
+        return const_iterator(_tensor.cbegin());
     }
 
-    const_iterator end() const
+    const_iterator cend() const
     {
-        return const_iterator(_tensor.end());
+        return const_iterator(_tensor.cend());
     }
 
 private:
-    ITensor& _tensor;
+    tensor_reference _tensor;
 };
+
+template <typename T>
+using ConstTensorSpan = TensorSpan<T, true>;
 
 } // namespace hipdnn_sdk::utilities

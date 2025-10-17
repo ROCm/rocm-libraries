@@ -57,8 +57,8 @@ public:
         double maxRefMagnitude = 0.0;
         double maxImplMagnitude = 0.0;
 
-        TensorSpan<T> refSpan(reference);
-        TensorSpan<T> implSpan(implementation);
+        ConstTensorSpan<T> refSpan(reference);
+        ConstTensorSpan<T> implSpan(implementation);
 
         auto refItr = refSpan.begin();
         auto implItr = implSpan.begin();

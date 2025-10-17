@@ -51,30 +51,31 @@ class TensorBase;
 class ITensor;
 
 // Type-erased iterator for ITensor polymorphic iteration
+template <bool IsConst = false>
 class ITensorIterator
 {
 public:
     // Iterator traits for STL compatibility
     using iterator_category = std::forward_iterator_tag;
-    using value_type = void;
+    using value_type = std::conditional_t<IsConst, const void*, void*>;
     using difference_type = std::ptrdiff_t;
-    using pointer = void*;
-    using reference = void*;
+    using pointer = std::conditional_t<IsConst, const void*, void*>;
+    using reference = std::conditional_t<IsConst, const void*, void*>;
 
     // Default constructor
     ITensorIterator() = default;
 
     // Template constructor for non-const iterator
     template <typename T>
-    ITensorIterator(TensorBase<T>* tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<IteratorModel<T, false>>(tensor, std::move(indices), isEnd))
+    ITensorIterator(TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
+        : _impl(std::make_unique<IteratorModel<T, false>>(&tensor, std::move(indices), isEnd))
     {
     }
 
     // Template constructor for const iterator
     template <typename T>
-    ITensorIterator(const TensorBase<T>* tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<IteratorModel<T, true>>(tensor, std::move(indices), isEnd))
+    ITensorIterator(const TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
+        : _impl(std::make_unique<IteratorModel<T, true>>(&tensor, std::move(indices), isEnd))
     {
     }
 
@@ -101,7 +102,7 @@ public:
     ITensorIterator& operator=(ITensorIterator&&) = default;
 
     // Dereference - returns void*
-    void* operator*() const
+    value_type operator*() const
     {
         if(!_impl)
         {
@@ -163,17 +164,17 @@ private:
     {
         virtual ~IteratorConcept() = default;
         virtual void increment() = 0;
-        virtual void* get() = 0;
+        virtual value_type get() = 0;
         virtual bool equals(const IteratorConcept* other) const = 0;
         virtual std::unique_ptr<IteratorConcept> clone() const = 0;
         virtual std::vector<int64_t> getIndices() const = 0;
     };
 
     // Single template for both const and non-const iterators
-    template <typename T, bool IsConst>
+    template <typename T, bool IsConstInternal>
     struct IteratorModel : IteratorConcept
     {
-        using tensor_type = std::conditional_t<IsConst, const TensorBase<T>, TensorBase<T>>;
+        using tensor_type = std::conditional_t<IsConstInternal, const TensorBase<T>, TensorBase<T>>;
 
         IteratorModel(tensor_type* tensor, std::vector<int64_t> indices, bool isEnd)
             : _tensor(tensor)
@@ -207,18 +208,16 @@ private:
             _isEnd = true;
         }
 
-        void* get() override
+        value_type get() override
         {
             if(_isEnd)
             {
                 throw std::out_of_range("Cannot dereference end iterator");
             }
             int64_t index = _tensor->getIndex(_indices);
-            if constexpr(IsConst)
+            if constexpr(IsConstInternal)
             {
-                // Cast away const for void* return, but data remains logically const
-                return const_cast<void*>(
-                    static_cast<const void*>(&_tensor->memory().hostData()[index]));
+                return _tensor->hostDataOffsetFromIndex(index);
             }
             else
             {
@@ -228,7 +227,7 @@ private:
 
         bool equals(const IteratorConcept* other) const override
         {
-            auto* otherModel = dynamic_cast<const IteratorModel<T, IsConst>*>(other);
+            const auto* otherModel = dynamic_cast<const IteratorModel<T, IsConstInternal>*>(other);
             if(otherModel == nullptr)
             {
                 return false;
@@ -250,7 +249,7 @@ private:
 
         std::unique_ptr<IteratorConcept> clone() const override
         {
-            return std::make_unique<IteratorModel<T, IsConst>>(_tensor, _indices, _isEnd);
+            return std::make_unique<IteratorModel<T, IsConstInternal>>(_tensor, _indices, _isEnd);
         }
 
         std::vector<int64_t> getIndices() const override
@@ -313,10 +312,10 @@ public:
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
-    virtual ITensorIterator begin() = 0;
-    virtual ITensorIterator end() = 0;
-    virtual ITensorIterator begin() const = 0;
-    virtual ITensorIterator end() const = 0;
+    virtual ITensorIterator<false> begin() = 0;
+    virtual ITensorIterator<false> end() = 0;
+    virtual ITensorIterator<true> cbegin() const = 0;
+    virtual ITensorIterator<true> cend() const = 0;
 
     virtual bool isPacked() const = 0;
 
@@ -400,28 +399,28 @@ public:
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
 
-    ITensorIterator begin() override
+    ITensorIterator<false> begin() override
     {
         std::vector<int64_t> startIndices(dims().size(), 0);
-        return ITensorIterator(this, startIndices, false);
+        return ITensorIterator<false>(*this, startIndices, false);
     }
 
-    ITensorIterator end() override
+    ITensorIterator<false> end() override
     {
         std::vector<int64_t> endIndices(dims().size(), 0);
-        return ITensorIterator(this, endIndices, true);
+        return ITensorIterator<false>(*this, endIndices, true);
     }
 
-    ITensorIterator begin() const override
+    ITensorIterator<true> cbegin() const override
     {
         std::vector<int64_t> startIndices(dims().size(), 0);
-        return ITensorIterator(this, startIndices, false);
+        return ITensorIterator<true>(*this, startIndices, false);
     }
 
-    ITensorIterator end() const override
+    ITensorIterator<true> cend() const override
     {
         std::vector<int64_t> endIndices(dims().size(), 0);
-        return ITensorIterator(this, endIndices, true);
+        return ITensorIterator<true>(*this, endIndices, true);
     }
 
 protected:

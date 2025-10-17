@@ -43,8 +43,8 @@ public:
         }
         bool result = true;
 
-        TensorSpan<T> refSpan(reference);
-        TensorSpan<T> implSpan(implementation);
+        ConstTensorSpan<T> refSpan(reference);
+        ConstTensorSpan<T> implSpan(implementation);
 
         auto refItr = refSpan.begin();
         auto implItr = implSpan.begin();

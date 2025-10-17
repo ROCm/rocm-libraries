@@ -92,10 +92,10 @@ TEST(TestTensorSpan, ConstIteration)
     tensor.fillWithValue(3.14);
 
     const ITensor* iTensor = &tensor;
-    TensorSpan<double> span(*iTensor);
+    ConstTensorSpan<double> span(*iTensor);
 
     int count = 0;
-    for(auto it = span.begin(); it != span.end(); ++it)
+    for(auto it = span.cbegin(); it != span.cend(); ++it)
     {
         const double& value = *it;
         EXPECT_DOUBLE_EQ(value, 3.14);
@@ -111,7 +111,7 @@ TEST(TestTensorSpan, ConstSpanFromConstTensor)
     tensor.fillWithValue(1.5f);
 
     const ITensor& iTensor = tensor;
-    TensorSpan<float> span(iTensor);
+    ConstTensorSpan<float> span(iTensor);
 
     // Should be able to read through const span
     for(const float& value : span)
@@ -126,7 +126,7 @@ TEST(TestTensorSpan, ConstRangeBasedForLoop)
     tensor.fillWithValue(42.0f);
 
     ITensor* iTensor = &tensor;
-    const TensorSpan<int> span(*iTensor);
+    ConstTensorSpan<int> span(*iTensor);
 
     int count = 0;
     for(const int& value : span)
@@ -442,7 +442,7 @@ TEST(TestTensorSpan, FromConstITensorReference)
     tensor.fillWithValue(2.0f);
 
     const ITensor& iTensor = tensor;
-    TensorSpan<float> span(iTensor);
+    ConstTensorSpan<float> span(iTensor);
 
     for(const float& value : span)
     {
