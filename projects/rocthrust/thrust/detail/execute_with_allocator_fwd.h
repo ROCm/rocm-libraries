@@ -26,8 +26,10 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/execute_with_dependencies.h>
 #include <thrust/detail/type_traits.h>
+#if !THRUST_COMPILER(NVRTC)
+#  include <thrust/detail/execute_with_dependencies.h>
+#endif // !THRUST_COMPILER(NVRTC)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -57,11 +59,12 @@ public:
       : alloc(alloc_)
   {}
 
-  _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
+  THRUST_HOST_DEVICE _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
   {
     return alloc;
   }
 
+#if !THRUST_COMPILER(NVRTC)
   template <typename... Dependencies>
   THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(Dependencies&&... dependencies) const
@@ -101,6 +104,7 @@ public:
   {
     return {alloc, capture_as_dependency(std::move(dependencies))};
   }
+#endif // !THRUST_COMPILER(NVRTC)
 };
 
 THRUST_SUPPRESS_DEPRECATED_POP
