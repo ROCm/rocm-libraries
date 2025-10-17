@@ -180,6 +180,7 @@ const static std::vector<std::vector<size_t>> partial_pass_adhoc_3D = {
     {160, 80, 72},
     {160, 80, 80},
     {96, 96, 96},
+    {108, 108, 80},
 };
 const static std::vector<size_t> partial_pass_batch_range_3D = {1, 5, 10, 20, 50};
 
