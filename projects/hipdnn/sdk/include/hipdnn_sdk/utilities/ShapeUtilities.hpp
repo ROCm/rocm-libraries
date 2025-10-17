@@ -255,8 +255,9 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
 
     if(inChannels % wChannels != 0)
     {
-        // Non-divisible channel dims could be valid for non-grouped convs
-        return 1;
+        throw std::invalid_argument("Input channels (" + std::to_string(inChannels)
+                                    + ") must be evenly divisible by weight channels ("
+                                    + std::to_string(wChannels) + ")");
     }
 
     return inChannels / wChannels;

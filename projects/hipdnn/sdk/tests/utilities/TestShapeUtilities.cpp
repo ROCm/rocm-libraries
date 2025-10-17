@@ -482,15 +482,6 @@ TEST(TestShapeUtils, CalculateGroupCountThrowsForZeroInputChannels)
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
 
-TEST(TestShapeUtils, CalculateGroupCountReturnsOneForNonDivisibleChannels)
-{
-    std::vector<int64_t> inputDims = {1, 16, 32, 32};
-    std::vector<int64_t> weightDims = {32, 7, 3, 3};
-
-    auto groupCount = calculateGroupCount(inputDims, weightDims);
-    EXPECT_EQ(groupCount, 1);
-}
-
 TEST(TestShapeUtils, CalculateGroupCountThrowsForInputDimsLessThanTwo)
 {
     std::vector<int64_t> inputDims = {16};
@@ -503,6 +494,14 @@ TEST(TestShapeUtils, CalculateGroupCountThrowsForWeightDimsLessThanTwo)
 {
     std::vector<int64_t> inputDims = {1, 16, 32, 32};
     std::vector<int64_t> weightDims = {32};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForNonDivisibleChannels)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32, 7, 3, 3};
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
