@@ -24,6 +24,16 @@
   float* tensor = static_cast<float*>(data);
   ```
 - Use auto when initializing variables, unless the type is not obvious.
+- always use {}'s for if/for/while bodies, even if single line
+  ```cpp
+    // Good
+    if(condition)
+    {
+        doSomething();
+    }
+    // Avoid
+    if(condition) doSomething();
+  ```
 
 ### Build System
 - Always use CMake for managing C/C++ dependencies

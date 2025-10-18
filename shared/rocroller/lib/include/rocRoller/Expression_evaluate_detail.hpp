@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
 namespace rocRoller::Expression::EvaluateDetail

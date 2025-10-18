@@ -27,7 +27,9 @@ trigger:
     - cmake
     - shared/mxdatagenerator
     - shared/rocroller
+    - shared/origami
     - projects/hipblas-common
+    - projects/hipblaslt
     - projects/rocprim
     - projects/rocrand
     exclude:
@@ -39,6 +41,7 @@ trigger:
     - ./**/*.md
 
 pr:
+  autoCancel: false
   branches:
     include:
     - develop
@@ -49,7 +52,9 @@ pr:
     - cmake
     - shared/mxdatagenerator
     - shared/rocroller
+    - shared/origami
     - projects/hipblas-common
+    - projects/hipblaslt
     - projects/rocprim
     - projects/rocrand
     exclude:

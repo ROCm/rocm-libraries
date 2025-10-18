@@ -263,6 +263,9 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
  * This function creates a backend descriptor and deserializes a graph from a serialized byte array 
  * into the descriptor. The serialized graph is provided as an input byte array, and the size of 
  * the graph in bytes is specified. The created descriptor will encapsulate the deserialized graph.
+ * 
+ * IMPORTANT: Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
+ * and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
  *
  * @param [out] descriptor        Pointer to a backend descriptor where the deserialized graph will 
  *                                be stored.

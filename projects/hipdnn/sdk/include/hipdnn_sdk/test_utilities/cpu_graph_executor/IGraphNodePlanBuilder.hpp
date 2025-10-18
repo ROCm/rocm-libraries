@@ -22,7 +22,7 @@ public:
 
     virtual std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node)
+                      const hipdnn_sdk::data_objects::Node& node) const
         = 0;
 };
 
