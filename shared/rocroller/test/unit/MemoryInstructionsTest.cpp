@@ -35,11 +35,11 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
@@ -506,7 +506,7 @@ namespace MemoryInstructionsTest
 
         void genBufferTest()
         {
-            int N = numBytesParam();
+            int  N             = numBytesParam();
             bool useBufferExpr = useBufferExprParam();
 
             auto k = m_context->kernel();
@@ -542,7 +542,7 @@ namespace MemoryInstructionsTest
 
                 std::shared_ptr<rocRoller::BufferDescriptor> bufDesc;
 
-                if (!useBufferExpr)
+                if(!useBufferExpr)
                 {
                     bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
                     co_yield bufDesc->setup();
@@ -551,11 +551,14 @@ namespace MemoryInstructionsTest
                 }
                 else
                 {
-                    auto v = Register::Value::Placeholder(m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                    auto v = Register::Value::Placeholder(m_context,
+                                                          Register::Type::Scalar,
+                                                          {DataType::None, PointerType::Buffer},
+                                                          1);
 
                     // Manually create buffer descriptor expression
                     uint32_t opts = rocRoller::BufferDescriptor::getDefaultOptionsValue(m_context);
-                    auto bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                    auto     bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                     bufferExpr = bfc(Expression::literal(2147483548), bufferExpr, 0, 64, 32);
                     bufferExpr = bfc(Expression::literal(opts), bufferExpr, 0, 96, 32);
                     // TODO: this bfc generates two redundant bfe instructions

@@ -143,24 +143,21 @@ namespace rocRoller
                 }
                 else
                 {
-                    uint32_t      overlapStart = std::max(combineStartBit, dwordStartBit);
-                    uint32_t      overlapEnd   = std::min(combineEndBit, dwordEndBit);
-                    uint32_t      overlapWidth = overlapEnd - overlapStart + 1;
-                    uint32_t      srcOffset    = expr.srcOffset + (overlapStart - combineStartBit);
-                    uint32_t      dstOffset    = overlapStart - dwordStartBit;
+                    uint32_t overlapStart = std::max(combineStartBit, dwordStartBit);
+                    uint32_t overlapEnd   = std::min(combineEndBit, dwordEndBit);
+                    uint32_t overlapWidth = overlapEnd - overlapStart + 1;
+                    uint32_t srcOffset    = expr.srcOffset + (overlapStart - combineStartBit);
+                    uint32_t dstOffset    = overlapStart - dwordStartBit;
 
                     ExpressionPtr srcDWord = expr.lhs;
-                    if (resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize) {
-                        srcDWord = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
+                    if(resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize)
+                    {
+                        srcDWord  = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
                         srcOffset = 0;
                     }
 
                     ExpressionPtr subBitfieldCombine
-                        = bfc(srcDWord,
-                              dstDWord,
-                              srcOffset,
-                              dstOffset,
-                              overlapWidth);
+                        = bfc(srcDWord, dstDWord, srcOffset, dstOffset, overlapWidth);
 
                     fields.push_back(subBitfieldCombine);
                 }
