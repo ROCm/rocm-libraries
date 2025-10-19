@@ -1,6 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-enable_language(Fortan)
 find_package(BLAS REQUIRED)
 find_package(OpenMP REQUIRED)
 
