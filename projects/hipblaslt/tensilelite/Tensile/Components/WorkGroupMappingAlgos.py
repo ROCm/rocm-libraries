@@ -120,7 +120,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
             module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
-            module.add(SAndB32(dst=sgpr(SgprWGMXCC), shiftHex=sgpr(SgprWGMXCC), src=hex(63), comment="Get WGMXCC"))
+            module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
             module.addComment0("remap WGs if WGMXCC > 1")
             module.add(SCmpGtI32(src0=sgpr(SgprWGMXCC), src1=1))
             module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
