@@ -62,13 +62,13 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    if (xDesc.GetLayout_t() != yDesc.GetLayout_t())
+    if(xDesc.GetLayout_t() != yDesc.GetLayout_t())
     {
         throw std::runtime_error("Input and output tensor layout must be the same");
     }
-    bool isLayoutNHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
+    bool isLayoutNHWC       = (xDesc.GetLayout_t() == miopenTensorNHWC);
     unsigned int in_cstride = h * w;
-    size_t max_localsize = 256;
+    size_t max_localsize    = 256;
     size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
     size_t vectorsize = isLayoutNHWC ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
                                      : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
@@ -92,7 +92,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     zgridsize  = 1;
 
     // HIP runtime does not support non-uniform blocks
-    if (use_hip)
+    if(use_hip)
     {
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
@@ -170,8 +170,11 @@ template <typename XDataType,
           typename ScaleDataType,
           typename BiasDataType,
           typename MeanVarDataType>
-struct BatchNormFwdInferTester
-    : public BatchNormInferTester<XDataType, YDataType, ScaleDataType, BiasDataType, MeanVarDataType>
+struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
+                                                             YDataType,
+                                                             ScaleDataType,
+                                                             BiasDataType,
+                                                             MeanVarDataType>
 {
 #if PERF_ENABLE
     BatchNormFwdInferTester()
@@ -213,13 +216,11 @@ struct BatchNormFwdInferTester
     }
 };
 
-struct GPU_bn_fwd_infer_spatial_FP32
-    : BatchNormFwdInferTester<float, float, float, float, float>
+struct GPU_bn_fwd_infer_spatial_FP32 : BatchNormFwdInferTester<float, float, float, float, float>
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_FP32
-    : BatchNormFwdInferTester<float, float, float, float, float>
+struct GPU_bn_fwd_infer_per_act_FP32 : BatchNormFwdInferTester<float, float, float, float, float>
 {
 };
 
@@ -233,10 +234,7 @@ struct GPU_bn_fwd_infer_per_act_FP16
 {
 };
 
-std::vector<miopenActivationMode_t> ActivationConfigs()
-{
-    return {miopenActivationPASTHRU};
-}
+std::vector<miopenActivationMode_t> ActivationConfigs() { return {miopenActivationPASTHRU}; }
 
 TEST_P(GPU_bn_fwd_infer_spatial_FP32, PortTest)
 {
@@ -311,12 +309,10 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_spatial_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_bn_fwd_infer_per_act_FP16,
+                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
+                                              miopenBNPerActivation))));

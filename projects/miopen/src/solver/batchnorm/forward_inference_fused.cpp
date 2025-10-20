@@ -92,12 +92,12 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
 
     size_t read_unit = 1;
     size_t read_len  = (mode == miopenBNSpatial) ? h * w : c * h * w;
-    read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    read_unit        = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
 
     size_t xlocalsize = 256;
-    size_t xgridsize = read_len / read_unit;
-    size_t ygridsize = (mode == miopenBNSpatial) ? size_t(c) : 1;
-    size_t zgridsize = 1;
+    size_t xgridsize  = read_len / read_unit;
+    size_t ygridsize  = (mode == miopenBNSpatial) ? size_t(c) : 1;
+    size_t zgridsize  = 1;
 
     // HIP runtime does not support non-uniform blocks
     // Adjust the xlocalsize and xgridsize accordingly

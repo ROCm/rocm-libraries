@@ -184,8 +184,11 @@ template <typename XDataType,
           typename ScaleDataType,
           typename BiasDataType,
           typename MeanVarDataType>
-struct BatchNormActivInferTester
-    : public BatchNormInferTester<XDataType, YDataType, ScaleDataType, BiasDataType, MeanVarDataType>
+struct BatchNormActivInferTester : public BatchNormInferTester<XDataType,
+                                                               YDataType,
+                                                               ScaleDataType,
+                                                               BiasDataType,
+                                                               MeanVarDataType>
 {
 #if PERF_ENABLE
     BatchNormActivInferTester()
@@ -341,13 +344,11 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_per_act_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_bn_activ_infer_per_act_FP16,
+                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
+                                              miopenBNPerActivation))));
 #endif

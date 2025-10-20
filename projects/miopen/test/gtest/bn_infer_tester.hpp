@@ -76,7 +76,7 @@ struct BatchNormInferTester
         estVariance_dev = handle.Write(estVariance.data);
 
         // Enable profiling
-        if (perf_enable)
+        if(perf_enable)
         {
             handle.EnableProfiling(true);
         }
@@ -122,7 +122,7 @@ struct BatchNormInferTester
 
     void TearDown() override
     {
-        if (perf_enable)
+        if(perf_enable)
         {
             // get the kernel handle
             auto&& handle = get_handle();
@@ -176,7 +176,7 @@ struct BatchNormInferTester
     const float activ_beta  = static_cast<float>(0.5f);
     const float activ_gamma = static_cast<float>(0.5f);
     double epsilon          = 1.0e-5;
-    bool perf_enable = false;
+    bool perf_enable        = false;
     PerfHelper<float> perf_helper;
 };
 

@@ -122,14 +122,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT value[MIO_BN_VEC_SIZE];
 
     // loop over the batches
-    for (unsigned int n = 0; n < batchSize; ++n)
+    for(unsigned int n = 0; n < batchSize; ++n)
     {
         // load input value
         const unsigned int batchIndex =
             (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
         *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
             *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
-        
+
         // perform batchnorm and activation
 #pragma unroll
         for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
