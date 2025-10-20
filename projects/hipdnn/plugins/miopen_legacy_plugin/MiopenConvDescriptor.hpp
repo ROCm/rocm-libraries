@@ -5,6 +5,7 @@
 
 #include <hipdnn_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <miopen/miopen.h>
 
 namespace miopen_legacy_plugin
@@ -18,6 +19,8 @@ public:
                          const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes);
     MiopenConvDescriptor(size_t spatialDimCount,
                          const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes);
+    MiopenConvDescriptor(size_t spatialDimCount,
+                         const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes);
 
     MiopenConvDescriptor(const MiopenConvDescriptor&) = delete;
     MiopenConvDescriptor& operator=(const MiopenConvDescriptor&) = delete;

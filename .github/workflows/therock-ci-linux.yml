@@ -7,7 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
-
+      test_type:
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +20,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:044b113562629f4bd2ec5d2e64b32eee11562d48fb1a75d7493daec9dd8d8292
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:2f3ebd0beb04c449fdb36933e54bdc69483b914fb9005594d3fc9444c206b54b
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -38,7 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 67b14d45696cf31a7cf5adbb0743814502e7d190 # 2025-10-08 commit
+          ref: 5542f136fe57cd1c485dd369277ef0613fd919b9 # 2025-10-15 commit
 
       - name: Install python deps
         run: |
@@ -127,3 +128,4 @@ jobs:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
+      test_type: ${{ inputs.test_type }}
