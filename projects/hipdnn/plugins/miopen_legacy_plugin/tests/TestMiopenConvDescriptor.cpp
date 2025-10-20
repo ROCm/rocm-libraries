@@ -29,7 +29,7 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr);
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1);
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
@@ -72,12 +72,12 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountFwd)
         builder.GetBufferPointer());
 
     EXPECT_THROW(MiopenConvDescriptor convDesc(
-                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr),
+                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr));
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr),
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr, 1));
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -100,7 +100,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -123,7 +123,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -146,7 +146,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -169,7 +169,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -192,7 +192,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationFwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -212,7 +212,7 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr);
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1);
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
@@ -255,12 +255,12 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountBwd)
         builder.GetBufferPointer());
 
     EXPECT_THROW(MiopenConvDescriptor convDesc(
-                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr),
+                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr));
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr),
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr, 1));
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -283,7 +283,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -306,7 +306,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -329,7 +329,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -352,7 +352,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -375,7 +375,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationBwd)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionBwdAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -395,7 +395,7 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr);
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1);
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
@@ -438,12 +438,12 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountWrw)
         builder.GetBufferPointer());
 
     EXPECT_THROW(MiopenConvDescriptor convDesc(
-                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr),
+                     static_cast<size_t>(std::numeric_limits<int>::max()) + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() - 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
-    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr));
-    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr),
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(prePadding.size(), *attrPtr, 1));
+    EXPECT_THROW(MiopenConvDescriptor convDesc(prePadding.size() + 1, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -466,7 +466,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -489,7 +489,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -512,7 +512,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -535,7 +535,7 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -558,6 +558,75 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationWrw)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(
         builder.GetBufferPointer());
 
-    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr),
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1),
+                 hipdnn_plugin::HipdnnPluginException);
+}
+
+TEST(TestMiopenConvDescriptor, AcceptsValidGroupCount)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1));
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 2));
+    EXPECT_NO_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 4));
+}
+
+TEST(TestMiopenConvDescriptor, VerifiesGroupCountSetCorrectly)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+    int groupCount = 4;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, groupCount);
+
+    int returnedGroupCount = 0;
+    miopenStatus_t status
+        = miopenGetConvolutionGroupCount(convDesc.convDescriptor(), &returnedGroupCount);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(returnedGroupCount, groupCount);
+}
+
+TEST(TestMiopenConvDescriptor, ThrowsOnInvalidGroupCount)
+{
+    const std::vector<int64_t> prePadding{0, 0, 0};
+    const std::vector<int64_t> postPadding{0, 0, 0};
+    const std::vector<int64_t> stride{1, 1, 1};
+    const std::vector<int64_t> dilation{1, 1, 1};
+    const auto convMode = hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    size_t spatialDimCount = 3;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>(
+        builder.GetBufferPointer());
+
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 0),
+                 hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, -1),
                  hipdnn_plugin::HipdnnPluginException);
 }
