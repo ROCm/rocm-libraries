@@ -471,17 +471,15 @@ namespace rocRoller
 
             ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
-                auto cpy = expr;
+                auto cpy        = expr;
                 auto rhsVarType = resultVariableType(cpy.rhs);
 
                 // Nothing to combine
                 if(cpy.width == 0)
                     return call(cpy.rhs);
                 // Src overrides entire dst
-                else if(cpy.dstOffset == 0
-                        && cpy.width == rhsVarType.getElementSize() * 8)
-                    return call(bfe(
-                        rhsVarType.dataType, cpy.lhs, cpy.srcOffset, cpy.width));
+                else if(cpy.dstOffset == 0 && cpy.width == rhsVarType.getElementSize() * 8)
+                    return call(bfe(rhsVarType.dataType, cpy.lhs, cpy.srcOffset, cpy.width));
 
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
