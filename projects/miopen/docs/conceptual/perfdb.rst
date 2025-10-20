@@ -95,8 +95,8 @@ Note that the API call miopenSetTuningPolicy() can be used to set the same modes
     miopenSetTuningPolicy(handle, miopenTuningPolicyNone);
 
 Note that this API method is supported for both convolutions and batchnorms, although batchnorm does
-not support a policy of DB_UPDATE (this will be a no-op and the user should specify SEARCH_DB_UPDATE
-instead if they want DB_UPDATE behaviour).
+not support a policy of ``DB_UPDATE`` (this will be a no-op and the user should specify ``SEARCH_DB_UPDATE``
+instead if they want ``DB_UPDATE`` behavior).
 
 If both the API method and environment variable are used, then the API method takes precedence.
 
