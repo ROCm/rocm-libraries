@@ -34,7 +34,6 @@ public:
 
     virtual void markHostModified() = 0;
     virtual void markDeviceModified() = 0;
-    virtual bool isModified() const = 0;
 
     virtual size_t count() const = 0;
     virtual bool empty() const = 0;
@@ -199,7 +198,6 @@ public:
         _hostValid = true;
         _deviceValid = false;
         _currentLocation = MemoryLocation::HOST;
-        _lastModifiedLocation = MemoryLocation::HOST;
     }
 
     // Mark memory as modified on device
@@ -208,12 +206,6 @@ public:
         _deviceValid = true;
         _hostValid = false;
         _currentLocation = MemoryLocation::DEVICE;
-        _lastModifiedLocation = MemoryLocation::DEVICE;
-    }
-
-    bool isModified() const override
-    {
-        return _lastModifiedLocation != MemoryLocation::NONE;
     }
 
     size_t count() const override
@@ -238,7 +230,6 @@ public:
         _itemSize = 0;
         _totalSize = 0;
         _currentLocation = MemoryLocation::NONE;
-        _lastModifiedLocation = MemoryLocation::NONE;
         _hostValid = false;
         _deviceValid = false;
     }
@@ -371,7 +362,6 @@ private:
     size_t _itemSize;
     size_t _totalSize;
     MemoryLocation _currentLocation{MemoryLocation::NONE};
-    MemoryLocation _lastModifiedLocation{MemoryLocation::NONE};
     bool _hostValid{false};
     bool _deviceValid{false};
     hipStream_t _stream{nullptr};

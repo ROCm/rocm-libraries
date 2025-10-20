@@ -59,9 +59,7 @@ protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
                      unsigned int seed,
                      const IReferenceValidation& validator,
-                     const std::vector<int64_t>& tensorsToValidate,
-                     const std::function<void(GraphTensorBundle&, unsigned int)>& initializer
-                     = defaultInitializer)
+                     const std::vector<int64_t>& tensorsToValidate)
     {
         auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
         hipdnn_plugin::GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
@@ -70,8 +68,18 @@ protected:
         GraphTensorBundle gpuBundle(tensorMap);
         GraphTensorBundle cpuBundle(tensorMap);
 
-        initializer(gpuBundle, seed);
-        initializer(cpuBundle, seed);
+        verifyGraph(graph, seed, cpuBundle, gpuBundle, validator, tensorsToValidate);
+    }
+
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph,
+                     unsigned int seed,
+                     GraphTensorBundle& cpuBundle,
+                     GraphTensorBundle& gpuBundle,
+                     const IReferenceValidation& validator,
+                     const std::vector<int64_t>& tensorsToValidate)
+    {
+        initializeBundle(graph, gpuBundle, seed);
+        initializeBundle(graph, cpuBundle, seed);
 
         auto result = graph.validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -92,6 +100,16 @@ protected:
 
             bool valid = validator.allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId;
+        }
+    }
+
+    virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
+                                  GraphTensorBundle& bundle,
+                                  unsigned int seed)
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
         }
     }
 
@@ -130,14 +148,6 @@ private:
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
-    }
-
-    static void defaultInitializer(GraphTensorBundle& bundle, unsigned int seed)
-    {
-        for(auto& tensorPair : bundle.tensors)
-        {
-            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
-        }
     }
 
     hipdnnHandle_t _handle = nullptr;

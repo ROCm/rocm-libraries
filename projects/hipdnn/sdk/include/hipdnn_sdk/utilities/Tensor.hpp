@@ -95,7 +95,6 @@ public:
 
     virtual bool isPacked() const = 0;
 
-    virtual bool isModified() const = 0;
     virtual void markHostModified() = 0;
     virtual void markDeviceModified() = 0;
 
@@ -188,11 +187,6 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
-
-    bool isModified() const override
-    {
-        return memory().isModified();
-    }
 
     void markHostModified() override
     {

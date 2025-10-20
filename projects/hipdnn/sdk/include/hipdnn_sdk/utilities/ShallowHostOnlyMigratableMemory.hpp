@@ -85,11 +85,6 @@ public:
         throwNotSupported();
     }
 
-    bool isModified() const override
-    {
-        return false;
-    }
-
     size_t count() const override
     {
         return _count;
