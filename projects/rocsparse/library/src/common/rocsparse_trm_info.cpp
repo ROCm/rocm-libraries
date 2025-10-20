@@ -197,17 +197,6 @@ void rocsparse::trm_info_t::set_index_indextype(const rocsparse_indextype value)
     this->index_type_J = value;
 }
 
-void rocsparse::trm_info_t::recreate(rocsparse::trm_info_t** const dp_that)
-{
-    if(dp_that[0] != nullptr)
-    {
-        delete dp_that[0];
-        dp_that[0] = nullptr;
-    }
-
-    dp_that[0] = new rocsparse::trm_info_t();
-}
-
 void rocsparse::trm_info_t::destroy(rocsparse::trm_info_t* const p_that)
 {
     if(p_that != nullptr)

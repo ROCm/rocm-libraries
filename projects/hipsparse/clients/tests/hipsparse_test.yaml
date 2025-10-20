@@ -21,4 +21,11 @@
 #
 # ########################################################################
 
+# level1
 include: test_axpyi.yaml
+include: test_doti.yaml
+include: test_dotci.yaml
+include: test_roti.yaml
+include: test_sctr.yaml
+include: test_gthr.yaml
+include: test_gthrz.yaml
