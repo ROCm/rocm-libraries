@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-function(add_rocprim_example EXAMPLE_SOURCE)
+function(add_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
 
   if(USE_HIPCXX)
@@ -33,6 +33,7 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     PRIVATE
     rocprim
   )
+
   if(USE_HIPCXX)
     target_link_libraries(${EXAMPLE_TARGET}
       PRIVATE
@@ -43,20 +44,31 @@ function(add_rocprim_example EXAMPLE_SOURCE)
       PRIVATE
       hip::device)
   endif()
+
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/example"
   )
+
+  # Use an EXAMPLE_SOURCE like "rocprim/device/example_device_search.cpp"
+  # to create a test named "example.rocprim.device.example_device_search"
+  get_filename_component(DIR_PATH "${EXAMPLE_SOURCE}" PATH)
+  string(REPLACE "/" "." DIR_PATH_DOTS "${DIR_PATH}")
+  set(TEST_NAME "example.${DIR_PATH_DOTS}.${EXAMPLE_TARGET}")
+  add_test(NAME ${TEST_NAME} COMMAND ${EXAMPLE_TARGET})
+
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
+
     # for now adding in all .dll as dependency chain is not cmake based on win32
     file( GLOB third_party_dlls
-    LIST_DIRECTORIES ON
-    CONFIGURE_DEPENDS
-    ${HIP_DIR}/bin/*.dll
-    ${CMAKE_SOURCE_DIR}/rtest.*
+      LIST_DIRECTORIES ON
+      CONFIGURE_DEPENDS
+      ${HIP_DIR}/bin/*.dll
+      ${CMAKE_SOURCE_DIR}/rtest.*
     )
+
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/example )
     endforeach( file_i )
@@ -67,5 +79,6 @@ endfunction()
 # rocPRIM examples
 # ****************************************************************************
 
-add_rocprim_example(example_temporary_storage.cpp)
-add_rocprim_example(example_type_traits_interface.cpp)
+add_example(extra/example_temporary_storage.cpp)
+add_example(extra/example_type_traits_interface.cpp)
+add_example(rocprim/device/example_device_search.cpp)

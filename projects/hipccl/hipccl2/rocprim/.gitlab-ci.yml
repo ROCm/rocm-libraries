@@ -205,10 +205,12 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/CMakeCache.txt
       - $BUILD_DIR/CTestTestfile.cmake
       - $BUILD_DIR/deps/googlebenchmark/
+      - $BUILD_DIR/deps/rocrand/
+      - $BUILD_DIR/example/CTestTestfile.cmake
+      - $BUILD_DIR/example/example_*
       - $BUILD_DIR/gtest/
       - $BUILD_DIR/test/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
-      - $BUILD_DIR/deps/rocrand/
       - $BUILD_DIR/test/rocprim/test_*
       - $BUILD_DIR/test/rocprim/libtest_*
       - $BUILD_DIR/test/test_*
