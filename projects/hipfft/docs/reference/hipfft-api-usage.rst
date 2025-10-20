@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipFFT documentation and API reference library
-  :keywords: FFT, hipFFT, rocFFT, ROCm, API, documentation
+  :description: hipFFT documentation, hipFFTW documentation, and API reference library
+  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation
 
 .. _hipfft-api-usage:
 
