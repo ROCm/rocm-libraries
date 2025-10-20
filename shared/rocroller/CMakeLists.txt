@@ -6,6 +6,11 @@ set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
+execute_process(COMMAND ${CMAKE_COMMAND} -E environment
+                OUTPUT_VARIABLE ENV_OUTPUT)
+message(STATUS "Environment variables:\n${ENV_OUTPUT}")
+
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CMakeRC)
