@@ -220,6 +220,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
+  startVgprCvt: int                      = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -254,6 +255,7 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
+  freeSgprVarPool                        = set()
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
@@ -281,10 +283,12 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-
-  perIterLocalWriteCanSkip: List[int]    = field(init=False)
+  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
+
+  WGMTransformLevels: int                = -1
 
   # Epilogue states
   preloadScaleA = False
@@ -311,6 +315,7 @@ class StateValues:
     self.nonPostLoopSgpr = []
 
     self.preloadGuard = []
+    self.tmpvgpr = {}
 
 @dataclass
 class StateVgprs:
@@ -549,6 +554,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
     siaComponent.schedIntoIteration(self, kernel, tensorParametersA, tensorParametersB, \
       localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, \
       globalReadIncBCode, isNGLL)
+
+  ##############################################################################
+  # packItemsConditional: pack src items into dst items until numPack or searchString is found
+  # returns number of items packed
+  ##############################################################################
+  def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings):
+    numPacked = 0
+    if numPack == 0:
+      numPack = 999
+    for n in range(numPack):
+      if srcPackItems:
+        numPacked += 1
+        item = srcPackItems.pop(0)
+        dstPackItems.append(item)
+        itemStr = str(item)
+        for string in searchStrings:
+          if string in itemStr:
+            return numPacked
+    return numPacked
 
   ##############################################################################
   # Schedule work into the each unroll loop iteration
@@ -949,16 +973,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
-          # 26 is the instruction count for the TF32 emulation sequence in LocalRead.py
-          instPerPackA = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packAItems)
-          instPerPackB = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packBItems)
+          if kernel["UseDirect32XEmulation"]:
+            # none needed for direct
+            instPerPackA = 0
+            instPerPackB = 0
+          else:
+            instPerPackA = self.states.numPackCvt
+            instPerPackB = self.states.numPackCvt
           while packAItems or packBItems:
-            for n in range(instPerPackA):
-              if packAItems:
-                packItems.append(packAItems.pop(0))
-            for n in range(instPerPackB):
-              if packBItems:
-                packItems.append(packBItems.pop(0))
+            KernelWriter._packItemsConditional(instPerPackA, packAItems, packItems, ["__TF32_1", "__TF32_2"])
+            KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, ["__TF32_1", "__TF32_2"])
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1422,20 +1446,32 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
 
           if not schedulePackConsiderMetadata:
-              # we put 2 pack in each mfma
-              for j in range(instPerPackA):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
+              if kernel["UseF32XEmulation"]:
+                tmp = []
+                curPackIdx += KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
+                for n in tmp:
+                  iterCode.add(n)
+              else:
+                # we put 2 pack in each mfma
+                for j in range(instPerPackA):
+                  if packItems:
+                    iterCode.add(packItems.pop(0))
+                    curPackIdx += 1
               if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
                 for j in range(ceil(instPerPackM)):
                   if packItems:
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
-              for j in range(instPerPackB):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
+              if kernel["UseF32XEmulation"]:
+                tmp = []
+                curPackIdx += KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
+                for n in tmp:
+                  iterCode.add(n)
+              else:
+                for j in range(instPerPackB):
+                  if packItems:
+                    iterCode.add(packItems.pop(0))
+                    curPackIdx += 1
               # since packed register need to wait 2 quad cycle to finish packing
               # we insert pack instruction if we can, or s_nop
               while curPackIdx < numPack+2:
@@ -1448,7 +1484,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   break
               if kernel["UseF32XEmulation"]:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
-                numDummy = 1 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 2
+                numDummy = 0 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 1
                 for numd in range(numDummy):
                   iterCode.add(SNop(waitState=0, comment="VALU packing writes to be consumed by matrix instruction"))
           else:
@@ -1825,6 +1861,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not forceNoTileCode:
       module.add(self.graWorkGroup(kernel, tensorParametersA, tensorParametersB))
 
+
     self.dontAppendCode = forceNoTileCode
 
     tPM = tensorParametersA["tpsMetadata"]
@@ -1837,6 +1874,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StreamK"] != 0:
       module.add(self.localReadAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
       module.add(self.localWriteAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
+
+    module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
 
     # tile assignments
     module.addComment1("global read addresses: tile offset assignment a")
@@ -1921,6 +1960,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.addComment1("global read addresses: shift metadata")
           module.add(self.graMetadataShift(kernel, tensorParametersB))
 
+    # addresses
+    if not forceNoTileCode:
+      module.addComment1("global read addresses: addresses a")
+      module.add(self.graAddresses(kernel, tensorParametersA))
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+        module.addComment1("global read addresses: addresses metadata")
+        module.add(self.graAddresses(kernel, tPM))
+      module.addComment1("global read addresses: addresses b")
+      module.add(self.graAddresses(kernel, tensorParametersB))
+
+    # workgoup SGPRs no longer needed
+
+    module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+
     # final offsets
     module.addComment1("global read addresses: final offsets a")
     module.add(self.graFinalOffsets(kernel, tensorParametersA))
@@ -1934,16 +1987,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(self.graFinalOffsets(kernel, tensorParametersB))
     self.dontAppendCode = False
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
-
-    # addresses
-    if not forceNoTileCode:
-      module.addComment1("global read addresses: addresses a")
-      module.add(self.graAddresses(kernel, tensorParametersA))
-      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        module.addComment1("global read addresses: addresses metadata")
-        module.add(self.graAddresses(kernel, tPM))
-      module.addComment1("global read addresses: addresses b")
-      module.add(self.graAddresses(kernel, tensorParametersB))
 
     # Add increment code
     gsuComponent = Component.GSU.find(self)
@@ -2489,7 +2532,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     pflr     = self.states.numItersPLR  # how many pf already done above
 
-
     # Store instruction streams across all iterations
     MfmaCodeAllIters = Module()
     LRSwapAAllIters = Module()
@@ -2779,10 +2821,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
+
+
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
-    module.add(loopComponent.openPersistentLoop(self, kernel))
 
+    module.add(loopComponent.openPersistentLoop(self, kernel))
     module.add(self.setupNewTile(kernel, tensorParametersA, tensorParametersB, isOptNLL=False))
 
     if self.do["executeToPrefetchEnd"]:
@@ -2794,6 +2838,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
         module.add(self.openShadowInit())
+        # SrdD/SrdC are used starting now, remove from sgpr pool
+        self.removeSgprVarFromPool("SrdD")
+        self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
         if self.states.doShadowInit == 2:
           module.add(self.initC(kernel)) # initC while waiting for global reads
@@ -2956,6 +3003,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # second GR buffer check for DTV
       isDTVGRSecondBuf = True if isDTV else False
       module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
+
       loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SSubU32(dst=loopCounter, src0=loopCounter, \
@@ -3041,6 +3089,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.lastVgprForReads - self.states.lastValuAB, "address vgpr")
     module.addComment1("Tail: add address/G2L vgpr [%u...%u) to pool" % \
         (self.states.lastValuAB, self.states.lastVgprForReads))
+
+    self.removeSgprVarFromPool("SrdWS")
 
     if not kernel["NoTailLoop"]:
       ########################################
@@ -4570,6 +4620,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.startVgprSerial = vgprIdx
     vgprIdx += 1 # for vgpr serial id
 
+    if kernel["UseDirect32XEmulation"]:
+      numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
+      if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
+        kernel["UseDirect32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = True
+      else:
+        #align 64 bit
+        vgprIdx = ((vgprIdx+1)//2)*2
+        self.states.startVgprCvt = vgprIdx
+        vgprIdx += numVgprsEmu # for vgpr 32XEmulation
+
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
       raise RuntimeError("Generating asm kernel error: total vgpr: %u not in [0, %u].\n" % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
@@ -4697,6 +4758,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
 
+    # the sgprs overlap with wg ids
     if self.states.doShadowInit and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
@@ -4826,8 +4888,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("StreamKIterEnd", 1)
       self.defineSgpr("StreamKLocalStart", 1)
       self.defineSgpr("StreamKLocalEnd", 1)
+      if len(kernel["SpaceFillingAlgo"]):
+        self.defineSgpr("StreamKTileID", 1)
       if kernel["StreamKAtomic"] == 0:
         self.defineSgpr("SrdWS", 4, 4)
+
+    # These SGPRs aren't used right away, add them to spr pool temporarily
+    if self.states.doShadowInit and kernel["BufferStore"]:
+      self.addSgprVarToPool("SrdC")
+    if kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
+      self.addSgprVarToPool("SrdWS")
 
     #------------------------
     # Registers defined below this point are not available in the post-loop
@@ -5114,6 +5184,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def defineAndResources(self, kernel, tPA, tPB, tPM):
+    return ""
+
+  ##############################################################################
+  # Allocate GR Address Resources
+  ##############################################################################
+  @abc.abstractmethod
+  def removeGRSrdVariableSgprsFromPool(self, kernel):
+    return ""
+
+  ##############################################################################
+  # Allocate GR Address Resources
+  ##############################################################################
+  @abc.abstractmethod
+  def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
 
   ##############################################################################

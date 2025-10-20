@@ -15,6 +15,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -223,6 +224,8 @@ protected:
         }
 
         yTensorAttr->set_data_type(inputDataType);
+        yTensorAttr->set_dim(graphTensorBundle.yTensor.dims());
+        yTensorAttr->set_stride(graphTensorBundle.yTensor.strides());
 
         // Validate and build graph
         auto result = graph->validate();
@@ -261,7 +264,7 @@ protected:
             cpuTensorBundle.meanTensor,
             cpuTensorBundle.varianceTensor,
             cpuTensorBundle.yTensor,
-            1e-3);
+            BATCHNORM_DEFAULT_EPSILON);
     }
 
     void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)

@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 using namespace hipdnn_sdk::utilities;
@@ -68,7 +69,8 @@ struct BatchnormTrainTensorBundle
         invVarianceTensor.fillWithRandomValues(
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
 
-        epsilonTensor.fillWithValue(static_cast<MeanVarianceDataType>(1e-5f));
+        epsilonTensor.fillWithValue(
+            static_cast<MeanVarianceDataType>(static_cast<float>(BATCHNORM_DEFAULT_EPSILON)));
 
         if(useOptionalTensors)
         {

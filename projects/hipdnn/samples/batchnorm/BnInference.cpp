@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -111,7 +112,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         }
 
         auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
-        double epsilon = 1e-3;
+        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
             batchnormFwdInference(

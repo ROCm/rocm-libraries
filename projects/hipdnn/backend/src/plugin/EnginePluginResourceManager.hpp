@@ -69,6 +69,8 @@ public:
     virtual size_t getWorkspaceSize(int64_t engineId,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const GraphDescriptor* graphDesc) const;
+    virtual size_t getWorkspaceSize(int64_t engineId,
+                                    hipdnnEnginePluginExecutionContext_t executionContext) const;
 
     virtual void executeOpGraph(hipdnnBackendDescriptor_t executionPlan,
                                 hipdnnBackendDescriptor_t variantPack) const;

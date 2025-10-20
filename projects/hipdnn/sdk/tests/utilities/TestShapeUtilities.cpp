@@ -447,3 +447,61 @@ TEST(TestShapeUtils, GetDerivedShapeThrowsForSingleDimension)
     std::vector<int64_t> shape = {10};
     EXPECT_THROW(getDerivedShape(shape), std::runtime_error);
 }
+
+TEST(TestShapeUtils, CalculateGroupCountReturnsOneForStandardConvolution)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32, 16, 3, 3};
+
+    auto groupCount = calculateGroupCount(inputDims, weightDims);
+    EXPECT_EQ(groupCount, 1);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountReturnsCorrectValueForGroupedConvolution)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32, 8, 3, 3};
+
+    auto groupCount = calculateGroupCount(inputDims, weightDims);
+    EXPECT_EQ(groupCount, 2);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForZeroWeightChannels)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32, 0, 3, 3};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForZeroInputChannels)
+{
+    std::vector<int64_t> inputDims = {1, 0, 32, 32};
+    std::vector<int64_t> weightDims = {32, 8, 3, 3};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForInputDimsLessThanTwo)
+{
+    std::vector<int64_t> inputDims = {16};
+    std::vector<int64_t> weightDims = {32, 16, 3, 3};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForWeightDimsLessThanTwo)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
+
+TEST(TestShapeUtils, CalculateGroupCountThrowsForNonDivisibleChannels)
+{
+    std::vector<int64_t> inputDims = {1, 16, 32, 32};
+    std::vector<int64_t> weightDims = {32, 7, 3, 3};
+
+    EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
+}
