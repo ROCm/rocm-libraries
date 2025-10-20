@@ -25,7 +25,6 @@
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
-#  include <utility>
 #endif
 
 THRUST_DIAG_PUSH
@@ -208,43 +207,6 @@ typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 {
   return __t;
 }
-
-// Ad-hoc testing for other functionals
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
-{
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-  int i    = 42;
-  double d = 3.14;
-
-  // pass through
-  ASSERT_EQUAL(thrust::identity<int>{}(i), 42);
-  ASSERT_EQUAL(thrust::identity<int>{}(d), 3);
-
-  // modification through
-  thrust::identity<int>{}(i) = 1337;
-  ASSERT_EQUAL(i, 1337);
-
-  // value categories and const
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(i))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value,
-                "");
-
-  // value categories when casting to different type
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
-  // unfortunately, old versions of MSVC or nvcc in MSVC mode pick the `const int&` overload instead of `int&&`
-#if !THRUST_COMPILER(MSVC, <, 19, 29) && !(THRUST_COMPILER(MSVC) && THRUST_CUDA_COMPILER(NVCC, <, 12, 1))
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
-#endif
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value,
-                "");
-  THRUST_SUPPRESS_DEPRECATED_POP
-}
-DECLARE_UNITTEST(TestIdentityFunctional);
 
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctionalVector()

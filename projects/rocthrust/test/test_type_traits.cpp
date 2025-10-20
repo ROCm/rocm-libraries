@@ -67,23 +67,14 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
-  using ConstantIterator = thrust::constant_iterator<int>;
-  using CountingIterator = thrust::counting_iterator<int>;
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-  using TransformIterator1 = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
-  THRUST_SUPPRESS_DEPRECATED_POP
-  using TransformIterator2 = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
-  using ZipIterator        = thrust::zip_iterator<HostIteratorTuple>;
+  using ConstantIterator  = thrust::constant_iterator<int>;
+  using CountingIterator  = thrust::counting_iterator<int>;
+  using TransformIterator = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+  using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-#if !THRUST_COMPILER(NVHPC)
-  // thrust::identity creates a deprecated warning that could not be worked around
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator1>::value, false);
-  THRUST_SUPPRESS_DEPRECATED_POP
-#endif // !THRUST_COMPILER(NVHPC)
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator2>::value, false);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
 }
 
