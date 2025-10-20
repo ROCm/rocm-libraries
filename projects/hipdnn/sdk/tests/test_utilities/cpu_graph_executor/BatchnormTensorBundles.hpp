@@ -69,7 +69,8 @@ struct BatchnormTrainTensorBundle
         invVarianceTensor.fillWithRandomValues(
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
 
-        epsilonTensor.fillWithValue(static_cast<MeanVarianceDataType>(BATCHNORM_DEFAULT_EPSILON));
+        epsilonTensor.fillWithValue(
+            static_cast<MeanVarianceDataType>(static_cast<float>(BATCHNORM_DEFAULT_EPSILON)));
 
         if(useOptionalTensors)
         {
