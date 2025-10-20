@@ -65,7 +65,7 @@ struct select_system_fn final
 
 } // namespace select_system_detail
 
-THRUST_INLINE_CONSTANT select_system_detail::select_system_fn select_system{};
+THRUST_GLOBAL_CONSTANT select_system_detail::select_system_fn select_system{};
 
 } // namespace detail
 
