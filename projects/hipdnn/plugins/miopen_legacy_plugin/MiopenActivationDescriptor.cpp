@@ -15,7 +15,6 @@ MiopenActivationDescriptor::MiopenActivationDescriptor(
     const auto params = miopen_utils::mapPointwiseModeToMiopenActivation(pointwiseAttrs);
     if(!params.has_value())
     {
-        // TODO: make a common pointwise mode to string function
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported pointwise mode for activation descriptor: "
