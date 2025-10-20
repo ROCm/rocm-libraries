@@ -15,18 +15,33 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/tabulate.h>
+#include <thrust/universal_vector.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
 TESTS_DEFINE(TabulateTests, FullTestsParams);
 TESTS_DEFINE(TabulatePrimitiveTests, NumericalTestsParams);
+TESTS_DEFINE(TabulateVectorTests, VectorTestsParams)
 
 template <typename ForwardIterator, typename UnaryOperation>
 void tabulate(my_system& system, ForwardIterator, ForwardIterator, UnaryOperation)
@@ -41,7 +56,7 @@ TEST(TabulateTests, TestTabulateDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::tabulate(sys, vec.begin(), vec.end(), thrust::identity<int>());
+  thrust::tabulate(sys, vec.begin(), vec.end(), ::internal::identity{});
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -58,74 +73,34 @@ TEST(TabulateTests, TestTabulateDispatchImplicit)
 
   thrust::device_vector<int> vec(1);
 
-  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), thrust::identity<int>());
+  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
 
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(TabulateTests, TestTabulateSimple)
+TYPED_TEST(TabulateVectorTests, TestTabulateSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
-  using T      = typename Vector::value_type;
   using namespace thrust::placeholders;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(5);
 
-  thrust::tabulate(Policy{}, v.begin(), v.end(), thrust::identity<T>());
+  thrust::tabulate(v.begin(), v.end(), ::internal::identity{});
 
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(1));
-  ASSERT_EQ(v[2], T(2));
-  ASSERT_EQ(v[3], T(3));
-  ASSERT_EQ(v[4], T(4));
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQ(v, ref);
 
-  thrust::tabulate(Policy{}, v.begin(), v.end(), -_1);
+  thrust::tabulate(v.begin(), v.end(), -_1);
 
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(-1));
-  ASSERT_EQ(v[2], T(-2));
-  ASSERT_EQ(v[3], T(-3));
-  ASSERT_EQ(v[4], T(-4));
+  ref = {0, -1, -2, -3, -4};
+  ASSERT_EQ(v, ref);
 
-  thrust::tabulate(Policy{}, v.begin(), v.end(), _1 * _1 * _1);
+  thrust::tabulate(v.begin(), v.end(), _1 * _1 * _1);
 
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(1));
-  ASSERT_EQ(v[2], T(8));
-  ASSERT_EQ(v[3], T(27));
-  ASSERT_EQ(v[4], T(64));
-}
-
-template <class OutputType>
-struct nonconst_op
-{
-  THRUST_HIP_FUNCTION
-  OutputType operator()(size_t idx)
-  {
-    return (OutputType) (idx >= 3);
-  }
-};
-
-TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
-{
-  using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
-  using T      = typename Vector::value_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  Vector v(5);
-
-  thrust::tabulate(Policy{}, v.begin(), v.end(), nonconst_op<T>());
-
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(0));
-  ASSERT_EQ(v[2], T(0));
-  ASSERT_EQ(v[3], T(1));
-  ASSERT_EQ(v[4], T(1));
+  ref = {0, 1, 8, 27, 64};
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
@@ -142,17 +117,13 @@ TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
     thrust::host_vector<T> h_data(size);
     thrust::device_vector<T> d_data(size);
 
-    thrust::tabulate(h_data.begin(), h_data.end(), _1 * _1 + T(13));
-    thrust::tabulate(d_data.begin(), d_data.end(), _1 * _1 + T(13));
+    thrust::tabulate(h_data.begin(), h_data.end(), _1 * _1 + 13);
+    thrust::tabulate(d_data.begin(), d_data.end(), _1 * _1 + 13);
 
-    thrust::host_vector<T> h_result = d_data;
-    for (size_t i = 0; i < size; i++)
-    {
-      ASSERT_EQ(h_data[i], h_result[i]) << "where index = " << i;
-    }
+    ASSERT_EQ(h_data, d_data);
 
-    thrust::tabulate(h_data.begin(), h_data.end(), (_1 - T(7)) * _1);
-    thrust::tabulate(d_data.begin(), d_data.end(), (_1 - T(7)) * _1);
+    thrust::tabulate(h_data.begin(), h_data.end(), (_1 - 7) * _1);
+    thrust::tabulate(d_data.begin(), d_data.end(), (_1 - 7) * _1);
 
     ASSERT_EQ(h_data, d_data);
   }
@@ -164,9 +135,40 @@ TEST(TabulateTests, TestTabulateToDiscardIterator)
 
   for (auto size : get_sizes())
   {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
     thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                      thrust::discard_iterator<thrust::device_system_tag>(size),
-                     thrust::identity<int>());
+                     ::internal::identity{});
   }
+
   // nothing to check -- just make sure it compiles
+}
+
+template <typename OutputType>
+struct nonconst_op
+{
+  THRUST_HIP_FUNCTION
+  OutputType operator()(size_t idx)
+  {
+    return (OutputType) (idx >= 3);
+  }
+};
+
+TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector v(5);
+
+  thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
+
+  ASSERT_EQ(v[0], 0);
+  ASSERT_EQ(v[1], 0);
+  ASSERT_EQ(v[2], 0);
+  ASSERT_EQ(v[3], 1);
+  ASSERT_EQ(v[4], 1);
 }

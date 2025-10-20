@@ -15,6 +15,17 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+#if THRUST_COMPILER(NVHPC)
+// suppress warnings on thrust::identity
+THRUST_SUPPRESS_DEPRECATED_PUSH
+#endif // THRUST_COMPILER(NVHPC)
+
 #include <thrust/copy.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -27,6 +38,10 @@
 #include <vector>
 
 #include <unittest/unittest.h>
+
+#if THRUST_COMPILER(NVHPC)
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_COMPILER(NVHPC)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <functional>
@@ -157,6 +172,7 @@ struct forward
 
 void TestTransformIteratorReferenceAndValueType()
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   using _THRUST_STD::is_same;
   using _THRUST_STD::negate;
   {
@@ -265,11 +281,13 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 DECLARE_UNITTEST(TestTransformIteratorReferenceAndValueType);
 
 void TestTransformIteratorIdentity()
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   thrust::device_vector<int> v(3, 42);
 
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
@@ -277,6 +295,7 @@ void TestTransformIteratorIdentity()
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
   using namespace thrust::placeholders;
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _1), 42);
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 DECLARE_UNITTEST(TestTransformIteratorIdentity);

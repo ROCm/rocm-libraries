@@ -96,8 +96,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
       get_random_data<int>(100, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> output(input.size(), 0);
 
-    simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-                thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+    simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+                thrust::make_transform_iterator(input.end(), ::internal::identity{}),
                 output.begin());
 
     ASSERT_EQ(input, output);
@@ -111,8 +111,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorInputConversion)
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<double>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<double>()),
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
               output.begin());
 
   ASSERT_EQ(input == output, true);
@@ -125,8 +125,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorOutputConversion)
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
               output.begin());
 
   ASSERT_EQ(input == output, true);

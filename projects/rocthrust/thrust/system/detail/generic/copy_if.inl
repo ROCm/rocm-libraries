@@ -86,8 +86,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
     thrust::plus<IndexType>());
 
   // scatter the true elements
-  thrust::scatter_if(
-    exec, first, last, scatter_indices.begin(), predicates.begin(), result, thrust::identity<IndexType>());
+  thrust::scatter_if(exec, first, last, scatter_indices.begin(), predicates.begin(), result);
 
   // find the end of the new sequence
   IndexType output_size = scatter_indices[n - 1] + predicates[n - 1];

@@ -15,6 +15,17 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#endif
+
+#if THRUST_COMPILER(NVHPC)
+// suppress warnings on thrust::identity
+THRUST_SUPPRESS_DEPRECATED_PUSH
+#endif // THRUST_COMPILER(NVHPC)
+
 #include <thrust/copy.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -30,6 +41,10 @@
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#if THRUST_COMPILER(NVHPC)
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_COMPILER(NVHPC)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <functional>
@@ -182,6 +197,7 @@ struct forward
 
 TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   using _THRUST_STD::is_same;
   using _THRUST_STD::negate;
   {
@@ -290,10 +306,12 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
     (void) it_tr_cid;
   }
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 TEST(TransformIteratorTests, TestTransformIteratorIdentity)
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   thrust::device_vector<int> v(3, 42);
 
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
@@ -301,6 +319,7 @@ TEST(TransformIteratorTests, TestTransformIteratorIdentity)
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
   using namespace thrust::placeholders;
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), _1), 42);
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 TEST(TransformIteratorTests, UsingHip)

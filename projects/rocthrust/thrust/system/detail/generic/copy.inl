@@ -46,16 +46,14 @@ template <typename DerivedPolicy, typename InputIterator, typename OutputIterato
 THRUST_HOST_DEVICE OutputIterator
 copy(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
 {
-  using T = typename thrust::iterator_value<InputIterator>::type;
-  return thrust::transform(exec, first, last, result, thrust::identity<T>());
+  return thrust::transform(exec, first, last, result, ::internal::identity{});
 } // end copy()
 
 template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator
 copy_n(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Size n, OutputIterator result)
 {
-  using value_type = typename thrust::iterator_value<InputIterator>::type;
-  using xfrm_type  = thrust::identity<value_type>;
+  using xfrm_type = ::internal::identity;
 
   using functor_type = thrust::detail::unary_transform_functor<xfrm_type>;
 
