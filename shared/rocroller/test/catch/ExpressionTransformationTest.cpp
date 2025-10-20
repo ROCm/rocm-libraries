@@ -54,6 +54,10 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Int32, 1);
     r2->allocateNow();
     auto v2 = r2->expression();
+    auto r3
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::UInt64, 1);
+    r3->allocateNow();
+    auto v3 = r3->expression();
 
     auto zero  = literal(0);
     auto one   = literal(1);
@@ -173,6 +177,25 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         CHECK_THAT(simplify(fuseTernary(a + b << one + one)),
                    IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(
                        AddShiftL{literal(33), literal(100), literal(2)})));
+    }
+
+    SECTION("bitFieldExtract")
+    {
+        CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
+        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+                   IdenticalTo(convert(DataType::UInt32, v)));
+    }
+
+    SECTION("bitFieldCombine")
+    {
+        CHECK_THAT(simplify(bfc(v2, v, 16, 8, 0)), IdenticalTo(v));
+        CHECK_THAT(simplify(bfc(v2, v, 0, 0, 32)), IdenticalTo(v2));
+        CHECK_THAT(simplify(bfc(v3, v, 16, 0, 32)), IdenticalTo(bfe(DataType::Int32, v3, 16, 32)));
+    }
+
+    SECTION("concatenate")
+    {
+        CHECK_THAT(simplify(concat({v}, {DataType::Int32})), IdenticalTo(v));
     }
 }
 
