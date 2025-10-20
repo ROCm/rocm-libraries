@@ -58,10 +58,13 @@ namespace rocRoller
             template <typename T>
             void mapRequired(const char* key, T& obj)
             {
+                std::cout << "enter maprequired key: " << key << std::endl;
                 amd_comgr_metadata_node_t value;
                 auto status = amd_comgr_metadata_lookup(node, key, &value);
+                std::cout << "status = " << status << std::endl;
                 AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, 
                     "Key ", ShowValue(key), " not found in comgr metadata");
+                std::cout << "mapRequired key: " << key << ", status: " << status << std::endl;
                 input(value, obj);
                 amd_comgr_destroy_metadata(value);
             }
@@ -82,39 +85,51 @@ namespace rocRoller
             requires(CMappedType<T, ComgrNodeInput> || EmptyMappedType<T, ComgrNodeInput>)
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {
+                std::cout << "CMappedType or EmptyMappedType" << std::endl;
                 ComgrNodeInput subInput(n, context);
+                std:: cout << "Created subInput" << std::endl;
                 EmptyContext ctx;
+                std::cout << "Calling MappingTraits" << std::endl;
                 MappingTraits<T, ComgrNodeInput>::mapping(subInput, obj, ctx);
-            }
-
-            template <typename T>
-            void input(amd_comgr_metadata_node_t& n, T& obj)
-            {
-                comgrNodeInputHelper(n, obj);
+                std::cout << "CMappedType or EmptyMappedType done" << std::endl;
             }
 
             template <SequenceType<ComgrNodeInput> T>
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {
+                std::cout << "SequenceType" << std::endl;
                 size_t count;
                 auto status = amd_comgr_get_metadata_list_size(n, &count);
                 AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get list size");
+                std::cout << "List size: " << count << std::endl;
 
                 for(size_t i = 0; i < count; i++)
                 {
+                    std::cout << "iteration " << i << std::endl; 
                     amd_comgr_metadata_node_t elNode;
                     status = amd_comgr_index_list_metadata(n, i, &elNode);
                     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to index list");
                     
                     auto& value = SequenceTraits<T, ComgrNodeInput>::element(*this, obj, i);
+                    std::cout << "value type: " << typeid(value).name() << std::endl;
                     input(elNode, value);
                     amd_comgr_destroy_metadata(elNode);
+                    std::cout << "iteration " << i << " done" << std::endl;
                 }
+            }
+
+            template <typename T>
+            void input(amd_comgr_metadata_node_t& n, T& obj)
+            {
+                std::cout << "basic" << std::endl;
+                comgrNodeInputHelper(n, obj);
+                std::cout << "basic done\n" << std::endl;
             }
 
             template <CustomMappingType<ComgrNodeInput> T>
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {   
+                std::cout << "CustomMappingType" << std::endl;
                 auto callback = [] (amd_comgr_metadata_node_t key, 
                                     amd_comgr_metadata_node_t value, 
                                     void* user_data
@@ -138,6 +153,7 @@ namespace rocRoller
             template <CHasScalarTraits T>
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {
+                std::cout << "CHasScalarTraits" << std::endl;
                 std::string stringVal;
                 input(n, stringVal);
                 ScalarTraits<T>::input(stringVal, obj);
@@ -152,53 +168,20 @@ namespace rocRoller
             template <typename T>
             void comgrNodeInputHelper(amd_comgr_metadata_node_t& n, T& obj)
             {
-                size_t size;
-                auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
                 amd_comgr_metadata_kind_t kind;
                 amd_comgr_get_metadata_kind(n, &kind);
-                std::cout << "status: " << status << std::endl;
-                std::cout << "kind: " << kind << "\n" << std::endl;
-                if(status == AMD_COMGR_STATUS_SUCCESS)
+                if (kind == AMD_COMGR_METADATA_KIND_STRING)
                 {
-                    std::string str(size - 1, '\0');
-                    amd_comgr_get_metadata_string(n, &size, str.data());
-                    
-                    // Parse the string based on type
-                    if constexpr (std::is_integral_v<T>)
-                    {
-                        if constexpr (std::is_signed_v<T>)
-                        {
-                            obj = static_cast<T>(std::strtoll(str.c_str(), nullptr, 10));
-                        }
-                        else
-                        {
-                            obj = static_cast<T>(std::strtoull(str.c_str(), nullptr, 10));
-                        }
-                    }
-                    else if constexpr (std::is_floating_point_v<T>)
-                    {
-                        if constexpr (std::is_same_v<T, float>)
-                        {
-                            obj = std::strtof(str.c_str(), nullptr);
-                        }
-                        else if constexpr (std::is_same_v<T, double>)
-                        {
-                            obj = std::strtod(str.c_str(), nullptr);
-                        }
-                        else
-                        {
-                            obj = static_cast<T>(std::strtold(str.c_str(), nullptr));
-                        }
-                    }
-                    else if constexpr (std::is_same_v<T, bool>)
-                    {
-                        obj = (str == "true" || str == "1" || str == "True" || str == "TRUE");
-                    }
+                    size_t size;
+                    auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
+                    std::cout << "status: " << status << std::endl;
+                    std::cout << "kind: " << kind << std::endl;
                 }
                 else
                 {
-                    AssertFatal(false, "Failed to read comgr metadata value");
+                    std::cout << "Not string kind" << std::endl;
                 }
+
             }
         };
 
@@ -212,6 +195,7 @@ namespace rocRoller
             val.resize(size - 1);
             status = amd_comgr_get_metadata_string(n, &size, val.data());
             AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get string");
+            std::cout << "string specialization done" << std::endl;
         }
 
         template <>

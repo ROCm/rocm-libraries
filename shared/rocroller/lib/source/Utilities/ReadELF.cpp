@@ -23,21 +23,3 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
-#include <rocRoller/Utilities/Error.hpp>
-#include <rocRoller/Serialization/comgr/comgr.hpp>
-#include <rocRoller/Serialization/ELF.hpp>
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
-#include <amd_comgr/amd_comgr.h>
-
-namespace rocRoller
-{
-    std::string readMetaDataFromCodeObject(std::string const& fileName)
-    {
-        using namespace Serialization;
-        AssemblyKernels kernel = fromELF<AssemblyKernels>(fileName);
-        return toYAML(kernel);
-    }
-    
-}

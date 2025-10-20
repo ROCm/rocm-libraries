@@ -717,8 +717,15 @@ namespace rocRoller::Client::GEMMClient
             //auto yaml = readMetaDataFromCodeObject(io.loadCOPath);
             //std::cout << yaml << std::endl;
 
-            auto kernelFromELF = AssemblyKernels::fromELF(io.loadCOPath).kernels[0];
-            std::cout << *kernelFromELF.command() << std::endl;
+            try {
+                auto elfKernels = AssemblyKernels::fromELF(io.loadCOPath).kernels;
+                auto kernelFromELF = elfKernels.at(0);
+                std::cout << *kernelFromELF.command() << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error loading ELF file: " << e.what() << std::endl;
+                return ReturnCodes::GenerateFailure;
+            }
 
             return ReturnCodes::OK;
         }

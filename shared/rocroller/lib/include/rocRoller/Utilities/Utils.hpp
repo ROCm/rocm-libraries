@@ -386,8 +386,6 @@ namespace rocRoller
 
     std::vector<char> readFile(std::string const&);
 
-    std::string readMetaDataFromCodeObject(std::string const& fileName);
-
     template <typename Variant, typename Alternative, size_t Index = 0>
     consteval size_t variantIndex()
     {

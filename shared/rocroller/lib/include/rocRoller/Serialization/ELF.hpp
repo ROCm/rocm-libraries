@@ -40,14 +40,20 @@ namespace rocRoller
          */
 
         /**
-         * Parses ELF as a string into a T.
+         * Parses ELF from a filepath into a T.
          */
         template <typename T>
         T fromELFFile(std::string const& filename);
 
+        /**
+         * Parses ELF as amd_comgr_metadata_node_t into a T.
+         */
         template <typename T>
         T fromELFData(amd_comgr_metadata_node_t metadata);
 
+        /**
+         * Parses ELF from a file into a T.
+         */
         template <typename T>
         T fromELF(std::string const& filename);
     }
