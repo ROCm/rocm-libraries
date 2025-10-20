@@ -36,18 +36,11 @@
 
 namespace miopen {
 
-std::string EncodeDataTypesForKey(miopenDataType_t in,
-                                  miopenDataType_t weights,
-                                  miopenDataType_t out,
-                                  bool use_tf32)
+std::string
+EncodeDataTypesForKey(miopenDataType_t in, miopenDataType_t weights, miopenDataType_t out)
 {
     if(in == weights && in == out)
-    {
-        if(in == miopenFloat && use_tf32)
-            return "TF32";
-        else
-            return GetDataTypeName(in);
-    }
+        return GetDataTypeName(in);
     return GetDataTypeName(in) + GetDataTypeName(weights) + GetDataTypeName(out);
 }
 
@@ -193,11 +186,14 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         ss << 'x' << GetWeightsLayout();
         ss << 'x' << GetOutLayout();
     }
-    ss << 'x'
-       << EncodeDataTypesForKey(
-              GetInDataType(), GetWeightsDataType(), GetOutDataType(), EnableTF32());
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    ss << 'x' << data_type;
 
     std::ostringstream optional;
+    if(data_type == "FP32" && EnableTF32())
+        optional << "TF32" << 'x';
+
     if(const auto ct = GetInCastType())
         optional << "ci" << GetDataTypeName(*ct);
     if(const auto ct = GetWeightsCastType())
@@ -248,10 +244,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         stream << sep << GetWeightsLayout();
         stream << sep << GetOutLayout();
     }
-    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType(), EnableTF32());
+    // clang-format on
+    const auto data_type =
+        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
+    stream << sep << data_type;
     stream << sep << GetDirectionStr();
 
-    // clang-format on
     // New performance config entries shall come into variable/optional part of db key.
     // This is to support backward compatibility with previous versions of databases.
     std::ostringstream optional;
@@ -266,6 +264,10 @@ void ProblemDescription::Serialize(std::ostream& stream) const
             optional << "_cw" << GetDataTypeName(*ct);
         if(const auto ct = GetOutCastType())
             optional << "_co" << GetDataTypeName(*ct);
+
+        // cx indicates compute datatype
+        if(data_type == "FP32" && EnableTF32())
+            optional << "_cxTF32";
     }
     if(!optional.str().empty())
     {

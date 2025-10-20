@@ -145,7 +145,7 @@ miopenTensorLayout_t GetLayoutFromString(const std::string& layout)
 }
 miopenDataType_t GetDataTypeFromString(const std::string& data_type)
 {
-    if(data_type == "FP32" || data_type == "TF32")
+    if(data_type == "FP32")
         return miopenFloat;
     else if(data_type == "FP16")
         return miopenHalf;
@@ -173,14 +173,47 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     TensorDescriptor wei{};
     TensorDescriptor out{};
     ConvolutionDescriptor conv;
+    bool use_tf32 = false;
     if(opt.size() >= 2)
     {
         key = opt[0];
-        ASSERT_TRUE(StartsWith(opt[1], "g"));
-        group_cnt = std::stoi(RemovePrefix(opt[1], "g"));
+
+        // Use the lambda function to parse key/value pairs
+        // Parse additional key/value pairs from opt[1:]
+        auto keyValueMap = [&opt]() -> std::unordered_map<std::string, std::string> {
+            std::unordered_map<std::string, std::string> mapping;
+            const std::unordered_set<std::string> validKeys{"g", "ci", "cw", "co", "cx"};
+            for(size_t i = 1; i < opt.size(); ++i)
+            {
+                const std::string& opt_current = opt[i];
+                // Find the key by checking which valid key the option starts with
+                for(const auto& validKey : validKeys)
+                {
+                    if(StartsWith(opt_current, validKey))
+                    {
+                        std::string value = RemovePrefix(opt_current, validKey);
+                        mapping[validKey] = value;
+                        break;
+                    }
+                }
+            }
+
+            return mapping;
+        }();
+
+        if(keyValueMap.find("g") != keyValueMap.end())
+        {
+            group_cnt = std::stoi(keyValueMap["g"]);
+        }
+        if(keyValueMap.find("cx") != keyValueMap.end())
+        {
+            // if another compute datatype is added in future, this part needs to be extended
+            if(keyValueMap["cx"] == "TF32")
+                use_tf32 = true;
+        }
     }
     else
-        ASSERT_TRUE(opt.size() == 1); // either there is one optional args or there is none
+        ASSERT_TRUE(opt.size() == 1);
     // 2d or 3d ?
     const auto is_3d = [&]() {
         const auto pat_3d = std::regex{"[0-9]x[0-9]x[0-9]"};
@@ -295,7 +328,7 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     conv.group_count = group_cnt;
     if(precision == miopenFloat)
     {
-        const auto math_type_ = (attrs[sz - 2] == "TF32") ? miopenMathDefault : miopenMathPedantic;
+        const auto math_type_ = use_tf32 ? miopenMathDefault : miopenMathPedantic;
         conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
     }
     prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};

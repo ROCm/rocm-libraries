@@ -42,10 +42,8 @@ namespace miopen {
 
 struct ExecutionContext;
 
-MIOPEN_INTERNALS_EXPORT std::string EncodeDataTypesForKey(miopenDataType_t in,
-                                                          miopenDataType_t weights,
-                                                          miopenDataType_t out,
-                                                          bool use_tf32);
+MIOPEN_INTERNALS_EXPORT std::string
+EncodeDataTypesForKey(miopenDataType_t in, miopenDataType_t weights, miopenDataType_t out);
 
 template <class TElement>
 constexpr auto GetDHW(unsigned spatial_dims, const std::vector<TElement>& data)
@@ -397,12 +395,12 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
     {
         f(self.GetInLayout(), "layout");
-        std::string data_type = EncodeDataTypesForKey(self.GetInDataType(),
-                                                      self.GetWeightsDataType(),
-                                                      self.GetOutDataType(),
-                                                      self.EnableTF32());
+        std::string data_type = EncodeDataTypesForKey(
+            self.GetInDataType(), self.GetWeightsDataType(), self.GetOutDataType());
         f(data_type, "data_type");
         f(self.GetDirectionStr(), "direction");
+        if(data_type == "FP32" && self.EnableTF32())
+            f("TF32", "compute_datatype");
     }
 
     template <class Self, class Visitor>
