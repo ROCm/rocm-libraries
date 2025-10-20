@@ -249,7 +249,7 @@ TEST(TestMiopenUtils, MapPointwiseModeEluWithDefaultAlpha)
     EXPECT_DOUBLE_EQ(result->alpha, 1.0);
 }
 
-TEST(TestMiopenUtils, MapPointwiseModeSoftplus)
+TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithoutBeta)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
@@ -261,6 +261,59 @@ TEST(TestMiopenUtils, MapPointwiseModeSoftplus)
     auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->mode, miopenActivationSOFTRELU);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithBetaOne)
+{
+    const float beta = 1.0f;
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        0,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        1,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        beta);
+    builder.Finish(attrOffset);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->mode, miopenActivationSOFTRELU);
+}
+
+TEST(TestMiopenUtils, MapPointwiseModeSoftplusWithInvalidBeta)
+{
+    const float beta = 2.0f;
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        0,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        1,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        beta);
+    builder.Finish(attrOffset);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    auto result = miopen_utils::mapPointwiseModeToMiopenActivation(*attr);
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST(TestMiopenUtils, MapPointwiseModeAbs)

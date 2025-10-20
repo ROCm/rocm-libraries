@@ -275,7 +275,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
     EXPECT_DOUBLE_EQ(alpha, 1.0);
 }
 
-TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwd)
+TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
 {
     auto builder
         = createPointwiseAttributesBuilder(hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD);
@@ -294,7 +294,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwd)
     EXPECT_EQ(mode, miopenActivationSOFTRELU);
 }
 
-TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwd)
+TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
 {
     auto builder
         = createPointwiseAttributesBuilder(hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD);
@@ -311,6 +311,47 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwd)
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationSOFTRELU);
+}
+
+TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
+{
+    const float softplusBeta = 1.0f;
+    auto builder
+        = createPointwiseAttributesBuilder(hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           softplusBeta);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    MiopenActivationDescriptor activDesc(*attr);
+
+    miopenActivationMode_t mode;
+    double alpha;
+    double beta;
+    double gamma;
+    EXPECT_EQ(miopenGetActivationDescriptor(
+                  activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
+              miopenStatusSuccess);
+    EXPECT_EQ(mode, miopenActivationSOFTRELU);
+}
+
+TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
+{
+    const float softplusBeta = 2.0f;
+    auto builder
+        = createPointwiseAttributesBuilder(hipdnn_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           flatbuffers::nullopt,
+                                           softplusBeta);
+    const auto* attr = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
+        builder.GetBufferPointer());
+
+    EXPECT_THROW(MiopenActivationDescriptor activDesc(*attr), hipdnn_plugin::HipdnnPluginException);
 }
 
 TEST(TestMiopenActivationDescriptor, CreatesAbs)

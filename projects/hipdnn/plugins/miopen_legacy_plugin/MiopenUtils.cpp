@@ -130,6 +130,18 @@ std::optional<ActivationParams>
     }
     case PM::SOFTPLUS_FWD:
     case PM::SOFTPLUS_BWD:
+        // Softplus is (1/beta) * log(1 + e^(beta*x))
+        // However, MIOpen uses:
+        // log(1 + e^x)
+        // This is valid Softplus only when beta=1
+        if(attrs.softplus_beta())
+        {
+            // Only support beta=1
+            if(static_cast<double>(*attrs.softplus_beta()) != 1.0)
+            {
+                return std::nullopt;
+            }
+        }
         return ActivationParams{miopenActivationSOFTRELU, 0.0, 0.0, 0.0};
     case PM::ABS:
         return ActivationParams{miopenActivationABS, 0.0, 0.0, 0.0};
