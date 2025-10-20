@@ -68,11 +68,8 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
 
     size_t read_unit = 1;
     size_t read_len  = (bn_mode == miopenBNSpatial) ? h * w : c * h * w;
-    // vectorized reads for spatial when not using fp16
-    if(bn_mode == miopenBNSpatial && xDesc.GetType() != miopenHalf)
-    {
-        read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
-    }
+    // read unit size for vectorized loads/stores
+    read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     // For vectorized r/rw of the input/output data
     std::string READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
     // Setup the kernel launch parameters
@@ -150,27 +147,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
 
     if constexpr(PERF_ENABLE)
     {
-#if COMPARE_WITH_OPENCL
-        // disable the perf test for FP16 as OpenCL FP16 is broken
-        if(xDesc.GetType() != miopenHalf)
-        {
-            // run the perf test
-            perf_helper.perfTest(handle,
-                                 kernel_name,
-                                 network_config,
-                                 use_hip,
-                                 static_cast<float>(activ_alpha),
-                                 static_cast<float>(activ_beta),
-                                 static_cast<float>(activ_gamma),
-                                 static_cast<double>(epsilon),
-                                 x,
-                                 y,
-                                 bnBias,
-                                 bnScale,
-                                 estimatedMean,
-                                 estimatedVariance);
-        }
-#else
         // run the perf test
         perf_helper.perfTest(handle,
                              kernel_name,
@@ -186,7 +162,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                              bnScale,
                              estimatedMean,
                              estimatedVariance);
-#endif
     }
     else
     {
@@ -263,6 +238,7 @@ struct GPU_bn_activ_infer_per_act_FP32
 {
 };
 
+#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 struct GPU_bn_activ_infer_spatial_FP16
     : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
@@ -272,6 +248,7 @@ struct GPU_bn_activ_infer_per_act_FP16
     : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
 };
+#endif
 
 std::vector<miopenActivationMode_t> ActivationConfigs()
 {
@@ -317,6 +294,7 @@ TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
     Verify();
 };
 
+#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
@@ -346,6 +324,7 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
     // Compare the outputs
     Verify();
 };
+#endif
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
@@ -357,6 +336,8 @@ INSTANTIATE_TEST_SUITE_P(
     GPU_bn_activ_infer_per_act_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
+
+#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP16,
@@ -369,3 +350,4 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(
         testing::ValuesIn(ActivationConfigs()),
         testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+#endif
