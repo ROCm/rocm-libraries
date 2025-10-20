@@ -28,6 +28,9 @@
 
 #include <thrust/detail/tuple_transform.h>
 #include <thrust/iterator/zip_iterator.h>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/tuple.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -91,15 +94,31 @@ zip_iterator<IteratorTuple>::distance_to(const zip_iterator<OtherIteratorTuple>&
 } // end zip_iterator::distance_to()
 
 template <typename... Iterators>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>> make_zip_iterator(_THRUST_STD::tuple<Iterators...> t)
+#else
 THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(thrust::tuple<Iterators...> t)
+#endif
 {
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  return zip_iterator<_THRUST_STD::tuple<Iterators...>>(t);
+#else
   return zip_iterator<thrust::tuple<Iterators...>>(t);
+#endif
 } // end make_zip_iterator()
 
 template <typename... Iterators>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>> make_zip_iterator(Iterators... its)
+#else
 THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(Iterators... its)
+#endif
 {
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  return make_zip_iterator(_THRUST_STD::make_tuple(its...));
+#else
   return make_zip_iterator(thrust::make_tuple(its...));
+#endif
 } // end make_zip_iterator()
 
 THRUST_NAMESPACE_END
