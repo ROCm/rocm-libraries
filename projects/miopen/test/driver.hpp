@@ -168,6 +168,8 @@ struct test_driver
     bool verbose           = false;
     double tolerance       = 80;
     bool time              = false;
+    int time_iter          = 1;
+    int warmup_iter        = 0;
     int batch_factor       = 0;
     bool no_validate       = false;
     int repeat             = 1;
@@ -197,6 +199,8 @@ struct test_driver
         v(verbose, {"--verbose", "-v"}, "Run verbose mode");
         v(tolerance, {"--tolerance", "-t"}, "Set test tolerance");
         v(time, {"--time"}, "Time the kernel on GPU");
+        v(time_iter, {"--time-iter"}, "The number of iterations to average for timing the kernel");
+        v(warmup_iter, {"--warmup-iter"}, "The number of warmup iterations for timing the kernel");
         v(batch_factor, {"--batch-factor", "-n"}, "Set batch factor");
         v(no_validate,
           {"--disable-validation"},
@@ -821,17 +825,29 @@ struct test_driver
             // Compute gpu
             if(time)
             {
+                for(size_t i = 0; i < warmup_iter; ++i)
+                {
+                    v.gpu(xs...);
+                }
+
                 h.EnableProfiling();
                 h.ResetKernelTime();
             }
             gpu = v.gpu(xs...);
-            adjust_parameters(v);
-
             if(time)
             {
-                std::cout << "Kernel time: " << h.GetKernelTime() << " ms" << std::endl;
+                float total_time = h.GetKernelTime();
+                for(size_t i = 1; i < time_iter; ++i)
+                {
+                    h.ResetKernelTime();
+                    v.gpu(xs...);
+                    total_time += h.GetKernelTime();
+                }
+                std::cout << "Kernel time: " << (total_time / time_iter) << " ms" << std::endl;
                 h.EnableProfiling(false);
             }
+            adjust_parameters(v);
+
             // Validate
             if(!no_validate)
             {
