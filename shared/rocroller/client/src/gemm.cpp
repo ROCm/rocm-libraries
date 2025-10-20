@@ -1459,8 +1459,8 @@ int main(int argc, const char* argv[])
         .numWarmUp        = 3,
         .numOuter         = 5,
         .numInner         = 2,
-        .check            = true,
         .rotatingBuffSize = 32'000'000ull,
+        .check            = true,
         .visualize        = false,
     };
 
