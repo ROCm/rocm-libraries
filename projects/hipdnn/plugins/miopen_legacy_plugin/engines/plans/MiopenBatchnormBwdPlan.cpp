@@ -4,6 +4,7 @@
 #include "MiopenBatchnormBwdPlan.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenUtils.hpp"
+#include <hipdnn_sdk/utilities/Constants.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -95,7 +96,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = 1e-5;
+    double epsilon = hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
