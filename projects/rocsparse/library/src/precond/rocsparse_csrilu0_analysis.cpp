@@ -29,6 +29,7 @@
 
 namespace rocsparse
 {
+
     template <typename T>
     rocsparse_status csrilu0_analysis_core(rocsparse_handle          handle,
                                            rocsparse_int             m,
@@ -44,84 +45,63 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Differentiate the analysis policies
         if(analysis == rocsparse_analysis_policy_reuse)
         {
-            // We try to re-use already analyzed lower part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
+            auto trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            if(trm == nullptr)
+            {
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csric0_info(rocsparse_operation_none,
+                                                               rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsv_info(rocsparse_operation_none,
+                                                              rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsm_info(rocsparse_operation_none,
+                                                              rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsv_info(rocsparse_operation_transpose,
+                                                              rocsparse_fill_mode_upper);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsm_info(rocsparse_operation_transpose,
+                                                              rocsparse_fill_mode_upper);
 
-            // If csrilu0 meta data is already available, do nothing
-            if(info->csrilu0_info != nullptr)
-            {
-                return rocsparse_status_success;
+                if(trm != nullptr)
+                {
+                    info->set_csrilu0_info(
+                        rocsparse_operation_none, rocsparse_fill_mode_lower, trm);
+                }
             }
 
-            // Check for other lower analysis meta data
-
-            if(info->csric0_info != nullptr)
+            if(trm != nullptr)
             {
-                // csric0 meta data
-                info->csrilu0_info = info->csric0_info;
-                return rocsparse_status_success;
-            }
-            else if(info->csrsv_lower_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrilu0_info = info->csrsv_lower_info;
-                return rocsparse_status_success;
-            }
-            else if(info->csrsvt_upper_info != nullptr)
-            {
-                // csrsvt meta data
-                info->csrilu0_info = info->csrsvt_upper_info;
-                return rocsparse_status_success;
-            }
-            else if(info->csrsm_lower_info != nullptr)
-            {
-                // csrsm meta data
-                info->csrilu0_info = info->csrsm_lower_info;
-                return rocsparse_status_success;
-            }
-            else if(info->csrsmt_upper_info != nullptr)
-            {
-                // csrsmt meta data
-                info->csrilu0_info = info->csrsmt_upper_info;
                 return rocsparse_status_success;
             }
         }
 
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used.
-
-        rocsparse::trm_info_t::recreate(&info->csrilu0_info);
-
+        auto csrilu0_info = info->get_csrilu0_info();
         // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          rocsparse_operation_none,
-                                                          m,
-                                                          nnz,
-                                                          descr,
-                                                          csr_val,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          info->csrilu0_info,
-                                                          (rocsparse_int**)&info->zero_pivot,
-                                                          temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(csrilu0_info->recreate(rocsparse_operation_none,
+                                                         rocsparse_fill_mode_lower,
+                                                         handle,
+                                                         rocsparse_operation_none,
+                                                         m,
+                                                         nnz,
+                                                         descr,
+                                                         csr_val,
+                                                         csr_row_ptr,
+                                                         csr_col_ind,
+                                                         temp_buffer));
 
-        {
-            // setup info->singular_pivot
-            if(info->singular_pivot == nullptr)
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                    &info->singular_pivot, sizeof(rocsparse_int), handle->stream));
-            }
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->singular_pivot,
-                                               info->zero_pivot,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToDevice,
-                                               handle->stream));
-        }
+        // setup info->singular_pivot
+        csrilu0_info->create_singular_pivot_async(rocsparse::get_indextype<rocsparse_int>(),
+                                                  handle->stream);
+
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrilu0_info->get_singular_pivot(),
+                                           csrilu0_info->get_zero_pivot(),
+                                           sizeof(rocsparse_int),
+                                           hipMemcpyDeviceToDevice,
+                                           handle->stream));
 
         return rocsparse_status_success;
     }

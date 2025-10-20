@@ -98,17 +98,51 @@ constexpr T getToleranceFwd()
 template <typename T>
 constexpr T getToleranceBwd()
 {
+    // Note: MIOpen seems to have some accuracy issues with 16-bit fp in some cases (like iGemm),
+    //       so we relax the tolerance a bit here.
+    //       See: ConvDriver<Tgpu, Tref>::VerifyBackward()
+
+    // Since we can't predict which engine will run, we have to go with the lowest common denominator
+    // of tolerances.
+
     if constexpr(std::is_same_v<T, float>)
     {
         return 8.5e-6f;
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return 1e-2_h;
+        return 2e-2_h;
     }
     else if constexpr(std::is_same_v<T, hip_bfloat16>)
     {
-        return 1e-2_bf;
+        return 2e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+template <typename T>
+constexpr T getToleranceWrw()
+{
+    // For more information as to why these tolerances are what they are, please
+    // refer to driver\conv_driver.hpp -> int ConvDriver<Tgpu, Tref>::VerifyBackward()
+
+    // Since we can't predict which engine will run, we have to go with the lowest common denominator
+    // of tolerances.
+
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 2e-4f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 2e-1_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 2e-1_bf;
     }
     else
     {

@@ -26,11 +26,40 @@
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"
 #include "csrsm_device.h"
+
+namespace rocsparse
+{
+    rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,
+                                      rocsparse::pivot_info_t* info,
+                                      rocsparse_indextype      indextype,
+                                      void*                    position)
+
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+        if(info == nullptr)
+        {
+            rocsparse::set_minus_one_async(
+                handle->stream, handle->pointer_mode, indextype, position);
+            return rocsparse_status_success;
+        }
+
+        auto status = info->copy_zero_pivot_async(
+            handle->pointer_mode, indextype, position, handle->stream);
+        if(status == rocsparse_status_zero_pivot)
+        {
+            return status;
+        }
+        RETURN_IF_ROCSPARSE_ERROR(status);
+
+        return rocsparse_status_success;
+    }
+}
 
 extern "C" rocsparse_status rocsparse_csrsm_zero_pivot(rocsparse_handle   handle,
                                                        rocsparse_mat_info info,
@@ -45,70 +74,14 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    // Stream
-    hipStream_t stream = handle->stream;
-
-    // If m == 0 || nrhs == 0 || nnz == 0 it can happen, that info structure is not created.
-    // In this case, always return -1.
-    if(info->zero_pivot == nullptr)
+    auto csrsm_info = info->get_csrsm_info();
+    auto status     = rocsparse::csrsm_zero_pivot(
+        handle, csrsm_info, rocsparse::get_indextype<rocsparse_int>(), position);
+    if(status == rocsparse_status_zero_pivot)
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            *position = -1;
-        }
-
-        return rocsparse_status_success;
+        return status;
     }
-
-    // Differentiate between pointer modes
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        // rocsparse_pointer_mode_device
-        rocsparse_int zero_pivot;
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &zero_pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-
-        // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        if(zero_pivot == std::numeric_limits<rocsparse_int>::max())
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                               info->zero_pivot,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
-
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
-    }
-    else
-    {
-        // rocsparse_pointer_mode_host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            position, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        // If no zero pivot is found, set -1
-        if(*position == std::numeric_limits<rocsparse_int>::max())
-        {
-            *position = -1;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
-    }
-
+    RETURN_IF_ROCSPARSE_ERROR(status);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -127,20 +100,7 @@ try
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, info);
-
-    // Clear csrsm meta data (this includes lower, upper and their transposed equivalents
-    if(!rocsparse::check_trm_shared(info, info->csrsm_lower_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsm_lower_info);
-    }
-    if(!rocsparse::check_trm_shared(info, info->csrsm_upper_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsm_upper_info);
-    }
-
-    info->csrsm_lower_info = nullptr;
-    info->csrsm_upper_info = nullptr;
-
+    info->clear_csrsm_info();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
