@@ -2340,6 +2340,20 @@ namespace ExpressionTest
 
             CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
         }
+
+        SECTION("Evaluation 5")
+        {
+            auto const offset = 2u;
+            auto const width  = 30u;
+            auto       src1   = literal(4u);
+            auto       src2   = literal(-4);
+
+            auto expr1 = bfe(DataType::UInt32, src1, offset, width);
+            auto expr2 = bfe(DataType::Int32, src2, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr1)) == 1u);
+            CHECK(std::get<int32_t>(evaluate(expr2)) == -1);
+        }
     }
 
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")

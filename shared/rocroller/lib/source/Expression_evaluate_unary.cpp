@@ -186,7 +186,7 @@ namespace rocRoller::Expression::EvaluateDetail
         BitFieldExtract expr;
 
         template <CCommandArgumentValue ARG>
-        requires(!std::same_as<bool, ARG> && std::unsigned_integral<ARG>) CommandArgumentValue
+        requires(!std::same_as<bool, ARG> && std::integral<ARG>) CommandArgumentValue
             operator()(ARG const& arg) const
         {
             auto argBits = resultVariableType(arg).getElementSize() * 8u;
@@ -196,19 +196,33 @@ namespace rocRoller::Expression::EvaluateDetail
                         expr.width,
                         argBits);
 
-            ARG mask = 0;
+            using UnsignedARG       = std::make_unsigned_t<ARG>;
+            UnsignedARG unsignedArg = static_cast<UnsignedARG>(arg);
+
+            UnsignedARG mask = 0;
             if(argBits == this->expr.width)
             {
-                mask = std::numeric_limits<ARG>::max();
+                mask = std::numeric_limits<UnsignedARG>::max();
             }
             else
             {
-                mask = (static_cast<ARG>(1) << this->expr.width) - 1;
+                mask = (static_cast<UnsignedARG>(1) << this->expr.width) - 1;
             }
 
-            ARG  result     = (arg >> this->expr.offset) & mask;
-            auto resultExpr = literal(result);
+            UnsignedARG result = (arg >> this->expr.offset) & mask;
 
+            // Sign extend if needed
+            if constexpr(std::is_signed_v<ARG>)
+            {
+                bool signBit = (result >> (this->expr.width - 1)) & 1;
+                if(signBit)
+                {
+                    UnsignedARG signExtensionMask = ~mask;
+                    result |= signExtensionMask;
+                }
+            }
+
+            auto resultExpr = literal(static_cast<ARG>(result));
             return evaluate(convert(expr.outputDataType, resultExpr));
         }
 
