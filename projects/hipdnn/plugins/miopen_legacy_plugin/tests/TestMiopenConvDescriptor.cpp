@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -54,6 +55,9 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -79,6 +83,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -99,6 +106,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -119,6 +129,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, -1, 0};
     const std::vector<int64_t> postPadding{0, -1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -139,6 +152,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 0, 1};
@@ -159,6 +175,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideFwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationFwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -219,6 +238,9 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -244,6 +266,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -264,6 +289,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -284,6 +312,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, -1, 0};
     const std::vector<int64_t> postPadding{0, -1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -304,6 +335,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 0, 1};
@@ -324,6 +358,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideBwd)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationBwd)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -384,6 +421,9 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -409,6 +449,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -429,6 +472,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongConvModeWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -449,6 +495,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnAsymmetricPaddingWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, -1, 0};
     const std::vector<int64_t> postPadding{0, -1, 0};
     const std::vector<int64_t> stride{1, 1, 1};
@@ -469,6 +518,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongPaddingWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 0, 1};
@@ -489,6 +541,9 @@ TEST(TestMiopenConvDescriptor, ThrowsOnWrongStrideWrw)
 
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongDilationWrw)
 {
+    // MIOpen flags an ASAN error if improperly creating a conv descriptor.
+    SKIP_IF_ASAN();
+
     const std::vector<int64_t> prePadding{0, 0, 0};
     const std::vector<int64_t> postPadding{0, 0, 0};
     const std::vector<int64_t> stride{1, 1, 1};
