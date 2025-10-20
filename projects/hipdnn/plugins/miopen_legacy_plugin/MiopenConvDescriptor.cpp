@@ -43,36 +43,45 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
-    size_t spatialDimCount, const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes)
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
                              attributes.post_padding(),
                              attributes.stride(),
                              attributes.dilation(),
-                             attributes.conv_mode());
+                             attributes.conv_mode(),
+                             groupCount);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
-    size_t spatialDimCount, const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes)
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+    int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
                              attributes.post_padding(),
                              attributes.stride(),
                              attributes.dilation(),
-                             attributes.conv_mode());
+                             attributes.conv_mode(),
+                             groupCount);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
-    size_t spatialDimCount, const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes)
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    int groupCount)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
                              attributes.post_padding(),
                              attributes.stride(),
                              attributes.dilation(),
-                             attributes.conv_mode());
+                             attributes.conv_mode(),
+                             groupCount);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(MiopenConvDescriptor&& other) noexcept
@@ -115,7 +124,8 @@ void MiopenConvDescriptor::createDescriptorInternal(
     const flatbuffers::Vector<int64_t>* attrPostPadding,
     const flatbuffers::Vector<int64_t>* attrStride,
     const flatbuffers::Vector<int64_t>* attrDilation,
-    hipdnn_sdk::data_objects::ConvMode convMode)
+    hipdnn_sdk::data_objects::ConvMode convMode,
+    int groupCount)
 {
     if(spatialDimCount > std::numeric_limits<int>::max())
     {
@@ -169,6 +179,13 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: asymmetric padding is not supported");
     }
 
+    if(groupCount < 1)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: groupCount < 1 is not supported");
+    }
+
     std::vector<int> padding(spatialDimCount);
     std::vector<int> stride(spatialDimCount);
     std::vector<int> dilation(spatialDimCount);
@@ -184,5 +201,6 @@ void MiopenConvDescriptor::createDescriptorInternal(
                                                               stride.data(),
                                                               dilation.data(),
                                                               miopenConvolution));
+    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
 }
 }
