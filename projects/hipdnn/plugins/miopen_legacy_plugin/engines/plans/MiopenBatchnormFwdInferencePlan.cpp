@@ -3,6 +3,7 @@
 
 #include "MiopenBatchnormFwdInferencePlan.hpp"
 #include "MiopenUtils.hpp"
+
 #include <hipdnn_sdk/utilities/Constants.hpp>
 
 namespace miopen_legacy_plugin
