@@ -153,7 +153,6 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},
-            {"MIO_BN_N", static_cast<unsigned int>(n)},
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});

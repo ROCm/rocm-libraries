@@ -29,9 +29,15 @@
 #endif
 #include "bnorm_spatial_activation_functions.hpp"
 #include "float_types.h"
+#include "vector_types.hpp"
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
+
+// define types for vectorized loads/stores
+using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIO_BN_VEC_SIZE>::type;
+using FLOAT_ACCUM_VEC_TYPE =
+    typename miopen::mapped_vector_type<FLOAT_ACCUM, MIO_BN_VEC_SIZE>::type;
 
 extern "C" __global__ void __launch_bounds__(blockSize)
     MIOpenBatchNormFwdInferSpatialEst(const FLOAT* __restrict in,
@@ -83,14 +89,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
     if constexpr(MIO_LAYOUT_NHWC)
     {
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
-        {
-            mean[i]     = estimatedMean[adjIndex + i];
-            variance[i] = estimatedVariance[adjIndex + i];
-            pscale[i]   = scale[adjIndex + i];
-            pbias[i]    = bias[adjIndex + i];
-        }
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(variance)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
     }
     else // NCHW layout
     {
@@ -116,17 +122,13 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT value[MIO_BN_VEC_SIZE];
 
     // loop over the batches
-#pragma unroll 2
-    for (unsigned int n = 0; n < MIO_BN_N; ++n)
+    for (unsigned int n = 0; n < batchSize; ++n)
     {
         // load input value
         const unsigned int batchIndex =
             (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
-        {
-            value[i] = in[batchIndex + i];
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
         
         // perform batchnorm and activation
 #pragma unroll
@@ -141,10 +143,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         }
 
         // write output value
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
-        {
-            out[batchIndex + i] = value[i];
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
     }
 }
