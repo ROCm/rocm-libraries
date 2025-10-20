@@ -128,8 +128,13 @@ if( NOT BUILD_FFTW )
     find_package(FFTW3f CONFIG QUIET )
     if( FFTW3_FOUND AND FFTW3f_FOUND )
       message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      if ( NOT WIN32 )
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      else()
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+      endif()
 
       # Look for omp (preferred) or thread libraries. These are not a
       # hard requirement, but are nice to have to make FFTW run faster.
@@ -244,17 +249,22 @@ set( rocfft-test_link_libs
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
   # Attempt to find a config version, which provides openmp_LIB_DIR.
-  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR )
      # Fall-back to module mode.
-     find_package( OpenMP REQUIRED )
+     find_package( OpenMP MODULE REQUIRED )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
   else()
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )
+  if( TARGET OpenMP::omp )
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::omp )
+  else()
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::OpenMP_CXX )
+  endif()
+  list( APPEND rocfft-test_link_libs ${ROCFFT_OPENMP_LIBRARY} )
 
   set_target_properties( rocfft-test PROPERTIES
      BUILD_RPATH "{$BUILD_RPATH}"
@@ -422,7 +432,7 @@ if( ROCFFT_MPI_ENABLE )
 
     if ( ROCFFT_CRAY_MPI_ENABLE )
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX
@@ -435,7 +445,7 @@ if( ROCFFT_MPI_ENABLE )
   	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
       target_link_libraries( ${worker} PRIVATE
-        OpenMP::OpenMP_CXX 
+        ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
         MPI::MPI_CXX

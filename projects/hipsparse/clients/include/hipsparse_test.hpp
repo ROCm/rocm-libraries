@@ -29,6 +29,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_test_cleanup.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <sstream>
 #include <type_traits>

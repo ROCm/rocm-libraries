@@ -57,6 +57,8 @@ hipsparse_arguments_config::hipsparse_arguments_config()
         this->betai      = 0.0;
         this->threshold  = 0.0;
         this->percentage = 0.0;
+        this->c          = 1.0;
+        this->s          = 1.0;
 
         this->transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
         this->transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;

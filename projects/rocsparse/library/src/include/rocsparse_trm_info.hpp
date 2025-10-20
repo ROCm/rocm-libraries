@@ -104,7 +104,6 @@ namespace rocsparse
         int64_t get_nnz() const;
         void    set_nnz(int64_t);
 
-        static void recreate(trm_info_t**);
         static void destroy(trm_info_t*);
         static void copy(trm_info_t* __restrict__*, const trm_info_t* __restrict__);
     };

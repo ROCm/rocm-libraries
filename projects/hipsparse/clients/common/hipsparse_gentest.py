@@ -97,7 +97,6 @@ def process_doc(doc):
 
     # Instantiate all of the tests, starting with defaults
     for test in doc['Tests']:
-        print(test)
         case = defaults.copy()
         case.update(test)
         generate(case, instantiate)

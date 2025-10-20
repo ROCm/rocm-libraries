@@ -3,6 +3,12 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 4.2.0
+
+### Added
+
+* Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocSPARSE.
+
 ## rocSPARSE 4.1.0 for ROCm 7.1.0
 
 ### Added
