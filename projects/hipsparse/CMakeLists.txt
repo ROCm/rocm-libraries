@@ -23,10 +23,6 @@
 
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
-
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
 if(WIN32)
