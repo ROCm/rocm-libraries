@@ -39,7 +39,7 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = 1e-3;
+    double epsilon = 1e-5;
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = 1;
     auto graph = buildBatchnormFwdInferenceGraph(
