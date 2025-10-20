@@ -484,6 +484,118 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
     }
 };
 
+// This is the instance for MIO_BN_VARIANT == 3
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
+{
+
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict scale,
+                                                         const FpPrecType* __restrict bias,
+                                                         FpPrecType INHW,
+                                                         double epsilon,
+                                                         FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta)
+    {
+        // SPATIAL
+        mean               = cast<FpPrecType>(0.);
+        variance           = cast<FpPrecType>(0.);
+        invVariance        = cast<FpPrecType>(0.);
+        FpPrecType inhat   = cast<FpPrecType>(0.);
+        FpPrecType pvscale = cast<FpPrecType>(0.);
+        FpPrecType pvbias  = cast<FpPrecType>(0.);
+        FpPrecType xin     = cast<FpPrecType>(0.);
+
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+
+        unsigned int index = 0;
+        unsigned int lid   = threadIdx.x;
+        unsigned int grpid = blockIdx.x;
+        unsigned int cidx  = grpid * mio_bn_config::hw;
+
+#if(MIO_BN_N < MIO_BN_MAXN)
+        FpType minibatch[MIO_BN_N];
+#endif
+
+        if(lid == 0)
+        {
+            lcl_scale = *(scale + grpid);
+            lcl_bias  = *(bias + grpid);
+        }
+
+        if(lid < mio_bn_config::hw)
+        {
+            static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{[&](unsigned int n) {
+                index = n * mio_bn_config::chw + cidx + lid;
+                xin   = cast<FpPrecType>(*(in + index));
+                mean += xin;
+                variance = fma(xin, xin, variance);
+
+#if(MIO_BN_N < MIO_BN_MAXN)
+                minibatch[n] = (*(in + index));
+#endif
+            }};
+        }
+        __syncthreads();
+
+        constexpr auto lcl_data_size =
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
+        if constexpr(mio_bn_config::use_amdgcn)
+        {
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+        else
+        {
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
+        }
+
+        variance = fma(-mean, mean, variance);
+        if(variance < 0)
+        {
+            variance = 0;
+        }
+        invVariance = rsqrt(variance + (FpPrecType)epsilon);
+
+        if(lid < mio_bn_config::hw)
+        {
+            pvscale = lcl_scale;
+            pvbias  = lcl_bias;
+            static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{
+                [&](unsigned int n) { // apply normalization
+                    index = n * mio_bn_config::chw + cidx + lid;
+#if(MIO_BN_N < MIO_BN_MAXN)
+                    inhat = (cast<FpPrecType>(minibatch[n]) - mean) *
+                            invVariance; // (in[index] - mean) * invVariance;
+#else
+                    inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
+#endif
+                    out[index] = cast<FpType>(
+                        miopen::batchnorm::activation_op(fma(pvscale, inhat, pvbias), alpha, beta));
+                }}; // end for
+
+        } // end if
+    }
+};
+
 } // namespace batchnorm
 } // namespace miopen
 
