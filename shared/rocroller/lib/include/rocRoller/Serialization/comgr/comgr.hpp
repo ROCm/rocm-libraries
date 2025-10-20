@@ -116,6 +116,7 @@ namespace rocRoller
                     amd_comgr_destroy_metadata(elNode);
                     std::cout << "iteration " << i << " done" << std::endl;
                 }
+                std::cout << "SequenceType done" << std::endl;
             }
 
             template <typename T>
