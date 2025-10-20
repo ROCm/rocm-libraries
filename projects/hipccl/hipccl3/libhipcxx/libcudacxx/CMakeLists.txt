@@ -1,19 +1,60 @@
-# 3.15 is the minimum for including the project with add_subdirectory.
-# 3.18 for C++17 + CUDA and clang-cuda support.
-# 3.21 is the minimum for the developer build.
-cmake_minimum_required(VERSION 3.15)
+# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
-if (CCCL_ENABLE_LIBCUDACXX)
+# 3.15 is the minimum.
+# 3.17 for NVC++.
+# 3.18 for C++17 + CUDA and clang-cuda support.
+# 3.21 is for HIP
+cmake_minimum_required(VERSION 3.21)
+
+# Determine whether libhipcxx is the top-level project or included into
+# another project via add_subdirectory().
+if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_LIST_DIR}")
+  set(LIBCUDACXX_TOPLEVEL_PROJECT ON)
+endif()
+
+if (LIBCUDACXX_TOPLEVEL_PROJECT)
   cmake_minimum_required(VERSION 3.21)
 endif()
 
-set(PACKAGE_NAME libcudacxx)
+set(PACKAGE_NAME libhipcxx)
 set(PACKAGE_VERSION 11.0)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
-project(libcudacxx LANGUAGES CXX)
 
-if (NOT CCCL_ENABLE_LIBCUDACXX)
-  include(cmake/libcudacxxAddSubdir.cmake)
+project(libhipcxx LANGUAGES CXX VERSION 2.7.0)
+
+# rocm-cmake contains common cmake code for rocm projects to help
+# setup and install
+include(cmake/FindROCMCmake.cmake)
+include(ROCMSetupVersion)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+# include(ROCMPackageConfigHelpers)
+# include(ROCMInstallSymlinks)
+# include(ROCMHeaderWrapper)
+# include(ROCMCheckTargetIds)
+# include(ROCMClients)
+option(libhipcxx_ENABLE_INSTALL_RULES "Enable installation of libcu++" ${LIBCUDACXX_TOPLEVEL_PROJECT})
+if (libhipcxx_ENABLE_INSTALL_RULES)
+  include(cmake/libhipcxxInstallRules.cmake)
+endif()
+
+if (NOT LIBCUDACXX_TOPLEVEL_PROJECT)
+  include(cmake/libhipcxxAddSubdir.cmake)
   return()
 endif()
 
@@ -22,26 +63,58 @@ include(CTest)
 enable_testing()
 
 # Add codegen module
-option(libcudacxx_ENABLE_CODEGEN "Enable libcudacxx's atomics backend codegen and tests." OFF)
-if (libcudacxx_ENABLE_CODEGEN)
+option(libhipcxx_ENABLE_CODEGEN "Enable libhipcxx's atomics backend codegen and tests." OFF)
+if (libhipcxx_ENABLE_CODEGEN)
   add_subdirectory(codegen)
 endif()
 
-set(CMAKE_MODULE_PATH "${libcudacxx_SOURCE_DIR}/cmake")
-set(LLVM_PATH "${libcudacxx_SOURCE_DIR}" CACHE STRING "" FORCE)
+# Note that this currently returns and skips the rest of the build
+# system.
+option(libhipcxx_ENABLE_CMAKE_TESTS "Enable ctest-based testing." ON)
+if (libhipcxx_ENABLE_CMAKE_TESTS)
+  add_subdirectory(cmake/test)
+endif()
+
+set(CMAKE_MODULE_PATH "${libhipcxx_SOURCE_DIR}/cmake")
+set(LLVM_PATH "${libhipcxx_SOURCE_DIR}" CACHE STRING "" FORCE)
 
 # Configuration options.
-option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." ON)
+option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)
+option(LIBCUDACXX_ENABLE_HIP "Enable the HIP language support." ON)
+
+if (LIBCUDACXX_ENABLE_CUDA AND LIBCUDACXX_ENABLE_HIP)
+  message(FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )
+endif()
+
+if (LIBCUDACXX_ENABLE_CUDA)
+  message(FATAL_ERROR "CUDA backend support is currently not supported. CMake will exit.")
+endif()
+
 if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
+elseif (LIBCUDACXX_ENABLE_HIP)
+  # sync variables used by HIP CMake package etc.
+  if ("${AMDGPU_TARGETS}" STREQUAL "")
+    set(AMDGPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+  elseif(NOT "${AMDGPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
+    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and AMDGPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', AMDGPU_TARGETS='${AMDGPU_TARGETS}'")
+  endif()
+  if ("${GPU_TARGETS}" STREQUAL "")
+    set(GPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+  elseif(NOT "${GPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
+    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and GPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', GPU_TARGETS='${GPU_TARGETS}'")
+  endif()
+
+  find_package(hip REQUIRED)
+  enable_language(HIP)
 endif ()
 
-option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libcu++ tests." ON)
+option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libhip++ tests." ON)
 if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
   enable_testing()
 
-  find_package (Python COMPONENTS Interpreter)
-  if (NOT Python_Interpreter_FOUND)
+  include(FindPythonInterp)
+  if (NOT PYTHONINTERP_FOUND)
     message(FATAL_ERROR
       "Failed to find python interpreter, which is required for running tests and "
       "building a libcu++ static library.")
@@ -66,7 +139,7 @@ if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
   find_program(LLVM_DEFAULT_EXTERNAL_LIT lit)
   set(LLVM_LIT_ARGS "-sv ${LIT_EXTRA_ARGS}")
 
-  set(LIBCUDACXX_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  set(libhipcxx_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
   add_subdirectory(test)
 
   include(AddLLVM)
@@ -84,3 +157,25 @@ if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
     ARGS ${LLVM_LIT_EXTRA_ARGS}
   )
 endif ()
+
+# Package configuration
+set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.TXT")
+set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0 AND MIT")
+
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
+
+rocm_create_package(
+  NAME libhipcxx
+  DESCRIPTION "ROCm libhipcxx library"
+  # FIXME(HIP/AMD): A maintainer string is required
+  # Set to the following when available:
+  # MAINTAINER "libhipcxx-maintainer@amd.com"
+  MAINTAINER "AMD, Inc."
+  HEADER_ONLY
+)
