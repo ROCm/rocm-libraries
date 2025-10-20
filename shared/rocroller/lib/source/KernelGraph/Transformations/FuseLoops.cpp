@@ -392,22 +392,26 @@ namespace rocRoller
             void IdentifyAndFuseLoops(KernelGraph&                           graph,
                                       std::unordered_map<int, LoopBodyInfo>& loopInfo)
             {
-                std::unordered_set<int> loopTags;
-                for(auto const& [loopTag, _] : loopInfo)
+                bool changed = true;
+                while(changed)
                 {
-                    loopTags.insert(loopTag);
-                }
+                    changed = false;
+                    std::unordered_set<int> loopTags;
+                    for(auto const& [loopTag, _] : loopInfo)
+                        loopTags.insert(loopTag);
 
-                for(auto const loopTag : loopTags)
-                {
-                    if(loopInfo.find(loopTag) == loopInfo.end())
-                        continue;
+                    for(auto const loopTag : loopTags)
+                    {
+                        if(loopInfo.find(loopTag) == loopInfo.end())
+                            continue;
 
-                    auto fusibleLoops = IdentifyFusibleLoops(graph, loopTag, loopInfo);
-                    if(!fusibleLoops)
-                        continue;
+                        auto fusibleLoops = IdentifyFusibleLoops(graph, loopTag, loopInfo);
+                        if(!fusibleLoops)
+                            continue;
 
-                    FuseLoops(graph, loopTag, loopInfo, *fusibleLoops);
+                        FuseLoops(graph, loopTag, loopInfo, *fusibleLoops);
+                        changed = true;
+                    }
                 }
             }
         } // namespace FuseLoopsDetail

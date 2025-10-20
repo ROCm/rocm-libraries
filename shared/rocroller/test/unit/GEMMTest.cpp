@@ -3343,7 +3343,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 20);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 22);
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
@@ -3403,7 +3403,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 24);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 26);
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
@@ -3513,7 +3513,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 9);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed4x2)
@@ -3573,7 +3573,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 15);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
