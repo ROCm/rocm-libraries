@@ -28,8 +28,9 @@ ConvWrwParams::ConvWrwParams(
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
 
-    auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
-    auto weightDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
+    const auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto weightDims
+        = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
     const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
