@@ -337,7 +337,7 @@ static const detail::host_t host;
  *  \see host_execution_policy
  *  \see thrust::device
  */
-THRUST_INLINE_CONSTANT detail::device_t device;
+THRUST_GLOBAL_CONSTANT detail::device_t device;
 
 // define seq for the purpose of Doxygenating it
 // it is actually defined elsewhere

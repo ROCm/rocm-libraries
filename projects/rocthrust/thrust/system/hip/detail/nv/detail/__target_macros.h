@@ -12,8 +12,6 @@
 #ifndef _NV__TARGET_MACROS
 #define _NV__TARGET_MACROS
 
-#include <thrust/detail/config/cpp_compatibility.h>
-
 #include "__preprocessor.h"
 
 #if defined(__GNUC__)

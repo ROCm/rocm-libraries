@@ -28,10 +28,12 @@
 #  define THRUST_CONSTEXPR_CXX23 _CCCL_CONSTEXPR_CXX23
 #  define THRUST_IF_CONSTEXPR    _CCCL_IF_CONSTEXPR
 #  define THRUST_TRAIT           _CCCL_TRAIT
+#  define THRUST_GLOBAL_CONSTANT _CCCL_GLOBAL_CONSTANT
 
 #else
 
 #  include <thrust/detail/config/cpp_dialect.h>
+#  include <thrust/detail/config/execution_space.h>
 
 // Constexpr feature macros:
 #  if THRUST_CPP_DIALECT >= 2017
@@ -59,6 +61,15 @@
 #  endif // !_CCCL_NO_IF_CONSTEXPR
 
 #  define THRUST_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
+
+#  define THRUST_CONSTEXPR_GLOBAL constexpr
+
+// We need to treat host and device separately
+#  if defined(__CUDA_ARCH__)
+#    define THRUST_GLOBAL_CONSTANT THRUST_DEVICE THRUST_CONSTEXPR_GLOBAL
+#  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv
+#    define THRUST_GLOBAL_CONSTANT inline constexpr
+#  endif // __CUDA_ARCH__
 
 #endif
 

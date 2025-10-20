@@ -279,7 +279,7 @@ private:
 };
 THRUST_SUPPRESS_DEPRECATED_POP
 
-THRUST_INLINE_CONSTANT par_t par;
+THRUST_GLOBAL_CONSTANT par_t par;
 
 /*! \p thrust::hip::par_nosync is a parallel execution policy targeting Thrust's CUDA device backend.
  *  Similar to \p thrust::hip::par it allows execution of Thrust algorithms in a specific CUDA stream.
@@ -328,9 +328,9 @@ THRUST_INLINE_CONSTANT par_t par;
  *  \endcode
  *
  */
-THRUST_INLINE_CONSTANT par_nosync_t par_nosync;
-THRUST_INLINE_CONSTANT par_det_t par_det;
-THRUST_INLINE_CONSTANT par_det_nosync_t par_det_nosync;
+THRUST_GLOBAL_CONSTANT par_nosync_t par_nosync;
+THRUST_GLOBAL_CONSTANT par_det_t par_det;
+THRUST_GLOBAL_CONSTANT par_det_nosync_t par_det_nosync;
 } // namespace hip_rocprim
 
 namespace system
