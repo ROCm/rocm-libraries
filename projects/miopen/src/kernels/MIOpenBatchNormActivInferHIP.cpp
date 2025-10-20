@@ -38,6 +38,8 @@ constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
 // define types for vectorized loads/stores
 using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIOPEN_READ_UNIT>::type;
+using FLOAT_ACCUM_VEC_TYPE =
+    typename miopen::mapped_vector_type<FLOAT_ACCUM, MIOPEN_READ_UNIT>::type;
 
 extern "C" __global__ void __launch_bounds__(blockSize)
     MIOpenBatchNormActivInferSpatialEst(const FLOAT_ACCUM alpha,
@@ -139,14 +141,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM pvar[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pscale[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pbias[MIOPEN_READ_UNIT];
-#pragma unroll
-    for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
-    {
-        pmean[i]  = estimatedMean[chw_i + i];
-        pvar[i]   = estimatedVariance[chw_i + i];
-        pscale[i] = scale[chw_i + i];
-        pbias[i]  = bias[chw_i + i];
-    }
+    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pmean)) =
+        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + chw_i));
+    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pvar)) =
+        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + chw_i));
+    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
+        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + chw_i));
+    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
+        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + chw_i));
 
     FLOAT data[MIOPEN_READ_UNIT];
     FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
