@@ -43,6 +43,12 @@
 #include <thrust/iterator/detail/zip_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(tuple)
+#else
+#  include <thrust/tuple.h>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
@@ -215,7 +221,12 @@ private:
  *  \see zip_iterator
  */
 template <typename... Iterators>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+inline THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>>
+make_zip_iterator(_THRUST_STD::tuple<Iterators...> t);
+#else
 inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(thrust::tuple<Iterators...> t);
+#endif
 
 /*! \p make_zip_iterator creates a \p zip_iterator from
  *  iterators.
@@ -226,7 +237,11 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
  *  \see zip_iterator
  */
 template <typename... Iterators>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+inline THRUST_HOST_DEVICE zip_iterator<_THRUST_STD::tuple<Iterators...>> make_zip_iterator(Iterators... its);
+#else
 inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_iterator(Iterators... its);
+#endif
 
 /*! \} // end fancyiterators
  */
