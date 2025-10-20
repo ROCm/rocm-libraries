@@ -27,43 +27,67 @@
 #define GUARD_GEMM_HPP
 
 #include "ford.hpp"
-#include <miopen/returns.hpp>
+#include <iostream>
 
-template <class AF, class BF, class CF>
-void gemm(std::size_t n, std::size_t m, std::size_t k, AF a, BF b, CF c)
+/*
+    A and B rows and cols should be passed as default values (NxM, MxK), independently of
+   a_transponse/b_transpose flag value
+    C rows and cols should have correct values based on a_transponse/b_transpose values
+*/
+template <typename Dtype>
+void gemm_cpu(const Dtype* a_ptr,
+              const size_t a_cols,
+              const size_t a_rows,
+              const size_t a_stride,
+              const bool a_transpose,
+              const Dtype* b_ptr,
+              const size_t b_cols,
+              const size_t b_rows,
+              const size_t b_stride,
+              const bool b_transpose,
+              Dtype* c_ptr,
+              const size_t c_cols,
+              const size_t c_rows,
+              const size_t c_stride,
+              double d_alpha = 1.0,
+              double d_beta  = 1.0)
 {
-    auto inner_loop = [&](int i, int j) {
-        double x = 0.0;
-        ford(k)([&](int kk) { x += a(i, kk) * b(kk, j); });
-        c(i, j, x);
-    };
-    if(n * m > 32)
+    Dtype alpha = static_cast<Dtype>(d_alpha);
+    Dtype beta  = static_cast<Dtype>(d_beta);
+    if((!a_transpose && !b_transpose &&
+        ((a_cols != b_rows) || (a_rows != c_rows) || (b_cols != c_cols))) ||
+       (a_transpose && b_transpose &&
+        ((a_rows != b_cols) || (a_cols != c_rows) || (b_rows != c_cols))) ||
+       (a_transpose && !b_transpose &&
+        ((a_rows != b_rows) || (a_cols != c_rows) || (b_cols != c_cols))) ||
+       (!a_transpose && b_transpose &&
+        ((a_cols != b_cols) || (a_rows != c_rows) || (b_rows != c_cols))))
     {
-        par_ford(n, m)(inner_loop);
+
+        std::cout << "MM_CPU_ERROR. Incompatible matrix size: " << std::endl
+                  << "A: " << a_rows << "x" << a_cols << " transpose: " << a_transpose << std::endl
+                  << "B: " << b_rows << "x" << b_cols << " transpose: " << b_transpose << std::endl
+                  << "C: " << c_rows << "x" << c_cols << std::endl;
+        return;
+    }
+
+    size_t inner_loop_limit = a_transpose ? a_rows : a_cols;
+    auto inner_loop         = [&](int n, int k) {
+        Dtype el = static_cast<Dtype>(0.0);
+        ford(inner_loop_limit)(
+            [&](int m) { el += a_ptr[n * a_stride + m] * b_ptr[m * b_stride + k]; });
+        c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * el;
+    };
+
+    constexpr size_t iter_margin = 1'048'576;
+    if(c_rows * c_cols * inner_loop_limit > iter_margin)
+    {
+        par_ford(c_rows, c_cols)(inner_loop);
     }
     else
     {
-        ford(n, m)(inner_loop);
+        ford(c_rows, c_cols)(inner_loop);
     }
 }
-
-struct with_stride_impl
-{
-    template <class T>
-    auto operator()(T& data, std::size_t stride, std::size_t x, std::size_t y) const
-        MIOPEN_RETURNS(data[x * stride + y]);
-
-    template <class T>
-    auto operator()(std::vector<T>& data, std::size_t stride, std::size_t x, std::size_t y) const
-        MIOPEN_RETURNS(data.at(x* stride + y));
-};
-
-template <class T>
-auto with_stride(T& data, std::size_t stride) MIOPEN_RETURNS(std::bind(
-    with_stride_impl{}, std::ref(data), stride, std::placeholders::_1, std::placeholders::_2));
-
-template <class T>
-auto with_stride(T* data, std::size_t stride) MIOPEN_RETURNS(
-    std::bind(with_stride_impl{}, data, stride, std::placeholders::_1, std::placeholders::_2));
 
 #endif

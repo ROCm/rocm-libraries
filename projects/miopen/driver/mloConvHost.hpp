@@ -34,145 +34,11 @@
 
 #include "calcerr.hpp"
 
-//#if 0 // disable functions
+// #if 0 // disable functions
 #if 1
 ////////////////////////////////////////////////////////////
 //
 ///////////////////////////////////////////////////////////
-#define ADNN_MM_TRANSPOSE 1
-template <typename Dtype>
-void ADNN_mm_cpu(const Dtype* a_ptr,
-                 size_t a_cols,
-                 size_t a_rows,
-                 size_t a_stride,
-                 int a_flags,
-                 const Dtype* b_ptr,
-                 size_t b_cols,
-                 size_t b_rows,
-                 size_t b_stride,
-                 int b_flags,
-                 Dtype* c_ptr,
-                 size_t c_cols,
-                 size_t c_rows,
-                 size_t c_stride,
-                 int /*c_flags*/,
-                 double d_alpha,
-                 double d_beta)
-{
-    // mA
-
-    // mB
-
-    // mC
-    Dtype alpha = Dtype(d_alpha);
-    Dtype beta  = Dtype(d_beta);
-    if((!(a_flags & ADNN_MM_TRANSPOSE) && !(b_flags & ADNN_MM_TRANSPOSE) &&
-        ((a_cols != b_rows) || (a_rows != c_rows) || (b_cols != c_cols))) ||
-       ((a_flags & ADNN_MM_TRANSPOSE) && (b_flags & ADNN_MM_TRANSPOSE) &&
-        ((a_rows != b_cols) || (a_cols != c_rows) || (b_rows != c_cols))) ||
-       ((a_flags & ADNN_MM_TRANSPOSE) && !(b_flags & ADNN_MM_TRANSPOSE) &&
-        ((a_rows != b_rows) || (a_cols != c_rows) || (b_cols != c_cols))) ||
-       (!(a_flags & ADNN_MM_TRANSPOSE) && (b_flags & ADNN_MM_TRANSPOSE) &&
-        ((a_cols != b_cols) || (a_rows != c_rows) || (b_rows != c_cols))))
-    {
-        printf("MM_CPU ERROR; %zu %zu   %zu %zu   %zu %zu\n",
-               a_cols,
-               a_rows,
-               b_cols,
-               b_rows,
-               c_rows,
-               c_cols);
-        return;
-    }
-
-    size_t inner_loop = (!(a_flags & ADNN_MM_TRANSPOSE)) ? a_cols : a_rows;
-
-    if(!(a_flags & ADNN_MM_TRANSPOSE) && !(b_flags & ADNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                Dtype mm_e = static_cast<Dtype>(0);
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += a_ptr[n * a_stride + m] * b_ptr[m * b_stride + k];
-                }
-                c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * mm_e;
-            }
-        }
-    }
-    else if((a_flags & ADNN_MM_TRANSPOSE) && !(b_flags & ADNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-
-                Dtype mm_e = static_cast<Dtype>(0);
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += a_ptr[m * a_stride + n] * b_ptr[m * b_stride + k];
-#if 0
-                    if (
-                        (n == 0 && k == 33
-                        || n == 1 && k == 32
-                        || n == 3 && k == 1
-                        || n == 4 && k == 0
-
-                        )
-                        && a_ptr[m*a_stride + n] * b_ptr[m*b_stride + k] != 0
-                        )
-                    {
-                        printf("C:mm:%d %d %d   %11.9f %11.9f %11.9f %11.9f\n",
-                            n, k, m,
-                            mm_e, a_ptr[m*a_stride + n], b_ptr[m*b_stride + k], a_ptr[m*a_stride + n] * b_ptr[m*b_stride + k]);
-                    }
-#endif
-                }
-                c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * mm_e;
-            }
-        }
-    }
-    else if(!(a_flags & ADNN_MM_TRANSPOSE) && (b_flags & ADNN_MM_TRANSPOSE))
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                Dtype mm_e = static_cast<Dtype>(0);
-
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    mm_e += a_ptr[n * a_stride + m] * b_ptr[k * b_stride + m];
-#if 0
-                    if (n == 0 && k == 6 && a_ptr[n*a_stride + m] * b_ptr[k*b_stride + m] != 0)
-                    {
-                        printf("%4d  %11.9f %11.9f %11.9f\n", m, mm_e, a_ptr[n*a_stride + m], b_ptr[k*b_stride + m]);
-                    }
-#endif
-                }
-                c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * mm_e;
-            }
-        }
-    }
-    else
-    {
-        for(size_t n = 0; n < c_rows; ++n)
-        {
-            for(size_t k = 0; k < c_cols; ++k)
-            {
-                Dtype mm_e = static_cast<Dtype>(0);
-                for(size_t m = 0; m < inner_loop; ++m)
-                {
-                    c_ptr[n * c_stride + k] += a_ptr[m * a_stride + n] * b_ptr[k * b_stride + m];
-                }
-                c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * mm_e;
-            }
-        }
-    }
-}
-
 template <typename Dtype>
 void ADNN_im2col_cpu(const Dtype* data_im,
                      const int channels,
@@ -400,23 +266,22 @@ int mloBackwardMMOnHost(int kernel_size_h,
 
     for(int b = 0; b < batch_sz; ++b)
     {
-        ADNN_mm_cpu<T_>(weights_ptr,
-                        weights_width,
-                        weights_height,
-                        weights_stride,
-                        ADNN_MM_TRANSPOSE,
-                        &T_(&top_df_ptr[top_df_batch_stride * b]),
-                        top_width * top_height,
-                        outputs,
-                        top_df_channel_stride,
-                        0,
-                        &col_we_df_ptr[col_we_batch_stride * b],
-                        col_we_df_width,
-                        col_we_df_height,
-                        col_we_stride,
-                        0,
-                        1,
-                        0); //- bias
+        gemm_cpu<T_>(weights_ptr,
+                     weights_width,
+                     weights_height,
+                     weights_stride,
+                     true,
+                     &T_(&top_df_ptr[top_df_batch_stride * b]),
+                     top_width * top_height,
+                     outputs,
+                     top_df_channel_stride,
+                     false,
+                     &col_we_df_ptr[col_we_batch_stride * b],
+                     col_we_df_width,
+                     col_we_df_height,
+                     col_we_stride,
+                     1,
+                     0); //- bias
 
         ADNN_col2im_cpu<T_>(&col_we_df_ptr[col_we_batch_stride * b],
                             inputs,
@@ -872,8 +737,8 @@ int mloDirectSPConvHost5x5(int MLO_GRP_SZ1,
                             } // for (int k_j = 0; k_j < MLO_KERNEL_SZ1; ++k_j, bot_off1 +=
                               // MLO_BOT_STRIDE, wei_off += MLO_FILTER_SIZE1 * MLO_N_OUTPUTS *
                               // MLO_N_INPUTS)
-                        }     // for (int c = 0; c < MLO_N_INPUTS; ++c, bot_off +=
-                              // MLO_BOT_CHANNEL_STRIDE)
+                        } // for (int c = 0; c < MLO_N_INPUTS; ++c, bot_off +=
+                          // MLO_BOT_CHANNEL_STRIDE)
 
                         // output
                         int out_off = b * MLO_TOP_BATCH_STRIDE + o_base * MLO_TOP_CHANNEL_STRIDE +

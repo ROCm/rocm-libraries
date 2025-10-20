@@ -27,6 +27,7 @@
 #ifndef GUARD_MIOPEN_TEST_RNN_VANILLA_COMMON_HPP
 #define GUARD_MIOPEN_TEST_RNN_VANILLA_COMMON_HPP
 
+#include "../test/gemm.hpp"
 #include "driver.hpp"
 #include "dropout_util.hpp"
 #include "get_handle.hpp"
@@ -86,7 +87,7 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
                           bool hx_is_null = false)
 {
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
            in_h,
@@ -197,23 +198,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
             }
             else
             {
-                RNN_mm_cpu<T>(in.data(),
-                              in_h,
-                              batch_n,
-                              in_stride,
-                              0,
-                              wei.data(),
-                              in_h,
-                              hy_h * bi,
-                              in_stride,
-                              RNN_MM_TRANSPOSE,
-                              &rsvspace[hid_shift],
-                              hy_h * bi,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+                gemm_cpu<T>(in.data(),
+                            in_h,
+                            batch_n,
+                            in_stride,
+                            false,
+                            wei.data(),
+                            in_h,
+                            hy_h * bi,
+                            in_stride,
+                            true,
+                            &rsvspace[hid_shift],
+                            hy_h * bi,
+                            batch_n,
+                            hy_stride,
+                            1,
+                            1);
 
                 // from bias
                 if(biased)
@@ -253,24 +253,23 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
                 prelayer_shift = drop_out_offset;
             }
 
-            RNN_mm_cpu<T>(use_dropout ? &dropout_hid_state[prelayer_shift]
-                                      : &rsvspace[prelayer_shift],
-                          hy_h * bi,
-                          batch_n,
-                          use_dropout ? hy_h * bi : hy_stride,
-                          0,
-                          &wei[wei_shift],
-                          hy_h * bi,
-                          hy_h * bi,
-                          bi_stride,
-                          RNN_MM_TRANSPOSE,
-                          &rsvspace[hid_shift],
-                          hy_h * bi,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          1,
-                          1);
+            gemm_cpu<T>(use_dropout ? &dropout_hid_state[prelayer_shift]
+                                    : &rsvspace[prelayer_shift],
+                        hy_h * bi,
+                        batch_n,
+                        use_dropout ? hy_h * bi : hy_stride,
+                        false,
+                        &wei[wei_shift],
+                        hy_h * bi,
+                        hy_h * bi,
+                        bi_stride,
+                        true,
+                        &rsvspace[hid_shift],
+                        hy_h * bi,
+                        batch_n,
+                        hy_stride,
+                        1,
+                        1);
 
             // from bias
             if(biased)
@@ -304,23 +303,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
             {
                 if(!hx_is_null)
                 {
-                    RNN_mm_cpu<T>(&hx[hx_shift],
-                                  hy_h,
-                                  in_n.at(ti),
-                                  uni_stride,
-                                  0,
-                                  &wei[wei_shift],
-                                  hy_h,
-                                  hy_h,
-                                  uni_stride,
-                                  RNN_MM_TRANSPOSE,
-                                  &rsvspace[hid_shift + bacc * hy_stride],
-                                  hy_h,
-                                  in_n.at(ti),
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                    gemm_cpu<T>(&hx[hx_shift],
+                                hy_h,
+                                in_n.at(ti),
+                                uni_stride,
+                                false,
+                                &wei[wei_shift],
+                                hy_h,
+                                hy_h,
+                                uni_stride,
+                                true,
+                                &rsvspace[hid_shift + bacc * hy_stride],
+                                hy_h,
+                                in_n.at(ti),
+                                hy_stride,
+                                1,
+                                1);
 
                     // from bias
                     if(biased)
@@ -338,23 +336,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
 
                     if(bidirection)
                     {
-                        RNN_mm_cpu<T>(&hx[hx_shift + hy_n * hy_h],
-                                      hy_h,
-                                      in_n.at(seqLength - 1 - ti),
-                                      uni_stride,
-                                      0,
-                                      &wei[wei_shift + hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h,
-                                      uni_stride,
-                                      RNN_MM_TRANSPOSE,
-                                      &rsvspace[hid_shift + baccbi * hy_stride + hy_h],
-                                      hy_h,
-                                      in_n.at(seqLength - 1 - ti),
-                                      hy_stride,
-                                      0,
-                                      1,
-                                      1);
+                        gemm_cpu<T>(&hx[hx_shift + hy_n * hy_h],
+                                    hy_h,
+                                    in_n.at(seqLength - 1 - ti),
+                                    uni_stride,
+                                    false,
+                                    &wei[wei_shift + hy_h * uni_stride],
+                                    hy_h,
+                                    hy_h,
+                                    uni_stride,
+                                    true,
+                                    &rsvspace[hid_shift + baccbi * hy_stride + hy_h],
+                                    hy_h,
+                                    in_n.at(seqLength - 1 - ti),
+                                    hy_stride,
+                                    1,
+                                    1);
 
                         // from bias
                         if(biased)
@@ -375,23 +372,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
             }
             else
             {
-                RNN_mm_cpu<T>(&hy_host[hx_shift],
-                              hy_h,
-                              in_n.at(ti),
-                              uni_stride,
-                              0,
-                              &wei[wei_shift],
-                              hy_h,
-                              hy_h,
-                              uni_stride,
-                              RNN_MM_TRANSPOSE,
-                              &rsvspace[hid_shift + bacc * hy_stride],
-                              hy_h,
-                              in_n.at(ti),
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+                gemm_cpu<T>(&hy_host[hx_shift],
+                            hy_h,
+                            in_n.at(ti),
+                            uni_stride,
+                            false,
+                            &wei[wei_shift],
+                            hy_h,
+                            hy_h,
+                            uni_stride,
+                            true,
+                            &rsvspace[hid_shift + bacc * hy_stride],
+                            hy_h,
+                            in_n.at(ti),
+                            hy_stride,
+                            1,
+                            1);
 
                 // from bias
                 if(biased)
@@ -412,23 +408,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
 
                     if(!hx_is_null && in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti))
                     {
-                        RNN_mm_cpu<T>(
+                        gemm_cpu<T>(
                             &hx[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h],
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             uni_stride,
-                            0,
+                            false,
                             &wei[wei_shift + hy_h * uni_stride],
                             hy_h,
                             hy_h,
                             uni_stride,
-                            RNN_MM_TRANSPOSE,
+                            true,
                             &rsvspace[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
                                       hy_h],
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -450,23 +445,22 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
                         }
                     }
 
-                    RNN_mm_cpu<T>(&hy_host[hx_shift + hy_n * hy_h],
-                                  hy_h,
-                                  in_n.at(seqLength - ti),
-                                  uni_stride,
-                                  0,
-                                  &wei[wei_shift + hy_h * uni_stride],
-                                  hy_h,
-                                  hy_h,
-                                  uni_stride,
-                                  RNN_MM_TRANSPOSE,
-                                  &rsvspace[hid_shift + baccbi * hy_stride + hy_h],
-                                  hy_h,
-                                  in_n.at(seqLength - ti),
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                    gemm_cpu<T>(&hy_host[hx_shift + hy_n * hy_h],
+                                hy_h,
+                                in_n.at(seqLength - ti),
+                                uni_stride,
+                                false,
+                                &wei[wei_shift + hy_h * uni_stride],
+                                hy_h,
+                                hy_h,
+                                uni_stride,
+                                true,
+                                &rsvspace[hid_shift + baccbi * hy_stride + hy_h],
+                                hy_h,
+                                in_n.at(seqLength - ti),
+                                hy_stride,
+                                1,
+                                1);
 
                     // from bias
                     if(biased)
@@ -588,7 +582,7 @@ void RNNBwdDataCPUVerify(bool use_dropout,
                          bool dhy_is_null = false)
 {
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
     printf("BWD DATA CPU driver:\n");
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
@@ -678,23 +672,22 @@ void RNNBwdDataCPUVerify(bool use_dropout,
         {
             int prelayer_shift = (li + 1) * batch_n * hy_h * bi;
 
-            RNN_mm_cpu<T>(&wkspace[prelayer_shift],
-                          hy_h * bi,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          &wei[wei_shift],
-                          hy_h * bi,
-                          hy_h * bi,
-                          bi_stride,
-                          0,
-                          &wkspace[hid_shift],
-                          hy_h * bi,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          1,
-                          1);
+            gemm_cpu<T>(&wkspace[prelayer_shift],
+                        hy_h * bi,
+                        batch_n,
+                        hy_stride,
+                        false,
+                        &wei[wei_shift],
+                        hy_h * bi,
+                        hy_h * bi,
+                        bi_stride,
+                        false,
+                        &wkspace[hid_shift],
+                        hy_h * bi,
+                        batch_n,
+                        hy_stride,
+                        1,
+                        1);
 
             if(use_dropout)
             {
@@ -784,23 +777,22 @@ void RNNBwdDataCPUVerify(bool use_dropout,
                             : (bi * (in_h + hy_h) * hy_h +
                                (li - 1) * bi * (bi * hy_h + hy_h) * hy_h + bi * hy_h * hy_stride);
 
-            RNN_mm_cpu<T>(&wkspace[hid_shift + bacc * hy_stride],
-                          hy_h,
-                          in_n.at(ti),
-                          hy_stride,
-                          0,
-                          &wei[wei_shift],
-                          hy_h,
-                          hy_h,
-                          uni_stride,
-                          0,
-                          &dhx_host[hx_shift],
-                          hy_h,
-                          in_n.at(ti),
-                          uni_stride,
-                          0,
-                          1,
-                          1);
+            gemm_cpu<T>(&wkspace[hid_shift + bacc * hy_stride],
+                        hy_h,
+                        in_n.at(ti),
+                        hy_stride,
+                        false,
+                        &wei[wei_shift],
+                        hy_h,
+                        hy_h,
+                        uni_stride,
+                        false,
+                        &dhx_host[hx_shift],
+                        hy_h,
+                        in_n.at(ti),
+                        uni_stride,
+                        1,
+                        1);
 
             if(bidirection)
             {
@@ -849,23 +841,22 @@ void RNNBwdDataCPUVerify(bool use_dropout,
                     }
                 }
 
-                RNN_mm_cpu<T>(&wkspace[hid_shift + baccbi * hy_stride + hy_h],
-                              hy_h,
-                              in_n.at(seqLength - 1 - ti),
-                              hy_stride,
-                              0,
-                              &wei[wei_shift + hy_h * uni_stride],
-                              hy_h,
-                              hy_h,
-                              uni_stride,
-                              0,
-                              &dhx_host[hx_shift + hy_n * hy_h],
-                              hy_h,
-                              in_n.at(seqLength - 1 - ti),
-                              uni_stride,
-                              0,
-                              1,
-                              1);
+                gemm_cpu<T>(&wkspace[hid_shift + baccbi * hy_stride + hy_h],
+                            hy_h,
+                            in_n.at(seqLength - 1 - ti),
+                            hy_stride,
+                            false,
+                            &wei[wei_shift + hy_h * uni_stride],
+                            hy_h,
+                            hy_h,
+                            uni_stride,
+                            false,
+                            &dhx_host[hx_shift + hy_n * hy_h],
+                            hy_h,
+                            in_n.at(seqLength - 1 - ti),
+                            uni_stride,
+                            1,
+                            1);
             }
 
             baccbi += in_n.at(seqLength - 1 - ti);
@@ -889,23 +880,22 @@ void RNNBwdDataCPUVerify(bool use_dropout,
     }
     else
     {
-        RNN_mm_cpu<T>(wkspace.data(),
-                      hy_h * bi,
-                      batch_n,
-                      hy_stride,
-                      0,
-                      wei.data(),
-                      in_h,
-                      hy_h * bi,
-                      in_stride,
-                      0,
-                      din_host.data(),
-                      in_h,
-                      batch_n,
-                      in_stride,
-                      0,
-                      1,
-                      1);
+        gemm_cpu<T>(wkspace.data(),
+                    hy_h * bi,
+                    batch_n,
+                    hy_stride,
+                    false,
+                    wei.data(),
+                    in_h,
+                    hy_h * bi,
+                    in_stride,
+                    false,
+                    din_host.data(),
+                    in_h,
+                    batch_n,
+                    in_stride,
+                    1,
+                    1);
     }
 }
 
@@ -937,7 +927,7 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                            std::vector<T>& wkspace,
                            bool hx_is_null = false)
 {
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
     printf("BWD WEGIHTS CPU ctest:\n");
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
@@ -991,23 +981,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
         {
             if(inputMode != 1)
             {
-                RNN_mm_cpu<T>(wkspace.data(),
-                              hy_h * bi,
-                              batch_n,
-                              hy_stride,
-                              RNN_MM_TRANSPOSE,
-                              in.data(),
-                              in_h,
-                              batch_n,
-                              in_stride,
-                              0,
-                              dwei_host.data(),
-                              in_h,
-                              hy_h * bi,
-                              in_stride,
-                              0,
-                              1,
-                              1);
+                gemm_cpu<T>(wkspace.data(),
+                            hy_h * bi,
+                            batch_n,
+                            hy_stride,
+                            true,
+                            in.data(),
+                            in_h,
+                            batch_n,
+                            in_stride,
+                            false,
+                            dwei_host.data(),
+                            in_h,
+                            hy_h * bi,
+                            in_stride,
+                            1,
+                            1);
             }
 
             if(biased)
@@ -1029,23 +1018,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
             int hid_shift = li * bi * batch_n * hy_h;
             int wei_shift = bi * (in_h + hy_h) * hy_h + (li - 1) * bi * (bi * hy_h + hy_h) * hy_h;
 
-            RNN_mm_cpu<T>(&wkspace[hid_shift],
-                          hy_h * bi,
-                          batch_n,
-                          hy_stride,
-                          RNN_MM_TRANSPOSE,
-                          &rsvspace[prelayer_shift],
-                          hy_h * bi,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          &dwei_host[wei_shift],
-                          hy_h * bi,
-                          hy_h * bi,
-                          bi_stride,
-                          0,
-                          1,
-                          1);
+            gemm_cpu<T>(&wkspace[hid_shift],
+                        hy_h * bi,
+                        batch_n,
+                        hy_stride,
+                        true,
+                        &rsvspace[prelayer_shift],
+                        hy_h * bi,
+                        batch_n,
+                        hy_stride,
+                        false,
+                        &dwei_host[wei_shift],
+                        hy_h * bi,
+                        hy_h * bi,
+                        bi_stride,
+                        1,
+                        1);
 
             if(biased)
             {
@@ -1079,23 +1067,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
             {
                 if(!hx_is_null)
                 {
-                    RNN_mm_cpu<T>(&wkspace[hid_shift],
-                                  hy_h,
-                                  in_n.at(ti),
-                                  hy_stride,
-                                  RNN_MM_TRANSPOSE,
-                                  &hx[hx_shift],
-                                  hy_h,
-                                  in_n.at(ti),
-                                  uni_stride,
-                                  0,
-                                  &dwei_host[wei_shift],
-                                  hy_h,
-                                  hy_h,
-                                  uni_stride,
-                                  0,
-                                  1,
-                                  1);
+                    gemm_cpu<T>(&wkspace[hid_shift],
+                                hy_h,
+                                in_n.at(ti),
+                                hy_stride,
+                                true,
+                                &hx[hx_shift],
+                                hy_h,
+                                in_n.at(ti),
+                                uni_stride,
+                                false,
+                                &dwei_host[wei_shift],
+                                hy_h,
+                                hy_h,
+                                uni_stride,
+                                1,
+                                1);
 
                     if(biased)
                     {
@@ -1117,23 +1104,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                 pretime_shift = li * bi * batch_n * hy_h + (bacc - in_n.at(ti - 1)) * hy_stride +
                                 numlayer * batch_n * hy_h * bi;
 
-                RNN_mm_cpu<T>(&wkspace[hid_shift],
-                              hy_h,
-                              in_n.at(ti),
-                              hy_stride,
-                              RNN_MM_TRANSPOSE,
-                              &rsvspace[pretime_shift],
-                              hy_h,
-                              in_n.at(ti),
-                              hy_stride,
-                              0,
-                              &dwei_host[wei_shift],
-                              hy_h,
-                              hy_h,
-                              uni_stride,
-                              0,
-                              1,
-                              1);
+                gemm_cpu<T>(&wkspace[hid_shift],
+                            hy_h,
+                            in_n.at(ti),
+                            hy_stride,
+                            true,
+                            &rsvspace[pretime_shift],
+                            hy_h,
+                            in_n.at(ti),
+                            hy_stride,
+                            false,
+                            &dwei_host[wei_shift],
+                            hy_h,
+                            hy_h,
+                            uni_stride,
+                            1,
+                            1);
 
                 if(biased)
                 {
@@ -1156,23 +1142,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                 {
                     if(!hx_is_null)
                     {
-                        RNN_mm_cpu<T>(&wkspace[hid_shift + hy_h],
-                                      hy_h,
-                                      in_n.at(ti),
-                                      hy_stride,
-                                      RNN_MM_TRANSPOSE,
-                                      &hx[hx_shift + hy_n * hy_h],
-                                      hy_h,
-                                      in_n.at(ti),
-                                      uni_stride,
-                                      0,
-                                      &dwei_host[wei_shift + hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                        gemm_cpu<T>(&wkspace[hid_shift + hy_h],
+                                    hy_h,
+                                    in_n.at(ti),
+                                    hy_stride,
+                                    true,
+                                    &hx[hx_shift + hy_n * hy_h],
+                                    hy_h,
+                                    in_n.at(ti),
+                                    uni_stride,
+                                    false,
+                                    &dwei_host[wei_shift + hy_h * uni_stride],
+                                    hy_h,
+                                    hy_h,
+                                    uni_stride,
+                                    1,
+                                    1);
 
                         if(biased)
                         {
@@ -1193,23 +1178,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                 {
                     if(!hx_is_null && in_n.at(ti) > in_n.at(ti + 1))
                     {
-                        RNN_mm_cpu<T>(&wkspace[hid_shift + hy_h + in_n.at(ti + 1) * hy_stride],
-                                      hy_h,
-                                      (in_n.at(ti) - in_n.at(ti + 1)),
-                                      hy_stride,
-                                      RNN_MM_TRANSPOSE,
-                                      &hx[hx_shift + hy_n * hy_h + in_n.at(ti + 1) * hy_h],
-                                      hy_h,
-                                      (in_n.at(ti) - in_n.at(ti + 1)),
-                                      uni_stride,
-                                      0,
-                                      &dwei_host[wei_shift + hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                        gemm_cpu<T>(&wkspace[hid_shift + hy_h + in_n.at(ti + 1) * hy_stride],
+                                    hy_h,
+                                    (in_n.at(ti) - in_n.at(ti + 1)),
+                                    hy_stride,
+                                    true,
+                                    &hx[hx_shift + hy_n * hy_h + in_n.at(ti + 1) * hy_h],
+                                    hy_h,
+                                    (in_n.at(ti) - in_n.at(ti + 1)),
+                                    uni_stride,
+                                    false,
+                                    &dwei_host[wei_shift + hy_h * uni_stride],
+                                    hy_h,
+                                    hy_h,
+                                    uni_stride,
+                                    1,
+                                    1);
 
                         if(biased)
                         {
@@ -1229,23 +1213,22 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                     pretime_shift = li * bi * batch_n * hy_h + (bacc + in_n.at(ti)) * hy_stride +
                                     numlayer * batch_n * hy_h * bi;
 
-                    RNN_mm_cpu<T>(&wkspace[hid_shift + hy_h],
-                                  hy_h,
-                                  in_n.at(ti + 1),
-                                  hy_stride,
-                                  RNN_MM_TRANSPOSE,
-                                  &rsvspace[pretime_shift + hy_h],
-                                  hy_h,
-                                  in_n.at(ti + 1),
-                                  hy_stride,
-                                  0,
-                                  &dwei_host[wei_shift + hy_h * uni_stride],
-                                  hy_h,
-                                  hy_h,
-                                  uni_stride,
-                                  0,
-                                  1,
-                                  1);
+                    gemm_cpu<T>(&wkspace[hid_shift + hy_h],
+                                hy_h,
+                                in_n.at(ti + 1),
+                                hy_stride,
+                                true,
+                                &rsvspace[pretime_shift + hy_h],
+                                hy_h,
+                                in_n.at(ti + 1),
+                                hy_stride,
+                                false,
+                                &dwei_host[wei_shift + hy_h * uni_stride],
+                                hy_h,
+                                hy_h,
+                                uni_stride,
+                                1,
+                                1);
 
                     if(biased)
                     {
@@ -1338,7 +1321,7 @@ struct verify_forward_infer_rnn
     std::vector<T> cpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1398,21 +1381,21 @@ struct verify_forward_infer_rnn
                              reserveSpace,
                              nohx);
 
-#if(MIO_RNN_TEST_DEBUG == 2)
+#if (MIO_RNN_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward inference RNN pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward inference CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1422,7 +1405,7 @@ struct verify_forward_infer_rnn
     std::vector<T> gpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1488,7 +1471,7 @@ struct verify_forward_infer_rnn
                                   wspace.ptr(),
                                   wspace.size());
 
-#if(MIO_RNN_TEST_DEBUG == 2)
+#if (MIO_RNN_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -1496,14 +1479,14 @@ struct verify_forward_infer_rnn
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward inference GPU" << std::endl;
 #endif
         return (handle.Read<T>(output_dev, output.size()));
@@ -1603,7 +1586,7 @@ struct verify_forward_train_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1663,14 +1646,14 @@ struct verify_forward_train_rnn
                              reserveSpace,
                              nohx);
 
-#if(MIO_RNN_TEST_DEBUG == 2)
+#if (MIO_RNN_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward train RNN pass time: "
@@ -1680,7 +1663,7 @@ struct verify_forward_train_rnn
 
         auto retSet = std::make_tuple(output, (nohy ? initHidden : hiddenState), reserveSpace);
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1690,7 +1673,7 @@ struct verify_forward_train_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1766,7 +1749,7 @@ struct verify_forward_train_rnn
                                  rspace.ptr(),
                                  rspace.size());
 
-#if(MIO_RNN_TEST_DEBUG == 2)
+#if (MIO_RNN_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -1777,14 +1760,14 @@ struct verify_forward_train_rnn
         auto retSet = std::make_tuple(handle.Read<T>(output_dev, output.size()),
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train GPU" << std::endl;
 #endif
         return retSet;
@@ -1909,7 +1892,7 @@ struct verify_backward_data_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1963,7 +1946,7 @@ struct verify_backward_data_rnn
                             workSpace,
                             nodhy);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_data_rnn_vanilla pass time: "
@@ -1973,7 +1956,7 @@ struct verify_backward_data_rnn
 
         auto retSet = std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward data CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1983,7 +1966,7 @@ struct verify_backward_data_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2068,14 +2051,14 @@ struct verify_backward_data_rnn
                                       rspace.Read<std::vector<T>>(),
                                       wspace.Read<std::vector<T>>());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward data RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward data GPU" << std::endl;
 #endif
         return retSet;
@@ -2189,7 +2172,7 @@ struct verify_backward_weights_rnn
     std::vector<T> cpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2225,14 +2208,14 @@ struct verify_backward_weights_rnn
                               workSpace,
                               nohx);
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_weights_rnn_vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward weights CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -2242,7 +2225,7 @@ struct verify_backward_weights_rnn
     std::vector<T> gpu()
     {
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2295,14 +2278,14 @@ struct verify_backward_weights_rnn
                                  rspace.ptr(),
                                  rspace.size());
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
+#if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backwards_weights RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward weights GPU" << std::endl;
 #endif
         auto retvec = handle.Read<T>(dweights_dev, dweights.size());
@@ -2362,7 +2345,7 @@ struct rnn_basic_vanilla_driver : test_driver
     void run()
     {
         const double Data_scale = 0.001;
-#if(MIOPEN_BACKEND_OPENCL == 1)
+#if (MIOPEN_BACKEND_OPENCL == 1)
         if(type == miopenHalf)
             exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
@@ -2389,7 +2372,7 @@ struct rnn_basic_vanilla_driver : test_driver
             std::abort();
         }
 
-#if(MIO_RNN_TEST_DEBUG == 2)
+#if (MIO_RNN_TEST_DEBUG == 2)
         printf("seqLen: %d, batch_seq array len: %d\n", seqLength, batchSeq.size());
         for(int i = 0; i < seqLength; i++)
         {
@@ -2501,7 +2484,7 @@ struct rnn_basic_vanilla_driver : test_driver
             weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale / 10, 100);
         }
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         printf("inputMode: %d, biasMode: %d, rnnMode: %d, dirMode: %d\n",
                inputMode,
                biasMode,
@@ -2596,7 +2579,7 @@ struct rnn_basic_vanilla_driver : test_driver
         {
             dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
         }
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         printf("Running backward data RNN.\n");
 #endif
         auto bwdDataOutputPair = verify(verify_backward_data_rnn<T>{rnnDesc,
@@ -2626,7 +2609,7 @@ struct rnn_basic_vanilla_driver : test_driver
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
         auto workSpaceBwdData    = std::get<3>(bwdDataOutputPair.second);
 
-#if(MIO_RNN_TEST_DEBUG > 0)
+#if (MIO_RNN_TEST_DEBUG > 0)
         printf("Running backward weights RNN.\n");
         printf("reserve sz: %d, workSpace sz: %d, weight sz: %d\n",
                reserveSpaceBwdData.size(),
