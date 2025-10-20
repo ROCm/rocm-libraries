@@ -61,6 +61,7 @@ public:
 
     ITensorIterator() = default;
 
+    template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
     ITensorIterator(ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
         , _indices(_tensor.dims().size(), 0)
@@ -71,6 +72,7 @@ public:
         }
     }
 
+    template <bool C = IsConst, std::enable_if_t<C, int> = 0>
     ITensorIterator(const ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
         , _indices(_tensor.dims().size(), 0)
