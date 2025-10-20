@@ -1086,6 +1086,10 @@ struct onesweep_iteration_helper
     static constexpr unsigned int NKey   = N<Key>::value;
     static constexpr unsigned int NValue = N<Value>::value;
 
+    static constexpr unsigned int KeyLDSSize = BlockSize * NKey + (NKey != ItemsPerThread ? 1 : 0);
+    static constexpr unsigned int ValueLDSSize
+        = BlockSize * NValue + (NValue == ItemsPerThread ? 0 : 1);
+
     using v_pack = type_wrapper<Value>;
 
     union data_storage
@@ -1096,8 +1100,8 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                Key   ordered_block_keys[BlockSize * NKey + 1];
-                v_pack ordered_block_values[BlockSize * NValue + 1];
+                Key   ordered_block_keys[KeyLDSSize];
+                v_pack ordered_block_values[ValueLDSSize];
             };
         };
     };
