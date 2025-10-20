@@ -50,7 +50,6 @@
 #include <thrust/detail/config/diagnostic.h> // IWYU pragma: export
 #include <thrust/detail/config/dialect.h> // IWYU pragma: export
 #include <thrust/detail/config/execution_space.h> // IWYU pragma: export
-#include <thrust/detail/config/global_workarounds.h> // IWYU pragma: export
 #include <thrust/detail/config/namespace.h> // IWYU pragma: export
 #include <thrust/detail/config/rtti.h> // IWYU pragma: export
 #include <thrust/detail/config/sequence_access.h> // IWYU pragma: export
