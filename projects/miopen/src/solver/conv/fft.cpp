@@ -388,7 +388,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
     }
 
     const std::string algorithm    = "miopenConvolutionFwdAlgoFFT";
-    const std::string program_name = "MIOpenConvFFT.cl";
+    const std::string program_name = "MIOpenConvFFT.cpp";
 
     auto sol         = ConvSolution{miopenStatusSuccess};
     sol.workspace_sz = workSpaceSize;

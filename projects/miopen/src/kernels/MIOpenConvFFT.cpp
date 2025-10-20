@@ -31,7 +31,7 @@
 #define C3QA 0.50000000000000000000000000000000f
 #define C3QB 0.86602540378443864676372317075294f
 
-void FwdRad3B1(float2* R0, float2* R1, float2* R2)
+__device__ void FwdRad3B1(float2* R0, float2* R1, float2* R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
@@ -52,7 +52,7 @@ void FwdRad3B1(float2* R0, float2* R1, float2* R2)
     ((*R2).y) = TI2;
 }
 
-void InvRad3B1(float2* R0, float2* R1, float2* R2)
+__device__ void InvRad3B1(float2* R0, float2* R1, float2* R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
@@ -73,7 +73,7 @@ void InvRad3B1(float2* R0, float2* R1, float2* R2)
     ((*R2).y) = TI2;
 }
 
-void FwdRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
+__device__ void FwdRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
@@ -111,7 +111,7 @@ void FwdRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float
     (*R5).y = TI4 - (-C3QB * TR5 - C3QA * TI5);
 }
 
-void InvRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
+__device__ void InvRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
@@ -149,14 +149,14 @@ void InvRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float
     (*R5).y = TI4 - (C3QB * TR5 - C3QA * TI5);
 }
 
-void FwdRad2B1(float2* R0, float2* R1)
+__device__ void FwdRad2B1(float2* R0, float2* R1)
 {
 
     (*R1) = (*R0) - (*R1);
     (*R0) = 2.0f * (*R0) - (*R1);
 }
 
-void InvRad2B1(float2* R0, float2* R1)
+__device__ void InvRad2B1(float2* R0, float2* R1)
 {
 
     (*R1) = (*R0) - (*R1);
@@ -165,7 +165,7 @@ void InvRad2B1(float2* R0, float2* R1)
 
 #define C8Q 0.70710678118654752440084436210485f
 
-void FwdRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
+__device__ void FwdRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
 {
 
     float2 T;
@@ -185,7 +185,7 @@ void FwdRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
     (*R2) = T;
 }
 
-void InvRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
+__device__ void InvRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
 {
 
     float2 T;
@@ -205,7 +205,7 @@ void InvRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
     (*R2) = T;
 }
 
-void FwdRad8B1(
+__device__ void FwdRad8B1(
     float2* R0, float2* R4, float2* R2, float2* R6, float2* R1, float2* R5, float2* R3, float2* R7)
 {
 
@@ -246,7 +246,7 @@ void FwdRad8B1(
     (*R6) = T;
 }
 
-void InvRad8B1(
+__device__ void InvRad8B1(
     float2* R0, float2* R4, float2* R2, float2* R6, float2* R1, float2* R5, float2* R3, float2* R7)
 {
 
@@ -289,7 +289,7 @@ void InvRad8B1(
 
 #if defined(CFF_IMG_SZ_7_7)
 
-static __constant float2 twiddles[11] = {
+static __constant__ float2 twiddles[11] = {
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
@@ -305,11 +305,11 @@ static __constant float2 twiddles[11] = {
              -4.9999999999999994448884876874217298e-01f),
 };
 
-void FwdPassIN(uint me,
+__device__ void FwdPassIN(uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -318,7 +318,7 @@ void FwdPassIN(uint me,
                float2* R5)
 {
     uint met            = me % 48;
-    __local float* ldsf = (__local float*)(bufOut + outOffset);
+    float* ldsf = (float*)(bufOut + outOffset);
 
     (*R0) = (float2)(0, 0);
     (*R1) = (float2)(0, 0);
@@ -335,7 +335,7 @@ void FwdPassIN(uint me,
     bufOut[outOffset + me + 5 * 192] = (*R0);
     bufOut[outOffset + me + 6 * 192] = (*R0);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     (*R0).x = bufIn[inOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)];
     (*R1).x = bufIn[inOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)];
@@ -358,12 +358,12 @@ void FwdPassIN(uint me,
     }
 }
 
-void FwdPassWE(uint batch,
+__device__ void FwdPassWE(uint batch,
                uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -372,7 +372,7 @@ void FwdPassWE(uint batch,
                float2* R5)
 {
     uint met            = me % 24;
-    __local float* ldsf = (__local float*)(bufOut + outOffset);
+    float* ldsf = (float*)(bufOut + outOffset);
 
 #ifdef CFF_BACKWARD
     inOffset =
@@ -402,12 +402,12 @@ void FwdPassWE(uint batch,
     ldsf[(23 - met) + ((me / 24) + 8) * 25] = (*R1).x;
 #endif
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     (*R0).x = ldsf[((me / 24) + 0) * 25 + met];
     (*R1).x = ldsf[((me / 24) + 8) * 25 + met];
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + me + 0 * 192] = (*R5);
     bufOut[outOffset + me + 1 * 192] = (*R5);
@@ -417,7 +417,7 @@ void FwdPassWE(uint batch,
     bufOut[outOffset + me + 5 * 192] = (*R5);
     bufOut[outOffset + me + 6 * 192] = (*R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 0 * 1344] = (*R0).x;
     ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 1 * 1344] = (*R1).x;
@@ -434,11 +434,11 @@ void FwdPassWE(uint batch,
     }
 }
 
-void FwdPass0(uint me,
+__device__ void FwdPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -456,7 +456,7 @@ void FwdPass0(uint me,
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0)] = (*R0);
     bufOut[outOffset + (me * 6 + 1)] = (*R1);
@@ -466,11 +466,11 @@ void FwdPass0(uint me,
     bufOut[outOffset + (me * 6 + 5)] = (*R5);
 }
 
-void FwdPass1(uint me,
+__device__ void FwdPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -517,7 +517,7 @@ void FwdPass1(uint me,
     FwdRad2B1(R2, R3);
     FwdRad2B1(R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (3 * me + 0 + 0)] = (*R0);
     bufOut[outOffset + (3 * me + 1 + 0)] = (*R2);
@@ -527,11 +527,11 @@ void FwdPass1(uint me,
     bufOut[outOffset + (3 * me + 2 + 6)] = (*R5);
 }
 
-void FwdPass1b(uint me,
+__device__ void FwdPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -553,7 +553,7 @@ void FwdPass1b(uint me,
         dc = bufIn[inOffset];
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + 0 + (3 * me + 1)] =
         (float2)(((*R0).x + (*R3).x) * 0.5, +((*R0).y - (*R3).y) * 0.5);
@@ -576,11 +576,11 @@ void FwdPass1b(uint me,
     }
 }
 
-void FwdPass2(uint me,
+__device__ void FwdPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -598,7 +598,7 @@ void FwdPass2(uint me,
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0) * 7] = (*R0);
     bufOut[outOffset + (me * 6 + 1) * 7] = (*R1);
@@ -608,11 +608,11 @@ void FwdPass2(uint me,
     bufOut[outOffset + (me * 6 + 5) * 7] = (*R5);
 }
 
-void FwdPass3(uint me,
+__device__ void FwdPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -659,7 +659,7 @@ void FwdPass3(uint me,
     FwdRad2B1(R2, R3);
     FwdRad2B1(R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (3 * me + 0 + 0) * 7] = (*R0);
     bufOut[outOffset + (3 * me + 1 + 0) * 7] = (*R2);
@@ -669,11 +669,11 @@ void FwdPass3(uint me,
     bufOut[outOffset + (3 * me + 2 + 6) * 7] = (*R5);
 }
 
-void FwdPass4_IN(uint me,
+__device__ void FwdPass4_IN(uint me,
                  uint inOffset,
                  uint outOffset,
-                 __local float2* bufIn,
-                 __global float2* bufOut,
+                 float2* bufIn,
+                 float2* bufOut,
                  float2* R0,
                  float2* R1,
                  float2* R2,
@@ -690,7 +690,7 @@ void FwdPass4_IN(uint me,
     (*R5) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
     (*R6) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
         (*R0);
@@ -708,11 +708,11 @@ void FwdPass4_IN(uint me,
         (*R6);
 }
 
-void FwdPass4_WE(uint me,
+__device__ void FwdPass4_WE(uint me,
                  uint inOffset,
                  uint outOffset,
-                 __local float2* bufIn,
-                 __global float2* bufOut,
+                 float2* bufIn,
+                 float2* bufOut,
                  float2* R0,
                  float2* R1,
                  float2* R2,
@@ -729,7 +729,7 @@ void FwdPass4_WE(uint me,
     (*R5) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
     (*R6) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
         (*R0);
@@ -747,16 +747,16 @@ void FwdPass4_WE(uint me,
         (*R6);
 }
 
-__kernel __attribute__((reqd_work_group_size(192, 1, 1))) void
-MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(192) void
+MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[1344];
+    __shared__ float2 lds[1344];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
     float2 R6;
@@ -767,7 +767,7 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
     uint met = me % 12;
 
     FwdPassIN(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass0(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
@@ -780,7 +780,7 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass1(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
@@ -792,7 +792,7 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass1b(me % 2,
               (me / 12) * 84 + (met / 2) * 12,
@@ -805,7 +805,7 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
               &R3,
               &R4,
               &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass2(me % 2,
              (me / 12) * 84 + (met / 2),
@@ -818,7 +818,7 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass3(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
@@ -830,31 +830,31 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 2)
     {
         FwdPass2(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         FwdPass3(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
     FwdPass4_IN(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6);
 }
 
-__kernel __attribute__((reqd_work_group_size(192, 1, 1))) void
-MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(192) void
+MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[1344];
+    __shared__ float2 lds[1344];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
     float2 R6;
@@ -865,7 +865,7 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
     uint met = me % 12;
 
     FwdPassWE(batch, me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass0(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
@@ -878,7 +878,7 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass1(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
@@ -890,7 +890,7 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass1b(me % 2,
               (me / 12) * 84 + (met / 2) * 12,
@@ -903,7 +903,7 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
               &R3,
               &R4,
               &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass2(me % 2,
              (me / 12) * 84 + (met / 2),
@@ -916,7 +916,7 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass3(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
@@ -928,33 +928,33 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 2)
     {
         FwdPass2(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         FwdPass3(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
     FwdPass4_WE(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6);
 }
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_out(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -981,7 +981,7 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
         lds[(me % 16) * 16 + (me / 16)] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(bm == 5)
     {
@@ -998,11 +998,11 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
     }
 }
 
-void InvPassA(uint me,
+__device__ void InvPassA(uint me,
               uint inOffset,
               uint outOffset,
-              __global const float2* bufIn,
-              __local float2* bufOut,
+              const float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1029,11 +1029,11 @@ void InvPassA(uint me,
     bufOut[outOffset + (me + 6 * 192)] = (*R0);
 }
 
-void InvPass0(uint me,
+__device__ void InvPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1051,7 +1051,7 @@ void InvPass0(uint me,
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0) * 7] = (*R0);
     bufOut[outOffset + (me * 6 + 1) * 7] = (*R1);
@@ -1061,11 +1061,11 @@ void InvPass0(uint me,
     bufOut[outOffset + (me * 6 + 5) * 7] = (*R5);
 }
 
-void InvPass1(uint me,
+__device__ void InvPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1112,7 +1112,7 @@ void InvPass1(uint me,
     InvRad2B1(R2, R3);
     InvRad2B1(R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (3 * me + 0 + 0) * 7] = (*R0) * 8.3333333333333329e-02f;
     bufOut[outOffset + (3 * me + 1 + 0) * 7] = (*R2) * 8.3333333333333329e-02f;
@@ -1122,11 +1122,11 @@ void InvPass1(uint me,
     bufOut[outOffset + (3 * me + 2 + 6) * 7] = (*R5) * 8.3333333333333329e-02f;
 }
 
-void InvPass1b(uint me,
+__device__ void InvPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -1142,14 +1142,14 @@ void InvPass1b(uint me,
     (*R4) = bufIn[inOffset + 7 + (3 * me + 2)];
     (*R5) = bufIn[inOffset + 7 + (3 * me + 3)];
 
-    float2 dc = 0;
+    float2 dc{};
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
         dc.y = bufIn[inOffset + 7].x;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (12 - (3 * me + 1))] = (float2)((*R0).x + (*R3).y, -(*R0).y + (*R3).x);
     bufOut[outOffset + (12 - (3 * me + 2))] = (float2)((*R1).x + (*R4).y, -(*R1).y + (*R4).x);
@@ -1164,11 +1164,11 @@ void InvPass1b(uint me,
     }
 }
 
-void InvPass2(uint me,
+__device__ void InvPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1186,7 +1186,7 @@ void InvPass2(uint me,
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0)] = (*R0);
     bufOut[outOffset + (me * 6 + 1)] = (*R1);
@@ -1196,11 +1196,11 @@ void InvPass2(uint me,
     bufOut[outOffset + (me * 6 + 5)] = (*R5);
 }
 
-void InvPass3(uint me,
+__device__ void InvPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1247,7 +1247,7 @@ void InvPass3(uint me,
     InvRad2B1(R2, R3);
     InvRad2B1(R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (3 * me + 0 + 0)] = (*R0) * 8.3333333333333329e-02f;
     bufOut[outOffset + (3 * me + 1 + 0)] = (*R2) * 8.3333333333333329e-02f;
@@ -1257,11 +1257,11 @@ void InvPass3(uint me,
     bufOut[outOffset + (3 * me + 2 + 6)] = (*R5) * 8.3333333333333329e-02f;
 }
 
-void InvPassOUT(uint me,
+__device__ void InvPassOUT(uint me,
                 uint inOffset,
                 uint outOffset,
-                __local float2* bufIn,
-                __global float* bufOut,
+                float2* bufIn,
+                float* bufOut,
                 float2* R0,
                 float2* R1,
                 float2* R2,
@@ -1270,7 +1270,7 @@ void InvPassOUT(uint me,
 {
 
     uint met            = me % 48;
-    __local float* ldsf = (__local float*)(bufIn + inOffset);
+    float* ldsf = (float*)(bufIn + inOffset);
 
     (*R0).x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
                    0 * 672];
@@ -1293,17 +1293,17 @@ void InvPassOUT(uint me,
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(192, 1, 1))) void
-MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* restrict gbOut)
+extern "C" __global__ __launch_bounds__(192) void
+MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
     uint met   = me % 12;
 
-    __local float2 lds[1344];
+    __shared__ float2 lds[1344];
 
-    __global const float2* lwbIn;
-    __global float* lwbOut;
+    const float2* lwbIn;
+    float* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1311,7 +1311,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 16;
 
     InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     InvPass0(me % 2,
              (me / 12) * 84 + (met / 2),
@@ -1324,7 +1324,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass1(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
@@ -1336,16 +1336,16 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 2)
     {
         InvPass0(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         InvPass1(
             me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
     InvPass1b(me % 2,
@@ -1359,7 +1359,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
               &R3,
               &R4,
               &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     InvPass2(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
@@ -1372,7 +1372,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass3(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
@@ -1384,14 +1384,14 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
              &R3,
              &R4,
              &R5);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     InvPassOUT(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4);
 }
 
 #elif defined(CFF_IMG_SZ_14_14)
 
-static __constant float2 twiddles[17] = {
+static __constant__ float2 twiddles[17] = {
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
@@ -1414,11 +1414,11 @@ static __constant float2 twiddles[17] = {
     (float2)(-9.3969262078590842790504211734514683e-01f, 3.4202014332566865739693184877978638e-01f),
 };
 
-void FwdPass0(uint me,
+__device__ void FwdPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1436,7 +1436,7 @@ void FwdPass0(uint me,
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0)] = (*R0);
     bufOut[outOffset + (me * 6 + 1)] = (*R1);
@@ -1446,11 +1446,11 @@ void FwdPass0(uint me,
     bufOut[outOffset + (me * 6 + 5)] = (*R5);
 }
 
-void FwdPass1(uint me,
+__device__ void FwdPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1513,11 +1513,11 @@ void FwdPass1(uint me,
     bufOut[outOffset + (2 * me + 1 + 12)] = (*R5);
 }
 
-void FwdPass1b(uint me,
+__device__ void FwdPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -1539,7 +1539,7 @@ void FwdPass1b(uint me,
         dc = bufIn[inOffset];
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + 0 + (3 * me + 1)] =
         (float2)(((*R0).x + (*R3).x) * 0.5, +((*R0).y - (*R3).y) * 0.5);
@@ -1562,11 +1562,11 @@ void FwdPass1b(uint me,
     }
 }
 
-void FwdPass2(uint me,
+__device__ void FwdPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1584,7 +1584,7 @@ void FwdPass2(uint me,
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0) * 10] = (*R0);
     bufOut[outOffset + (me * 6 + 1) * 10] = (*R1);
@@ -1594,11 +1594,11 @@ void FwdPass2(uint me,
     bufOut[outOffset + (me * 6 + 5) * 10] = (*R5);
 }
 
-void FwdPass3(uint me,
+__device__ void FwdPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1661,11 +1661,11 @@ void FwdPass3(uint me,
     bufOut[outOffset + (2 * me + 1 + 12) * 10] = (*R5);
 }
 
-void FwdPass4(uint me,
+__device__ void FwdPass4(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __global float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -1691,11 +1691,11 @@ void FwdPass4(uint me,
     }
 }
 
-void FwdPassIN(uint me,
+__device__ void FwdPassIN(uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -1720,7 +1720,7 @@ void FwdPassIN(uint me,
         bufOut[outOffset + me + 5 * 120] = (*R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if((me % 16) < CFF_IMG_W)
     {
@@ -1755,12 +1755,12 @@ void FwdPassIN(uint me,
     }
 }
 
-void FwdPassWE(uint batch,
+__device__ void FwdPassWE(uint batch,
                uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -1784,7 +1784,7 @@ void FwdPassWE(uint batch,
     (*R4) = (float2)(0, 0);
     (*R5) = (float2)(0, 0);
 
-    __local float* ldsf = (__local float*)(bufOut + outOffset);
+    float* ldsf = (float*)(bufOut + outOffset);
 
     ldsf[(me / 32) * 180 * 2 + met] = (*R0).x;
 
@@ -1799,7 +1799,7 @@ void FwdPassWE(uint batch,
 #endif
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -1811,7 +1811,7 @@ void FwdPassWE(uint batch,
 #endif
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(me < 120)
     {
@@ -1823,7 +1823,7 @@ void FwdPassWE(uint batch,
         bufOut[outOffset + me + 5 * 120] = (*R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -1833,9 +1833,9 @@ void FwdPassWE(uint batch,
     (*R0) = (float2)(0, 0);
 }
 
-void FwdPass(uint me,
-             __local float2* lds,
-             __global float2* lwbOut,
+__device__ void FwdPass(uint me,
+             float2* lds,
+             float2* lwbOut,
              float2* R0,
              float2* R1,
              float2* R2,
@@ -1860,7 +1860,7 @@ void FwdPass(uint me,
                  R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 27)
     {
@@ -1877,7 +1877,7 @@ void FwdPass(uint me,
                  R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 27)
     {
@@ -1894,7 +1894,7 @@ void FwdPass(uint me,
                   R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -1911,7 +1911,7 @@ void FwdPass(uint me,
                  R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -1928,21 +1928,21 @@ void FwdPass(uint me,
                  R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5);
 }
 
-__kernel __attribute__((reqd_work_group_size(128, 1, 1))) void
-MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(128) void
+MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[720];
+    __shared__ float2 lds[720];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1951,21 +1951,21 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
 
     FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass(me, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5);
 }
 
-__kernel __attribute__((reqd_work_group_size(128, 1, 1))) void
-MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(128) void
+MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[720];
+    __shared__ float2 lds[720];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1975,23 +1975,23 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
 
     FwdPassWE(batch, me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass(me, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5);
 }
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_in(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -2018,7 +2018,7 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
         lds[(me % 16) * 16 + (me / 16)] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(bm == 11)
     {
@@ -2035,18 +2035,18 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_we(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -2074,7 +2074,7 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
         lds[(me % 16) * 16 + (me / 16)] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(bm == 11)
     {
@@ -2091,18 +2091,18 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_out(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -2129,7 +2129,7 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
         lds[(me % 16) * 16 + (me / 16)] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(bm == 11)
     {
@@ -2146,11 +2146,11 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
     }
 }
 
-void InvPassA(uint me,
+__device__ void InvPassA(uint me,
               uint inOffset,
               uint outOffset,
-              __global const float2* bufIn,
-              __local float2* bufOut,
+              const float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2177,11 +2177,11 @@ void InvPassA(uint me,
     }
 }
 
-void InvPass0(uint me,
+__device__ void InvPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2199,7 +2199,7 @@ void InvPass0(uint me,
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0) * 10] = (*R0);
     bufOut[outOffset + (me * 6 + 1) * 10] = (*R1);
@@ -2209,11 +2209,11 @@ void InvPass0(uint me,
     bufOut[outOffset + (me * 6 + 5) * 10] = (*R5);
 }
 
-void InvPass1(uint me,
+__device__ void InvPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2276,11 +2276,11 @@ void InvPass1(uint me,
     bufOut[outOffset + (2 * me + 1 + 12) * 10] = (*R5) * 5.5555555555555555e-02f;
 }
 
-void InvPass1b(uint me,
+__device__ void InvPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -2296,14 +2296,14 @@ void InvPass1b(uint me,
     (*R4) = bufIn[inOffset + 10 + (3 * me + 2)];
     (*R5) = bufIn[inOffset + 10 + (3 * me + 3)];
 
-    float2 dc = 0;
+    float2 dc{};
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
         dc.y = bufIn[inOffset + 10].x;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (18 - (3 * me + 1))] = (float2)((*R0).x + (*R3).y, -(*R0).y + (*R3).x);
     bufOut[outOffset + (18 - (3 * me + 2))] = (float2)((*R1).x + (*R4).y, -(*R1).y + (*R4).x);
@@ -2318,11 +2318,11 @@ void InvPass1b(uint me,
     }
 }
 
-void InvPass2(uint me,
+__device__ void InvPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2340,7 +2340,7 @@ void InvPass2(uint me,
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 6 + 0)] = (*R0);
     bufOut[outOffset + (me * 6 + 1)] = (*R1);
@@ -2350,11 +2350,11 @@ void InvPass2(uint me,
     bufOut[outOffset + (me * 6 + 5)] = (*R5);
 }
 
-void InvPass3(uint me,
+__device__ void InvPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2417,11 +2417,11 @@ void InvPass3(uint me,
     bufOut[outOffset + (2 * me + 1 + 12)] = (*R5) * 5.5555555555555555e-02f;
 }
 
-void InvPassOUT(uint me,
+__device__ void InvPassOUT(uint me,
                 uint inOffset,
                 uint outOffset,
-                __local float2* bufIn,
-                __global float* bufOut,
+                float2* bufIn,
+                float* bufOut,
                 float2* R0,
                 float2* R1,
                 float2* R2,
@@ -2443,7 +2443,7 @@ void InvPassOUT(uint me,
         (*R3) = bufIn[inOffset + (me / 32) * 180 + (2 + 6) * 18 + (4 + (me % 32))];
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if((me % 16) < CFF_IMG_W)
     {
@@ -2469,17 +2469,17 @@ void InvPassOUT(uint me,
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(128, 1, 1))) void
-MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* restrict gbOut)
+extern "C" __global__ __launch_bounds__(128) void
+MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
     uint met   = me % 32;
 
-    __local float2 lds[720];
+    __shared__ float2 lds[720];
 
-    __global const float2* lwbIn;
-    __global float* lwbOut;
+    const float2* lwbIn;
+    float* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -2488,7 +2488,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
 
     InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -2505,7 +2505,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
                  &R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 30)
     {
@@ -2522,7 +2522,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
                  &R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 27)
     {
@@ -2539,7 +2539,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
                   &R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 27)
     {
@@ -2556,7 +2556,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
                  &R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(met < 27)
     {
@@ -2573,7 +2573,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
                  &R5);
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     InvPassOUT(me, 0, (me / 32) * CFF_IMG_W * CFF_IMG_H, lds, lwbOut, &R0, &R1, &R2, &R3);
 }
@@ -2582,7 +2582,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
 
 #else
 
-static __constant float2 twiddles[31] = {
+static __constant__ float2 twiddles[31] = {
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
     (float2)(1.0000000000000000000000000000000000e+00f, -0.0000000000000000000000000000000000e+00f),
@@ -2622,11 +2622,11 @@ static __constant float2 twiddles[31] = {
     (float2)(-5.5557023301960217764872140833176672e-01f, 8.3146961230254523567140267914510332e-01f),
 };
 
-void FwdPassIN(uint me,
+__device__ void FwdPassIN(uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -2688,7 +2688,7 @@ void FwdPassIN(uint me,
 #endif
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(me < 32)
     {
@@ -2705,11 +2705,11 @@ void FwdPassIN(uint me,
     bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 1) % 17) * 32 + ((2 + me) % 32)] = (*R7);
 }
 
-void FwdPassWE(uint me,
+__device__ void FwdPassWE(uint me,
                uint inOffset,
                uint outOffset,
-               __global const float* bufIn,
-               __local float2* bufOut,
+               const float* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -2720,7 +2720,7 @@ void FwdPassWE(uint me,
                float2* R7)
 {
 
-    __local float* ldsf = (__local float*)bufOut;
+    float* ldsf = (float*)bufOut;
 
     if(me < 25)
     {
@@ -2728,7 +2728,7 @@ void FwdPassWE(uint me,
         ldsf[me] = (*R0).x;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     (*R0) = (float2)(0, 0);
     (*R1) = (float2)(0, 0);
@@ -2759,7 +2759,7 @@ void FwdPassWE(uint me,
     }
 #endif
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + ((me / 32) * 8 + 0) * 32 + (me % 32)] = (*R0);
     bufOut[outOffset + ((me / 32) * 8 + 1) * 32 + (me % 32)] = (*R1);
@@ -2776,11 +2776,11 @@ void FwdPassWE(uint me,
     }
 }
 
-void FwdPass0(uint me,
+__device__ void FwdPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2802,7 +2802,7 @@ void FwdPass0(uint me,
 
     FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 8 + 0)] = (*R0);
     bufOut[outOffset + (me * 8 + 1)] = (*R1);
@@ -2814,11 +2814,11 @@ void FwdPass0(uint me,
     bufOut[outOffset + (me * 8 + 7)] = (*R7);
 }
 
-void FwdPass1(uint me,
+__device__ void FwdPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2895,7 +2895,7 @@ void FwdPass1(uint me,
     FwdRad4B1(R0, R1, R2, R3);
     FwdRad4B1(R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0);
     bufOut[outOffset + (2 * me + 1 + 0)]  = (*R4);
@@ -2907,11 +2907,11 @@ void FwdPass1(uint me,
     bufOut[outOffset + (2 * me + 1 + 24)] = (*R7);
 }
 
-void FwdPass1b(uint me,
+__device__ void FwdPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -2936,7 +2936,7 @@ void FwdPass1b(uint me,
         dc = bufIn[inOffset];
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + 0 + (me + 1)] =
         (float2)(((*R0).x + (*R4).x) * 0.5, +((*R0).y - (*R4).y) * 0.5);
@@ -2963,11 +2963,11 @@ void FwdPass1b(uint me,
     }
 }
 
-void FwdPass2(uint me,
+__device__ void FwdPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -2989,7 +2989,7 @@ void FwdPass2(uint me,
 
     FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 8 + 0) * 17] = (*R0);
     bufOut[outOffset + (me * 8 + 1) * 17] = (*R1);
@@ -3001,11 +3001,11 @@ void FwdPass2(uint me,
     bufOut[outOffset + (me * 8 + 7) * 17] = (*R7);
 }
 
-void FwdPass3(uint me,
+__device__ void FwdPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3082,7 +3082,7 @@ void FwdPass3(uint me,
     FwdRad4B1(R0, R1, R2, R3);
     FwdRad4B1(R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (2 * me + 0 + 0) * 17]  = (*R0);
     bufOut[outOffset + (2 * me + 1 + 0) * 17]  = (*R4);
@@ -3094,11 +3094,11 @@ void FwdPass3(uint me,
     bufOut[outOffset + (2 * me + 1 + 24) * 17] = (*R7);
 }
 
-void FwdPass4(uint me,
+__device__ void FwdPass4(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __global float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3134,16 +3134,16 @@ void FwdPass4(uint me,
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(64, 1, 1))) void
-MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(64) void
+MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[544];
+    __shared__ float2 lds[544];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3151,44 +3151,44 @@ MIOpenConvFFT_fwd_in(__global const float* restrict gbIn, __global float2* restr
     lwbOut = gbOut + batch * 544;
 
     FwdPassIN(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass0(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass1(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass1b(
         me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(me < 4)
     {
         FwdPass2(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         FwdPass3(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
     FwdPass4(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
 }
 
-__kernel __attribute__((reqd_work_group_size(64, 1, 1))) void
-MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restrict gbOut)
+extern "C" __global__ __launch_bounds__(64) void
+MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[544];
+    __shared__ float2 lds[544];
 
-    __global const float* lwbIn;
-    __global float2* lwbOut;
+    const float* lwbIn;
+    float2* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3201,29 +3201,29 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
     lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
 
     FwdPassWE(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass0(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass1(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     FwdPass1b(
         me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(me < 4)
     {
         FwdPass2(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         FwdPass3(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
     FwdPass4(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
@@ -3231,18 +3231,18 @@ MIOpenConvFFT_fwd_we(__global const float* restrict gbIn, __global float2* restr
 
 #if defined(CFF_TRANSP_IN_MOD16)
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_in(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3258,7 +3258,7 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
     R0                              = lwbIn[(me % 16) + (me / 16) * 544];
     lds[(me % 16) * 16 + (me / 16)] = R0;
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     R0                                                              = lds[me];
     lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
@@ -3266,18 +3266,18 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
 
 #else
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_in(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[1024];
+    __shared__ float2 lds[1024];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3296,7 +3296,7 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     for(uint t = 0; t < 4; t++)
     {
@@ -3310,18 +3310,18 @@ MIOpenConvFFT_transpose_in(__global float2* restrict gb)
 
 #if defined(CFF_TRANSP_WT_MOD16)
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_we(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3338,7 +3338,7 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
     R0                              = lwbIn[(me % 16) + (me / 16) * 544];
     lds[(me % 16) * 16 + (me / 16)] = R0;
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     R0                                                                = lds[me];
     lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
@@ -3346,18 +3346,18 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
 
 #else
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_we(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[1024];
+    __shared__ float2 lds[1024];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3377,7 +3377,7 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     for(uint t = 0; t < 4; t++)
     {
@@ -3391,18 +3391,18 @@ MIOpenConvFFT_transpose_we(__global float2* restrict gb)
 
 #if defined(CFF_TRANSP_OT_MOD16)
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_out(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[256];
+    __shared__ float2 lds[256];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3418,7 +3418,7 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
     R0                              = lwbIn[(me % 16) + (me / 16) * (CFF_NFILTER * CFF_BATCH + 64)];
     lds[(me % 16) * 16 + (me / 16)] = R0;
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     R0                                  = lds[me];
     lwbOut[(me % 16) + (me / 16) * 544] = R0;
@@ -3426,18 +3426,18 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
 
 #else
 
-__kernel __attribute__((reqd_work_group_size(256, 1, 1))) void
-MIOpenConvFFT_transpose_out(__global float2* restrict gb)
+extern "C" __global__ __launch_bounds__(256) void
+MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[1024];
+    __shared__ float2 lds[1024];
 
     uint iOffset;
     uint oOffset;
-    __global const float2* lwbIn;
-    __global float2* lwbOut;
+    const float2* lwbIn;
+    float2* lwbOut;
 
     float2 R0;
 
@@ -3457,7 +3457,7 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     for(uint t = 0; t < 4; t++)
     {
@@ -3468,11 +3468,11 @@ MIOpenConvFFT_transpose_out(__global float2* restrict gb)
 
 #endif
 
-void InvPassA(uint me,
+__device__ void InvPassA(uint me,
               uint inOffset,
               uint outOffset,
-              __global const float2* bufIn,
-              __local float2* bufOut,
+              const float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3508,11 +3508,11 @@ void InvPassA(uint me,
     }
 }
 
-void InvPass0(uint me,
+__device__ void InvPass0(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3534,7 +3534,7 @@ void InvPass0(uint me,
 
     InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 8 + 0) * 17] = (*R0);
     bufOut[outOffset + (me * 8 + 1) * 17] = (*R1);
@@ -3546,11 +3546,11 @@ void InvPass0(uint me,
     bufOut[outOffset + (me * 8 + 7) * 17] = (*R7);
 }
 
-void InvPass1(uint me,
+__device__ void InvPass1(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3627,7 +3627,7 @@ void InvPass1(uint me,
     InvRad4B1(R0, R1, R2, R3);
     InvRad4B1(R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     (*R0) = (*R0) * 3.1250000000000000e-02f;
     (*R4) = (*R4) * 3.1250000000000000e-02f;
@@ -3648,11 +3648,11 @@ void InvPass1(uint me,
     bufOut[outOffset + (2 * me + 1 + 24) * 17] = (*R7);
 }
 
-void InvPass1b(uint me,
+__device__ void InvPass1b(uint me,
                uint inOffset,
                uint outOffset,
-               __local float2* bufIn,
-               __local float2* bufOut,
+               float2* bufIn,
+               float2* bufOut,
                float2* R0,
                float2* R1,
                float2* R2,
@@ -3672,14 +3672,14 @@ void InvPass1b(uint me,
     (*R6) = bufIn[inOffset + 17 + (me + 9)];
     (*R7) = bufIn[inOffset + 17 + (me + 13)];
 
-    float2 dc = 0;
+    float2 dc{};
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
         dc.y = bufIn[inOffset + 17].x;
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (32 - (me + 1))]  = (float2)((*R0).x + (*R4).y, -(*R0).y + (*R4).x);
     bufOut[outOffset + (32 - (me + 5))]  = (float2)((*R1).x + (*R5).y, -(*R1).y + (*R5).x);
@@ -3696,11 +3696,11 @@ void InvPass1b(uint me,
     }
 }
 
-void InvPass2(uint me,
+__device__ void InvPass2(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3722,7 +3722,7 @@ void InvPass2(uint me,
 
     InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (me * 8 + 0)] = (*R0);
     bufOut[outOffset + (me * 8 + 1)] = (*R1);
@@ -3734,11 +3734,11 @@ void InvPass2(uint me,
     bufOut[outOffset + (me * 8 + 7)] = (*R7);
 }
 
-void InvPass3(uint me,
+__device__ void InvPass3(uint me,
               uint inOffset,
               uint outOffset,
-              __local float2* bufIn,
-              __local float2* bufOut,
+              float2* bufIn,
+              float2* bufOut,
               float2* R0,
               float2* R1,
               float2* R2,
@@ -3815,7 +3815,7 @@ void InvPass3(uint me,
     InvRad4B1(R0, R1, R2, R3);
     InvRad4B1(R4, R5, R6, R7);
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0) * 3.1250000000000000e-02f;
     bufOut[outOffset + (2 * me + 1 + 0)]  = (*R4) * 3.1250000000000000e-02f;
@@ -3827,11 +3827,11 @@ void InvPass3(uint me,
     bufOut[outOffset + (2 * me + 1 + 24)] = (*R7) * 3.1250000000000000e-02f;
 }
 
-void InvPassOUT(uint me,
+__device__ void InvPassOUT(uint me,
                 uint inOffset,
                 uint outOffset,
-                __local float2* bufIn,
-                __global float* bufOut,
+                float2* bufIn,
+                float* bufOut,
                 float2* R0,
                 float2* R1,
                 float2* R2,
@@ -3851,7 +3851,7 @@ void InvPassOUT(uint me,
     (*R6) = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 0) % 16) * 32 + ((4 + me) % 32)];
     (*R7) = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 1) % 16) * 32 + ((4 + me) % 32)];
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if((me % 32) < CFF_IMG_W)
     {
@@ -3894,16 +3894,16 @@ void InvPassOUT(uint me,
     }
 }
 
-__kernel __attribute__((reqd_work_group_size(64, 1, 1))) void
-MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* restrict gbOut)
+extern "C" __global__ __launch_bounds__(64) void
+MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
 {
-    uint me    = get_local_id(0);
-    uint batch = get_group_id(0);
+    uint me    = threadIdx.x;
+    uint batch = blockIdx.x;
 
-    __local float2 lds[544];
+    __shared__ float2 lds[544];
 
-    __global const float2* lwbIn;
-    __global float* lwbOut;
+    const float2* lwbIn;
+    float* lwbOut;
 
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3911,31 +3911,31 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H;
 
     InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     InvPass0(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass1(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     if(me < 4)
     {
         InvPass0(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         InvPass1(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass1b(
         me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass2(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPass3(
         me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     InvPassOUT(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
 }
 
@@ -3980,19 +3980,21 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
 #define TYPE_C float2
 //#define TYPE_ALPHA float2
 //#define TYPE_BETA  float2
-#define MAD(A, B, DST) mad(A, B, DST)
+#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MADs */
 #define TYPE_MAD(MULA, MULB, DST)            \
-    DST.s0 = MAD(MULA.s0, MULB.s0, DST.s0);  \
-    DST.s0 = MAD(-MULA.s1, MULB.s1, DST.s0); \
-    DST.s1 = MAD(MULA.s0, MULB.s1, DST.s1);  \
-    DST.s1 = MAD(MULA.s1, MULB.s0, DST.s1);
+    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
+    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
+    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
+    DST.y = MAD(MULA.y, MULB.x, DST.y);
 #define TYPE_MAD_WRITE(DST, REG) \
     /* (1) */                    \
     /* (2) */                    \
     /* (3) */                    \
     DST = REG;
+
+// TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
 
 /* 4x4 micro-tile */
 #define MICRO_TILE                    \
@@ -4022,7 +4024,7 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
     TYPE_MAD(rA[3], rB[1], rC[3][1]); \
     TYPE_MAD(rA[3], rB[2], rC[3][2]); \
     TYPE_MAD(rA[3], rB[3], rC[3][3]); \
-    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /*mem_fence(CLK_LOCAL_MEM_FENCE);*/
 
 /* preprocessor definitions of kernel arguments*/
 #define strideC0I 1
@@ -4030,8 +4032,8 @@ MIOpenConvFFT_inv_out(__global const float2* restrict gbIn, __global float* rest
 #define strideBL 1
 
 /* kernel */
-__attribute__((reqd_work_group_size(WG_0I, WG_1J, 1))) __kernel void
-MIOpenConvFFT_cgemm(__global float2* gb,
+extern "C" __global__ __launch_bounds__(WG_0I * WG_1J) void
+MIOpenConvFFT_cgemm(float2* gb,
                     unsigned int const offsetC,
                     unsigned int const offsetA,
                     unsigned int const offsetB,
@@ -4048,27 +4050,27 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 {
 
     /* apply offsets */
-    __global float2* C       = gb + offsetC;
-    __global float2 const* A = gb + offsetA;
-    __global float2 const* B = gb + offsetB;
+    float2* C       = gb + offsetC;
+    float2 const* A = gb + offsetA;
+    float2 const* B = gb + offsetB;
 
     /* allocate registers */
-    TYPE_C rC[UT_0I][UT_1J] = {{0}};
+    TYPE_C rC[UT_0I][UT_1J] = {};
     TYPE_A rA[UT_0I];
     TYPE_B rB[UT_1J];
 
     /* allocate local memory */
-    __local TYPE_A localA[UNROLL * (MT_0I + PAD)];
-    __local TYPE_B localB[UNROLL * (MT_1J + PAD)];
+    __shared__ TYPE_A localA[UNROLL * (MT_0I + PAD)];
+    __shared__ TYPE_B localB[UNROLL * (MT_1J + PAD)];
 
     /* c indices (group) */
-    unsigned int g0I = get_group_id(0); // d0, tensorA
-    unsigned int g1J = get_group_id(1); // d1, tensorB
-    unsigned int gK  = (get_group_id(2)) % sizeK;
+    unsigned int g0I = blockIdx.x; // d0, tensorA
+    unsigned int g1J = blockIdx.y; // d1, tensorB
+    unsigned int gK  = blockIdx.z % sizeK;
 
     /* c indices (local) */
-    unsigned int l0I        = get_local_id(0); // d0
-    unsigned int l1J        = get_local_id(1); // d1
+    unsigned int l0I        = threadIdx.x; // d0
+    unsigned int l1J        = threadIdx.y; // d1
     unsigned int loadSerial = l0I + l1J * WG_0I;
     unsigned int a0I        = loadSerial / LS_COAL_A;
     unsigned int b1J        = loadSerial / LS_COAL_B;
@@ -4084,8 +4086,8 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     B += GLOBAL_B((unsigned long)bL, (unsigned long)b1J + g1J * MT_1J, (unsigned long)gK);
 
     /* where will this thread write to local memory */
-    __local TYPE_A* lA = localA + a0I + aL * (MT_0I + PAD);
-    __local TYPE_B* lB = localB + b1J + bL * (MT_1J + PAD);
+    TYPE_A* lA = localA + a0I + aL * (MT_0I + PAD);
+    TYPE_B* lB = localB + b1J + bL * (MT_1J + PAD);
 
     /* conditionals to guard against loading A out-of-bounds */
     bool condA_0_0 = (a0I + g0I * MT_0I + 0 * LS_PERP_A >= size0I);
@@ -4108,7 +4110,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     do
     {
 
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         /* load A global -> local */
         a_0_0 = (condA_0_0) ? (float2)(0.0, 0.0)
                             : A[0 * LS_COAL_A * strideAL + 0 * LS_PERP_A * strideA0I];
@@ -4139,7 +4141,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         lB[0 * LS_COAL_B * (MT_1J + PAD) + 2 * LS_PERP_B] = b_0_2;
         lB[0 * LS_COAL_B * (MT_1J + PAD) + 3 * LS_PERP_B] = b_0_3;
 
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         unsigned int offA = l0I; // d0
         unsigned int offB = l1J; // d1
 
@@ -4455,19 +4457,21 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 /* data types */
 #define DATA_TYPE float2
 #define VECTOR_TYPE float2
-#define MAD(A, B, DST) mad(A, B, DST)
+#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)            \
-    DST.s0 = MAD(MULA.s0, MULB.s0, DST.s0);  \
-    DST.s0 = MAD(-MULA.s1, MULB.s1, DST.s0); \
-    DST.s1 = MAD(MULA.s0, MULB.s1, DST.s1);  \
-    DST.s1 = MAD(MULA.s1, MULB.s0, DST.s1);
+    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
+    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
+    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
+    DST.y = MAD(MULA.y, MULB.x, DST.y);
 #define TYPE_MAC_WRITE(DST, REG) \
     /* (1) */                    \
     /* (2) */                    \
     /* (3) */                    \
     DST = REG;
+
+// TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
 
 /* 4x4 micro-tile */
 #define SUMMATION_UNROLL                                       \
@@ -4497,7 +4501,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     TYPE_MAC(rA[1], rB[3], rC[(1 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[2], rB[3], rC[(2 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[3], rB[3], rC[(3 + 3 * TT0I / VECTOR_WIDTH)]); \
-    mem_fence(CLK_LOCAL_MEM_FENCE);
+    /*mem_fence(CLK_LOCAL_MEM_FENCE);*/
 
 /* hard-coded initial strides */
 #define strideC0I 1
@@ -4507,8 +4511,8 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 /****************************************/
 /* Begin Kernel                         */
 /****************************************/
-__attribute__((reqd_work_group_size(NUM_THREADS, 1, 1))) __kernel void
-MIOpenConvFFT_cgemm(__global float2* gb,
+extern "C" __global__ __launch_bounds__(NUM_THREADS) void
+MIOpenConvFFT_cgemm(float2* gb,
                     unsigned int const offsetC,
                     unsigned int const offsetA,
                     unsigned int const offsetB,
@@ -4525,16 +4529,16 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 {
 
     /* apply offsets */
-    __global float2* C       = gb + offsetC;
-    __global float2 const* A = gb + offsetA;
-    __global float2 const* B = gb + offsetB;
+    float2* C       = gb + offsetC;
+    float2 const* A = gb + offsetA;
+    float2 const* B = gb + offsetB;
 
     /***************************************/
     /* Allocate Resources                  */
     /***************************************/
 
     /* registers for MAC's */
-    VECTOR_TYPE rC[TT0I * TT1J / VECTOR_WIDTH] = {0};
+    VECTOR_TYPE rC[TT0I * TT1J / VECTOR_WIDTH] = {};
     VECTOR_TYPE rA[TT0I / VECTOR_WIDTH];
     VECTOR_TYPE rB[TT1J / VECTOR_WIDTH];
 
@@ -4543,18 +4547,18 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     VECTOR_TYPE b_0_0, b_0_1, b_0_2, b_0_3;
 
     /* allocate LDS */
-    __local DATA_TYPE lds[LDS_NUM_ELEMENTS];
+    __shared__ DATA_TYPE lds[LDS_NUM_ELEMENTS];
 
     /***************************************/
     /* Global Read Addresses               */
     /***************************************/
 
     /* global read: work-group mapping */
-    unsigned int wg0I = get_group_id(0);
-    unsigned int wg1J = get_group_id(1);
+    unsigned int wg0I = blockIdx.x;
+    unsigned int wg1J = blockIdx.y;
 
     /* global read: thread assignments */
-    unsigned int serial              = get_local_id(0);
+    unsigned int serial              = threadIdx.x;
     unsigned int sgId                = serial / (SG0I * SG1J);
     unsigned int globalReadOffsetA0I = (serial % LSPA) + (wg0I * MT0I);
     unsigned int globalReadOffsetB1J = (serial % LSPB) + (wg1J * MT1J);
@@ -4562,7 +4566,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     unsigned int globalReadOffsetBL  = (serial / LSPB) * VECTOR_WIDTH;
 
     /* global read: other free indices */
-    unsigned int wgK = (get_group_id(2)) % sizeK;
+    unsigned int wgK = blockIdx.z % sizeK;
 
     /* global read: dimension offsets a */
     unsigned int globalReadOffsetA0I_0 = globalReadOffsetA0I + 0 * LSPA;
@@ -4619,24 +4623,24 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_3, wgK);
 
     /* global read: addresses a */
-    __global VECTOR_TYPE const* globalReadA_0_0 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    __global VECTOR_TYPE const* globalReadA_0_1 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
-    __global VECTOR_TYPE const* globalReadA_0_2 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_2);
-    __global VECTOR_TYPE const* globalReadA_0_3 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_3);
+    VECTOR_TYPE const* globalReadA_0_0 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
+    VECTOR_TYPE const* globalReadA_0_1 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
+    VECTOR_TYPE const* globalReadA_0_2 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_2);
+    VECTOR_TYPE const* globalReadA_0_3 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_3);
 
     /* global read: addresses b */
-    __global VECTOR_TYPE const* globalReadB_0_0 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    __global VECTOR_TYPE const* globalReadB_0_1 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
-    __global VECTOR_TYPE const* globalReadB_0_2 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_2);
-    __global VECTOR_TYPE const* globalReadB_0_3 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_3);
+    VECTOR_TYPE const* globalReadB_0_0 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
+    VECTOR_TYPE const* globalReadB_0_1 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
+    VECTOR_TYPE const* globalReadB_0_2 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_2);
+    VECTOR_TYPE const* globalReadB_0_3 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_3);
 
     /***************************************/
     /* LDS Write Addresses                 */
@@ -4669,26 +4673,26 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         ldsWriteOffsetInitialB + (0 * LSCB) * (MT1J + PAD) + (3 * LSPB);
 
     /* lds write addresses */
-    __local VECTOR_TYPE* ldsWriteA_0_0 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_0);
-    __local VECTOR_TYPE* ldsWriteA_0_1 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_1);
-    __local VECTOR_TYPE* ldsWriteA_0_2 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_2);
-    __local VECTOR_TYPE* ldsWriteA_0_3 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_3);
-    __local VECTOR_TYPE* ldsWriteB_0_0 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_0);
-    __local VECTOR_TYPE* ldsWriteB_0_1 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_1);
-    __local VECTOR_TYPE* ldsWriteB_0_2 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_2);
-    __local VECTOR_TYPE* ldsWriteB_0_3 = (__local VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_3);
+    VECTOR_TYPE* ldsWriteA_0_0 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_0);
+    VECTOR_TYPE* ldsWriteA_0_1 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_1);
+    VECTOR_TYPE* ldsWriteA_0_2 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_2);
+    VECTOR_TYPE* ldsWriteA_0_3 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_3);
+    VECTOR_TYPE* ldsWriteB_0_0 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_0);
+    VECTOR_TYPE* ldsWriteB_0_1 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_1);
+    VECTOR_TYPE* ldsWriteB_0_2 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_2);
+    VECTOR_TYPE* ldsWriteB_0_3 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_3);
 
     /***************************************/
     /* LDS Read Addresses                  */
     /***************************************/
     unsigned int lr0I = (serial % SG0I);
     unsigned int lr1J = (serial / SG0I) % SG1J;
-    __local VECTOR_TYPE* ldsReadA =
-        (__local VECTOR_TYPE*)(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
-    __local VECTOR_TYPE* ldsReadB =
-        (__local VECTOR_TYPE*)(lds + lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B);
-    __local VECTOR_TYPE* ldsReadIterA = ldsReadA;
-    __local VECTOR_TYPE* ldsReadIterB = ldsReadB;
+    VECTOR_TYPE* ldsReadA =
+        (VECTOR_TYPE*)(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
+    VECTOR_TYPE* ldsReadB =
+        (VECTOR_TYPE*)(lds + lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B);
+    VECTOR_TYPE* ldsReadIterA = ldsReadA;
+    VECTOR_TYPE* ldsReadIterB = ldsReadB;
 
     /****************************************/
     /* summation loops(s)                   */
@@ -4708,7 +4712,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         b_0_3 = *globalReadB_0_3;
 
         /* lds write */
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
         *ldsWriteA_0_0 = a_0_0;
         *ldsWriteA_0_1 = a_0_1;
         *ldsWriteA_0_2 = a_0_2;
@@ -4717,7 +4721,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         *ldsWriteB_0_1 = b_0_1;
         *ldsWriteB_0_2 = b_0_2;
         *ldsWriteB_0_3 = b_0_3;
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
 
         /* re-init lds read addresses */
         ldsReadIterA = ldsReadA;
@@ -4730,25 +4734,25 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         SUMMATION_UNROLL
 
         /* increment global read addresses */
-        globalReadA_0_0 = (__global VECTOR_TYPE*)(((__global DATA_TYPE*)globalReadA_0_0) +
+        globalReadA_0_0 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_0) +
                                                   ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_1 = (__global VECTOR_TYPE*)(((__global DATA_TYPE*)globalReadA_0_1) +
+        globalReadA_0_1 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_1) +
                                                   ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_2 = (__global VECTOR_TYPE*)(((__global DATA_TYPE*)globalReadA_0_2) +
+        globalReadA_0_2 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_2) +
                                                   ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_3 = (__global VECTOR_TYPE*)(((__global DATA_TYPE*)globalReadA_0_3) +
+        globalReadA_0_3 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_3) +
                                                   ((unsigned long)strideAL) * DEPTHU);
         globalReadB_0_0 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_0) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
                                           ((unsigned long)strideBL) * DEPTHU);
         globalReadB_0_1 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_1) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
                                           ((unsigned long)strideBL) * DEPTHU);
         globalReadB_0_2 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_2) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
                                           ((unsigned long)strideBL) * DEPTHU);
         globalReadB_0_3 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_3) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
                                           ((unsigned long)strideBL) * DEPTHU);
     }
 
@@ -4767,7 +4771,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     b_0_3 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? (float2)(0.f, 0.f) : *globalReadB_0_3;
 
     /* lds write */
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
     *ldsWriteA_0_0 = a_0_0;
     *ldsWriteA_0_1 = a_0_1;
     *ldsWriteA_0_2 = a_0_2;
@@ -4776,7 +4780,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     *ldsWriteB_0_1 = b_0_1;
     *ldsWriteB_0_2 = b_0_2;
     *ldsWriteB_0_3 = b_0_3;
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     /* re-init lds read addresses */
     ldsReadIterA = ldsReadA;
@@ -4791,36 +4795,36 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 
         /* increment global read addresses */
         globalReadA_0_0 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_0) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) +
                                           ((long)strideAL) * DEPTHU);
         globalReadA_0_1 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_1) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) +
                                           ((long)strideAL) * DEPTHU);
         globalReadA_0_2 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_2) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_2) +
                                           ((long)strideAL) * DEPTHU);
         globalReadA_0_3 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_3) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_3) +
                                           ((long)strideAL) * DEPTHU);
         globalReadB_0_0 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_0) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
                                           ((long)strideBL) * DEPTHU);
         globalReadB_0_1 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_1) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
                                           ((long)strideBL) * DEPTHU);
         globalReadB_0_2 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_2) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
                                           ((long)strideBL) * DEPTHU);
         globalReadB_0_3 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_3) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
                                           ((long)strideBL) * DEPTHU);
     }
 
     /***************************************/
     /* SplitU Reduction                    */
     /***************************************/
-    barrier(CLK_LOCAL_MEM_FENCE);
-    __local VECTOR_TYPE* ldsSplitU                 = (__local VECTOR_TYPE*)(lds);
+    __syncthreads();
+    VECTOR_TYPE* ldsSplitU                 = (VECTOR_TYPE*)(lds);
     ldsSplitU[lr0I + 0 * SG0I +
               (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
               (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
@@ -4869,7 +4873,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     ldsSplitU[lr0I + 3 * SG0I +
               (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 3) +
               (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[3 + 0 * (TT0I / VECTOR_WIDTH) + 3 * TT0I];
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     /* SplitU: new C elements to store */
     rC[0] = ldsSplitU[serial + 0 * NUM_THREADS];
@@ -5042,14 +5046,14 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 /* data types */
 #define DATA_TYPE float2
 #define VECTOR_TYPE float2
-#define MAD(A, B, DST) mad(A, B, DST)
+#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)            \
-    DST.s0 = MAD(MULA.s0, MULB.s0, DST.s0);  \
-    DST.s0 = MAD(-MULA.s1, MULB.s1, DST.s0); \
-    DST.s1 = MAD(MULA.s0, MULB.s1, DST.s1);  \
-    DST.s1 = MAD(MULA.s1, MULB.s0, DST.s1);
+    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
+    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
+    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
+    DST.y = MAD(MULA.y, MULB.x, DST.y);
 #define TYPE_MAC_WRITE(DST, REG) \
     /* (1) */                    \
     /* (2) */                    \
@@ -5071,8 +5075,8 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 /******************************************/
 /* Begin Kernel                           */
 /******************************************/
-__attribute__((reqd_work_group_size(NUM_THREADS, 1, 1))) __kernel void
-MIOpenConvFFT_cgemm(__global float2* gb,
+extern "C" __global__ __launch_bounds__(NUM_THREADS) void
+MIOpenConvFFT_cgemm(float2* gb,
                     unsigned int const offsetC,
                     unsigned int const offsetA,
                     unsigned int const offsetB,
@@ -5089,9 +5093,9 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 {
 
     /* apply offsets */
-    __global float2* C       = gb + offsetC;
-    __global float2 const* A = gb + offsetA;
-    __global float2 const* B = gb + offsetB;
+    float2* C       = gb + offsetC;
+    float2 const* A = gb + offsetA;
+    float2 const* B = gb + offsetB;
 
     /******************************************/
     /* Allocate Resources                     */
@@ -5099,10 +5103,10 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 
     /* registers for MAC's */
     VECTOR_TYPE rC[TT0I * TT1J / VECTOR_WIDTH];
-    rC[0] = 0;
-    rC[1] = 0;
-    rC[2] = 0;
-    rC[3] = 0;
+    rC[0] = VECTOR_TYPE{};
+    rC[1] = VECTOR_TYPE{};
+    rC[2] = VECTOR_TYPE{};
+    rC[3] = VECTOR_TYPE{};
     VECTOR_TYPE rA[TT0I / VECTOR_WIDTH];
     VECTOR_TYPE rB[TT1J / VECTOR_WIDTH];
 
@@ -5111,21 +5115,21 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     VECTOR_TYPE b_0_0, b_0_1;
 
     /* allocate local memory */
-    __local DATA_TYPE localMemory[LDS_NUM_ELEMENTS];
+    __shared__ DATA_TYPE localMemory[LDS_NUM_ELEMENTS];
     DATA_TYPE ZERO;
-    ZERO.s0 = 0;
-    ZERO.s1 = 0;
+    ZERO.x = 0;
+    ZERO.y = 0;
 
     /******************************************/
     /* Global Read Addresses                  */
     /******************************************/
 
     /* global read addresses: work-group */
-    unsigned int wg0I = get_group_id(0);
-    unsigned int wg1J = get_group_id(1);
+    unsigned int wg0I = blockIdx.x;
+    unsigned int wg1J = blockIdx.y;
 
     /* global read addresses: subgroup */
-    unsigned int serial = get_local_id(0);
+    unsigned int serial = threadIdx.x;
     unsigned int sgId   = serial / (SG0I * SG1J);
 
     /* global read addresses: tile offset assignment a */
@@ -5141,7 +5145,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     unsigned int globalReadOffsetBL = (serial / LSPB) * VECTOR_WIDTH;
 
     /* global read addresses: other free assignments */
-    unsigned int wgK = (get_group_id(2)) % sizeK;
+    unsigned int wgK = blockIdx.z % sizeK;
 
     /* global read addresses: tile offsets a */
     unsigned int globalReadOffsetA0I_0 = globalReadOffsetA0I + 0 * LSPA;
@@ -5182,16 +5186,16 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_1, wgK);
 
     /* global read addresses: addresses a */
-    __global VECTOR_TYPE const* globalReadA_0_0 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    __global VECTOR_TYPE const* globalReadA_0_1 =
-        (__global VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
+    VECTOR_TYPE const* globalReadA_0_0 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
+    VECTOR_TYPE const* globalReadA_0_1 =
+        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
 
     /* global read addresses: addresses b */
-    __global VECTOR_TYPE const* globalReadB_0_0 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    __global VECTOR_TYPE const* globalReadB_0_1 =
-        (__global VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
+    VECTOR_TYPE const* globalReadB_0_0 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
+    VECTOR_TYPE const* globalReadB_0_1 =
+        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
 
     /* global read addresses: increments a */
     long globalReadIncAL = (long)strideAL * DEPTHU;
@@ -5234,20 +5238,20 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         localWriteFirstOffsetB + (0 * LSCB) * (MT1J + PAD) + (1 * LSPB);
 
     /* local write addresses: declare addresses a */
-    __local VECTOR_TYPE* localWriteA_0_0;
-    __local VECTOR_TYPE* localWriteA_0_1;
+    VECTOR_TYPE* localWriteA_0_0;
+    VECTOR_TYPE* localWriteA_0_1;
 
     /* local write addresses: declare addresses b */
-    __local VECTOR_TYPE* localWriteB_0_0;
-    __local VECTOR_TYPE* localWriteB_0_1;
+    VECTOR_TYPE* localWriteB_0_0;
+    VECTOR_TYPE* localWriteB_0_1;
 
     /* local write addresses: init pointers a */
-    localWriteA_0_0 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
-    localWriteA_0_1 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
+    localWriteA_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
+    localWriteA_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
 
     /* local write addresses: init pointers b */
-    localWriteB_0_0 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
-    localWriteB_0_1 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
+    localWriteB_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
+    localWriteB_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
 
     /******************************************/
     /* Local Read Addresses                   */
@@ -5266,16 +5270,16 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     unsigned int localReadOffsetB = lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B;
 
     /* local read addresses: declare addresses a */
-    __local VECTOR_TYPE* localReadA;
+    VECTOR_TYPE* localReadA;
 
     /* local read addresses: declare addresses b */
-    __local VECTOR_TYPE* localReadB;
+    VECTOR_TYPE* localReadB;
 
     /* local read addresses: init pointers a */
-    localReadA = (__local VECTOR_TYPE*)(localMemory + localReadOffsetA);
+    localReadA = (VECTOR_TYPE*)(localMemory + localReadOffsetA);
 
     /* local read addresses: init pointers b */
-    localReadB = (__local VECTOR_TYPE*)(localMemory + localReadOffsetB);
+    localReadB = (VECTOR_TYPE*)(localMemory + localReadOffsetB);
 
     /* declare loop iterators */
     unsigned int sumIterL;
@@ -5295,20 +5299,20 @@ MIOpenConvFFT_cgemm(__global float2* gb,
 
         /* global read inc a */
         globalReadA_0_0 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_0) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) +
                                           globalReadIncAL);
         globalReadA_0_1 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadA_0_1) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) +
                                           globalReadIncAL);
 
         /* global read inc b */
         globalReadB_0_0 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_0) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
                                           globalReadIncBL);
         globalReadB_0_1 =
-            (__global VECTOR_TYPE const*)(((__global DATA_TYPE const*)globalReadB_0_1) +
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
                                           globalReadIncBL);
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
 
         /* local write a */
         *localWriteA_0_0 = a_0_0;
@@ -5317,7 +5321,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         /* local write b */
         *localWriteB_0_0 = b_0_0;
         *localWriteB_0_1 = b_0_1;
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
 
         /* iter 0 */
 
@@ -5381,10 +5385,10 @@ MIOpenConvFFT_cgemm(__global float2* gb,
         rB[1] = localReadB[1 * SG1J];
 
         /* local read init pointers a */
-        localReadA = (__local VECTOR_TYPE*)(localMemory + localReadOffsetA);
+        localReadA = (VECTOR_TYPE*)(localMemory + localReadOffsetA);
 
         /* local read init pointers b */
-        localReadB = (__local VECTOR_TYPE*)(localMemory + localReadOffsetB);
+        localReadB = (VECTOR_TYPE*)(localMemory + localReadOffsetB);
         MAC_2x2
     }
 
@@ -5401,13 +5405,13 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     b_0_1 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadB_0_1;
 
     /* local write init pointers a */
-    localWriteA_0_0 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
-    localWriteA_0_1 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
+    localWriteA_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
+    localWriteA_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
 
     /* local write init pointers b */
-    localWriteB_0_0 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
-    localWriteB_0_1 = (__local VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
-    barrier(CLK_LOCAL_MEM_FENCE);
+    localWriteB_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
+    localWriteB_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
+    __syncthreads();
 
     /* local write a */
     *localWriteA_0_0 = a_0_0;
@@ -5416,7 +5420,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     /* local write b */
     *localWriteB_0_0 = b_0_0;
     *localWriteB_0_1 = b_0_1;
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     /* tail loop: macs */
     sumIterL = (((sizeL % DEPTHU) + SPLITU - 1) / SPLITU);
@@ -5442,10 +5446,10 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     /******************************************/
     /* SplitU Reduction                       */
     /******************************************/
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     /* SplitU: local write */
-    __local VECTOR_TYPE* localSplitU                 = (__local VECTOR_TYPE*)(localMemory);
+    VECTOR_TYPE* localSplitU                 = (VECTOR_TYPE*)(localMemory);
     localSplitU[lr0I + 0 * SG0I +
                 (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
                 (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
@@ -5458,7 +5462,7 @@ MIOpenConvFFT_cgemm(__global float2* gb,
     localSplitU[lr0I + 1 * SG0I +
                 (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 1) +
                 (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[1 + 0 * (TT0I / VECTOR_WIDTH) + 1 * TT0I];
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     /* SplitU: local read */
     rC[0] = localSplitU[serial + 0 * NUM_THREADS];
