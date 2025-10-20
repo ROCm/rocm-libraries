@@ -43,7 +43,6 @@
 #define IntTestName IntTest_reduce_custom_i8
 #endif
 
-
 namespace {
 
 using TestCase = std::tuple<std::vector<std::size_t>,
@@ -76,7 +75,7 @@ auto GetCpuImplResult(miopenDataType_t compTypeVal, const TVerifier& verifier)
         return verifier.template cpuImpl<double>();
 
     // We should never reach here! Put this line to avoid warning
-    return verifier.template cpuImpl<float>();        
+    return verifier.template cpuImpl<float>();
 }
 
 template <class T, bool toVerifyData>
@@ -122,7 +121,7 @@ struct verify_reduce_with_indices
     {
         using reduce::convert_type;
 
-        const std::tuple<tensor<T>, tensor<int>> results = 
+        const std::tuple<tensor<T>, tensor<int>> results =
             GetCpuImplResult<T, verify_reduce_with_indices>(compTypeVal, *this);
 
         if(toVerifyData)
@@ -238,21 +237,22 @@ struct verify_reduce_with_indices
 
         if(reduceAllDims)
         {
-            cpuImplReduceAllDims<compType>(inLengths, inStrides, PreUnaryOp, opReduce, res, res_indices);
+            cpuImplReduceAllDims<compType>(
+                inLengths, inStrides, PreUnaryOp, opReduce, res, res_indices);
         }
         else
         {
             cpuImplReduceFewDims<compType>(invariantLengths,
-                                 toReduceLengths,
-                                 inLengths,
-                                 invariantDims,
-                                 outStrides,
-                                 toReduceDims,
-                                 inStrides,
-                                 PreUnaryOp,
-                                 opReduce,
-                                 res,
-                                 res_indices);
+                                           toReduceLengths,
+                                           inLengths,
+                                           invariantDims,
+                                           outStrides,
+                                           toReduceDims,
+                                           inStrides,
+                                           PreUnaryOp,
+                                           opReduce,
+                                           res,
+                                           res_indices);
         };
 
         return (std::make_tuple(res, res_indices));
@@ -317,7 +317,8 @@ struct verify_reduce_with_indices
                 PreUnaryOp(currVal);
 
                 auto currIndex = get_flatten_offset(toReduceLengths, index_2);
-                reduce::binop_with_nan_check2(nanOpt, opReduce, accuVal, currVal, accuIndex, currIndex);
+                reduce::binop_with_nan_check2(
+                    nanOpt, opReduce, accuVal, currVal, accuIndex, currIndex);
             };
 
             // scale the accumulated value
@@ -490,8 +491,7 @@ struct verify_reduce_no_indices
     {
         using reduce::convert_type;
 
-        const tensor<T> result = 
-            GetCpuImplResult<T, verify_reduce_no_indices>(compTypeVal, *this);
+        const tensor<T> result = GetCpuImplResult<T, verify_reduce_no_indices>(compTypeVal, *this);
 
         const auto& dimLengths = output.desc.GetLengths();
         auto result_dataFloat  = tensor<float>(dimLengths);
@@ -547,21 +547,22 @@ struct verify_reduce_no_indices
 
         if(reduceAllDims)
         {
-            cpuImplReduceAllDims<compType>(inLengths, inStrides, PreUnaryOp, opReduce, PosUnaryOp, res);
+            cpuImplReduceAllDims<compType>(
+                inLengths, inStrides, PreUnaryOp, opReduce, PosUnaryOp, res);
         }
         else
         {
             cpuImplReduceFewDims<compType>(invariantLengths,
-                                 toReduceLengths,
-                                 inLengths,
-                                 invariantDims,
-                                 outStrides,
-                                 toReduceDims,
-                                 inStrides,
-                                 PreUnaryOp,
-                                 opReduce,
-                                 PosUnaryOp,
-                                 res);            
+                                           toReduceLengths,
+                                           inLengths,
+                                           invariantDims,
+                                           outStrides,
+                                           toReduceDims,
+                                           inStrides,
+                                           PreUnaryOp,
+                                           opReduce,
+                                           PosUnaryOp,
+                                           res);
         };
 
         return (res);
@@ -569,16 +570,16 @@ struct verify_reduce_no_indices
 
     template <typename compType>
     void cpuImplReduceFewDims(const std::vector<std::size_t>& invariantLengths,
-                          const std::vector<std::size_t>& toReduceLengths,
-                          const std::vector<std::size_t>& inLengths,
-                          const std::vector<int>& invariantDims,
-                          const std::vector<std::size_t>& outStrides,
-                          const std::vector<int>& toReduceDims,
-                          const std::vector<std::size_t>& inStrides,
-                          auto& PreUnaryOp,
-                          auto& opReduce,
-                          auto& PosUnaryOp,
-                          tensor<T>& res) const
+                              const std::vector<std::size_t>& toReduceLengths,
+                              const std::vector<std::size_t>& inLengths,
+                              const std::vector<int>& invariantDims,
+                              const std::vector<std::size_t>& outStrides,
+                              const std::vector<int>& toReduceDims,
+                              const std::vector<std::size_t>& inStrides,
+                              auto& PreUnaryOp,
+                              auto& opReduce,
+                              auto& PosUnaryOp,
+                              tensor<T>& res) const
     {
         using reduce::convert_type;
 
@@ -816,14 +817,13 @@ inline auto GetCases()
 
 inline auto GetCasesReduceCustomTestSet1()
 {
-    static TestCase test_case = std::make_tuple(
-        std::vector<size_t>{1024, 30528, 1}, 
-        std::vector<int>{0, 1, 2}, 
-        MIOPEN_REDUCE_TENSOR_ADD, 
-        MIOPEN_PROPAGATE_NAN, 
-        MIOPEN_REDUCE_TENSOR_NO_INDICES, 
-        std::vector<float>{1.0f, 0.0f});
-    
+    static TestCase test_case = std::make_tuple(std::vector<size_t>{1024, 30528, 1},
+                                                std::vector<int>{0, 1, 2},
+                                                MIOPEN_REDUCE_TENSOR_ADD,
+                                                MIOPEN_PROPAGATE_NAN,
+                                                MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                                                std::vector<float>{1.0f, 0.0f});
+
     return testing::Values(test_case);
 }
 
@@ -836,36 +836,38 @@ inline auto GetCasesReduceCustomTestSet2()
     constexpr miopenReduceTensorOp_t min = MIOPEN_REDUCE_TENSOR_MIN;
     constexpr miopenReduceTensorOp_t max = MIOPEN_REDUCE_TENSOR_MAX;
 
-    constexpr miopenNanPropagation_t nan = MIOPEN_PROPAGATE_NAN;
+    constexpr miopenNanPropagation_t nan   = MIOPEN_PROPAGATE_NAN;
     constexpr miopenNanPropagation_t nonan = MIOPEN_NOT_PROPAGATE_NAN;
 
     constexpr miopenReduceTensorIndices_t noind = MIOPEN_REDUCE_TENSOR_NO_INDICES;
-    constexpr miopenReduceTensorIndices_t ind = MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES;
-    
-    static std::vector<TestCase> test_cases = {
-        std::make_tuple(std::vector<size_t>{8, 2, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{160, 10, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{7, 1024, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, mul, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, max, nan, ind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 2, 1}, std::vector<int>{1, 2}, max, nan, ind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{6, 2, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{6, 2, 1}, std::vector<int>{1, 2}, min, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{2, 2, 1}, std::vector<int>{1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{4, 3, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 4, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 4, 1}, std::vector<int>{0, 2}, max, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{2048, 32, 1}, std::vector<int>{0, 2}, max, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{4, 3, 1}, std::vector<int>{1, 2}, min, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{3, 4, 1}, std::vector<int>{0, 2}, min, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{2048, 32, 1}, std::vector<int>{0, 2}, min, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{12, 11, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{13, 4, 7, 7}, std::vector<int>{0, 1, 2, 3}, add, nan, noind, alphabeta ),
-        std::make_tuple(std::vector<size_t>{64, 3, 280, 81}, std::vector<int>{0}, add, nonan, noind, alphabeta ),
-    };
+    constexpr miopenReduceTensorIndices_t ind   = MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES;
 
-   return testing::ValuesIn(test_cases);
+    // clang-format off
+    static std::vector<TestCase> test_cases = {
+        std::make_tuple(std::vector<size_t>{8, 2, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(std::vector<size_t>{160, 10, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(size_t>{7, 1024, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, mul, nan, noind, alphabeta),
+        std::make_tuple(size_t>{3, 1, 1}, std::vector<int>{0, 1, 2}, max, nan, ind, alphabeta),
+        std::make_tuple(size_t>{3, 2, 1}, std::vector<int>{1, 2}, max, nan, ind, alphabeta),
+        std::make_tuple(size_t>{6, 2, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta),
+        std::make_tuple(size_t>{6, 2, 1}, std::vector<int>{1, 2}, min, nan, noind, alphabeta),
+        std::make_tuple(size_t>{2, 2, 1}, std::vector<int>{1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(size_t>{4, 3, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta),
+        std::make_tuple(size_t>{3, 4, 1}, std::vector<int>{1, 2}, max, nan, noind, alphabeta),
+        std::make_tuple(size_t>{3, 4, 1}, std::vector<int>{0, 2}, max, nan, noind, alphabeta),
+        std::make_tuple(size_t>{2048, 32, 1}, std::vector<int>{0, 2}, max, nan, noind, alphabeta),
+        std::make_tuple(size_t>{4, 3, 1}, std::vector<int>{1, 2}, min, nan, noind, alphabeta),
+        std::make_tuple(std::vector<size_t>{3, 4, 1}, std::vector<int>{0, 2}, min, nan, noind, alphabeta),
+        std::make_tuple(std::vector<size_t>{2048, 32, 1}, std::vector<int>{0, 2}, min, nan, noind, alphabeta),
+        std::make_tuple(size_t>{12, 11, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
+        std::make_tuple(std::vector<size_t>{13, 4, 7, 7},std::vector<int>{0, 1, 2, 3}, add, nan, noind, alphabeta),
+        std::make_tuple(std::vector<size_t>{64, 3, 280, 81}, std::vector<int>{0}, add, nonan, noind, alphabeta),
+    };
+    // clang-format on
+
+    return testing::ValuesIn(test_cases);
 }
 
 } // anonymous namespace
@@ -1175,8 +1177,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
 
-
-
 // Reduce Custom Tests
 template <typename T>
 class ReduceCustomCommon : public ReduceCommon<T>
@@ -1185,7 +1185,7 @@ class ReduceCustomCommon : public ReduceCommon<T>
     {
         using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
         using d_mask = disabled<Gpu::Default>;
-        if (!::IsTestSupportedForDevMask<d_mask, e_mask>())
+        if(!::IsTestSupportedForDevMask<d_mask, e_mask>())
         {
             GTEST_SKIP();
         }
@@ -1208,28 +1208,20 @@ class GPU_reduce_custom_fp32_BFP16 : public ReduceCustomCommon<bfloat16>
 };
 
 class GPU_reduce_custom_fp32_I8 : public ReduceCustomCommon<int8_t>
-{    
+{
 };
 
 TEST_P(GPU_reduce_custom_fp32_FP32, FloatTest_reduce_custom_fp32) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_reduce_custom_fp32_FP32,
-                         GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP32, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_FP16, HalfTestName) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_reduce_custom_fp32_FP16,
-                         GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP16, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_BFP16, BHalfTestName) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_reduce_custom_fp32_BFP16,
-                         GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_BFP16, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_I8, IntTestName) { this->Run(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_I8, GetCasesReduceCustomTestSet1());
-
-
 
 // original file reduce_custom_fp32_fp16.cpp
 class GPU_reduce_custom_fp32_fp16_FP32 : public ReduceCustomCommon<float>
@@ -1240,21 +1232,10 @@ class GPU_reduce_custom_fp32_fp16_FP16 : public ReduceCustomCommon<half_float::h
 {
 };
 
-TEST_P(GPU_reduce_custom_fp32_fp16_FP32, FloatTest_reduce_custom_fp32_fp16)
-{
-    this->Run();
-};
+TEST_P(GPU_reduce_custom_fp32_fp16_FP32, FloatTest_reduce_custom_fp32_fp16) { this->Run(); };
 
-TEST_P(GPU_reduce_custom_fp32_fp16_FP16, HalfTest_reduce_custom_fp32_fp16)
-{
-    this->Run();
-};
+TEST_P(GPU_reduce_custom_fp32_fp16_FP16, HalfTest_reduce_custom_fp32_fp16) { this->Run(); };
 
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP32, GetCasesReduceCustomTestSet2());
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_reduce_custom_fp32_fp16_FP32,
-                         GetCasesReduceCustomTestSet2());
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_reduce_custom_fp32_fp16_FP16,
-                         GetCasesReduceCustomTestSet2());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP16, GetCasesReduceCustomTestSet2());
