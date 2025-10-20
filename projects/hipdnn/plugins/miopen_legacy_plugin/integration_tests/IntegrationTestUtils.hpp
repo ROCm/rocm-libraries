@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -58,25 +60,19 @@ protected:
 protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
                      unsigned int seed,
-                     const IReferenceValidation& validator,
-                     const std::vector<int64_t>& tensorsToValidate)
+                     const IReferenceValidation& validator)
     {
-        auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
-        hipdnn_plugin::GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
-        const auto& tensorMap = graphWrapper.getTensorMap();
+        GraphTensorBundle gpuBundle = generateBundle(graph);
+        GraphTensorBundle cpuBundle = generateBundle(graph);
 
-        GraphTensorBundle gpuBundle(tensorMap);
-        GraphTensorBundle cpuBundle(tensorMap);
-
-        verifyGraph(graph, seed, cpuBundle, gpuBundle, validator, tensorsToValidate);
+        verifyGraph(graph, seed, cpuBundle, gpuBundle, validator);
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
                      unsigned int seed,
                      GraphTensorBundle& cpuBundle,
                      GraphTensorBundle& gpuBundle,
-                     const IReferenceValidation& validator,
-                     const std::vector<int64_t>& tensorsToValidate)
+                     const IReferenceValidation& validator)
     {
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, cpuBundle, seed);
@@ -87,7 +83,7 @@ protected:
         executeGpuGraph(_handle, graph, gpuBundle);
         executeCpuGraph(graph, cpuBundle);
 
-        for(const auto& tensorId : tensorsToValidate)
+        for(const auto& tensorId : getAllNonVirtualOutputTensorIds(graph))
         {
             auto& cpuTensor = cpuBundle.tensors.at(tensorId);
             auto& gpuTensor = gpuBundle.tensors.at(tensorId);
@@ -101,6 +97,38 @@ protected:
             bool valid = validator.allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId;
         }
+    }
+
+    virtual GraphTensorBundle generateBundle(hipdnn_frontend::graph::Graph& graph)
+    {
+        GraphTensorBundle bundle;
+
+        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tensorAttr->get_is_virtual())
+                    continue;
+
+                const auto& tensorId = tensorAttr->get_uid();
+                if(bundle.tensors.find(tensorId) == bundle.tensors.end())
+                {
+                    bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                }
+            }
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                if(tensorAttr->get_is_virtual())
+                    continue;
+
+                const auto& tensorId = tensorAttr->get_uid();
+                if(bundle.tensors.find(tensorId) == bundle.tensors.end())
+                {
+                    bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                }
+            }
+        });
+
+        return bundle;
     }
 
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
@@ -118,7 +146,6 @@ private:
                          hipdnn_frontend::graph::Graph& graph,
                          GraphTensorBundle& bundle)
     {
-
         auto result = graph.build_operation_graph(handle);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
@@ -148,6 +175,23 @@ private:
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
+    }
+
+    std::vector<int64_t> getAllNonVirtualOutputTensorIds(hipdnn_frontend::graph::Graph& graph)
+    {
+        std::vector<int64_t> tensorIds;
+
+        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tensorAttr->get_is_virtual())
+                    continue;
+
+                tensorIds.push_back(tensorAttr->get_uid());
+            }
+        });
+
+        return tensorIds;
     }
 
     hipdnnHandle_t _handle = nullptr;

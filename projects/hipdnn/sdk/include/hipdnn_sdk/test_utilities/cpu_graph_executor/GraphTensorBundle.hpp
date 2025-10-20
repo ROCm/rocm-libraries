@@ -16,6 +16,8 @@ namespace hipdnn_sdk::test_utilities
 
 struct GraphTensorBundle
 {
+    GraphTensorBundle() = default;
+
     GraphTensorBundle(
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap)

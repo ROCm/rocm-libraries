@@ -67,7 +67,7 @@ protected:
         yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
         CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        this->verifyGraph(graphObj, testCase.seed, validator, {yAttr->get_uid()});
+        this->verifyGraph(graphObj, testCase.seed, validator);
     }
 };
 
