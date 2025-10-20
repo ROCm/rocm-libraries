@@ -38,7 +38,7 @@ public:
                 "Batchnorm inference requires at least 2D tensor (batch and channel).");
         }
 
-        auto batchnormFunc = [&](const std::vector<int64_t>& indices) {
+        auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[1];
             auto mean = estimatedMean.getHostValue(0, cidx);
             auto variance = estimatedVariance.getHostValue(0, cidx);
@@ -60,8 +60,8 @@ public:
         };
 
         // Iterate all indices in parallel
-        auto parallelFunc
-            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormFunc, input.dims());
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            batchnormFwdInferenceFunc, input.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified(); // Mark output memory as modified on host
@@ -95,7 +95,7 @@ public:
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]};
         batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
 
-        auto batchnormFunc = [&](const std::vector<int64_t>& indices) {
+        auto batchnormFwdTrainingFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[0];
             auto meanAccum = static_cast<MeanVarianceDataType>(0.0);
             auto varianceAccum = static_cast<MeanVarianceDataType>(0.0);
@@ -166,8 +166,8 @@ public:
         auto nChannels = x.dims().at(1);
         std::vector<int64_t> parallelDims = {nChannels};
 
-        auto parallelFunc
-            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormFunc, parallelDims);
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            batchnormFwdTrainingFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         // Mark all modified tensors as host-modified
@@ -217,7 +217,7 @@ public:
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]}; // batch dimension
         batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
 
-        auto batchnormFunc = [&](const std::vector<int64_t>& indices) {
+        auto batchnormBwdFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[0];
             auto channelMean = mean.getHostValue(0, cidx);
             auto channelInvVariance = invVariance.getHostValue(0, cidx); // 1 / sqrt(var + eps)
@@ -273,7 +273,7 @@ public:
         std::vector<int64_t> parallelDims = {nChannels};
 
         auto parallelFunc
-            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormFunc, parallelDims);
+            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();
