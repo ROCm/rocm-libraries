@@ -290,13 +290,6 @@ namespace rocRoller
                         {
                             Throw<FatalError>("Can't (de)serialize pointer values.");
                         }
-                        else if constexpr(std::is_same_v<U, Buffer>)
-                        {
-                            iot::mapRequired(io, "value.desc0", theVal.desc0);
-                            iot::mapRequired(io, "value.desc0", theVal.desc1);
-                            iot::mapRequired(io, "value.desc0", theVal.desc2);
-                            iot::mapRequired(io, "value.desc0", theVal.desc3);
-                        }
                         else
                         {
                             iot::mapRequired(io, "value", theVal);
@@ -306,6 +299,29 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, CommandArgumentValue& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Buffer, IO, Context>
+        {
+            static const bool flow = false;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Buffer& buffer, Context& ctx)
+            {
+                iot::mapRequired(io, "desc0", buffer.desc0);
+                iot::mapRequired(io, "desc1", buffer.desc1);
+                iot::mapRequired(io, "desc2", buffer.desc2);
+                iot::mapRequired(io, "desc3", buffer.desc3);
+            }
+
+            static void mapping(IO& io, Buffer& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 
