@@ -214,11 +214,13 @@ public:
         : _dims(dims)
         , _strides(strides)
         , _elementCount(TensorBase<T>::calculateItemCount(dims))
-        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
         validateDimsAndStridesSameSize();
         validateAllPositive(_dims, "dimension");
         validateAllPositive(_strides, "stride");
+
+        // Set packed flag after validations since it can be incorrect if dims/strides are invalid.
+        _packed = TensorBase<T>::computeIsPacked(dims, strides);
 
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(
             TensorBase<T>::calculateElementSpace(dims, strides));
