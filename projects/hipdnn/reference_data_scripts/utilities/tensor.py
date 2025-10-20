@@ -22,6 +22,12 @@ class TensorAttributes:
             "virtual": self.virtual
         }
 
+    def to_gpu(self):
+        tensor = self.tensor.cuda()
+
+    def to_cpu(self):
+        tensor = self.tensor.cpu()
+
     @staticmethod
     def empty(dtype: torch.dtype=torch.float, dims: list[int]=[], uid: int=None, name: str="", virtual: bool=False):
         return TensorAttributes(torch.empty(dims, dtype=dtype), uid, name, virtual)
@@ -39,6 +45,7 @@ class TensorAttributes:
     def from_dict(d: dict):
         dtype = DTypeConverter.from_string(d["data_type"])
         return TensorAttributes.empty(dtype, d["dims"], d["uid"], d["name"], d["virtual"])
+
 
 
 def dump_data_as_binary(filename: str, tensor_attr: TensorAttributes):
