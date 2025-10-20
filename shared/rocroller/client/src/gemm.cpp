@@ -45,13 +45,13 @@
 #include <common/Utilities.hpp>
 #include <common/mxDataGen.hpp>
 
+#include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
 #include "client/PreSwizzle.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
-#include "client/CLI_Utils.hpp"
 
 #include <CLI/CLI.hpp>
 
