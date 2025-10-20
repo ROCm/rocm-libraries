@@ -313,8 +313,8 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    const rocblas int nx = 32;
-    const rocblas int ny = 32;
+    const rocblas_int nx = 32;
+    const rocblas_int ny = 32;
     rocblas_int blocksx = (ldw - 1) / nx + 1;
     rocblas_int blocksy = (order - 1) / ny + 1;
     ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(nx, ny), 0, stream,
@@ -588,8 +588,8 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    const rocblas int nx = 32;
-    const rocblas int ny = 32;
+    const rocblas_int nx = 32;
+    const rocblas_int ny = 32;
     rocblas_int blocksx = (ldw - 1) / nx + 1;
     rocblas_int blocksy = (order - 1) / ny + 1;
     ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(nx, ny), 0, stream,
