@@ -124,23 +124,30 @@ public:
 
     void refresh_lock()
     {
-        std::error_code ec;
         MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
+        auto last_refresh = std::chrono::system_clock::now();
         while(lock_held)
         {
-            fs::last_write_time(
-                unique_handle,
-                fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()),
-                ec);
-            if(ec.value() != 0)
-                MIOPEN_LOG_I2("File <" << unique_handle << "> "
-                                       << " time update failed. "
-                                          "Error code: "
-                                       << ec.value()
-                                       << ". "
-                                          "Description: '"
-                                       << ec.message() << "'");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            auto now = std::chrono::system_clock::now();
+            auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
+            if(age >= std::chrono::milliseconds(1))
+            {
+                std::error_code ec;
+                fs::last_write_time(
+                    unique_handle,
+                    fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()),
+                    ec);
+                if(ec.value() != 0)
+                    MIOPEN_LOG_I2("File <" << unique_handle << "> "
+                                           << " time update failed. "
+                                              "Error code: "
+                                           << ec.value()
+                                           << ". "
+                                              "Description: '"
+                                           << ec.message() << "'");
+                last_refresh = now;
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
     }
@@ -162,7 +169,8 @@ public:
             if(fs::hard_link_count(unique_handle) == 2)
             {
                 lock_held = true;
-                std::thread([this]() { this->refresh_lock(); }).detach();
+                if(!refresh_thread.joinable())
+                    refresh_thread = std::thread([this]() { this->refresh_lock(); });
                 return true;
             }
         }
@@ -187,6 +195,7 @@ private:
     fs::path path;
     fs::path lockfile_path;
     fs::path unique_handle;
+    std::thread refresh_thread;
 };
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);

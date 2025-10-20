@@ -46,7 +46,7 @@ fs::path LockFilePath(const fs::path& filename_)
     try
     {
         auto directory = fs::temp_directory_path() / "miopen-lockfiles";
-        if(!filename_.parent_path().empty() && !filename_.parent_path().string().empty())
+        if(!filename_.parent_path().empty())
             directory = filename_.parent_path() / "miopen-lockfiles";
 
         if(!fs::exists(directory))
