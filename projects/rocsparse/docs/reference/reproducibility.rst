@@ -296,6 +296,10 @@ Function name                                        yes no
 :cpp:func:`rocsparse_dense_to_sparse()`              x
 :cpp:func:`rocsparse_spsv()`                             x
 :cpp:func:`rocsparse_spsm()`                             x
+:cpp:func:`rocsparse_sptrsv_buffer_size()`           x
+:cpp:func:`rocsparse_sptrsv()`                           x
+:cpp:func:`rocsparse_sptrsm_buffer_size()`           x
+:cpp:func:`rocsparse_sptrsm()`                           x
 :cpp:func:`rocsparse_spgemm()`                           x
 :cpp:func:`rocsparse_v2_spmv_buffer_size()`          x
 :cpp:func:`rocsparse_spgeam_buffer_size()`           x

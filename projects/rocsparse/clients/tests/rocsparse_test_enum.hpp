@@ -161,17 +161,21 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(spmv_sell)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_bsr)				    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_coo_aos)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_coo)				    \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csr)				    \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csc)				    \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_ell)				    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_csc)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_ell)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(v2_spmv_sell)				    \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_coo)				        \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_csr)				        \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_coo)				        \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_csr)				        \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spitsv_csr)				        \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spvec_descr)				    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsm_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsm_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsm_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsv_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsv_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spitsv_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spvec_descr)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spvv)
 // clang-format on
 
