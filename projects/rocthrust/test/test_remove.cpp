@@ -221,15 +221,13 @@ TEST(RemoveTests, TestRemoveIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector data{1, 2, 1, 3, 2};
-
   Vector stencil{0, 1, 0, 0, 1};
 
-  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
 
   ASSERT_EQ(end - data.begin(), 3);
   data.resize(end - data.begin());
@@ -337,18 +335,16 @@ TEST(RemoveTests, TestRemoveCopyIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector data{1, 2, 1, 3, 2};
-
   Vector stencil{0, 1, 0, 0, 1};
 
   Vector result(5);
 
   typename Vector::iterator end =
-    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
+    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::internal::identity{});
 
   ASSERT_EQ(end - result.begin(), 3);
   result.resize(end - result.begin());

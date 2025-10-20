@@ -47,6 +47,7 @@
 #  include <thrust/advance.h>
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/distance.h>
+#  include <thrust/functional.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/async/customization.h>
 #  include <thrust/system/hip/detail/async/transform.h>
@@ -124,9 +125,7 @@ auto async_copy_n(thrust::hip::execution_policy<FromPolicy>& from_exec,
                                       decltype(is_device_to_device_copy(from_exec, to_exec))>::value,
                           unique_eager_event>::type
 {
-  using T = typename iterator_traits<ForwardIt>::value_type;
-
-  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, thrust::identity<T>());
+  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, ::internal::identity{});
 }
 
 template <typename OutputIt>

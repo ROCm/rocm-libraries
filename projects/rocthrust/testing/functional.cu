@@ -212,6 +212,7 @@ typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 // Ad-hoc testing for other functionals
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
   int i    = 42;
   double d = 3.14;
 
@@ -241,16 +242,16 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
   static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value,
                 "");
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 DECLARE_UNITTEST(TestIdentityFunctional);
 
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctionalVector()
 {
-  using T = typename Vector::value_type;
   Vector input{0, 1, 2, 3};
   Vector output(4);
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::identity<T>());
+  thrust::transform(input.begin(), input.end(), output.begin(), ::internal::identity{});
   ASSERT_EQUAL(input, output);
 }
 DECLARE_VECTOR_UNITTEST(TestIdentityFunctionalVector);
@@ -324,13 +325,11 @@ DECLARE_VECTOR_UNITTEST(TestMinimumFunctional);
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1()
 {
-  using T = typename Vector::value_type;
-
   Vector input{1, 0, 1, 1, 0};
 
   Vector output(5);
 
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(thrust::identity<T>()));
+  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(::internal::identity{}));
 
   Vector ref{0, 1, 0, 0, 1};
   ASSERT_EQUAL(output, ref);

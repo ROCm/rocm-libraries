@@ -25,6 +25,9 @@
 #include <thrust/transform.h>
 
 #include <iostream>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <functional>
+#endif
 
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.
@@ -64,16 +67,20 @@ int main()
   my_system sys;
 
   // To invoke our version of for_each, pass sys as the first parameter
-  thrust::for_each(sys, vec.begin(), vec.end(), thrust::identity<int>());
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  thrust::for_each(sys, vec.begin(), vec.end(), _THRUST_STD::negate{});
 
   // Other algorithms that Thrust implements with thrust::for_each will also
   // cause our version of for_each to be invoked when we pass an instance of my_system as the first parameter.
   // Even though we did not define a special version of transform, Thrust dispatches the version it knows
   // for thrust::device_execution_policy, which my_system inherits.
-  thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), thrust::identity<int>());
+  thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), ::internal::identity{});
 
   // Invocations without my_system are handled normally.
-  thrust::for_each(vec.begin(), vec.end(), thrust::identity<int>());
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  thrust::for_each(vec.begin(), vec.end(), _THRUST_STD::negate{});
 
   return 0;
 }
