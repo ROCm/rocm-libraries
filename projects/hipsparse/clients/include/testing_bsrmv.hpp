@@ -295,8 +295,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
     hipsparseDirection_t dir       = argus.dirA;
     std::string          filename  = argus.filename;
 
-    std::cout << "filename: " << filename << std::endl;
-
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
