@@ -182,6 +182,7 @@ TEST(TestTypeErasedIterator, CopyAssignment)
 
     auto it1 = iTensor->begin();
     auto it2 = iTensor->end();
+    EXPECT_NE(it1, it2);
 
     it2 = it1; // Copy assignment
 

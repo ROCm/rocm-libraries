@@ -45,9 +45,6 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
-// Forward declaration of TensorBase for ITensorIterator implementation
-template <typename T>
-class TensorBase;
 class ITensor;
 
 template <bool IsConst = false>
@@ -60,24 +57,28 @@ public:
     using pointer = std::conditional_t<IsConst, const void*, void*>;
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
+    using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+
     ITensorIterator() = default;
 
-    template <typename T>
-    ITensorIterator(TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<InternalTypedTensorIterator<T, false>>(
-              &tensor, std::move(indices), isEnd))
+    ITensorIterator(ITensor& tensor, bool isEnd = false)
+        : _tensor(tensor)
+        , _indices(_tensor.dims().size(), 0)
+        , _isEnd(isEnd)
     {
     }
 
-    template <typename T>
-    ITensorIterator(const TensorBase<T>& tensor, std::vector<int64_t> indices, bool isEnd = false)
-        : _impl(std::make_unique<InternalTypedTensorIterator<T, true>>(
-              &tensor, std::move(indices), isEnd))
+    ITensorIterator(const ITensor& tensor, bool isEnd = false)
+        : _tensor(tensor)
+        , _indices(_tensor.dims().size(), 0)
+        , _isEnd(isEnd)
     {
     }
 
     ITensorIterator(const ITensorIterator& other)
-        : _impl(other._impl ? other._impl->clone() : nullptr)
+        : _tensor(other._tensor)
+        , _indices(other._indices)
+        , _isEnd(other._isEnd)
     {
     }
 
@@ -87,28 +88,41 @@ public:
     {
         if(this != &other)
         {
-            _impl = other._impl ? other._impl->clone() : nullptr;
+            _tensor = other._tensor;
+            _indices = other._indices;
+            _isEnd = other._isEnd;
         }
         return *this;
     }
 
     ITensorIterator& operator=(ITensorIterator&&) = default;
 
-    value_type operator*() const
+    value_type operator*()
     {
-        if(!_impl)
-        {
-            throw std::runtime_error("Cannot dereference invalid iterator");
-        }
-        return _impl->get();
+        return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
     }
 
     ITensorIterator& operator++()
     {
-        if(_impl)
+        if(_isEnd)
         {
-            _impl->increment();
+            return *this;
         }
+
+        const auto& dims = _tensor.dims();
+
+        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+        {
+            auto dimIdx = static_cast<size_t>(dim);
+            _indices[dimIdx]++;
+            if(_indices[dimIdx] < dims[dimIdx])
+            {
+                return *this;
+            }
+            _indices[dimIdx] = 0;
+        }
+
+        _isEnd = true;
         return *this;
     }
 
@@ -121,15 +135,8 @@ public:
 
     bool operator==(const ITensorIterator& other) const
     {
-        if(!_impl && !other._impl)
-        {
-            return true;
-        }
-        if(!_impl || !other._impl)
-        {
-            return false;
-        }
-        return _impl->equals(other._impl.get());
+        return (&_tensor == &other._tensor) && (_indices == other._indices)
+               && (_isEnd == other._isEnd);
     }
 
     bool operator!=(const ITensorIterator& other) const
@@ -139,117 +146,13 @@ public:
 
     std::vector<int64_t> indices() const
     {
-        if(!_impl)
-        {
-            return {};
-        }
-        return _impl->getIndices();
+        return _indices;
     }
 
 private:
-    struct IInternalTypedTensorIterator
-    {
-        virtual ~IInternalTypedTensorIterator() = default;
-        virtual void increment() = 0;
-        virtual value_type get() = 0;
-        virtual bool equals(const IInternalTypedTensorIterator* other) const = 0;
-        virtual std::unique_ptr<IInternalTypedTensorIterator> clone() const = 0;
-        virtual std::vector<int64_t> getIndices() const = 0;
-    };
-
-    template <typename T, bool IsConstInternal>
-    struct InternalTypedTensorIterator : IInternalTypedTensorIterator
-    {
-        using tensor_type = std::conditional_t<IsConstInternal, const TensorBase<T>, TensorBase<T>>;
-
-        InternalTypedTensorIterator(tensor_type* tensor, std::vector<int64_t> indices, bool isEnd)
-            : _tensor(tensor)
-            , _indices(std::move(indices))
-            , _isEnd(isEnd)
-        {
-        }
-
-        void increment() override
-        {
-            if(_isEnd)
-            {
-                return;
-            }
-
-            const auto& dims = _tensor->dims();
-
-            for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
-            {
-                auto dimIdx = static_cast<size_t>(dim);
-                _indices[dimIdx]++;
-                if(_indices[dimIdx] < dims[dimIdx])
-                {
-                    return;
-                }
-                _indices[dimIdx] = 0;
-            }
-
-            _isEnd = true;
-        }
-
-        value_type get() override
-        {
-            if(_isEnd)
-            {
-                throw std::out_of_range("Cannot dereference end iterator");
-            }
-            int64_t index = _tensor->getIndex(_indices);
-            if constexpr(IsConstInternal)
-            {
-                return _tensor->hostDataOffsetFromIndex(index);
-            }
-            else
-            {
-                return &_tensor->memory().hostData()[index];
-            }
-        }
-
-        bool equals(const IInternalTypedTensorIterator* other) const override
-        {
-            const auto* otherModel
-                = dynamic_cast<const InternalTypedTensorIterator<T, IsConstInternal>*>(other);
-            if(otherModel == nullptr)
-            {
-                return false;
-            }
-            if(_tensor != otherModel->_tensor)
-            {
-                return false;
-            }
-            if(_isEnd && otherModel->_isEnd)
-            {
-                return true;
-            }
-            if(_isEnd != otherModel->_isEnd)
-            {
-                return false;
-            }
-            return _indices == otherModel->_indices;
-        }
-
-        std::unique_ptr<IInternalTypedTensorIterator> clone() const override
-        {
-            return std::make_unique<InternalTypedTensorIterator<T, IsConstInternal>>(
-                _tensor, _indices, _isEnd);
-        }
-
-        std::vector<int64_t> getIndices() const override
-        {
-            return _indices;
-        }
-
-    private:
-        tensor_type* _tensor;
-        std::vector<int64_t> _indices;
-        bool _isEnd;
-    };
-
-    std::unique_ptr<IInternalTypedTensorIterator> _impl;
+    TensorType _tensor;
+    std::vector<int64_t> _indices;
+    bool _isEnd;
 };
 
 class ITensor
@@ -264,6 +167,7 @@ public:
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
+    virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
@@ -330,6 +234,11 @@ public:
         return memory().hostData();
     }
 
+    void* hostDataOffsetFromIndex(int64_t index) override
+    {
+        return memory().hostData() + index;
+    }
+
     const void* hostDataOffsetFromIndex(int64_t index) const override
     {
         return memory().hostData() + index;
@@ -387,26 +296,22 @@ public:
 
     ITensorIterator<false> begin() override
     {
-        std::vector<int64_t> startIndices(dims().size(), 0);
-        return ITensorIterator<false>(*this, startIndices, false);
+        return ITensorIterator<false>(*this, false);
     }
 
     ITensorIterator<false> end() override
     {
-        std::vector<int64_t> endIndices(dims().size(), 0);
-        return ITensorIterator<false>(*this, endIndices, true);
+        return ITensorIterator<false>(*this, true);
     }
 
     ITensorIterator<true> cbegin() const override
     {
-        std::vector<int64_t> startIndices(dims().size(), 0);
-        return ITensorIterator<true>(*this, startIndices, false);
+        return ITensorIterator<true>(*this, false);
     }
 
     ITensorIterator<true> cend() const override
     {
-        std::vector<int64_t> endIndices(dims().size(), 0);
-        return ITensorIterator<true>(*this, endIndices, true);
+        return ITensorIterator<true>(*this, true);
     }
 
 protected:

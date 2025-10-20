@@ -24,12 +24,12 @@ public:
     {
     }
 
-    reference operator*() const
+    reference operator*()
     {
         return *static_cast<pointer>(*_iter);
     }
 
-    pointer operator->() const
+    pointer operator->()
     {
         void* ptr = *_iter;
         return static_cast<pointer>(ptr);
