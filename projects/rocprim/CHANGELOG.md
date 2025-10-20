@@ -13,6 +13,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 * Added a new cmake option, `BENCHMARK_USE_AMDSMI`. It is set to `OFF` by default. When this option is set to `ON`, it lets benchmarks use AMD SMI to output more GPU statistics.
+* Added the first tested example program for `device_search`, which is linked in the documentation.
 
 ### Changed
 
