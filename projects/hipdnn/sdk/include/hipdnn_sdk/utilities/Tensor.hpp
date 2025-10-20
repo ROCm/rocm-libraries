@@ -64,21 +64,26 @@ public:
     ITensorIterator(ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
         , _indices(_tensor.dims().size(), 0)
-        , _isEnd(isEnd)
     {
+        if(isEnd && !_tensor.dims().empty())
+        {
+            _indices[0] = _tensor.dims()[0];
+        }
     }
 
     ITensorIterator(const ITensor& tensor, bool isEnd = false)
         : _tensor(tensor)
         , _indices(_tensor.dims().size(), 0)
-        , _isEnd(isEnd)
     {
+        if(isEnd && !_tensor.dims().empty())
+        {
+            _indices[0] = _tensor.dims()[0];
+        }
     }
 
     ITensorIterator(const ITensorIterator& other)
         : _tensor(other._tensor)
         , _indices(other._indices)
-        , _isEnd(other._isEnd)
     {
     }
 
@@ -90,7 +95,6 @@ public:
         {
             _tensor = other._tensor;
             _indices = other._indices;
-            _isEnd = other._isEnd;
         }
         return *this;
     }
@@ -99,17 +103,22 @@ public:
 
     value_type operator*()
     {
+        const auto& dims = _tensor.dims();
+        if(!dims.empty() && _indices[0] == dims[0])
+        {
+            throw std::out_of_range("Cannot dereference the end iterator");
+        }
+
         return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
     }
 
     ITensorIterator& operator++()
     {
-        if(_isEnd)
-        {
-            return *this;
-        }
-
         const auto& dims = _tensor.dims();
+        if(!dims.empty() && _indices[0] == dims[0])
+        {
+            throw std::out_of_range("Iterator cannot be incremented past the end");
+        }
 
         for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
         {
@@ -122,7 +131,9 @@ public:
             _indices[dimIdx] = 0;
         }
 
-        _isEnd = true;
+        //set 1 past end.
+        _indices[0] = _tensor.dims()[0];
+
         return *this;
     }
 
@@ -135,8 +146,7 @@ public:
 
     bool operator==(const ITensorIterator& other) const
     {
-        return (&_tensor == &other._tensor) && (_indices == other._indices)
-               && (_isEnd == other._isEnd);
+        return (&_tensor == &other._tensor) && (_indices == other._indices);
     }
 
     bool operator!=(const ITensorIterator& other) const
@@ -152,7 +162,6 @@ public:
 private:
     TensorType _tensor;
     std::vector<int64_t> _indices;
-    bool _isEnd;
 };
 
 class ITensor
