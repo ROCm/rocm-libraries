@@ -27,9 +27,6 @@
 #endif // no system header
 
 #include <thrust/detail/type_traits.h>
-#if !THRUST_COMPILER(NVRTC)
-#  include <thrust/detail/execute_with_dependencies.h>
-#endif // !THRUST_COMPILER(NVRTC)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -63,48 +60,6 @@ public:
   {
     return alloc;
   }
-
-#if !THRUST_COMPILER(NVRTC)
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  after(Dependencies&&... dependencies) const
-  {
-    return {alloc, capture_as_dependency(THRUST_FWD(dependencies))...};
-  }
-
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  after(std::tuple<Dependencies...>& dependencies) const
-  {
-    return {alloc, capture_as_dependency(dependencies)};
-  }
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  after(std::tuple<Dependencies...>&& dependencies) const
-  {
-    return {alloc, capture_as_dependency(std::move(dependencies))};
-  }
-
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  rebind_after(Dependencies&&... dependencies) const
-  {
-    return {alloc, capture_as_dependency(THRUST_FWD(dependencies))...};
-  }
-
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  rebind_after(std::tuple<Dependencies...>& dependencies) const
-  {
-    return {alloc, capture_as_dependency(dependencies)};
-  }
-  template <typename... Dependencies>
-  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
-  rebind_after(std::tuple<Dependencies...>&& dependencies) const
-  {
-    return {alloc, capture_as_dependency(std::move(dependencies))};
-  }
-#endif // !THRUST_COMPILER(NVRTC)
 };
 
 THRUST_SUPPRESS_DEPRECATED_POP

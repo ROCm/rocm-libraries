@@ -37,7 +37,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -125,7 +124,6 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
 {
   using base_t = execution_policy<par_t>;
 
@@ -146,7 +144,6 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
 {
   using base_t = execution_policy<par_nosync_t>;
 
@@ -203,7 +200,6 @@ struct execute_on_stream_deterministic : execute_on_stream_deterministic_base<ex
 struct par_det_t
     : execution_policy<par_det_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_deterministic_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_deterministic_base>
 {
   using base_t = execution_policy<par_det_t>;
 
@@ -260,7 +256,6 @@ struct execute_on_stream_nosync_deterministic
 struct par_det_nosync_t
     : execution_policy<par_det_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_deterministic_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_deterministic_base>
 {
   using base_t = execution_policy<par_det_nosync_t>;
 

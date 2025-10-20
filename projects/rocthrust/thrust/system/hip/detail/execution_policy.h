@@ -45,10 +45,6 @@
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
 
-#if !THRUST_COMPILER(NVRTC)
-#  include <thrust/detail/dependencies_aware_execution_policy.h>
-#endif // !THRUST_COMPILER(NVRTC)
-
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
@@ -65,15 +61,10 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
-    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
-#if !THRUST_COMPILER(NVRTC)
-    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
-#endif // !THRUST_COMPILER(NVRTC)
+    , detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
 {};
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
