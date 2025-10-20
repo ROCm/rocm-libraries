@@ -352,7 +352,11 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
     inflags.AddInputFlag(
         "activ_beta", 'y', "1.0", "Activation function parameter beta (Default=1.0)", "float");
     AddGpuBufferCheckFlag(inflags);
-    inflags.AddInputFlag("tuning_policy", '&', "0", "MIOpen tuning policy (Default=0, or no tuning policy set)", "int");
+    inflags.AddInputFlag("tuning_policy",
+                         '&',
+                         "0",
+                         "MIOpen tuning policy (Default=0, or no tuning policy set)",
+                         "int");
 
     return miopenStatusSuccess;
 }

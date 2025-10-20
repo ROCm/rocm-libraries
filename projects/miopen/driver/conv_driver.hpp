@@ -1017,7 +1017,11 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
         "wei_cast_type", 'R', "-1", "Cast type for weight tensor, default to not set", "string");
     inflags.AddInputFlag(
         "init_output_nan", 'N', "0", "populate output buffers with nan values (Default=0)", "int");
-    inflags.AddInputFlag("tuning_policy", '&', "0", "MIOpen tuning policy (Default=0, or no tuning policy set)", "int");
+    inflags.AddInputFlag("tuning_policy",
+                         '&',
+                         "0",
+                         "MIOpen tuning policy (Default=0, or no tuning policy set)",
+                         "int");
 
     return 0;
 }
