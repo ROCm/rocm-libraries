@@ -132,7 +132,7 @@ public:
         }
 
         //set 1 past end.
-        _indices[0] = _tensor.dims()[0];
+        _indices[0] = dims[0];
 
         return *this;
     }

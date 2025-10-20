@@ -93,6 +93,33 @@ TEST(TestTensor, ExceedDimensions)
     EXPECT_THROW(tensor.setHostValue(99.0f, 0, 1, 1, 2, 3), std::invalid_argument);
 }
 
+TEST(TestTensor, ThrowsWhenIncrementingPastEnd)
+{
+    Tensor<float> tensor({2, 2});
+    auto it = tensor.begin();
+    auto endIt = tensor.end();
+
+    // Increment to the end
+    ++it; // (0,1)
+    ++it; // (1,0)
+    ++it; // (1,1)
+    ++it; // Now at 1 past end
+
+    EXPECT_EQ(it, endIt);
+
+    // Incrementing past the end should throw
+    EXPECT_THROW(++it, std::out_of_range);
+}
+
+TEST(TestTensor, ThrowsWhenAccessingEndIterator)
+{
+    Tensor<float> tensor({2, 2});
+    auto it = tensor.end();
+
+    // Dereferencing the end iterator should throw
+    EXPECT_THROW(*it, std::out_of_range);
+}
+
 TEST(TestTensor, GetIndex)
 {
     //Strides {60, 20, 5, 1}
