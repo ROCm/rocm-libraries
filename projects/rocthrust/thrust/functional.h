@@ -500,68 +500,6 @@ using _THRUST_STD::bit_xor;
  *  \{
  */
 
-/*! \p identity is a Unary Function that represents the identity function: it takes
- *  a single argument \c x, and returns \c x.
- *
- *  \tparam T No requirements on \p T.
- *
- *  The following code snippet demonstrates that \p identity returns its
- *  argument.
- *
- *  \code
- *  #include <thrust/functional.h>
- *  #include <assert.h>
- *  ...
- *  int x = 137;
- *  thrust::identity<int> id;
- *  assert(x == id(x));
- *  \endcode
- *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/identity
- */
-// TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to _THRUST_STD::identity
-template <typename T = void>
-struct THRUST_DEPRECATED_BECAUSE("use internal::identity instead") identity
-{
-  /*! \typedef result_type
-   *  \brief The type of the function object's result;
-   */
-  using result_type THRUST_DEPRECATED_IN_CXX11 = T;
-
-  /*! Function call operator. The return value is <tt>x</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr const T& operator()(const T& x) const
-  {
-    return x;
-  }
-
-  /*! Function call operator. The return value is <tt>x</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr T& operator()(T& x) const
-  {
-    return x;
-  }
-
-  // we cannot add an overload for `const T&&` because then calling e.g. `thrust::identity<int>{}(3.14);` is ambiguous
-  // on MSVC
-
-  /*! Function call operator. The return value is <tt>move(x)</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr T&& operator()(T&& x) const
-  {
-    return _THRUST_STD::move(x);
-  }
-};
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-template <>
-struct THRUST_DEPRECATED_BECAUSE("use internal::identity instead") identity<void> : ::internal::identity
-{};
-THRUST_SUPPRESS_DEPRECATED_POP
-
 using ::internal::maximum;
 using ::internal::minimum;
 
