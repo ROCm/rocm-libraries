@@ -154,7 +154,7 @@ protected:
             meanTensorCpu,
             varianceTensorCpu,
             yTensorCpu,
-            1e-3);
+            1e-5);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu.memory(), yTensor.memory()));

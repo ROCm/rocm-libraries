@@ -263,7 +263,7 @@ protected:
             cpuTensorBundle.meanTensor,
             cpuTensorBundle.varianceTensor,
             cpuTensorBundle.yTensor,
-            1e-3);
+            1e-5);
     }
 
     void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)

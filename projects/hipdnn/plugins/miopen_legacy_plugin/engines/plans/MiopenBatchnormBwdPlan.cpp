@@ -95,7 +95,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = 1e-3;
+    double epsilon = 1e-5;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);

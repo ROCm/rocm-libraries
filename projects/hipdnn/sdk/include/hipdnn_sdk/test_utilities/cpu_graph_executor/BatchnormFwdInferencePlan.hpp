@@ -148,7 +148,7 @@ public:
                                            *tensorMap.at(nodeAttributes->bias_tensor_uid()),
                                            *tensorMap.at(nodeAttributes->mean_tensor_uid()),
                                            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()),
-                                           1e-3);
+                                           1e-5);
 
         return std::make_unique<
             BatchnormFwdPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(

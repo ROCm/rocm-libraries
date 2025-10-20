@@ -73,7 +73,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
-    double epsilon = 1e-3;
+    double epsilon = 1e-5;
 
     auto xBuffer = miopen_utils::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
