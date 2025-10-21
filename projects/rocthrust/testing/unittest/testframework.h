@@ -19,7 +19,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/limits.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/device_memory_resource.h>
 #include <thrust/mr/host_memory_resource.h>
