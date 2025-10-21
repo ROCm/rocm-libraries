@@ -366,15 +366,15 @@ namespace origami
          *
          * \return best WGM.
          */
-    size_t select_best_wgm(const hardware_t& hardware,
-                           size_t            M,
-                           size_t            N,
-                           size_t            K,
-                           size_t            batch,
-                           size_t            MT_M,
-                           size_t            MT_N,
-                           size_t            MT_K,
-                           bool              print)
+    int32_t select_best_wgm(const hardware_t& hardware,
+                            size_t            M,
+                            size_t            N,
+                            size_t            K,
+                            size_t            batch,
+                            size_t            MT_M,
+                            size_t            MT_N,
+                            size_t            MT_K,
+                            bool              print)
     {
         constexpr size_t element_size = 32; // L2 scales linearly with element size so it doesn't matter
         

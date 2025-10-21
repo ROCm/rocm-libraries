@@ -101,20 +101,21 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
         Formula:
         x, g   = divmod(old_wg, WGMXCC)
         q, r   = divmod(WG, WGMXCC)
-        group  = q + (1 if x < r else 0)
-        offset = 0 if x < r else r
-        new    = g + x * group + offset
+        group  = q + (1 if g < r else 0)
+        offset = 0 if g < r else r
+        new    = x + offset + g * group
         """
-        with writer.allocTmpSgpr(5, 2) as tmpSgprRes:
+        with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
             SgprWGMXCC = tmpSgprRes.idx
             SgprX      = tmpSgprRes.idx + 1
             SgprG      = tmpSgprRes.idx + 2
             SgprQ      = tmpSgprRes.idx + 3
             SgprR      = tmpSgprRes.idx + 4
+            SgprO      = tmpSgprRes.idx + 5
             # Reuse some sgprs
             tmpSgpr = SgprWGMXCC
             group   = SgprQ
-            offset  = SgprR
+            # offset  = SgprR
             
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
@@ -122,21 +123,22 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
             module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
             module.addComment0("remap WGs if WGMXCC > 1")
-            module.add(SCmpGtI32(src0=sgpr(SgprWGMXCC), src1=1))
+            module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1))
             module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
             module.addComment0("divmod(old_wg, WGMXCC)")
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+            module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
             module.addComment0("divmod(WG, WGMXCC)")
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg="skGrid", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))            
             writer.vgprPool.checkIn(tmpVgpr)
             # Check if current group requires a remainder WG or not
-            module.add(SCmpLtU32(src0=sgpr(SgprX), src1=sgpr(SgprR)))
+            module.add(SCmpLtU32(src0=sgpr(SgprG), src1=sgpr(SgprR)))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(1), src1=hex(0), comment="Select multiplier"))
-            module.add(SCSelectB32(dst=sgpr(offset), src0=0, src1=sgpr(SgprR), comment="Select remainder"))
-            module.add(SAddU32(dst=sgpr(group), src0=sgpr(group), src1=sgpr(tmpSgpr), comment="Select multiplier"))
+            module.add(SCSelectB32(dst=sgpr(SgprO), src0=hex(0), src1=sgpr(SgprR), comment="Select remainder"))
+            module.add(SAddU32(dst=sgpr(group), src0=sgpr(SgprQ), src1=sgpr(tmpSgpr), comment="Adjust multiplier"))
             # Assemble everything
-            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprG), src1=sgpr(offset)))
-            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprX), src1=sgpr(group)))
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
+            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
 
             module.add(label_skipWGMXCC)
@@ -204,7 +206,6 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(label_skipWGMXCC)
 
     return module
-
 
 def DefaultWGM(writer, kernel, sgprWGM):
     module = Module("graWGMCalc")
