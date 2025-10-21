@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
@@ -15,7 +16,7 @@
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include "GoldenReference.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
@@ -23,45 +24,120 @@ using namespace hipdnn_sdk::utilities;
 
 namespace fs = std::filesystem;
 
-class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
+template <class T>
+class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
 {
-protected:
-    GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
-
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    void SetUp() override
+public:
+    void testSuite()
     {
-        auto const& path = GetParam();
-
-        // TODO: Temporary fix until reference data can be properly installed
-        if(path.empty())
-        {
-            GTEST_SKIP();
-        }
-
-        _graphAndTensors = loadGraphAndTensors(path);
-        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
+        return goldenReferenceTestSuite(batchnorm::getToleranceInference<T>(),
+                                        batchnorm::getToleranceInference<T>());
     }
 };
 
-TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32
+    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
 {
-    auto tensorMap = _graphAndTensors.hostBufferMap();
-    EXPECT_EQ(tensorMap.size(), 6);
+};
 
-    CpuReferenceGraphExecutor().execute(
-        _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16
+    : public TestCpuBatchnormFwdInferenceGoldenReference<half>
+{
+};
 
-    EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, 0.02f, 0.02f));
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16
+    : public TestCpuBatchnormFwdInferenceGoldenReference<hip_bfloat16>
+{
+};
+
+class TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32
+    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
+{
+};
+
+// Nchw Fp32------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
+{
+    testSuite();
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestCpuFpReferenceBatchnormFwdInference,
-                         testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-                             hipdnn_sdk::utilities::getCurrentExecutableDirectory()
-                                 / "../lib/hipdnn_reference_data/",
-                             ".json")));
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+
+// Nchw Fp16------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
+
+// Nchw Bfp16------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
+
+// Ncdhw Fp32------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
+
+//--------------------------
+
+// class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
+// {
+// protected:
+//     GraphAndTensorMap _graphAndTensors;
+//     std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
+
+//     // NOLINTNEXTLINE(readability-identifier-naming)
+//     void SetUp() override
+//     {
+//         auto const& path = GetParam();
+
+//         // TODO: Temporary fix until reference data can be properly installed
+//         if(path.empty())
+//         {
+//             GTEST_SKIP();
+//         }
+
+//         _graphAndTensors = loadGraphAndTensors(path);
+//         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
+//     }
+// };
+
+// TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
+// {
+//     auto tensorMap = _graphAndTensors.hostBufferMap();
+//     EXPECT_EQ(tensorMap.size(), 6);
+
+//     CpuReferenceGraphExecutor().execute(
+//         _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
+
+//     EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, 0.02f, 0.02f));
+// }
+
+// INSTANTIATE_TEST_SUITE_P(,
+//                          TestCpuFpReferenceBatchnormFwdInference,
+//                          testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
+//                              hipdnn_sdk::utilities::getCurrentExecutableDirectory()
+//                                  / "../lib/hipdnn_reference_data/",
+//                              ".json")));
+
+// class TestCpuFpReference
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {

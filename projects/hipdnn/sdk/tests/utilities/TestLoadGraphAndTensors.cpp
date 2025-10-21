@@ -60,8 +60,7 @@ TEST(TestFillTensorFromFile, Valid)
 TEST(TestLoadGraphAndTensors, Valid)
 {
     std::filesystem::path filepath
-        = utilities::getCurrentExecutableDirectory()
-          / "../lib/hipdnn_reference_data/BatchnormForwardInference.json";
+        = utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
@@ -102,8 +101,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     std::filesystem::path filepath
-        = utilities::getCurrentExecutableDirectory()
-          / "../lib/hipdnn_reference_data/BatchnormForwardInference.json";
+        = utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))

@@ -22,6 +22,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/BatchnormCommon.hpp"
+#include "common/GoldenReference.hpp"
 #include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
@@ -29,7 +30,9 @@ using namespace hipdnn_sdk::utilities;
 using namespace test_bn_common;
 using namespace test_helpers;
 
-class TestBatchnormFwdInferenceExecuteGraphGoldenReference
+/*
+template <class T>
+class TestBatchnormFwdInferenceExecuteGraphGoldenReferenceImpl
     : public testing::TestWithParam<std::filesystem::path>
 {
 protected:
@@ -86,21 +89,90 @@ protected:
             _graphAndTensors.tensorMap.at(uid)->markDeviceModified();
         }
 
-        EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, 0.02f, 0.02f));
+        EXPECT_TRUE(_graphAndTensors.validateTensors(
+            _referenceOutputTensors, getToleranceInference<T>(), getToleranceInference<T>()));
     }
 };
 
-TEST_P(TestBatchnormFwdInferenceExecuteGraphGoldenReference, Correctness)
+std::vector<std::filesystem::path> getGoldenReferenceParams(std::filesystem::path directory)
 {
-    goldenReferenceTestSuite();
+    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
+        hipdnn_sdk::utilities::getCurrentExecutableDirectory() / ".." / directory, ".json"))
+}
+*/
+
+template <class T>
+class TestBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceGpu
+{
+public:
+    void testSuite()
+    {
+        return goldenReferenceTestSuite(batchnorm::getToleranceInference<T>(),
+                                        batchnorm::getToleranceInference<T>());
+    }
+};
+
+class TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp32
+    : public TestBatchnormFwdInferenceGoldenReference<float>
+{
+};
+
+class TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp16
+    : public TestBatchnormFwdInferenceGoldenReference<half>
+{
+};
+
+class TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwBfp16
+    : public TestBatchnormFwdInferenceGoldenReference<hip_bfloat16>
+{
+};
+
+class TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32
+    : public TestBatchnormFwdInferenceGoldenReference<float>
+{
+};
+
+// Nchw Fp32------------
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
+{
+    testSuite();
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestBatchnormFwdInferenceExecuteGraphGoldenReference,
-                         testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-                             hipdnn_sdk::utilities::getCurrentExecutableDirectory()
-                                 / "../lib/hipdnn_reference_data/",
-                             ".json")));
+                         TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+
+// Nchw Fp16------------
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
+
+// Nchw Bfp16------------
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwBfp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
+
+// Ncdhw Fp32------------
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
+
+//--------------------------
 
 template <typename InputType, typename IntermediateType>
 class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<Batchnorm2dTestCase>
