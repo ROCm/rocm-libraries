@@ -101,11 +101,14 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     const std::vector<size_t> vgd{xgridsize, ygridsize, zgridsize};
     const std::vector<size_t> vld{xlocalsize, ylocalsize, zlocalsize};
 
+    bool useFP32 = (xDesc.GetType() == miopenFloat);
+    bool useFP16 = (xDesc.GetType() == miopenHalf);
+    bool useBFP16 = (xDesc.GetType() == miopenBFloat16);
     const auto build_params = miopen::KernelBuildParameters{
-        {"MIOPEN_USE_FP16", static_cast<int>(xDesc.GetType() == miopenHalf)},
-        {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)},
-        {"MIOPEN_USE_FPMIX", 0},
-        {"MIOPEN_USE_BFPMIX", 0},
+        {"MIOPEN_USE_FP16", static_cast<int>(useFP16)},
+        {"MIOPEN_USE_FP32", static_cast<int>(useFP32)},
+        {"MIOPEN_USE_BFP16", static_cast<int>(useBFP16)},
+        {"MIOPEN_USE_BFPMIX", static_cast<int>(useBFP16)},
         {"MIO_BN_GRP0", xlocalsize},
         {"MIO_BN_GRP1", ylocalsize},
         {"MIO_BN_GRP2", zlocalsize},
@@ -234,6 +237,16 @@ struct GPU_bn_fwd_infer_per_act_FP16
 {
 };
 
+struct GPU_bn_fwd_infer_spatial_BFP16
+    : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float>
+{
+};
+
+struct GPU_bn_fwd_infer_per_act_BFP16
+    : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float>
+{
+};
+
 std::vector<miopenActivationMode_t> ActivationConfigs() { return {miopenActivationPASTHRU}; }
 
 TEST_P(GPU_bn_fwd_infer_spatial_FP32, PortTest)
@@ -296,6 +309,36 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP16, PortTest)
     Verify();
 };
 
+TEST_P(GPU_bn_fwd_infer_spatial_BFP16, PortTest)
+{
+#if COMPARE_WITH_OPENCL
+    // Run the OpenCL implementation
+    RunTestGPU(false);
+#else
+    // Run the CPU implementation
+    RunTestCPU();
+#endif
+    // Run the HIP implementation
+    RunTestGPU();
+    // Compare the outputs
+    Verify();
+};
+
+TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
+{
+#if COMPARE_WITH_OPENCL
+    // Run the OpenCL implementation
+    RunTestGPU(false);
+#else
+    // Run the CPU implementation
+    RunTestCPU();
+#endif
+    // Run the HIP implementation
+    RunTestGPU();
+    // Compare the outputs
+    Verify();
+};
+
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_spatial_FP32,
@@ -316,3 +359,13 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
                                           testing::ValuesIn(BNInferTestConfigs<half_float::half>(
                                               miopenBNPerActivation))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_fwd_infer_spatial_BFP16,
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNSpatial))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_fwd_infer_per_act_BFP16,
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation))));
