@@ -139,6 +139,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     )
 
     if(ROCROLLER_ENABLE_CATCH)
+        # Both paths are added for compatibility with multiple catch2 vresions.
         list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
         list(APPEND CMAKE_MODULE_PATH "${Catch2_DIR}")
 
