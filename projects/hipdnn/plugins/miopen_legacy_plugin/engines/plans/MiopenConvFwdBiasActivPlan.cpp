@@ -68,18 +68,18 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
         _activAlpha = static_cast<double>(activAttr.elu_alpha().value_or(1.0f));
         break;
     case PointwiseMode::RELU_FWD:
-        if(activAttr.relu_lower_clip().has_value())
+        if(activAttr.relu_upper_clip().has_value())
         {
-            if(activAttr.relu_upper_clip().has_value())
+            if(activAttr.relu_lower_clip().has_value())
             {
                 _activMode = miopenActivationCLAMP;
-                _activAlpha = static_cast<double>(activAttr.relu_upper_clip().value());
-                _activBeta = static_cast<double>(activAttr.relu_lower_clip().value());
+                _activAlpha = static_cast<double>(activAttr.relu_lower_clip().value());
+                _activBeta = static_cast<double>(activAttr.relu_upper_clip().value());
             }
             else
             {
                 _activMode = miopenActivationCLIPPEDRELU;
-                _activAlpha = static_cast<double>(activAttr.relu_lower_clip().value());
+                _activAlpha = static_cast<double>(activAttr.relu_upper_clip().value());
             }
         }
         else if(activAttr.relu_lower_clip_slope().has_value())
