@@ -121,6 +121,7 @@ inline const PointwiseModeBitset& getBinaryModesBitset()
     return s_binaryModes;
 }
 
+// Get all ternary operations (for frontend compatibility)
 inline const PointwiseModeBitset& getTernaryModesBitset()
 {
     static const PointwiseModeBitset s_ternaryModes = []() {

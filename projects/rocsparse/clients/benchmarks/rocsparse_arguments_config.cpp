@@ -95,8 +95,10 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->sddmm_alg            = rocsparse_sddmm_alg_default;
         this->spmv_alg             = rocsparse_spmv_alg_default;
         this->spsv_alg             = rocsparse_spsv_alg_default;
+        this->sptrsv_alg           = rocsparse_sptrsv_alg_default;
         this->spitsv_alg           = rocsparse_spitsv_alg_default;
         this->spsm_alg             = rocsparse_spsm_alg_default;
+        this->sptrsm_alg           = rocsparse_sptrsm_alg_default;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
         this->spgeam_alg           = rocsparse_spgeam_alg_default;

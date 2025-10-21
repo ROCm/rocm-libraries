@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -83,6 +83,27 @@ def parse_args():
     parser.add_argument('-m', '--no-compression', dest='build_with_offload_compress', required=False, default=True, action='store_false',
                         help='Build rocSPARSE without offload compression.')
     return parser.parse_args()
+
+def strip_ECC(token):
+    return token.replace(':sramecc+', '').replace(':sramecc-', '').strip()
+
+def gpu_detect():
+    global OS_info
+    OS_info["GPU"] = ""
+    if os.name == "nt":
+        cmd = "hipinfo.exe"
+    else:
+        cmd = "rocminfo"
+    process = subprocess.run([cmd], stdout=subprocess.PIPE)
+    for line_in in process.stdout.decode().splitlines():
+        if os.name == "nt":
+            if 'gcnArchName' in line_in:
+                OS_info["GPU"] = strip_ECC( line_in.split(":")[1] )
+                break
+        else:
+            if 'amdgcn-amd-amdhsa' in line_in:
+                OS_info["GPU"] = strip_ECC( line_in.split("--")[1] )
+                break
 
 def os_detect():
     global OS_info
@@ -214,17 +235,6 @@ def config_cmd():
 
     if args.clients_only:
         cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
-
-
-
-# Reject
-#    if args.cpu_ref_lib == 'blis':
-#        cmake_options.append( f"-DLINK_BLIS=ON" )
-
-#
-# Reject for now
-#
-#    cmake_options.append( f"-DGPU_TARGETS={args.gpu_architecture}" )
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:
