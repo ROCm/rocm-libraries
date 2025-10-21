@@ -10,6 +10,9 @@
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
 #include "ConvolutionGraphUtils.hpp"
+#include "PointwiseGraphUtils.hpp"
+#include "PointwiseTensorBundles.hpp"
+
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
@@ -48,7 +51,7 @@ public:
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toVariantPack();
+        auto variantPack = tensorBundle.toHostVariantPack();
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
@@ -255,4 +258,47 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runConvolutionBwdTest<hip_bfloat16, float>(DataType::BFLOAT16,
                                                                               DataType::FLOAT);
+}
+
+// Single-node pointwise operation tests
+TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFwd)
+{
+    std::vector<int64_t> inputDims = {1, 3, 4, 4};
+    std::vector<int64_t> outputDims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(inputDims,
+                                   outputDims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::RELU_FWD,
+                                   1,
+                                   TensorLayout::NCHW);
+
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    CpuReferenceGraphExecutor().execute(
+        flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+}
+
+TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
+{
+    std::vector<int64_t> inputDims = {1, 3, 2, 2};
+    std::vector<int64_t> outputDims = {1, 3, 2, 2};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(inputDims,
+                                    inputDims,
+                                    outputDims,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
+
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    CpuReferenceGraphExecutor().execute(
+        flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
 }
