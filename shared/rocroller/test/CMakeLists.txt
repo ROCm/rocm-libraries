@@ -17,7 +17,7 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     if(ROCROLLER_ENABLE_THEROCK)
         find_package(mxDataGenerator REQUIRED)
     else()
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator" EXCLUDE_FROM_ALL)
     endif()
 endif()
 
