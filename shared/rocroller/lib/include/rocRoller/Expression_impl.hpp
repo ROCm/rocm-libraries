@@ -31,6 +31,7 @@
 #include <variant>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 

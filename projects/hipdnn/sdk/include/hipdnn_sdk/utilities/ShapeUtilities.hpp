@@ -158,5 +158,110 @@ inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)
     return result;
 }
 
+// Iterates the elements along each of the dimensions specified in dims and calls func for each unique index
+// Formally, we are iterating over a cartesian product of the ranges [0, dims[0]), [0, dims[1]), ..., [0, dims[n - 1]) for n dimensions
+template <typename F>
+static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
+{
+    if(dims.empty())
+    {
+        func({});
+        return;
+    }
+
+    int64_t totalElements = 1;
+    for(auto dim : dims)
+    {
+        totalElements *= dim;
+    }
+
+    std::vector<int64_t> indices(dims.size(), 0);
+
+    // Iterate over each unique position
+    for(int64_t iter = 0; iter < totalElements; ++iter)
+    {
+        if constexpr(std::is_invocable_r_v<bool, F, const std::vector<int64_t>&>)
+        {
+            if(!func(indices))
+            {
+                return; // Early exit if lambda returns false
+            }
+        }
+        else
+        {
+            func(indices); // Original behavior for void-returning lambdas
+        }
+
+        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+        {
+            auto dimIdx = static_cast<size_t>(dim);
+            indices[dimIdx]++;
+
+            if(indices[dimIdx] < dims[dimIdx])
+            {
+                break;
+            }
+
+            indices[dimIdx] = 0;
+        }
+    }
+}
+
+// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
+// skipping initial elements in the spatialIndices vector for convenience.
+static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
+                                                      int64_t channelIdx,
+                                                      const std::vector<int64_t>& spatialIndices,
+                                                      size_t spatialOffset = 0)
+{
+    std::vector<int64_t> fullIndices = {batchIdx, channelIdx};
+    fullIndices.insert(fullIndices.end(),
+                       spatialIndices.begin() + static_cast<std::ptrdiff_t>(spatialOffset),
+                       spatialIndices.end());
+    return fullIndices;
+}
+
+// Utility for calculating group count given weight and input tensors
+// For grouped convolutions, group count = input_channels / weight_channels_per_group
+inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
+                                   const std::vector<int64_t>& weightDims)
+{
+    if(inputDims.size() < 2)
+    {
+        throw std::invalid_argument("Input tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(inputDims.size()));
+    }
+
+    if(weightDims.size() < 2)
+    {
+        throw std::invalid_argument("Weight tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(weightDims.size()));
+    }
+
+    auto inChannels = inputDims[1];
+    auto wChannels = weightDims[1];
+
+    if(inChannels <= 0)
+    {
+        throw std::invalid_argument("Input channels must be positive, but got: "
+                                    + std::to_string(inChannels));
+    }
+
+    if(wChannels <= 0)
+    {
+        throw std::invalid_argument("Weight channels must be positive, but got: "
+                                    + std::to_string(wChannels));
+    }
+
+    if(inChannels % wChannels != 0)
+    {
+        throw std::invalid_argument("Input channels (" + std::to_string(inChannels)
+                                    + ") must be evenly divisible by weight channels ("
+                                    + std::to_string(wChannels) + ")");
+    }
+
+    return inChannels / wChannels;
+}
+
 }
 }

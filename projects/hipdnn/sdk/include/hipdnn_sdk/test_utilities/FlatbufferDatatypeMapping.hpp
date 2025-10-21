@@ -76,21 +76,4 @@ using DataTypeToNative = decltype(datatypeToNative<DT>());
 template <typename T>
 using NativeToDataType = decltype(nativeTypeToDataType<T>());
 
-template <typename T>
-inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vector<T>* in)
-{
-    std::vector<T> out;
-
-    if(in)
-    {
-        out.resize(in->size());
-        for(::flatbuffers::uoffset_t i = 0; i < in->size(); i++)
-        {
-            out[i] = in->Get(i);
-        }
-    }
-
-    return out;
-}
-
 }

@@ -10,6 +10,7 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -21,6 +22,7 @@
 #include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_sdk::utilities;
 using namespace test_bn_common;
 using namespace test_helpers;
 
@@ -154,7 +156,7 @@ protected:
             meanTensorCpu,
             varianceTensorCpu,
             yTensorCpu,
-            1e-3);
+            BATCHNORM_DEFAULT_EPSILON);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu.memory(), yTensor.memory()));

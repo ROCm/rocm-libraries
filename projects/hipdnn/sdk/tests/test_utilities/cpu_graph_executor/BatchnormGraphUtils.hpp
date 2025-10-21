@@ -157,7 +157,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     buildBatchnormFwdInferenceGraph(hipdnn_sdk::data_objects::DataType inputDataType,
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-                                    std::vector<int64_t>& dims,
+                                    const std::vector<int64_t>& dims,
                                     const TensorLayout& layout,
                                     bool isOutputVirtual = false)
 {

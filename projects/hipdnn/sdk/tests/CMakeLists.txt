@@ -31,9 +31,12 @@ add_executable(hipdnn_sdk_tests
     utilities/TestScopedResource.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestTensor.cpp
+    utilities/TestTensorIterator.cpp
+    utilities/TestTensorView.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp
+    utilities/TestPointwiseValidation.cpp
     test_utilities/TestCpuFpReferenceBatchnorm.cpp
     test_utilities/TestCpuFpReferenceConvolution.cpp
     test_utilities/TestCpuFpReferenceUtilities.cpp
@@ -57,6 +60,9 @@ add_executable(hipdnn_sdk_tests
     test_utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
     test_utilities/cpu_graph_executor/TestConvolutionBwdSignatureKey.cpp
     test_utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp
+    test_utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestPointwisePlan.cpp
+    test_utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
     test_utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
 )
 
