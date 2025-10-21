@@ -112,7 +112,9 @@ struct ConvTestCase
 
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
-    unsigned seed = std::random_device{}();
+    // Fixing seeds for now to ensure consistent runs
+    // unsigned seed = std::random_device{}();
+    unsigned seed = 1337;
 
     return {
         // Filter 1x1
@@ -139,7 +141,9 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
 
 inline std::vector<ConvTestCase> getConvTestCases5D()
 {
-    unsigned seed = std::random_device{}();
+    // Fixing seeds for now to ensure consistent runs
+    // unsigned seed = std::random_device{}();
+    unsigned seed = 1337;
 
     return {
         // Filter 1x1

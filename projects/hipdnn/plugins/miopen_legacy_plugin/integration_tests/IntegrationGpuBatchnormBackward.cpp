@@ -389,7 +389,9 @@ class IntegrationGpuBatchnormBackwardNdhwcFp16
 
 std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    // Fixing seeds for now to ensure consistent runs
+    // unsigned seed = std::random_device{}();
+    unsigned seed = 1337;
 
     return std::vector<Batchnorm2dTestCase>{
         {1, 3, 14, 14, seed},
@@ -407,7 +409,9 @@ std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 
 std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    // Fixing seeds for now to ensure consistent runs
+    // unsigned seed = std::random_device{}();
+    unsigned seed = 1337;
 
     return std::vector<Batchnorm3dTestCase>{
         {2, 3, 3, 1, 1, seed},

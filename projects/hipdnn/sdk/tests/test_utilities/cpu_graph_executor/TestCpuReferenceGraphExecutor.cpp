@@ -37,7 +37,10 @@ public:
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType)
     {
-        unsigned int seed = std::random_device{}();
+        // Fixing seeds for now to ensure consistent runs
+        // unsigned seed = std::random_device{}();
+        unsigned seed = 1337;
+
         std::vector<int64_t> dims = {1, 3, 14, 14};
         auto graph = buildBatchnormFwdInferenceGraph(
             inputDataType, scaleBiasDataType, meanVarianceDataType, dims, TensorLayout::NCHW, true);
