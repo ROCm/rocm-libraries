@@ -352,7 +352,7 @@ inline void execute_gpu_fft(Tparams&              params,
     // Execute the transform:
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
-        throw std::runtime_error("rocFFT plan execution failure");
+        throw std::runtime_error("FFT plan execution failure");
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
