@@ -267,7 +267,7 @@ def writeSolutionsAndKernels(
     print1(f"Number of duplicate kernels: {duplicates}")
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = noEnableAsmComments
+    outOptions.outputNoComment = disableAsmComments
 
     numAsmKernels = len(asmKernels)
     numKernels = len(asmKernels)
@@ -381,7 +381,7 @@ def writeSolutionsAndKernelsTCL(
         return result
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = not noEnableAsmComments
+    outOptions.outputNoComment = not disableAsmComments
 
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
