@@ -227,7 +227,7 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    noEnableAsmComments=False,
+    disableAsmComments=False,
     errorTolerant=False,
     generateSourcesAndExit=False,
     compress=True,
@@ -344,7 +344,7 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    noEnableAsmComments=False,
+    disableAsmComments=False,
     compress=True,
 ):
     outputPath = Path(outputPath)
