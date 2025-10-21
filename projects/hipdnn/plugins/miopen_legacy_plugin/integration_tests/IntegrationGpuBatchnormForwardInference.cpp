@@ -22,6 +22,7 @@
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -77,7 +78,7 @@ class BatchnormForwardInference : public ::testing::TestWithParam<TestCaseType>
     struct TensorBundle
     {
         TensorBundle(const std::vector<int64_t>& dims,
-                     unsigned int seed = 1,
+                     unsigned int seed = getGlobalTestSeed(),
                      const TensorLayout& layout = TensorLayout::NCHW)
             : derivedDims(getDerivedShape(dims))
             , xTensor(dims, layout)
@@ -358,9 +359,7 @@ class IntegrationGpuBatchnormForwardInferenceNdhwcFp16
 
 std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
 {
-    // Fixing seeds for now to ensure consistent runs
-    // unsigned seed = std::random_device{}();
-    unsigned seed = 1;
+    unsigned seed = getGlobalTestSeed();
 
     return {
         {1, 3, 14, 14, seed},
@@ -376,9 +375,7 @@ std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
 
 std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
 {
-    // Fixing seeds for now to ensure consistent runs
-    // unsigned seed = std::random_device{}();
-    unsigned seed = 1;
+    unsigned seed = getGlobalTestSeed();
 
     return {
         {2, 3, 3, 1, 1, seed},
