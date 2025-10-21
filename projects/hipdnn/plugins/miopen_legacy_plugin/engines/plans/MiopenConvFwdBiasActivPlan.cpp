@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
 #include "MiopenUtils.hpp"
@@ -18,9 +21,17 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
     , _w(miopen_utils::createTensor(tensorMap, convAttr.w_tensor_uid()))
-    , _conv(_spatialDimCount, convAttr)
     , _y(miopen_utils::createTensor(tensorMap, activAttr.out_0_tensor_uid()))
 {
+    const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
+    const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
+
+    const auto xDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto wDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(xDims, wDims);
+
+    _conv = MiopenConvDescriptor(_spatialDimCount, convAttr, static_cast<int>(groupCount));
+
     if(biasAttr != nullptr)
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
@@ -150,7 +161,7 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
     return _y;
 }
 
-ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle, ConvFwdBiasActivParams&& params, bool compile)
+ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle, ConvFwdBiasActivParams&& params, bool compile, bool getWsSize)
     : _params(std::move(params))
 {
     miopenFusionPlanDescriptor_t fusePlanDesc;
@@ -189,12 +200,14 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle,
                                                         fusePlanDesc));
     }
-    
-    // Get workspace size
-    THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(handle.miopenHandle,
-                                                             fusePlanDesc,
-                                                             &_workspaceSize,
-                                                             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+
+    if(getWsSize)
+    {
+        THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(handle.miopenHandle,
+                                                                 fusePlanDesc,
+                                                                 &_workspaceSize,
+                                                                 static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+    }
 }
 
 size_t ConvFwdBiasActivPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const

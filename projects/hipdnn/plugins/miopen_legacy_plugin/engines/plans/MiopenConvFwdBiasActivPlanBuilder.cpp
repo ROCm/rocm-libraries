@@ -303,7 +303,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
                                        std::get<1>(nodeAttrs.value()),
                                        std::get<2>(nodeAttrs.value()),
                                        opGraph.getTensorMap());
-        ConvFwdBiasActivPlan plan(handle, std::move(params), false);
+        ConvFwdBiasActivPlan plan(handle, std::move(params), true, false);
         return true;
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
@@ -320,7 +320,7 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(const HipdnnEnginePlu
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
     ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
-    ConvFwdBiasActivPlan plan(handle, std::move(params), false);
+    ConvFwdBiasActivPlan plan(handle, std::move(params), false, true);
     return plan.getWorkspaceSize(handle);
 }
 
