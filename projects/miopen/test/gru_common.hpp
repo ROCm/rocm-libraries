@@ -1840,7 +1840,7 @@ struct verify_forward_infer_gru
     std::vector<T> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1873,7 +1873,7 @@ struct verify_forward_infer_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1903,14 +1903,14 @@ struct verify_forward_infer_gru
                         reserveSpace,
                         nohx);
 
-#if (MIO_GRU_TEST_DEBUG == 2)
+#if(MIO_GRU_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward inference GRU pass time: "
@@ -1921,7 +1921,7 @@ struct verify_forward_infer_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU forward inference CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1931,7 +1931,7 @@ struct verify_forward_infer_gru
     std::vector<T> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -1976,7 +1976,7 @@ struct verify_forward_infer_gru
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2000,7 +2000,7 @@ struct verify_forward_infer_gru
                                   wspace.ptr(),
                                   wspace.size());
 
-#if (MIO_GRU_TEST_DEBUG == 2)
+#if(MIO_GRU_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -2008,7 +2008,7 @@ struct verify_forward_infer_gru
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer GRU pass time: "
@@ -2019,7 +2019,7 @@ struct verify_forward_infer_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU forward inference GPU" << std::endl;
 #endif
         return (handle.Read<T>(output_dev, output.size()));
@@ -2121,7 +2121,7 @@ struct verify_forward_train_gru
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2153,7 +2153,7 @@ struct verify_forward_train_gru
         std::vector<T> output(out_sz / sizeof(T));
         std::vector<T> hiddenState(initHidden.size());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
         GRUFwdCPUVerify(handle,
@@ -2182,14 +2182,14 @@ struct verify_forward_train_gru
                         reserveSpace,
                         nohx);
 
-#if (MIO_GRU_TEST_DEBUG == 2)
+#if(MIO_GRU_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward train GRU pass time: "
@@ -2202,7 +2202,7 @@ struct verify_forward_train_gru
 
         auto retSet = std::make_tuple(output, (nohy ? initHidden : hiddenState), reserveSpace);
 
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU forward train CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -2212,7 +2212,7 @@ struct verify_forward_train_gru
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2266,7 +2266,7 @@ struct verify_forward_train_gru
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2292,7 +2292,7 @@ struct verify_forward_train_gru
                                  rspace.ptr(),
                                  rspace.size());
 
-#if (MIO_GRU_TEST_DEBUG == 2)
+#if(MIO_GRU_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -2304,7 +2304,7 @@ struct verify_forward_train_gru
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train GRU pass time: "
@@ -2315,7 +2315,7 @@ struct verify_forward_train_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train GPU" << std::endl;
 #endif
         return retSet;
@@ -2443,7 +2443,7 @@ struct verify_backward_data_gru
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2467,7 +2467,7 @@ struct verify_backward_data_gru
         std::vector<T> dx(in_sz / sizeof(T));
         std::vector<T> dhx(initHidden.size());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2500,7 +2500,7 @@ struct verify_backward_data_gru
                             nohx,
                             nodhy);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward data GRU pass time: "
@@ -2514,7 +2514,7 @@ struct verify_backward_data_gru
 
         auto retSet = std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
 
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward data CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -2524,7 +2524,7 @@ struct verify_backward_data_gru
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2575,7 +2575,7 @@ struct verify_backward_data_gru
         std::vector<T> dhx(initHidden.size());
         auto dhx_dev = handle.Write(dhx);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2612,7 +2612,7 @@ struct verify_backward_data_gru
                                       rspace.Read<std::vector<T>>(),
                                       wspace.Read<std::vector<T>>());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward data GRU pass time: "
@@ -2623,7 +2623,7 @@ struct verify_backward_data_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward data GPU" << std::endl;
 #endif
         return retSet;
@@ -2738,13 +2738,13 @@ struct verify_backward_weights_gru
     std::vector<T> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         int bi = dirMode != 0 ? 2 : 1;
         std::vector<T> dweights(weightSize);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
         GRUBwdWeightCPUVerify(use_dropout,
@@ -2770,7 +2770,7 @@ struct verify_backward_weights_gru
                               workSpace,
                               nohx);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_weights GRU pass time: "
@@ -2780,7 +2780,7 @@ struct verify_backward_weights_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward weights CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -2790,7 +2790,7 @@ struct verify_backward_weights_gru
     std::vector<T> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2826,7 +2826,7 @@ struct verify_backward_weights_gru
         auto dy_dev    = handle.Write(dy);
         auto input_dev = handle.Write(input);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start1 = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2846,7 +2846,7 @@ struct verify_backward_weights_gru
                                  rspace.ptr(),
                                  rspace.size());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backwards_weights GRU pass time: "
@@ -2857,7 +2857,7 @@ struct verify_backward_weights_gru
                   << std::chrono::duration<double>(t_end - t_start1).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_GRU_TEST_DEBUG > 0)
+#if(MIO_GRU_TEST_DEBUG > 0)
         std::cout << "Done with GRU backward weights GPU" << std::endl;
 #endif
         auto retvec = handle.Read<T>(dweights_dev, dweights.size());
@@ -2979,7 +2979,7 @@ struct gru_basic_driver : test_driver
 
     void run()
     {
-#if (MIOPEN_BACKEND_OPENCL == 1)
+#if(MIOPEN_BACKEND_OPENCL == 1)
         if(type == miopenHalf)
             exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif

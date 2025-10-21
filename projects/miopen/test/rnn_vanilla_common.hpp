@@ -87,7 +87,7 @@ void RNNFwdTrainCPUVerify(const miopen::Handle& handle,
                           bool hx_is_null = false)
 {
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
            in_h,
@@ -582,7 +582,7 @@ void RNNBwdDataCPUVerify(bool use_dropout,
                          bool dhy_is_null = false)
 {
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
     printf("BWD DATA CPU driver:\n");
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
@@ -927,7 +927,7 @@ void RNNBwdWeightCPUVerify(bool use_dropout,
                            std::vector<T>& wkspace,
                            bool hx_is_null = false)
 {
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
     printf("BWD WEGIHTS CPU ctest:\n");
     printf("seqLen: %d, in_h: %d, hy_d: %d, hy_n: %d, hy_h: %d, out_h: %d\n",
            seqLength,
@@ -1321,7 +1321,7 @@ struct verify_forward_infer_rnn
     std::vector<T> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1381,21 +1381,21 @@ struct verify_forward_infer_rnn
                              reserveSpace,
                              nohx);
 
-#if (MIO_RNN_TEST_DEBUG == 2)
+#if(MIO_RNN_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward inference RNN pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward inference CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1405,7 +1405,7 @@ struct verify_forward_infer_rnn
     std::vector<T> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1471,7 +1471,7 @@ struct verify_forward_infer_rnn
                                   wspace.ptr(),
                                   wspace.size());
 
-#if (MIO_RNN_TEST_DEBUG == 2)
+#if(MIO_RNN_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -1479,14 +1479,14 @@ struct verify_forward_infer_rnn
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward inference GPU" << std::endl;
 #endif
         return (handle.Read<T>(output_dev, output.size()));
@@ -1586,7 +1586,7 @@ struct verify_forward_train_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1646,14 +1646,14 @@ struct verify_forward_train_rnn
                              reserveSpace,
                              nohx);
 
-#if (MIO_RNN_TEST_DEBUG == 2)
+#if(MIO_RNN_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             printf("CPU outdata[%d]: %f\n", i, output[i]);
         }
 #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward train RNN pass time: "
@@ -1663,7 +1663,7 @@ struct verify_forward_train_rnn
 
         auto retSet = std::make_tuple(output, (nohy ? initHidden : hiddenState), reserveSpace);
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1673,7 +1673,7 @@ struct verify_forward_train_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1749,7 +1749,7 @@ struct verify_forward_train_rnn
                                  rspace.ptr(),
                                  rspace.size());
 
-#if (MIO_RNN_TEST_DEBUG == 2)
+#if(MIO_RNN_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
@@ -1760,14 +1760,14 @@ struct verify_forward_train_rnn
         auto retSet = std::make_tuple(handle.Read<T>(output_dev, output.size()),
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       rspace.Read<std::vector<T>>());
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train GPU" << std::endl;
 #endif
         return retSet;
@@ -1892,7 +1892,7 @@ struct verify_backward_data_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -1946,7 +1946,7 @@ struct verify_backward_data_rnn
                             workSpace,
                             nodhy);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_data_rnn_vanilla pass time: "
@@ -1956,7 +1956,7 @@ struct verify_backward_data_rnn
 
         auto retSet = std::make_tuple(dx, (nodhx ? initHidden : dhx), reserveSpace, workSpace);
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward data CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -1966,7 +1966,7 @@ struct verify_backward_data_rnn
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2051,14 +2051,14 @@ struct verify_backward_data_rnn
                                       rspace.Read<std::vector<T>>(),
                                       wspace.Read<std::vector<T>>());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward data RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward data GPU" << std::endl;
 #endif
         return retSet;
@@ -2172,7 +2172,7 @@ struct verify_backward_weights_rnn
     std::vector<T> cpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2208,14 +2208,14 @@ struct verify_backward_weights_rnn
                               workSpace,
                               nohx);
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_weights_rnn_vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward weights CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
 #endif
@@ -2225,7 +2225,7 @@ struct verify_backward_weights_rnn
     std::vector<T> gpu()
     {
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -2278,14 +2278,14 @@ struct verify_backward_weights_rnn
                                  rspace.ptr(),
                                  rspace.size());
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+#if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backwards_weights RNN vanilla pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
 #endif
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         std::cout << "Done with RNN backward weights GPU" << std::endl;
 #endif
         auto retvec = handle.Read<T>(dweights_dev, dweights.size());
@@ -2345,7 +2345,7 @@ struct rnn_basic_vanilla_driver : test_driver
     void run()
     {
         const double Data_scale = 0.001;
-#if (MIOPEN_BACKEND_OPENCL == 1)
+#if(MIOPEN_BACKEND_OPENCL == 1)
         if(type == miopenHalf)
             exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
@@ -2372,7 +2372,7 @@ struct rnn_basic_vanilla_driver : test_driver
             std::abort();
         }
 
-#if (MIO_RNN_TEST_DEBUG == 2)
+#if(MIO_RNN_TEST_DEBUG == 2)
         printf("seqLen: %d, batch_seq array len: %d\n", seqLength, batchSeq.size());
         for(int i = 0; i < seqLength; i++)
         {
@@ -2484,7 +2484,7 @@ struct rnn_basic_vanilla_driver : test_driver
             weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale / 10, 100);
         }
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         printf("inputMode: %d, biasMode: %d, rnnMode: %d, dirMode: %d\n",
                inputMode,
                biasMode,
@@ -2579,7 +2579,7 @@ struct rnn_basic_vanilla_driver : test_driver
         {
             dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
         }
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         printf("Running backward data RNN.\n");
 #endif
         auto bwdDataOutputPair = verify(verify_backward_data_rnn<T>{rnnDesc,
@@ -2609,7 +2609,7 @@ struct rnn_basic_vanilla_driver : test_driver
         auto reserveSpaceBwdData = std::get<2>(bwdDataOutputPair.second);
         auto workSpaceBwdData    = std::get<3>(bwdDataOutputPair.second);
 
-#if (MIO_RNN_TEST_DEBUG > 0)
+#if(MIO_RNN_TEST_DEBUG > 0)
         printf("Running backward weights RNN.\n");
         printf("reserve sz: %d, workSpace sz: %d, weight sz: %d\n",
                reserveSpaceBwdData.size(),
