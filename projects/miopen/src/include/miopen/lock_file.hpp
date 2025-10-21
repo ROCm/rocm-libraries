@@ -147,7 +147,7 @@ public:
                                            << ec.message() << "'");
                 last_refresh = now;
             }
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::microseconds(10));
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
     }
@@ -169,8 +169,7 @@ public:
             if(fs::hard_link_count(unique_handle) == 2)
             {
                 lock_held = true;
-                if(!refresh_thread.joinable())
-                    refresh_thread = std::thread([this]() { this->refresh_lock(); });
+                refresh_thread = std::thread([this]() { this->refresh_lock(); });
                 return true;
             }
         }
@@ -188,6 +187,7 @@ public:
         lock_held = false;
         fs::remove(lockfile_path);
         fs::remove(unique_handle);
+        refresh_thread.join();
     }
 
 private:
