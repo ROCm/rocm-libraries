@@ -168,7 +168,7 @@ public:
         {
             if(fs::hard_link_count(unique_handle) == 2)
             {
-                lock_held = true;
+                lock_held      = true;
                 refresh_thread = std::thread([this]() { this->refresh_lock(); });
                 return true;
             }
