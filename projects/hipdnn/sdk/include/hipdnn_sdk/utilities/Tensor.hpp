@@ -105,23 +105,16 @@ public:
 
     value_type operator*()
     {
-        const auto& dims = _tensor.dims();
-        if(!dims.empty() && _indices[0] == dims[0])
-        {
-            throw std::out_of_range("Cannot dereference the end iterator");
-        }
+        throwIfOutOfBounds("Cannot dereference end iterator");
 
         return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
     }
 
     ITensorIterator& operator++()
     {
-        const auto& dims = _tensor.dims();
-        if(!dims.empty() && _indices[0] == dims[0])
-        {
-            throw std::out_of_range("Iterator cannot be incremented past the end");
-        }
+        throwIfOutOfBounds("Iterator cannot be incremented past the end");
 
+        const auto& dims = _tensor.dims();
         for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
         {
             auto dimIdx = static_cast<size_t>(dim);
@@ -162,6 +155,15 @@ public:
     }
 
 private:
+    void throwIfOutOfBounds(const std::string& reason) const
+    {
+        const auto& dims = _tensor.dims();
+        if(dims.empty() || _indices[0] == dims[0])
+        {
+            throw std::out_of_range(reason);
+        }
+    }
+
     TensorType _tensor;
     std::vector<int64_t> _indices;
 };
