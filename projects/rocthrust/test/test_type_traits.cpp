@@ -207,11 +207,11 @@ TEST(TypeTraitsTests, TestTriviallyRelocatable)
   static_assert(thrust::is_trivially_relocatable<int2>::value, "");
   static_assert(thrust::is_trivially_relocatable<int3>::value, "");
   static_assert(thrust::is_trivially_relocatable<int4>::value, "");
-#  if !(THRUST_COMPILER(MSVC) || (THRUST_COMPILER(NVRTC) && !defined(__CUDACC_RTC_INT128__)) \
-        || THRUST_CUDA_COMPILER(NVCC, <, 11, 5) || !defined(__SIZEOF_INT128__))
+#  if !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__)) \
+    && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
   static_assert(thrust::is_trivially_relocatable<__int128>::value, "");
-#  endif // !(THRUST_COMPILER(MSVC) || (THRUST_COMPILER(NVRTC) && !defined(__CUDACC_RTC_INT128__)) \
-         //   || THRUST_CUDA_COMPILER(NVCC, <, 11, 5) || !defined(__SIZEOF_INT128__))
+#  endif // !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__))
+         // && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #if THRUST_COMPILER(GCC, >=, 7)
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
