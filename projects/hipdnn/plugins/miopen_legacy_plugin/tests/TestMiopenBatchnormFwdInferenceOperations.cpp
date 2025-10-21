@@ -12,7 +12,6 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -29,77 +28,6 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
 using namespace test_bn_common;
 using namespace test_helpers;
-
-/*
-template <class T>
-class TestBatchnormFwdInferenceExecuteGraphGoldenReferenceImpl
-    : public testing::TestWithParam<std::filesystem::path>
-{
-protected:
-    hipdnn_sdk::utilities::GraphAndTensorMap _graphAndTensors;
-    hipdnnEnginePluginHandle_t _handle;
-    flatbuffers::DetachedBuffer _engineConfigBuffer;
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
-
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        auto const& path = GetParam();
-
-        // TODO: Temporary fix until reference data can be properly installed
-        if(path.empty())
-        {
-            GTEST_SKIP();
-        }
-
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreate(&_handle);
-        ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
-
-        _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
-
-        _graphAndTensors = loadGraphAndTensors(path);
-        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
-    }
-
-    void goldenReferenceTestSuite()
-    {
-        hipdnnPluginConstData_t opGraph
-            = {_graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size()};
-
-        hipdnnPluginConstData_t engineConfig
-            = {_engineConfigBuffer.data(), _engineConfigBuffer.size()};
-
-        hipdnnPluginStatus_t status;
-        hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContext(
-            _handle, &engineConfig, &opGraph, &executionContext);
-        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-        auto deviceBuffers = _graphAndTensors.deviceBuffers();
-
-        status = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                  executionContext,
-                                                  nullptr,
-                                                  deviceBuffers.data(),
-                                                  static_cast<uint32_t>(deviceBuffers.size()));
-        EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
-        for(auto uid : _graphAndTensors.outputTensorUids)
-        {
-            _graphAndTensors.tensorMap.at(uid)->markDeviceModified();
-        }
-
-        EXPECT_TRUE(_graphAndTensors.validateTensors(
-            _referenceOutputTensors, getToleranceInference<T>(), getToleranceInference<T>()));
-    }
-};
-
-std::vector<std::filesystem::path> getGoldenReferenceParams(std::filesystem::path directory)
-{
-    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        hipdnn_sdk::utilities::getCurrentExecutableDirectory() / ".." / directory, ".json"))
-}
-*/
 
 template <class T>
 class TestBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceGpu
