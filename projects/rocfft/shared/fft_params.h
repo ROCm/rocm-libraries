@@ -2329,12 +2329,18 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void*  load_cb_host,
-                                     void*  load_cb_data,
-                                     void*  store_cb_host,
-                                     void*  store_cb_data,
-                                     size_t load_cb_shared_mem_bytes,
-                                     size_t store_cb_shared_mem_bytes)
+    // A callback is expressed as a pair of device function pointer +
+    // device function data.
+    //
+    // Load and store callbacks are provided as vectors of those
+    // pointers, as we need a separate function+data for each device
+    // being loaded from or stored to.
+    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes,
+                                     size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }

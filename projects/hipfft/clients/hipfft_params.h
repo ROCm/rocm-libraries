@@ -536,146 +536,73 @@ public:
         }
     }
 
-    fft_status set_callbacks(void*  load_cb_host,
-                             void*  load_cb_data,
-                             void*  store_cb_host,
-                             void*  store_cb_data,
-                             size_t load_cb_shared_mem_bytes  = 0,
-                             size_t store_cb_shared_mem_bytes = 0) override
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
             if(!hipfft_transform_type)
                 throw std::runtime_error("callbacks require a valid hipfftType");
 
+            hipfftXtCallbackType load_type  = HIPFFT_CB_UNDEFINED;
+            hipfftXtCallbackType store_type = HIPFFT_CB_UNDEFINED;
+
             hipfftResult ret{HIPFFT_EXEC_FAILED};
             switch(*hipfft_transform_type)
             {
             case HIPFFT_R2C:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_REAL, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_REAL, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_COMPLEX, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_REAL;
+                store_type = HIPFFT_CB_ST_COMPLEX;
                 break;
             case HIPFFT_D2Z:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_REAL_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_REAL_DOUBLE, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_COMPLEX_DOUBLE, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_REAL_DOUBLE;
+                store_type = HIPFFT_CB_ST_COMPLEX_DOUBLE;
                 break;
             case HIPFFT_C2R:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(plan, &store_cb_host, HIPFFT_CB_ST_REAL, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_COMPLEX, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_REAL, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX;
+                store_type = HIPFFT_CB_ST_REAL;
                 break;
             case HIPFFT_Z2D:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_REAL_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_COMPLEX_DOUBLE, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_REAL_DOUBLE, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                store_type = HIPFFT_CB_ST_REAL_DOUBLE;
                 break;
             case HIPFFT_C2C:
-                ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_COMPLEX, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_COMPLEX, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX;
+                store_type = HIPFFT_CB_ST_COMPLEX;
                 break;
             case HIPFFT_Z2Z:
-                ret = hipfftXtSetCallback(
-                    plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX_DOUBLE, &load_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallback(
-                    plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_LD_COMPLEX_DOUBLE, load_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
-
-                ret = hipfftXtSetCallbackSharedSize(
-                    plan, HIPFFT_CB_ST_COMPLEX_DOUBLE, store_cb_shared_mem_bytes);
-                if(ret != HIPFFT_SUCCESS)
-                    return fft_status_from_hipfftparams(ret);
+                load_type  = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                store_type = HIPFFT_CB_ST_COMPLEX_DOUBLE;
                 break;
             default:
                 throw std::runtime_error("Invalid execution type");
             }
+
+            ret = hipfftXtSetCallback(plan,
+                                      load_cb_func ? load_cb_func->data() : nullptr,
+                                      load_type,
+                                      load_cb_data ? load_cb_data->data() : nullptr);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallback(plan,
+                                      store_cb_func ? store_cb_func->data() : nullptr,
+                                      store_type,
+                                      store_cb_data ? store_cb_data->data() : nullptr);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallbackSharedSize(plan, load_type, load_cb_shared_mem_bytes);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
+
+            ret = hipfftXtSetCallbackSharedSize(plan, store_type, store_cb_shared_mem_bytes);
+            if(ret != HIPFFT_SUCCESS)
+                return fft_status_from_hipfftparams(ret);
         }
         return fft_status_success;
     }
