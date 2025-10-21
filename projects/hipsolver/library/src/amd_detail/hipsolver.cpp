@@ -583,9 +583,6 @@ try
             enable_rocsolver_logging = true;
     }
 
-    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
-        enable_rocsolver_logging = true;
-
     if(enable_rocsolver_logging)
     {
         rocsolver_log_begin();
@@ -621,9 +618,6 @@ try
         if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
             enable_rocsolver_logging = true;
     }
-
-    if(std::getenv("HIPSOLVER_ENABLE_ROCSOLVER_LOGGING") != nullptr)
-        enable_rocsolver_logging = true;
 
     if(enable_rocsolver_logging)
     {

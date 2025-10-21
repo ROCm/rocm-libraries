@@ -7,7 +7,7 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Added
 
 * Extended test suites for hipsolverDn compatibility functions
-* Added ability to control rocSOLVER logging using the environment variables `HIPSOLVER_ENABLE_ROCSOLVER_LOGGING` `HIPSOLVER_REFACTOR_ENABLE_ROCSOLVER_LOGGING`, and `HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING`.
+* Added ability to control rocSOLVER logging using the environment variables `ROCSOLVER_LEVELS` and `ROCSOLVER_LAYER` 
 
 ### Changed
 
