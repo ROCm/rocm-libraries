@@ -283,9 +283,9 @@ namespace rocRoller
         co_yield Instruction::Comment(command->argInfo());
     }
 
-    CommandArgumentPtr findArgumentByName(std::vector<CommandArgumentPtr> const& arguments,
-                                          std::string const&                     argName)
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName)
     {
+        auto const& arguments = command->getArguments();
         auto it = std::ranges::find_if(arguments, [&](auto x) { return x->name() == argName; });
 
         if(it == arguments.end())
@@ -367,7 +367,7 @@ namespace rocRoller
 
         if(m_commandParameters->workgroupMappingDim.has_value())
         {
-            auto wgmArg = findArgumentByName(m_command->getArguments(), rocRoller::WGM);
+            auto wgmArg = findArgumentByName(m_command, rocRoller::WGM);
             AssertFatal(wgmArg != nullptr,
                         "Can not find WGM Command argument required for workgroup mapping.");
 
@@ -378,7 +378,7 @@ namespace rocRoller
 
         if(m_commandParameters->streamK)
         {
-            auto numWGsArg = findArgumentByName(m_command->getArguments(), rocRoller::NUMWGS);
+            auto numWGsArg = findArgumentByName(m_command, rocRoller::NUMWGS);
             AssertFatal(numWGsArg != nullptr,
                         "Can not find numWGs Command argument required for StreamK kernels.");
 

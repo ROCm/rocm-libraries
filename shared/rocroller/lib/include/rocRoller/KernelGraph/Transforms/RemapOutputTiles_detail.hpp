@@ -60,6 +60,34 @@ namespace rocRoller
             };
 
             /**
+             * @brief New dimensions created by workgroup mapping
+             */
+            struct RemappedDimensions
+            {
+                RemappedDimensions(int total, int parallel, int perpendicular)
+                    : totalTiles(total)
+                    , parallelDim(parallel)
+                    , perpendicularDim(perpendicular)
+                {
+                }
+
+                /**
+                 * @brief The total number of output tiles
+                 */
+                int totalTiles;
+
+                /**
+                 * @brief Remapped dimension parallel to the workgroup mapping dimension
+                 */
+                int parallelDim;
+
+                /**
+                 * @brief Remapped dimension perpendicular to the workgroup mapping dimension
+                 */
+                int perpendicularDim;
+            };
+
+            /**
              * @brief Query the graph and return TileSizeInfo.
              */
             TileSizeInfo getTileSizeInfo(KernelGraph const& kgraph);
@@ -92,16 +120,16 @@ namespace rocRoller
              *
              * Map workgroups to tiles in a Z-order-inspired blockwise manner where
              * the blocks are divided/bounded by `size` along `dimension` (M=0 or N=1).
-         * The returned values are a dimension representing total number of tiles,
-         * and the M/N dimensions after mapping.
+             * The returned values are a dimension representing total number of tiles,
+             * and the M/N dimensions after mapping.
              *
              * See shared/rocroller/docs/src/WorkgroupMapping.rst for more information.
              */
-            std::tuple<int, int, int> workgroupMapping(TileSizeInfo const&                  info,
-                                                       rocRoller::KernelGraph::KernelGraph& graph,
-                                                       rocRoller::Graph::Direction direction,
-                                                       uint                        dimension,
-                                                       Expression::ExpressionPtr   size);
+            RemappedDimensions workgroupMapping(TileSizeInfo const&                  info,
+                                                rocRoller::KernelGraph::KernelGraph& graph,
+                                                rocRoller::Graph::Direction          direction,
+                                                uint                                 dimension,
+                                                Expression::ExpressionPtr            size);
 
         }
     }

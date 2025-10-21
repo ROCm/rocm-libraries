@@ -134,9 +134,9 @@ namespace rocRoller
                     // Downstream: Starting at wgTop looking down
                     // Upstream:   Starting at wgBot looking up
 
-                    auto [_, parallel, perpendicular]
-                        = workgroupMapping(info, graph, direction, dimension, size);
-                    std::array<int, 2> tileNumTags = {parallel, perpendicular};
+                    auto remappedDims = workgroupMapping(info, graph, direction, dimension, size);
+                    std::array<int, 2> tileNumTags
+                        = {remappedDims.parallelDim, remappedDims.perpendicularDim};
 
                     for(auto dim = 0; dim < numDims; ++dim)
                     {
@@ -167,11 +167,11 @@ namespace rocRoller
                 }
             }
 
-            std::tuple<int, int, int> workgroupMapping(TileSizeInfo const&                  info,
-                                                       rocRoller::KernelGraph::KernelGraph& graph,
-                                                       GD                        direction,
-                                                       uint                      dimension,
-                                                       Expression::ExpressionPtr size)
+            RemappedDimensions workgroupMapping(TileSizeInfo const&                  info,
+                                                rocRoller::KernelGraph::KernelGraph& graph,
+                                                GD                                   direction,
+                                                uint                                 dimension,
+                                                Expression::ExpressionPtr            size)
             {
                 AssertFatal(dimension == 0 || dimension == 1);
                 AssertFatal(workgroupDimensions(info) == 2);

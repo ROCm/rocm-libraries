@@ -254,8 +254,12 @@ namespace RemapOutputTilesTest
             TileSizeInfo info{.sizes = {m_numTilesX, m_numTilesY, nullptr}};
 
             int macroTileNumberTag;
-            std::tie(macroTileNumberTag, m_wgx, m_wgy) = workgroupMapping(
+
+            auto remappedDims = workgroupMapping(
                 info, graph, rocRoller::Graph::Direction::Downstream, m_dim, m_wgm);
+            macroTileNumberTag = remappedDims.totalTiles;
+            m_wgx              = remappedDims.parallelDim;
+            m_wgy              = remappedDims.perpendicularDim;
 
             // Attach workgroup to dangling MacroTileNumber
             ConnectWorkgroupsDetail::connectWorkgroups(graph);
