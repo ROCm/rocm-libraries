@@ -26,7 +26,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_traits.h>
-#include <thrust/iterator/detail/iterator_category_to_system.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
 
@@ -38,12 +37,9 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-// forward declarations
-template <typename>
-struct is_iterator_system;
-template <typename>
-struct is_iterator_traversal;
+template <typename T>
+struct is_iterator_traversal : _THRUST_STD::is_convertible<T, incrementable_traversal_tag>
+{};
 
 template <typename Category>
 struct host_system_category_to_traversal
