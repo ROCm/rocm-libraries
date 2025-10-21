@@ -45,27 +45,4 @@ using _THRUST_STD::disjunction_v;
 using _THRUST_STD::negation;
 using _THRUST_STD::negation_v;
 
-template <bool... Bs>
-using conjunction_value THRUST_DEPRECATED_BECAUSE("Use: _THRUST_STD::bool_constant<(Bs && ...)>") =
-  conjunction<_THRUST_STD::bool_constant<Bs>...>;
-
-template <bool... Bs>
-constexpr bool conjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs && ...") =
-  conjunction<_THRUST_STD::bool_constant<Bs>...>::value;
-
-template <bool... Bs>
-using disjunction_value THRUST_DEPRECATED_BECAUSE("Use: _THRUST_STD::bool_constant<(Bs || ...)>") =
-  disjunction<_THRUST_STD::bool_constant<Bs>...>;
-
-template <bool... Bs>
-constexpr bool disjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs || ...") =
-  disjunction<_THRUST_STD::bool_constant<Bs>...>::value;
-
-template <bool B>
-using negation_value THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::bool_constant<!B>") = _THRUST_STD::bool_constant<!B>;
-
-template <bool B>
-constexpr bool
-  negation_value_v THRUST_DEPRECATED_BECAUSE("Use a plain negation !B") = _THRUST_STD::bool_constant<!B>::value;
-
 THRUST_NAMESPACE_END

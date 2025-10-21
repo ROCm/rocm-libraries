@@ -234,11 +234,6 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
   return status;
 }
 
-THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD_NOVERSION::terminate() instead") inline void THRUST_HOST_DEVICE terminate()
-{
-  NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (__builtin_trap();));
-}
-
 THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 {
   // Clear the global HIP error state which may have been set by the last
