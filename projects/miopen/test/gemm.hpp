@@ -33,6 +33,7 @@
     A and B rows and cols should be passed as default values (NxM, MxK), independently of
    a_transponse/b_transpose flag value
     C rows and cols should have correct values based on a_transponse/b_transpose values
+    A, B, C strides should have corret values based on a_transponse/b_transpose values
 */
 template <typename Dtype>
 void gemm_cpu(const Dtype* a_ptr,
