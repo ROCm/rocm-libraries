@@ -26,7 +26,6 @@
 #  define THRUST_CONSTEXPR_CXX17 _CCCL_CONSTEXPR_CXX17
 #  define THRUST_CONSTEXPR_CXX20 _CCCL_CONSTEXPR_CXX20
 #  define THRUST_CONSTEXPR_CXX23 _CCCL_CONSTEXPR_CXX23
-#  define THRUST_IF_CONSTEXPR    _CCCL_IF_CONSTEXPR
 #  define THRUST_TRAIT           _CCCL_TRAIT
 #  define THRUST_GLOBAL_CONSTANT _CCCL_GLOBAL_CONSTANT
 
@@ -53,12 +52,6 @@
 #  else
 #    define THRUST_CONSTEXPR_CXX23
 #  endif
-
-#  if THRUST_CPP_DIALECT <= 2014 || (defined(__cpp_if_constexpr) && __cpp_if_constexpr < 201606L)
-#    define THRUST_IF_CONSTEXPR if
-#  else // ^^^ _CCCL_NO_IF_CONSTEXPR ^^^ / vvv !_CCCL_NO_IF_CONSTEXPR vvv
-#    define THRUST_IF_CONSTEXPR if constexpr
-#  endif // !_CCCL_NO_IF_CONSTEXPR
 
 #  define THRUST_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
 
