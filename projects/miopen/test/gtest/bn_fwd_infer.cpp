@@ -105,7 +105,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     bool useFP16            = (xDesc.GetType() == miopenHalf);
     bool useBFP16           = (xDesc.GetType() == miopenBFloat16);
     const auto build_params = miopen::KernelBuildParameters{
-        {"MIOPEN_USE_FP16", static_cast<int>(useFP16)},
+        {use_hip ? "MIOPEN_USE_FP16" : "MIOPEN_USE_FPMIX", static_cast<int>(useFP16)},
         {"MIOPEN_USE_FP32", static_cast<int>(useFP32)},
         {"MIOPEN_USE_BFP16", static_cast<int>(useBFP16)},
         {"MIOPEN_USE_BFPMIX", static_cast<int>(useBFP16)},
@@ -150,22 +150,48 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     [[maybe_unused]] auto kernelInvoke =
         handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);
 
-    // execute the kernel
-    kernelInvoke(x,
-                 y,
-                 estimatedMean,
-                 estimatedVariance,
-                 bnScale,
-                 bnBias,
-                 epsilon,
-                 c,
-                 h * w,
-                 n,
-                 isLayoutNHWC ? 1 : h * w,
-                 isLayoutNHWC ? c : 1,
-                 c * h * w,
-                 activ_alpha,
-                 activ_beta);
+    if constexpr(PERF_ENABLE)
+    {
+        // run the perf test
+        perf_helper.perfTest(handle,
+                             kernel_name,
+                             network_config,
+                             use_hip,
+                             x,
+                             y,
+                             estimatedMean,
+                             estimatedVariance,
+                             bnScale,
+                             bnBias,
+                             epsilon,
+                             c,
+                             h * w,
+                             n,
+                             isLayoutNHWC ? 1 : h * w,
+                             isLayoutNHWC ? c : 1,
+                             c * h * w,
+                             activ_alpha,
+                             activ_beta);
+    }
+    else
+    {
+        // execute the kernel
+        kernelInvoke(x,
+                     y,
+                     estimatedMean,
+                     estimatedVariance,
+                     bnScale,
+                     bnBias,
+                     epsilon,
+                     c,
+                     h * w,
+                     n,
+                     isLayoutNHWC ? 1 : h * w,
+                     isLayoutNHWC ? c : 1,
+                     c * h * w,
+                     activ_alpha,
+                     activ_beta);
+    }
 }
 
 template <typename XDataType,

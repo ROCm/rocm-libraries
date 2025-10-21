@@ -143,7 +143,8 @@ struct BatchNormInferTester
                 {miopenActivationPOWER, "power"},
                 {miopenActivationCLIPPEDRELU, "clippedrelu"},
                 {miopenActivationLEAKYRELU, "leakyrelu"},
-                {miopenActivationELU, "elu"}};
+                {miopenActivationELU, "elu"},
+                {miopenActivationCLAMP, "clamp"}};
 
             auto it = activation_map.find(activ_mode);
             if(it != activation_map.end())
@@ -151,9 +152,9 @@ struct BatchNormInferTester
                 kernel_info += "_" + it->second;
             }
 
-            perf_helper.writeStatsToCSV(
-                "batch-norm-activ-infer-perf-" + handle.GetDeviceName() + ".csv",
-                "_" + kernel_info + "_" + (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
+            perf_helper.writeStatsToCSV("batch-norm-infer-perf-" + handle.GetDeviceName() + ".csv",
+                                        "_" + kernel_info + "_" +
+                                            (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
         }
     }
 
