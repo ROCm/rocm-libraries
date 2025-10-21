@@ -73,8 +73,6 @@ void testing_syrk_ex_bad_arg(const Arguments& arg)
             zero = zero_d;
         }
 
-        // const rocblas_syrk_algo algo = rocblas_syrk_algo_standard;
-
         int64_t Kmax  = std::max(K, int64_t(1));
         int64_t A_row = transA == rocblas_operation_none ? N : Kmax;
         int64_t A_col = transA == rocblas_operation_none ? Kmax : N;
@@ -150,10 +148,13 @@ nullptr, a_type, lda, nullptr, nullptr, c_type, ldc, compute_type));
 DAPI_CHECK(rocblas_syrk_ex_fn, (handle, uplo, transA, N, K, zero,
 nullptr, a_type, lda, beta, dC, c_type, ldc, compute_type));
 
-// TODO:
-// If K==0, then alpha, A can be nullptr without issue.
-// DAPI_CHECK(rocblas_syrk_ex_fn, (handle, uplo, transA, N, 0, nullptr,
-// nullptr, a_type, lda, beta, dC, c_type, ldc, compute_type));
+// k==0 and beta==1 all other pointers may be null
+DAPI_CHECK(rocblas_syrk_ex_fn, (handle, uplo, transA, N, 0, nullptr,
+nullptr, a_type, lda, one, nullptr, c_type, ldc, compute_type));
+
+// alpha==0 and beta==1 all other pointers may be null
+DAPI_CHECK(rocblas_syrk_ex_fn, (handle, uplo, transA, N, K, zero,
+nullptr, a_type, lda, one, nullptr, c_type, ldc, compute_type));
 
         // clang-format on
     }
@@ -316,8 +317,10 @@ void testing_syrk_ex(const Arguments& arg)
 
                     // copy data from CPU to device
                     CHECK_HIP_ERROR(dA_copy.transfer_from(hA));
-                    CHECK_HIP_ERROR(d_alpha_copy.transfer_from(h_alpha_Tc));
-                    CHECK_HIP_ERROR(d_beta_copy.transfer_from(h_beta_Tc));
+                    CHECK_HIP_ERROR(
+                        hipMemcpy(d_alpha_copy, &h_alpha_Tc, sizeof(Tex), hipMemcpyHostToDevice));
+                    CHECK_HIP_ERROR(
+                        hipMemcpy(d_beta_copy, &h_beta_Tc, sizeof(Tex), hipMemcpyHostToDevice));
 
                     CHECK_ROCBLAS_ERROR(
                         rocblas_set_pointer_mode(handle_copy, rocblas_pointer_mode_device));
