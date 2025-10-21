@@ -200,7 +200,7 @@ class EDF{
 };
 
 // Perform Two-Sample Kolmogorov-Smirnov Test
-bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual){
+bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
     EDF aEDF(expected);
     EDF eEDF(actual);
 
@@ -219,7 +219,6 @@ bool ks_test_2(const std::vector<double> & expected, const std::vector<double> &
         d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
 
     // calculating the critical value
-    double alpha = 0.1; // the signigficance level
     double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
     double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
 
