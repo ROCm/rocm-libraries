@@ -39,7 +39,7 @@ public:
     {
         // Fixing seeds for now to ensure consistent runs
         // unsigned seed = std::random_device{}();
-        unsigned seed = 1337;
+        unsigned seed = 1;
 
         std::vector<int64_t> dims = {1, 3, 14, 14};
         auto graph = buildBatchnormFwdInferenceGraph(

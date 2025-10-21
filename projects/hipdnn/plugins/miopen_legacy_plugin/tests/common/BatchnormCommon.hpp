@@ -35,7 +35,7 @@ inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
 {
     // Fixing seeds for now to ensure consistent runs
     // unsigned seed = std::random_device{}();
-    unsigned seed = 1337;
+    unsigned seed = 1;
 
     return {
         {1, 3, 14, 14, seed},

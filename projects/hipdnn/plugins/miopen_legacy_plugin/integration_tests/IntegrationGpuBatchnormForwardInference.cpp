@@ -360,7 +360,7 @@ std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
 {
     // Fixing seeds for now to ensure consistent runs
     // unsigned seed = std::random_device{}();
-    unsigned seed = 1337;
+    unsigned seed = 1;
 
     return {
         {1, 3, 14, 14, seed},
@@ -378,7 +378,7 @@ std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
 {
     // Fixing seeds for now to ensure consistent runs
     // unsigned seed = std::random_device{}();
-    unsigned seed = 1337;
+    unsigned seed = 1;
 
     return {
         {2, 3, 3, 1, 1, seed},

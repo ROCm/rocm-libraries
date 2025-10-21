@@ -140,7 +140,7 @@ std::vector<ConvTestCase> getTestCases()
 {
     // Fixing seeds for now to ensure consistent runs
     // unsigned seed = std::random_device{}();
-    unsigned seed = 1337;
+    unsigned seed = 1;
 
     return {
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
