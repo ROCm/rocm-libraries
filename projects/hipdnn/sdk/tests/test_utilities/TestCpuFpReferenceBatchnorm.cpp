@@ -96,48 +96,6 @@ INSTANTIATE_TEST_SUITE_P(,
 
 //--------------------------
 
-// class TestCpuFpReferenceBatchnormFwdInference : public ::testing::TestWithParam<fs::path>
-// {
-// protected:
-//     GraphAndTensorMap _graphAndTensors;
-//     std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
-
-//     // NOLINTNEXTLINE(readability-identifier-naming)
-//     void SetUp() override
-//     {
-//         auto const& path = GetParam();
-
-//         // TODO: Temporary fix until reference data can be properly installed
-//         if(path.empty())
-//         {
-//             GTEST_SKIP();
-//         }
-
-//         _graphAndTensors = loadGraphAndTensors(path);
-//         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
-//     }
-// };
-
-// TEST_P(TestCpuFpReferenceBatchnormFwdInference, Validate)
-// {
-//     auto tensorMap = _graphAndTensors.hostBufferMap();
-//     EXPECT_EQ(tensorMap.size(), 6);
-
-//     CpuReferenceGraphExecutor().execute(
-//         _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
-
-//     EXPECT_TRUE(_graphAndTensors.validateTensors(_referenceOutputTensors, 0.02f, 0.02f));
-// }
-
-// INSTANTIATE_TEST_SUITE_P(,
-//                          TestCpuFpReferenceBatchnormFwdInference,
-//                          testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-//                              hipdnn_sdk::utilities::getCurrentExecutableDirectory()
-//                                  / "../lib/hipdnn_reference_data/",
-//                              ".json")));
-
-// class TestCpuFpReference
-
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {
     Tensor<float> inputTensor({1, 3, 224, 224});
