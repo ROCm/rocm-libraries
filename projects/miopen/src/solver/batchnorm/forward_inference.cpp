@@ -65,15 +65,8 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
-    bool bfp16parm    = false;
     bool bfp32parm    = true;
-    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenHalf)
-    {
-        bfp16parm = true;
-        bfp32parm = false;
-    }
-    else if(problem.GetXDesc().GetType() == miopenHalf &&
-            problem.GetBnScale().GetType() == miopenFloat)
+    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat)
     {
         bfpmixparm = true;
         bfp32parm  = false;
@@ -139,9 +132,9 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         }
 
         const auto build_params = KernelBuildParameters{
-            {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
+            {"MIOPEN_USE_FP16", static_cast<int>(bfpmixparm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
-            {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
+            {"MIOPEN_USE_BFP16", static_cast<int>(bbfpmixparam)},
             {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
             {"MIO_BN_GRP0", xlocalsize},
             {"MIO_BN_GRP1", ylocalsize},
