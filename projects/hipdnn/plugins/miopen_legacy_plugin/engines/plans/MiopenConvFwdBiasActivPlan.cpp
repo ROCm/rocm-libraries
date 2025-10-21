@@ -12,11 +12,10 @@ namespace miopen_legacy_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
-        const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
+    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
@@ -161,27 +160,28 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
     return _y;
 }
 
-ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle, ConvFwdBiasActivParams&& params, bool compile, bool getWsSize)
+ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
+                                           ConvFwdBiasActivParams&& params,
+                                           bool compile,
+                                           bool getWsSize)
     : _params(std::move(params))
 {
     miopenFusionPlanDescriptor_t fusePlanDesc;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(&fusePlanDesc,
-                                                   miopenVerticalFusion,
-                                                   _params.x().tensorDescriptor()));
+    THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
+        &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
     _fusePlanDesc = hipdnn_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
         fusePlanDesc, [](miopenFusionPlanDescriptor_t desc) {
             auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("miopenDestroyFusionPlan failed in ConvFwdBiasActivPlan destructor");
+                HIPDNN_LOG_ERROR(
+                    "miopenDestroyFusionPlan failed in ConvFwdBiasActivPlan destructor");
             }
         });
 
     miopenFusionOpDescriptor_t convOp;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateOpConvForward(fusePlanDesc,
-                                                      &convOp,
-                                                      _params.conv().convDescriptor(),
-                                                      _params.w().tensorDescriptor()));
+    THROW_ON_MIOPEN_FAILURE(miopenCreateOpConvForward(
+        fusePlanDesc, &convOp, _params.conv().convDescriptor(), _params.w().tensorDescriptor()));
 
     if(_params.bias().has_value())
     {
@@ -191,34 +191,34 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     }
 
     miopenFusionOpDescriptor_t activOp;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateOpActivationForward(fusePlanDesc,
-                                                            &activOp,
-                                                            _params.activMode()));
-    
+    THROW_ON_MIOPEN_FAILURE(
+        miopenCreateOpActivationForward(fusePlanDesc, &activOp, _params.activMode()));
+
     if(compile)
     {
-        THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle,
-                                                        fusePlanDesc));
+        THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle, fusePlanDesc));
     }
 
     if(getWsSize)
     {
-        THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(handle.miopenHandle,
-                                                                 fusePlanDesc,
-                                                                 &_workspaceSize,
-                                                                 static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+        THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
+            handle.miopenHandle,
+            fusePlanDesc,
+            &_workspaceSize,
+            static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
     }
 }
 
-size_t ConvFwdBiasActivPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t ConvFwdBiasActivPlan::getWorkspaceSize(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
 {
     return _workspaceSize;
 }
 
 void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
-                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                          uint32_t numDeviceBuffers,
-                          void* workspace) const
+                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                   uint32_t numDeviceBuffers,
+                                   void* workspace) const
 {
     miopenOperatorArgs_t fusionArgs;
     THROW_ON_MIOPEN_FAILURE(miopenCreateOperatorArgs(&fusionArgs));
@@ -227,7 +227,8 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
             auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
             {
-                HIPDNN_LOG_ERROR("miopenDestroyOperatorArgs failed in ConvFwdBiasActivPlan destructor");
+                HIPDNN_LOG_ERROR(
+                    "miopenDestroyOperatorArgs failed in ConvFwdBiasActivPlan destructor");
             }
         });
 
@@ -245,8 +246,8 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
 
     if(_params.bias().has_value())
     {
-        auto biasBuffer
-            = miopen_utils::findDeviceBuffer(_params.bias().value().uid(), deviceBuffers, numDeviceBuffers);
+        auto biasBuffer = miopen_utils::findDeviceBuffer(
+            _params.bias().value().uid(), deviceBuffers, numDeviceBuffers);
 
         miopenFusionOpDescriptor_t biasOp;
         THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetOp(_fusePlanDesc.get(), opIdx++, &biasOp));

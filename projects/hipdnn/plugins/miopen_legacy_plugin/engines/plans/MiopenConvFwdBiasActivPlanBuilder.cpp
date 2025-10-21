@@ -63,7 +63,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
     // Expect the first node to be convolution forward operation
     const auto& convNode = opGraph.getNode(0);
     auto convNodeName = getNodeName(convNode);
-    if(convNode.attributes_type() != hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes)
+    if(convNode.attributes_type()
+       != hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -71,12 +72,14 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
                 + ") must be convolution forward. Found node of type: "
                 + std::string(hipdnn_sdk::data_objects::toString(convNode.attributes_type())));
     }
-    const auto& convAttr = opGraph.getNodeWrapper(0).attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+    const auto& convAttr = opGraph.getNodeWrapper(0)
+                               .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
 
     // Expect the second node to be either bias or activation forward
     const auto& secondNode = opGraph.getNode(1);
     auto secondNodeName = getNodeName(convNode);
-    if(secondNode.attributes_type() != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    if(secondNode.attributes_type()
+       != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -84,7 +87,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
                 + ") must be pointwise operation. Found node of type: "
                 + std::string(hipdnn_sdk::data_objects::toString(secondNode.attributes_type())));
     }
-    const auto& secondNodeAttr = opGraph.getNodeWrapper(1).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+    const auto& secondNodeAttr
+        = opGraph.getNodeWrapper(1).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
     if(isNodeActivFwd(secondNodeAttr))
     {
@@ -107,7 +111,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Second node in the graph (" + secondNodeName
-                + ") must be either bias addition or activation forward. Found pointwise operation: "
+                + ") must be either bias addition or activation forward. Found pointwise "
+                  "operation: "
                 + std::string(hipdnn_sdk::data_objects::toString(secondNodeAttr.operation())));
     }
 
@@ -118,9 +123,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
     // If bias node is present, the graph must have 3 nodes
     if(opGraph.nodeCount() != 3)
     {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Graph must have 3 nodes when bias is present.");
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "Graph must have 3 nodes when bias is present.");
     }
 
     const auto& thirdNode = opGraph.getNode(2);
@@ -133,7 +137,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
                 + ") must be pointwise operation. Found node of type: "
                 + std::string(hipdnn_sdk::data_objects::toString(thirdNode.attributes_type())));
     }
-    const auto& thirdNodeAttr = opGraph.getNodeWrapper(2).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+    const auto& thirdNodeAttr
+        = opGraph.getNodeWrapper(2).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
     if(!isNodeActivFwd(thirdNodeAttr))
     {
@@ -148,7 +153,8 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
     return {convAttr, &biasAttr, activAttr};
 }
 
-auto getNodeAttrsNoExcept(const hipdnn_plugin::IGraph& opGraph) -> std::optional<decltype(getNodeAttrs(opGraph))>
+auto getNodeAttrsNoExcept(const hipdnn_plugin::IGraph& opGraph)
+    -> std::optional<decltype(getNodeAttrs(opGraph))>
 {
     try
     {
@@ -162,23 +168,23 @@ auto getNodeAttrsNoExcept(const hipdnn_plugin::IGraph& opGraph) -> std::optional
 }
 
 void nodeAttrsCheckTensors(
-        const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
     // Check the connections between the convolution and bias/activation nodes
     if(biasAttr != nullptr)
     {
         if(!biasAttr->in_1_tensor_uid().has_value())
         {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Bias node must have two input tensors");
+            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Bias node must have two input tensors");
         }
 
         // One of the bias inputs must be the convolution output
-        if(biasAttr->in_0_tensor_uid() != convAttr.y_tensor_uid() && biasAttr->in_1_tensor_uid().value() != convAttr.y_tensor_uid())
+        if(biasAttr->in_0_tensor_uid() != convAttr.y_tensor_uid()
+           && biasAttr->in_1_tensor_uid().value() != convAttr.y_tensor_uid())
         {
             throw hipdnn_plugin::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -206,37 +212,49 @@ void nodeAttrsCheckTensors(
 
     // Verify that all tensors are either virtual or non-virtual as expected
     // Convolution: input and weight tensors must be non-virtual, output tensor must be virtual
-    const auto& convTensorAttrX = miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid());
-    const auto& convTensorAttrW = miopen_utils::findTensorAttributes(tensorMap, convAttr.w_tensor_uid());
-    const auto& convTensorAttrY = miopen_utils::findTensorAttributes(tensorMap, convAttr.y_tensor_uid());
-    
+    const auto& convTensorAttrX
+        = miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid());
+    const auto& convTensorAttrW
+        = miopen_utils::findTensorAttributes(tensorMap, convAttr.w_tensor_uid());
+    const auto& convTensorAttrY
+        = miopen_utils::findTensorAttributes(tensorMap, convAttr.y_tensor_uid());
+
     if(convTensorAttrX.virtual_() || convTensorAttrW.virtual_() || !convTensorAttrY.virtual_())
     {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Convolution input and weight tensors must be non-virtual, output tensor must be virtual");
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "Convolution input and weight tensors must be "
+                                                   "non-virtual, output tensor must be virtual");
     }
 
     if(biasAttr != nullptr)
     {
         // Bias: input tensor from convolution must be virtual, other input must be non-virtual, output must be virtual
-        const auto& biasIn0Attr = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid());
-        const auto& biasIn1Attr = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_1_tensor_uid().value());
-        const auto& biasOutAttr = miopen_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
+        const auto& biasIn0Attr
+            = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_0_tensor_uid());
+        const auto& biasIn1Attr
+            = miopen_utils::findTensorAttributes(tensorMap, biasAttr->in_1_tensor_uid().value());
+        const auto& biasOutAttr
+            = miopen_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
 
-        const auto& biasConvOutputAttr = (biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid()) ? biasIn0Attr : biasIn1Attr;
-        const auto& biasOtherInputAttr = (biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid()) ? biasIn1Attr : biasIn0Attr;
+        const auto& biasConvOutputAttr
+            = (biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid()) ? biasIn0Attr : biasIn1Attr;
+        const auto& biasOtherInputAttr
+            = (biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid()) ? biasIn1Attr : biasIn0Attr;
 
-        if(!biasConvOutputAttr.virtual_() || biasOtherInputAttr.virtual_() || !biasOutAttr.virtual_())
+        if(!biasConvOutputAttr.virtual_() || biasOtherInputAttr.virtual_()
+           || !biasOutAttr.virtual_())
         {
             throw hipdnn_plugin::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Bias node input from convolution must be virtual, other input must be non-virtual, output must be virtual");
+                "Bias node input from convolution must be virtual, other input must be "
+                "non-virtual, output must be virtual");
         }
 
         // Activation: input from bias must be virtual, output must be non-virtual
-        const auto& activInAttr = miopen_utils::findTensorAttributes(tensorMap, activAttr.in_0_tensor_uid());
-        const auto& activOutAttr = miopen_utils::findTensorAttributes(tensorMap, activAttr.out_0_tensor_uid());
+        const auto& activInAttr
+            = miopen_utils::findTensorAttributes(tensorMap, activAttr.in_0_tensor_uid());
+        const auto& activOutAttr
+            = miopen_utils::findTensorAttributes(tensorMap, activAttr.out_0_tensor_uid());
 
         if(!activInAttr.virtual_() || activOutAttr.virtual_())
         {
@@ -248,8 +266,10 @@ void nodeAttrsCheckTensors(
     else
     {
         // Activation: input from convolution must be virtual, output must be non-virtual
-        const auto& activInAttr = miopen_utils::findTensorAttributes(tensorMap, activAttr.in_0_tensor_uid());
-        const auto& activOutAttr = miopen_utils::findTensorAttributes(tensorMap, activAttr.out_0_tensor_uid());
+        const auto& activInAttr
+            = miopen_utils::findTensorAttributes(tensorMap, activAttr.in_0_tensor_uid());
+        const auto& activOutAttr
+            = miopen_utils::findTensorAttributes(tensorMap, activAttr.out_0_tensor_uid());
 
         if(!activInAttr.virtual_() || activOutAttr.virtual_())
         {
@@ -261,10 +281,10 @@ void nodeAttrsCheckTensors(
 }
 
 bool nodeAttrsCheckTensorsNoExcept(
-        const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
     try
     {
@@ -281,7 +301,7 @@ bool nodeAttrsCheckTensorsNoExcept(
 } // namespace
 
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                         const hipdnn_plugin::IGraph& opGraph) const
+                                                     const hipdnn_plugin::IGraph& opGraph) const
 {
     const auto nodeAttrs = getNodeAttrsNoExcept(opGraph);
     if(!nodeAttrs.has_value())
@@ -290,9 +310,9 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     }
 
     if(!nodeAttrsCheckTensorsNoExcept(std::get<0>(nodeAttrs.value()),
-                                     std::get<1>(nodeAttrs.value()),
-                                     std::get<2>(nodeAttrs.value()),
-                                     opGraph.getTensorMap()))
+                                      std::get<1>(nodeAttrs.value()),
+                                      std::get<2>(nodeAttrs.value()),
+                                      opGraph.getTensorMap()))
     {
         return false;
     }
@@ -300,9 +320,9 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     try
     {
         ConvFwdBiasActivParams params(std::get<0>(nodeAttrs.value()),
-                                       std::get<1>(nodeAttrs.value()),
-                                       std::get<2>(nodeAttrs.value()),
-                                       opGraph.getTensorMap());
+                                      std::get<1>(nodeAttrs.value()),
+                                      std::get<2>(nodeAttrs.value()),
+                                      opGraph.getTensorMap());
         ConvFwdBiasActivPlan plan(handle, std::move(params), true, false);
         return true;
     }
@@ -313,8 +333,9 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     }
 }
 
-size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                               const hipdnn_plugin::IGraph& opGraph) const
+size_t
+    MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                                        const hipdnn_plugin::IGraph& opGraph) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
@@ -324,9 +345,10 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(const HipdnnEnginePlu
     return plan.getWorkspaceSize(handle);
 }
 
-void MiopenConvFwdBiasActivPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin::IGraph& opGraph,
-                                      HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_plugin::IGraph& opGraph,
+    HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());

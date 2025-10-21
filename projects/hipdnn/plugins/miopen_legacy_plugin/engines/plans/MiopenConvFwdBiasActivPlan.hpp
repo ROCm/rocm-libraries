@@ -63,7 +63,10 @@ private:
 class ConvFwdBiasActivPlan : public IPlan
 {
 public:
-    ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle, ConvFwdBiasActivParams&& params, bool compile = true, bool getWsSize = true);
+    ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
+                         ConvFwdBiasActivParams&& params,
+                         bool compile = true,
+                         bool getWsSize = true);
     ~ConvFwdBiasActivPlan() override = default;
 
     ConvFwdBiasActivPlan(const ConvFwdBiasActivPlan&) = delete;

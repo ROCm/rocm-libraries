@@ -39,7 +39,8 @@ inline std::ostream& operator<<(std::ostream& os, hipdnn_sdk::data_objects::Data
     return os << hipdnn_sdk::data_objects::EnumNameDataType(dataType);
 }
 
-inline std::ostream& operator<<(std::ostream& os, hipdnn_sdk::data_objects::PointwiseMode pointwiseMode)
+inline std::ostream& operator<<(std::ostream& os,
+                                hipdnn_sdk::data_objects::PointwiseMode pointwiseMode)
 {
     return os << hipdnn_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode);
 }
