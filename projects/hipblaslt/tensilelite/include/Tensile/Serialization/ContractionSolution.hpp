@@ -144,6 +144,7 @@ namespace TensileLite
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
+                iot::mapRequired(io, "useSFC", s.useSFC);
             }
 
             const static bool flow = false;

@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
@@ -36,7 +37,6 @@ protected:
 
 TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 {
-    double epsilon = 1e-3;
     std::vector<int64_t> dxDims = {1, 1, 2, 2};
     std::vector<int64_t> wDims = {1, 1, 1, 1};
     std::vector<int64_t> dyDims = {1, 1, 2, 2};
@@ -76,8 +76,8 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(epsilon),
-                                                           static_cast<float>(epsilon));
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceBwd<float>(),
+                                                           conv::getToleranceBwd<float>());
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dxTensor.memory(),
                                                 planTensorBundle.dxTensor.memory()));
