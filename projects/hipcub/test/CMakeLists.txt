@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -43,7 +44,7 @@ function(add_relative_test test_name test_target)
         endif()
     endif()
     if(BUILD_CODE_COVERAGE)
-        set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
+	 set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
         set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
@@ -55,7 +56,6 @@ function(add_relative_test test_name test_target)
     if(BUILD_CODE_COVERAGE)
       set_tests_properties(${test_name} PROPERTIES
         ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
       )
     endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
@@ -66,12 +66,12 @@ endfunction()
 add_subdirectory(hipcub)
 
 if(BUILD_CODE_COVERAGE)
-    add_custom_target(
+  add_custom_target(
     hipcub_coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
     COMMAND ctest --output-on-failure
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/test/hipcub
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
   find_program(
@@ -90,6 +90,7 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
+  get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
   add_custom_target(
     hipcub_coverage
     DEPENDS hipcub_coverage_analysis
