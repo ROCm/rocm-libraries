@@ -536,6 +536,8 @@ namespace rocRoller
                              int                                    forReceiveTileLoopOp,
                              int                                    forReceiveTileLoopCoord,
                              int                                    fullyAccumulatedTileTag,
+                             int                                    assignLocalTileForX,
+                             int                                    assignLocalTileForY,
                              CommandParametersPtr                   params,
                              ContextPtr                             context)
         {
@@ -573,9 +575,6 @@ namespace rocRoller
             auto boundsCheckTag = graph.control.addElement(
                 AssertOp{"Bounds Check", (DF(nextWorkgroupTag) < numScratch)});
 
-            // auto boundsCheckTag = graph.control.addElement(
-            //     ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
-
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
             graph.coordinates.addElement(PassThrough(), {flagsScratchTag}, {nextWorkgroupTag});
@@ -588,41 +587,18 @@ namespace rocRoller
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
                                    * loopInfo.yLoopSize);
 
-            // auto fullyAccumulatedTileTag
-            //     = createInternalTile(graph, dataType, scratchTileTag, params, context);
-            // graph.coordinates.addElement(
-            //     DataFlow(), {accumulatorTileTag}, {fullyAccumulatedTileTag});
-
-            // Read tile
-            int loadAddForX = cloneForLoop(graph, loopInfo.xLoop);
-            int loadAddForY = cloneForLoop(graph, loopInfo.yLoop);
-
             auto loadTileTag = graph.control.addElement(LoadTiled(dataType));
             for(auto const& c : loadConnections)
                 graph.mapper.connect(loadTileTag, c.coordinate, c.connectionSpec);
 
-            graph.control.addElement(Body(), {loadAddForX}, {loadAddForY});
-            graph.control.addElement(Body(), {loadAddForY}, {loadTileTag});
-
             auto jammedX = graph.mapper.get<JammedWaveTileNumber>(loadTileTag, 0);
             if(jammedX != -1)
                 graph.coordinates.addElement(
-                    PassThrough(), {jammedX}, {graph.mapper.get<ForLoop>(loadAddForX)});
+                    PassThrough(), {jammedX}, {graph.mapper.get<ForLoop>(assignLocalTileForX)});
             auto jammedY = graph.mapper.get<JammedWaveTileNumber>(loadTileTag, 1);
             if(jammedY != -1)
                 graph.coordinates.addElement(
-                    PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(loadAddForY)});
-
-            // assign local accumulator partial tile to fully accumulated tile
-            // int assignLocalTileForX = cloneForLoop(graph, loopInfo.xLoop);
-            // int assignLocalTileForY = cloneForLoop(graph, loopInfo.yLoop);
-            // auto localAccumulatorTileExpr = std::make_shared<Expression::Expression>(
-            //     Expression::DataFlowTag{accumulatorTileTag, Register::Type::Vector, dataType});
-            // auto assignTile = graph.control.addElement(
-            //     Assign{Register::Type::Vector, localAccumulatorTileExpr, numRegisters});
-            // graph.mapper.connect(assignTile, fullyAccumulatedTileTag, NaryArgument::DEST);
-            // graph.control.addElement(Body(), {assignLocalTileForX}, {assignLocalTileForY});
-            // graph.control.addElement(Body(), {assignLocalTileForY}, {assignTile});
+                    PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(assignLocalTileForY)});
 
             // add fixup operations
             auto fixupTag = addFixup(graph,
@@ -634,60 +610,16 @@ namespace rocRoller
 
             graph.control.addElement(Sequence(), {loadTileTag}, {fixupTag});
 
-            // Attach epilogue operations after the fixup
-            // auto epilogueYLoop = only(graph.control.findNodes(
-            //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
-            // auto epilogueXLoop = only(graph.control.findNodes(
-            //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::XLOOP)));
-            // AssertFatal(epilogueYLoop, "Must have exactly one Y loop in the epilogue");
-            // AssertFatal(epilogueXLoop, "Must have exactly one X loop in the epilogue");
-
-            // auto reindexer       = std::make_shared<GraphReindexer>();
-            // auto newEpilogueBody = duplicateControlNodes(
-            //     graph,
-            //     reindexer,
-            //     graph.control.getOutputNodeIndices<Body>(*epilogueYLoop).to<std::vector>(),
-            //     [](int x) { return false; });
-
-            // // Replace accumulatorTileTag with fullyAccumulatedTileTag in the epilogue
-            // {
-            //     GraphReindexer expressionReindexer;
-            //     expressionReindexer.coordinates.emplace(accumulatorTileTag,
-            //                                             fullyAccumulatedTileTag);
-            //     for(auto const& node : graph.control.depthFirstVisit(newEpilogueBody))
-            //     {
-            //         reindexExpressions(graph, node, expressionReindexer);
-            //     }
-            // }
-
-            // // duplicate the forLoop for epilogue operations
-            // int epilogueForX = cloneForLoop(graph, *epilogueXLoop);
-            // int epilogueForY = cloneForLoop(graph, *epilogueYLoop);
-            // graph.control.addElement(Body(), {epilogueForX}, {epilogueForY});
-
-            // AssertFatal(newEpilogueBody.size() == 1);
-            // for(auto const& epilogueBody : newEpilogueBody)
-            // {
-            //     graph.control.addElement(Body(), {epilogueForY}, {epilogueBody});
-            // }
-
             // Add to control
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
             auto postWaitZeroTag = graph.control.addElement(WaitZero());
 
-            // graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
-
-            // graph.control.addElement(Body(), {receiveTileTag}, {assignTile});
-            // graph.control.addElement(Sequence(), {assignTile}, {forLoopOp});
-            // graph.control.addElement(Body(), {receiveTileTag}, {forLoopOp});
             graph.control.addElement(Body(), {receiveTileTag}, {forReceiveTileLoopOp});
-            // graph.control.addElement(Sequence(), {assignLocalTileForX}, {forReceiveTileLoopOp});
             graph.control.addElement(Body(), {forReceiveTileLoopOp}, {boundsCheckTag});
-            // graph.control.addElement(Sequence(), {forReceiveTileLoopOp}, {epilogueForX});
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            graph.control.chain<Sequence>(doWhileTag, loadAddForX, postWaitZeroTag);
+            graph.control.chain<Sequence>(doWhileTag, loadTileTag, postWaitZeroTag);
 
             return {preWaitZeroTag, receiveTileTag, setPlusOneTag};
         }
@@ -1143,6 +1075,7 @@ namespace rocRoller
             int         postAccumulationCond;
             if(accumInfo.accumulatorTile != -1)
             {
+                std::cout << "create receiveTile loop" << std::endl;
                 auto accumTileIdxStart
                     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
                 auto accumTileIdxEnd
@@ -1187,7 +1120,7 @@ namespace rocRoller
                                     loopInfo,
                                     context);
 
-                // Add Assign
+                // Add Assign local accumulator tile to a fully accumulated tile
                 auto fullyAccumulatedTileTag
                     = createInternalTile(graph,
                                          accumInfo.accumulatorVarType.dataType,
@@ -1233,6 +1166,8 @@ namespace rocRoller
                     forReceiveTileLoopOp,
                     forReceiveTileLoopCoord,
                     fullyAccumulatedTileTag,
+                    assignLocalTileForX,
+                    assignLocalTileForY,
                     params,
                     context);
 
@@ -1249,8 +1184,38 @@ namespace rocRoller
                     }
                 }
 
-                graph.control.chain<Sequence>(
-                    receiveInfo.preWaitZero, assignLocalTileForX, receiveInfo.receiveCond);
+                // Remove the ForXLoop and ForYLoop of epilogue
+                {
+                    AssertFatal(epilogueOperations.size() == 1,
+                                ShowValue(epilogueOperations.size()));
+                    AssertFatal(epilogueYLoop.has_value());
+                    auto epilogueBodyOp = -1;
+                    for(auto tag :
+                        graph.control.getNeighbours<GD::Downstream>(epilogueYLoop.value()))
+                    {
+                        auto maybeBody = graph.control.get<Body>(tag);
+                        if(maybeBody)
+                        {
+                            auto epilogueBody
+                                = only(graph.control.getNeighbours<GD::Downstream>(tag));
+                            AssertFatal(epilogueBody.has_value());
+                            AssertFatal(epilogueBodyOp == -1,
+                                        "More than 1 body under the epilogueYLoop.");
+                            epilogueBodyOp = epilogueBody.value();
+                            graph.control.deleteElement(tag);
+                        }
+                    }
+                    AssertFatal(epilogueBodyOp != -1,
+                                "Not find operation under epilogueYLoop body.");
+                    std::cout << "remove XLoop and Yloop for epilogue" << std::endl;
+                    purgeNodeAndChildren(graph, epilogueOperations[0]);
+                    epilogueOperations.clear();
+                    epilogueOperations.push_back(epilogueBodyOp);
+                }
+
+                graph.control.addElement(
+                    Sequence(), {receiveInfo.preWaitZero}, {assignLocalTileForX});
+                graph.control.addElement(Sequence(), {assignTile}, {receiveInfo.receiveCond});
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
@@ -1260,6 +1225,7 @@ namespace rocRoller
             }
             else
             {
+                std::cout << "not create receiveTile loop" << std::endl;
                 scratchTileInfo.setPlusOne  = graph.control.addElement(Scope());
                 sendInfo.assignSendBoolSGPR = graph.control.addElement(NOP());
                 sendInfo.preWaitZero        = graph.control.addElement(NOP());
@@ -1376,6 +1342,35 @@ namespace rocRoller
             {
                 graph.control.addElement(Body(), {postAccumulationCond}, {tag});
             }
+
+            // std::cout << "re-attach epilogue" << std::endl;
+
+            // auto epilogueYLoop = only(graph.control.findNodes(
+            //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
+            // // auto epilogueXLoop = only(graph.control.findNodes(
+            // //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::XLOOP)));
+            // AssertFatal(epilogueOperations.size() <= 1, ShowValue(epilogueOperations.size()));
+
+            // if (epilogueYLoop.has_value())
+            // {
+            // for(auto tag : graph.control.getNeighbours<GD::Downstream>(epilogueYLoop.value()))
+            // {
+            //     auto maybeBody = graph.control.get<Body>(tag);
+            //     if(maybeBody)
+            //     {
+            //         auto epilogueBody = only(graph.control.getNeighbours<GD::Downstream>(tag));
+            //         AssertFatal(epilogueBody.has_value());
+            //         graph.control.addElement(Body(), {postAccumulationCond}, {epilogueBody.value()});
+            //         graph.control.deleteElement(tag);
+            //     }
+            // }
+            // }
+
+            // if (epilogueOperations.size() == 1)
+            // {
+            //     std::cout << "remove XLoop and Yloop for epilogue" << std::endl;
+            //     purgeNodeAndChildren(graph, epilogueOperations[0]);
+            // }
         }
 
         ArgumentInfo setupArguments(ContextPtr             context,
