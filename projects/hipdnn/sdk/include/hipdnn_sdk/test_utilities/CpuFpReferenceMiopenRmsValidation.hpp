@@ -57,8 +57,8 @@ public:
         double maxRefMagnitude = 0.0;
         double maxImplMagnitude = 0.0;
 
-        ConstTensorView<T> refView(reference);
-        ConstTensorView<T> implView(implementation);
+        TensorView<T> refView(reference);
+        TensorView<T> implView(implementation);
 
         auto refItr = refView.begin();
         auto implItr = implView.begin();
