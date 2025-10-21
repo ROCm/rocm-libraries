@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/BinaryOperationFunctors.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -24,7 +25,7 @@ class TestFusedOperationsCpuGraphExecutor : public ::testing::Test
 
 TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 {
-    double epsilon = 1e-3;
+    auto tolerance = pointwise::getTolerance<float>();
     std::vector<int64_t> xDims = {1, 1, 2, 2};
     std::vector<int64_t> wDims = {1, 1, 1, 1};
     std::vector<int64_t> yDims = {1, 1, 2, 2};
@@ -184,8 +185,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     }
 
     // Validate results
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(epsilon),
-                                                           static_cast<float>(epsilon));
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor.memory(), yTensor.memory()));
 }
