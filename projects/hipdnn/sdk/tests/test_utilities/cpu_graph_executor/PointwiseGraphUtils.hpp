@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "PointwiseTensorBundles.hpp"
@@ -29,7 +30,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_sdk::data_objects::DataType accumulatorDataType,
                              hipdnn_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
-                             unsigned int seed = 1,
+                             unsigned int seed = getGlobalTestSeed(),
                              const TensorLayout& layout = TensorLayout::NCHW)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
@@ -67,7 +68,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseUnaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
-    auto variantPack = tensorBundle.toVariantPack();
+    auto variantPack = tensorBundle.toHostVariantPack();
 
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
@@ -83,7 +84,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                               hipdnn_sdk::data_objects::DataType accumulatorDataType,
                               hipdnn_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
-                              unsigned int seed = 1,
+                              unsigned int seed = getGlobalTestSeed(),
                               const TensorLayout& layout = TensorLayout::NCHW)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
@@ -129,7 +130,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseBinaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
-    auto variantPack = tensorBundle.toVariantPack();
+    auto variantPack = tensorBundle.toHostVariantPack();
 
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }

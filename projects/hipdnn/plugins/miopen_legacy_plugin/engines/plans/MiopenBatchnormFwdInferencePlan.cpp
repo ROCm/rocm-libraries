@@ -4,6 +4,8 @@
 #include "MiopenBatchnormFwdInferencePlan.hpp"
 #include "MiopenUtils.hpp"
 
+#include <hipdnn_sdk/utilities/Constants.hpp>
+
 namespace miopen_legacy_plugin
 {
 
@@ -73,7 +75,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
-    double epsilon = 1e-3;
+    double epsilon = hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer = miopen_utils::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);

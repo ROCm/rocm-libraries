@@ -15,12 +15,14 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -76,7 +78,7 @@ class BatchnormForwardInference : public ::testing::TestWithParam<TestCaseType>
     struct TensorBundle
     {
         TensorBundle(const std::vector<int64_t>& dims,
-                     unsigned int seed = 1,
+                     unsigned int seed = getGlobalTestSeed(),
                      const TensorLayout& layout = TensorLayout::NCHW)
             : derivedDims(getDerivedShape(dims))
             , xTensor(dims, layout)
@@ -263,7 +265,7 @@ protected:
             cpuTensorBundle.meanTensor,
             cpuTensorBundle.varianceTensor,
             cpuTensorBundle.yTensor,
-            1e-3);
+            BATCHNORM_DEFAULT_EPSILON);
     }
 
     void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
@@ -357,7 +359,7 @@ class IntegrationGpuBatchnormForwardInferenceNdhwcFp16
 
 std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
 
     return {
         {1, 3, 14, 14, seed},
@@ -373,7 +375,7 @@ std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
 
 std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
 
     return {
         {2, 3, 3, 1, 1, seed},
