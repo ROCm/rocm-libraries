@@ -44,9 +44,7 @@ endif()
 
 project( hipblas LANGUAGES CXX )
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
