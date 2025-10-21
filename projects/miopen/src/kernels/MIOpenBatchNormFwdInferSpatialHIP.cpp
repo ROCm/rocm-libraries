@@ -134,12 +134,12 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
         for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
         {
-            inhat[i] = (static_cast<FLOAT_ACCUM>(value[i]) - mean[i]) * invVariance[i];
+            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
             inhat[i] = fma(pscale[i], inhat[i], pbias[i]);
             inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
                                                         miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
                 inhat[i], _alpha, _beta);
-            value[i] = static_cast<FLOAT>(inhat[i]);
+            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
         }
 
         // write output value
