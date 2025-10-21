@@ -50,7 +50,6 @@ TEST(TestFillTensorFromFile, Valid)
 
     ASSERT_EQ(tensor.memory().count(), values.size());
 
-    // TODO refactor to use upcoming iterators
     for(size_t i = 0; i < values.size(); i++)
     {
         EXPECT_EQ(values[i], tensor.memory().hostData()[i]);
@@ -60,12 +59,13 @@ TEST(TestFillTensorFromFile, Valid)
 TEST(TestLoadGraphAndTensors, Valid)
 {
     std::filesystem::path filepath
-        = utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data/Small.json";
+        = utilities::getCurrentExecutableDirectory()
+          / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find ../lib/hipdnn_reference_data/Small.json")
+        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
         GTEST_SKIP();
     }
 
@@ -102,16 +102,29 @@ TEST(TestLoadGraphAndTensors, Valid)
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     std::filesystem::path filepath
-        = utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data/Small.json";
+        = utilities::getCurrentExecutableDirectory()
+          / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find ../lib/hipdnn_reference_data/Small.json");
+        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
         GTEST_SKIP();
     }
 
     auto res = loadGraphAndTensors(filepath);
+
+    std::unordered_map<int64_t, std::unique_ptr<ITensor>> savedTensorOutputs;
+
+    // Save tensor data
+    for(auto id : res.outputTensorUids)
+    {
+        const auto& tensor = res.tensorMap.at(id);
+        size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
+        auto& savedTensor = savedTensorOutputs[id]
+            = std::unique_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
+        savedTensor->fillWithData(tensor->rawHostData(), bytesInTensor);
+    }
 
     auto outputMap = res.extractAndClearOutputTensorData();
 
@@ -120,8 +133,22 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     for(auto id : res.outputTensorUids)
     {
         EXPECT_EQ(outputMap.count(id), 1);
-    }
+        TensorView<float> savedTensorView{*savedTensorOutputs[id]};
+        TensorView<float> extractedTensorView{*outputMap.at(id)};
 
-    // TODO: Expand tests once iterator is complete
+        auto savedIter = savedTensorView.cbegin();
+        auto extractedIter = extractedTensorView.cbegin();
+
+        for(; savedIter != savedTensorView.cend() && extractedIter != extractedTensorView.cend();
+            savedIter++, extractedIter++)
+        {
+            EXPECT_EQ(*savedIter, *extractedIter);
+        }
+
+        for(auto value : TensorView<float>(*res.tensorMap[id]))
+        {
+            EXPECT_EQ(value, 0.0);
+        }
+    }
 }
 }

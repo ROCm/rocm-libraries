@@ -45,7 +45,7 @@ def main():
                         help="datatype for batch norm operations (float, half, bfloat16, double, uint8, int32)")
     parser.add_argument("-s", "--size", required=True, nargs="+", type=int, 
                         help="size of x tensor (ex: --size 2 4 6 8)")
-    parser.add_argument("--min", default=-1.0, type=float, help="minimum value in tensor")
+    parser.add_argument("--min", default=0.1, type=float, help="minimum value in tensor")
     parser.add_argument("--max", default=1.0, type=float, help="maximum value in tensor")
     parser.add_argument("--seed", default=0, type=int, help="seed for random data in tensors")
     parser.add_argument("--gpu", default=False, type=bool, help="Use cuda or rocm backend")

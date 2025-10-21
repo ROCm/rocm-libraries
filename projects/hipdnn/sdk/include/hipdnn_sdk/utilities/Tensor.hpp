@@ -178,10 +178,10 @@ public:
 
     virtual void* rawHostData() = 0;
     virtual void* rawDeviceData() = 0;
-    virtual void markDeviceModified() = 0;
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
+    virtual size_t elementSize() const = 0;
     virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
@@ -346,6 +346,11 @@ public:
     void markDeviceModified() override
     {
         memory().markDeviceModified();
+    }
+
+    size_t elementSize() const override
+    {
+        return sizeof(T);
     }
 
 protected:

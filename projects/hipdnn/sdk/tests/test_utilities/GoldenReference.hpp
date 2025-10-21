@@ -29,7 +29,7 @@ protected:
         // TODO: Temporary fix until reference data can be properly installed
         if(path.empty())
         {
-            HIPDNN_LOG_WARN("No parameters in Cpu golden reference test");
+            HIPDNN_LOG_WARN("Reference not found for Cpu golden reference test");
             GTEST_SKIP();
         }
 
