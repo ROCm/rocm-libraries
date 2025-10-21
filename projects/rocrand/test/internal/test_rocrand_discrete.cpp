@@ -21,6 +21,9 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include "test_common.hpp"
+#include "test_rocrand_common.hpp"
+
 #include <algorithm>
 #include <numeric>
 #include <random>
@@ -31,32 +34,6 @@
 
 #include <hip/hip_runtime.h>
 
-#define HIP_CHECK(cmd)                                                                         \
-    do                                                                                         \
-    {                                                                                          \
-        auto error = (cmd);                                                                    \
-        if(error != hipSuccess)                                                                \
-        {                                                                                      \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
-                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    }                                                                                          \
-    while(0)
-
-#define ROCRAND_CHECK(cmd)                                                                \
-    do                                                                                    \
-    {                                                                                     \
-        auto status = cmd;                                                                \
-        if(status != 0)                                                                   \
-        {                                                                                 \
-            std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
-                      << " in file " << __FILE__ << "\n";                                 \
-            exit(-1);                                                                     \
-        }                                                                                 \
-    }                                                                                     \
-    while(0)
-
 struct GlobalSizes
 {
     static constexpr size_t items_per_thread = 256;
@@ -65,53 +42,6 @@ struct GlobalSizes
     static constexpr size_t grid_size        = 1234;
     static constexpr size_t size             = grid_size * items_per_block;
 };
-
-// class to represent a Emperical Distribution Function (EDF) of some distribution
-class EDF{
-    private:
-        std::vector<double> dis;
-        double n;
-
-    public:
-        EDF(const std::vector<double> & x){
-            dis = x;
-            std::sort(dis.begin(), dis.end());
-            n = static_cast<double>(dis.size());
-        }
-
-        double operator()(double x) const{
-            auto it = std::upper_bound(dis.begin(), dis.end(), x);
-            double pos = static_cast<double>(it - dis.begin());
-            return pos / n;
-        }
-};
-
-// Perform Two-Sample Kolmogorov-Smirnov Test
-bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual){
-    EDF aEDF(expected);
-    EDF eEDF(actual);
-
-    double n = static_cast<double>(expected.size());
-    double m = static_cast<double>(actual.size());
-
-    double iter = 1.0 / (static_cast<double>(actual.size()) * 2);
-
-
-    // Calculate the statistical value: the maximum difference between the two EDF functions.
-    // Since the original distributions are discrete, we can split [0, 1.0] into n points
-    // and check at those points. We double the points here just for extra coverage, but
-    // its not really needed.
-    double d = -1;
-    for(double x = 0; x <= 1.0; x += iter)
-        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
-
-    // calculating the critical value
-    double alpha = 0.1; // the signigficance level
-    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
-    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
-
-    return d <= cv; // <= because we reject if d > cv
-}
 
 using DiscreteDataType = ::testing::Types<double, unsigned int, unsigned long, unsigned long long int>;
 
