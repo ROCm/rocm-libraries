@@ -87,19 +87,21 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
         fp_prec_type pvt_scale = scale[adjIndex];
         fp_prec_type pvt_bias  = bias[adjIndex];
 
-        miopen::static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{[&](unsigned int n) {
+        for (unsigned int n = 0; n < mio_bn_config::n; ++n)
+        {
             unsigned int index = mio_bn_config::chw * n + adjIndex;
             fp_prec_type xin   = miopen::batchnorm::cast<fp_prec_type>(in[index]);
             mean += xin;
             variance = fma(xin, xin, variance);
-        }};
+        }
         mean /= mio_bn_config::fp_prec_type(mio_bn_config::n);
         variance /= mio_bn_config::fp_prec_type(mio_bn_config::n);
         variance                 = fma(-mean, mean, variance);
         fp_prec_type invVariance = rsqrt(variance + epsilon);
 
         fp_prec_type bn_out, act_out;
-        miopen::static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{[&](unsigned int n) {
+        for (unsigned int n = 0; n < mio_bn_config::n; ++n)
+        {
             // per (x-dims) channel load a block of data unsigned into LDS
             unsigned int index = mio_bn_config::chw * n + adjIndex;
             fp_prec_type inhat =
@@ -111,7 +113,7 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
                                                 miopen::batchnorm::cast<fp_prec_type>(beta),
                                                 miopen::batchnorm::cast<fp_prec_type>(alpha));
             out[index] = miopen::batchnorm::cast<fp_prec_type>(act_out);
-        }};
+        }
     
 #if (MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdaterPA<fp_accum_c_type>;
