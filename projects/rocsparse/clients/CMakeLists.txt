@@ -49,6 +49,10 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
+if (BUILD_CLIENTS_ONLY)
+  find_package(rocsparse 4.0.0 REQUIRED)
+endif()
+
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
 if(WIN32)

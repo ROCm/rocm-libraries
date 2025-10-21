@@ -11,6 +11,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
@@ -39,7 +40,7 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = 1e-3;
+    double epsilon = BATCHNORM_DEFAULT_EPSILON;
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = 1;
     auto graph = buildBatchnormFwdInferenceGraph(
@@ -61,7 +62,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.inv_variance_tensor_uid()),
                                        epsilon);
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
+    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());

@@ -38,6 +38,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
