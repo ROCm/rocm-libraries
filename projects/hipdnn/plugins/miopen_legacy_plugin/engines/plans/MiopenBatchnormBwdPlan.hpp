@@ -6,8 +6,10 @@
 #include <optional>
 
 #include <hipdnn_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 
+#include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
@@ -19,6 +21,12 @@ class BatchnormBwdParams
 public:
     BatchnormBwdParams(
         const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormBwdParams(
+        const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& attributes,
+        const hipdnn_sdk::data_objects::PointwiseAttributes& activationAttributes,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
@@ -37,6 +45,7 @@ public:
 
     const std::optional<MiopenTensor>& optMean() const;
     const std::optional<MiopenTensor>& optInvVariance() const;
+    const std::optional<MiopenActivationDescriptor>& optActivation() const;
 
 private:
     MiopenTensor _x;
@@ -48,6 +57,7 @@ private:
 
     std::optional<MiopenTensor> _optMean;
     std::optional<MiopenTensor> _optInvVariance;
+    std::optional<MiopenActivationDescriptor> _optActivation;
 };
 
 class BatchnormBwdPlan : public IPlan
