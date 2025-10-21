@@ -37,6 +37,10 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#endif
+
 using IntegralVariableParams =
   ::testing::Types<Params<signed char>,
                    Params<unsigned char>,
@@ -966,15 +970,32 @@ template <>
 struct is_non_const_reference<only_set_when_expected_it> : thrust::true_type
 {};
 } // end namespace detail
+THRUST_NAMESPACE_END
 
+namespace std
+{
 template <>
 struct iterator_traits<only_set_when_expected_it>
 {
   using value_type        = long long;
   using reference         = only_set_when_expected_it;
   using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
 };
-THRUST_NAMESPACE_END
+} // namespace std
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_STD_NAMESPACE_BEGIN
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type        = long long;
+  using reference         = only_set_when_expected_it;
+  using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
+};
+_THRUST_STD_NAMESPACE_END
+#  endif
 
 void TestCopyWithBigIndexesHelper(int magnitude)
 {
