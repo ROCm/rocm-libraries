@@ -30,18 +30,15 @@ the documentation for the corresponding backend libraries.
 Multi-level logging in hipSOLVER
 ============================================
 
-hipSOLVER exposes the rocSOLVER logging functionality. Upon handle creation, hipSOLVER retrieves the logging environment variables
-using ``std::getenv``.
+hipSOLVER can leverage the rocSOLVER logging functionality by using the rocSOLVER environment variables.
+Upon handle creation, hipSOLVER retrieves these variables using ``std::getenv``.
 
-To enable hipSOLVER logging for the default, refactor, and sparse APIs respectively, use the following environment variables:
+To enable hipSOLVER logging, specify the default layer mode and max level depth using the following environment variables:
 
-.. code-block:: bash
+*  ``ROCSOLVER_LAYER``
+*  ``ROCSOLVER_LEVELS``
 
-   HIPSOLVER_ENABLE_ROCSOLVER_LOGGING=1
-   HIPSOLVER_REFACTOR_ENABLE_ROCSOLVER_LOGGING=1
-   HIPSOLVER_SPARSE_ENABLE_ROCSOLVER_LOGGING=1
-
-For more details on how to configure the logging output, see :doc:`rocSOLVER logging <rocsolver:howto/logging>`.
+For more details on how to set these variables to configure logging output, see :doc:`rocSOLVER logging <rocsolver:howto/logging>`.
 
 .. _porting:
 
