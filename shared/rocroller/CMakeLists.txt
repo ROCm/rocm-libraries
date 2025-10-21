@@ -13,7 +13,7 @@ include(FetchContent)
 include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
-if(HIPBLASLT_ENABLE_FETCH)
+if(ROCROLLER_ENABLE_FETCH)
     if(NOT ROCmCMakeBuildTools_FOUND)
         FetchContent_Declare(
             ROCmCMakeBuildTools
