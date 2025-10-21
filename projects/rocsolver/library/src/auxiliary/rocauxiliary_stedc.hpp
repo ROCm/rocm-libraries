@@ -50,7 +50,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 // Number of threads per thread-block used in solver kernel,
 // at this point it must not exceed wave size.
-#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) \
+    || defined(__gfx950__)
 #define STEDC_SOLVE_BDIM 64
 #else
 #define STEDC_SOLVE_BDIM 32
@@ -1186,17 +1187,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     }
 }
 
-
 template <int BDIM, typename S>
 __device__ inline void reduce1_laed(S& val)
 {
     __shared__ S lds[BDIM];
-    
+
     lds[hipThreadIdx_x] = val;
-    for (int r = hipBlockDim_x / 2; r > 0; r /= 2)
+    for(int r = hipBlockDim_x / 2; r > 0; r /= 2)
     {
         __syncthreads();
-        if (hipThreadIdx_x < r) {
+        if(hipThreadIdx_x < r)
+        {
             val += lds[hipThreadIdx_x + r];
             lds[hipThreadIdx_x] = val;
         }
@@ -1236,35 +1237,20 @@ __device__ inline void reduce3_laed(S& val1, S& val2, S& val3)
 
 template <typename S, typename I, I BDIM, bool OVERRIDE_3RD_ORDER_SCHEME = false>
 __device__ I laed4_alt(I n,
-                    I i,
-                    S* delta,
-                    S* z,
-                    S rho,
-                    S& dlam,
-                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
-                    S ssfmin = std::numeric_limits<S>::min(),
-                    I MAXIT = 50)
+                       I i,
+                       S* delta,
+                       S* z,
+                       S rho,
+                       S& dlam,
+                       S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                       S ssfmin = std::numeric_limits<S>::min(),
+                       I MAXIT = 50)
 {
-    auto lam_abs = [](auto x) -> auto
-    {
-        return std::abs(x);
-    };
-    auto lam_sqr = [](auto x) -> auto
-    {
-        return x * x;
-    };
-    auto lam_sqrt = [](auto x) -> auto
-    {
-        return std::sqrt(x);
-    };
-    auto lam_max = [](auto x, auto y) -> auto
-    {
-        return std::max(x, y);
-    };
-    auto lam_min = [](auto x, auto y) -> auto
-    {
-        return std::min(x, y);
-    };
+    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
+    auto lam_sqr = [](auto x) -> auto { return x * x; };
+    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
+    auto lam_max = [](auto x, auto y) -> auto { return std::max(x, y); };
+    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
 
     i = i + 1;
     S zz[3]{};
@@ -2144,7 +2130,6 @@ __device__ I laed4_alt(I n,
     return info;
 }
 
-
 //--------------------------------------------------------------------------------------//
 /** STEDC_MERGEVALUES_KERNEL solves the secular equation for every pair of sub-blocks
     that need to be merged.
@@ -2205,7 +2190,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
             rocblas_int linfo;
 
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = laed4_alt<STEDC_SOLVE_BDIM>(dd, cc, etmpd + i * n, z + p1, std::abs(p), evs[i]);
+            linfo = laed4_alt<S, rocblas_int, STEDC_SOLVE_BDIM>(dd, cc, etmpd + i * n, z + p1,
+                                                                std::abs(p), evs[i]);
 #else
             if(cc == dd - 1)
                 linfo = seq_solve_ext(dd, etmpd + i * n, z + p1, std::abs(p), evs + i, eps, ssfmin,
@@ -2877,7 +2863,14 @@ rocblas_status rocsolver_stedc_argCheck(rocblas_handle handle,
 
 #if DEBUG_OUTPUT
 template <typename S, typename I>
-void print_block_map(const char* tag, bool show_pres, bool show_cnt, int n, int n_merges, I* bsz, I* bps, S* matr)
+void print_block_map(const char* tag,
+                     bool show_pres,
+                     bool show_cnt,
+                     int n,
+                     int n_merges,
+                     I* bsz,
+                     I* bps,
+                     S* matr)
 {
     int n_blocks = n_merges * 2;
     std::vector<I> sz(n_blocks);
@@ -2894,16 +2887,21 @@ void print_block_map(const char* tag, bool show_pres, bool show_cnt, int n, int 
     {
         s += sz[i];
     }
-    if (s != n) {
-        std::cout << "ERROR: n("<< n <<") != s("<< s <<")\n";
+    if(s != n)
+    {
+        std::cout << "ERROR: n(" << n << ") != s(" << s << ")\n";
         std::exit(0);
     }
 
     bool is_blk_diag = true;
-    for(int jb = 0; jb < n_blocks; jb++) {
-        for (int jp = 0; jp < sz[jb]; jp++) {
-            for(int ib = 0; ib < n_blocks; ib++) {
-                for(int ip = 0; ip < sz[ib]; ip++) {
+    for(int jb = 0; jb < n_blocks; jb++)
+    {
+        for(int jp = 0; jp < sz[jb]; jp++)
+        {
+            for(int ib = 0; ib < n_blocks; ib++)
+            {
+                for(int ip = 0; ip < sz[ib]; ip++)
+                {
                     {
                         int j = ps[jb] + jp;
                         int i = ps[ib] + ip;
@@ -2917,23 +2915,29 @@ void print_block_map(const char* tag, bool show_pres, bool show_cnt, int n, int 
         }
     }
 
-    std::cout << (is_blk_diag ? "block diag matrix ("
-        : "matrix has off-blockdiag non-zeros (") << tag << ")\n";
+    std::cout << (is_blk_diag ? "block diag matrix (" : "matrix has off-blockdiag non-zeros (")
+              << tag << ")\n";
 
-    if (show_pres) {
+    if(show_pres)
+    {
         std::cout << tag << " present map " << n_blocks << "x" << n_blocks << ":\n";
-        for(int j = 0; j < n_blocks; j++) {
-            for(int i = 0; i < n_blocks; i++) {
+        for(int j = 0; j < n_blocks; j++)
+        {
+            for(int i = 0; i < n_blocks; i++)
+            {
                 std::cout << (cnt[j * n_blocks + i] ? " X" : " .");
             }
             std::cout << "\n";
         }
     }
 
-    if (show_cnt) {
+    if(show_cnt)
+    {
         std::cout << tag << " cnt map " << n_blocks << "x" << n_blocks << ":\n";
-        for(int j = 0; j < n_blocks; j++) {
-            for(int i = 0; i < n_blocks; i++) {
+        for(int j = 0; j < n_blocks; j++)
+        {
+            for(int i = 0; i < n_blocks; i++)
+            {
                 std::cout << "\t" << cnt[j * n_blocks + i];
             }
             std::cout << "\n";
@@ -3131,10 +3135,9 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             HIP_CHECK(hipEventRecord(events[k], stream));
 #endif
 
-            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>),
-                                    dim3(n, batch_count), dim3(STEDC_SOLVE_BDIM), 0,
-                                    stream, k, n, D + shiftD, strideD, E + shiftE, strideE, tmpz,
-                                    tempgemm, splits, eps, ssfmin, ssfmax);
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
+                                    dim3(STEDC_SOLVE_BDIM), 0, stream, k, n, D + shiftD, strideD,
+                                    E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin, ssfmax);
 
 #if DEBUG_OUTPUT
             HIP_CHECK(hipEventRecord(events[k + levs], stream));
