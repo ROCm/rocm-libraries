@@ -231,6 +231,8 @@ struct BatchNormActivInferTester : public BatchNormInferTester<XDataType,
     }
 };
 
+namespace BatchNormActivInfer {
+
 struct GPU_bn_activ_infer_spatial_FP32
     : BatchNormActivInferTester<float, float, float, float, float>
 {
@@ -266,6 +268,9 @@ std::vector<miopenActivationMode_t> ActivationConfigs()
             miopenActivationLEAKYRELU,
             miopenActivationELU};
 }
+
+} // namespace BatchNormActivInfer
+using namespace BatchNormActivInfer;
 
 TEST_P(GPU_bn_activ_infer_spatial_FP32, PortTest)
 {

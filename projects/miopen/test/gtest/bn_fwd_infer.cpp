@@ -219,6 +219,8 @@ struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
     }
 };
 
+namespace BatchNormFwdInfer {
+
 struct GPU_bn_fwd_infer_spatial_FP32 : BatchNormFwdInferTester<float, float, float, float, float>
 {
 };
@@ -248,6 +250,9 @@ struct GPU_bn_fwd_infer_per_act_BFP16
 };
 
 std::vector<miopenActivationMode_t> ActivationConfigs() { return {miopenActivationPASTHRU}; }
+
+} // namespace BatchNormFwdInfer
+using namespace BatchNormFwdInfer;
 
 TEST_P(GPU_bn_fwd_infer_spatial_FP32, PortTest)
 {
