@@ -12,6 +12,7 @@
 #include "ConvolutionGraphUtils.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
+
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
@@ -50,7 +51,7 @@ public:
         BatchnormFwdTensorBundle tensorBundle(
             graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
 
-        auto variantPack = tensorBundle.toVariantPack();
+        auto variantPack = tensorBundle.toHostVariantPack();
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);

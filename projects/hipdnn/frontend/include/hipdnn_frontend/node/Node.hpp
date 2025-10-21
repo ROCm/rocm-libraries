@@ -67,6 +67,11 @@ public:
         return {};
     }
 
+    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
+    {
+        return _sub_nodes;
+    }
+
 protected:
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 

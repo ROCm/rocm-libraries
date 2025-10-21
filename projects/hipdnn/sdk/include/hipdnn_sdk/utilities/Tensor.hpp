@@ -177,11 +177,13 @@ public:
     virtual const std::vector<int64_t>& strides() const = 0;
 
     virtual void* rawHostData() = 0;
+    virtual void* rawDeviceData() = 0;
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
     virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
+    virtual const void* hostDataOffsetFromIndex(int64_t index) = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
     virtual void
@@ -222,6 +224,9 @@ public:
 
     virtual bool isPacked() const = 0;
 
+    virtual void markHostModified() = 0;
+    virtual void markDeviceModified() = 0;
+
 protected:
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     int64_t throwIfOutOfBounds(int64_t index) const
@@ -247,12 +252,22 @@ public:
         return memory().hostData();
     }
 
+    void* rawDeviceData() override
+    {
+        return memory().deviceData();
+    }
+
     void* hostDataOffsetFromIndex(int64_t index) override
     {
         return memory().hostData() + index;
     }
 
     const void* hostDataOffsetFromIndex(int64_t index) const override
+    {
+        return memory().hostData() + index;
+    }
+
+    const void* hostDataOffsetFromIndex(int64_t index) override
     {
         return memory().hostData() + index;
     }
@@ -269,8 +284,8 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
-    virtual IMigratableMemory<T>& memory() = 0;
-    virtual const IMigratableMemory<T>& memory() const = 0;
+    virtual MigratableMemoryBase<T>& memory() = 0;
+    virtual const MigratableMemoryBase<T>& memory() const = 0;
 
     template <typename... Args>
     T getHostValue(Args... indices) const
@@ -325,6 +340,16 @@ public:
     ITensorIterator<true> cend() const override
     {
         return ITensorIterator<true>(*this, true);
+    }
+
+    void markHostModified() override
+    {
+        memory().markHostModified();
+    }
+
+    void markDeviceModified() override
+    {
+        memory().markDeviceModified();
     }
 
 protected:
@@ -416,12 +441,12 @@ public:
         return _memory.count();
     }
 
-    const IMigratableMemory<T>& memory() const override
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
     }
