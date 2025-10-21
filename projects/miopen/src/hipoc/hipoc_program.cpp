@@ -39,10 +39,10 @@
 #include <miopen/write_file.hpp>
 #include <miopen/env.hpp>
 #include <miopen/comgr.hpp>
-#include <boost/optional.hpp>
 
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <sstream>
 
 #if defined(__linux__)
@@ -391,7 +391,7 @@ void HIPOCProgram::AttachBinary(std::vector<char> binary) { impl->binary = std::
 void HIPOCProgram::AttachBinary(fs::path binary)
 {
     if(impl->hsaco_file != binary)
-        impl->dir = boost::none;
+        impl->dir.reset();
     impl->hsaco_file = std::move(binary);
 }
 

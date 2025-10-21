@@ -44,10 +44,10 @@ namespace debug {
 MIOPEN_EXPORT bool testing_find_db_enabled = true;
 
 /// \todo Remove when #1723 is resolved.
-boost::optional<fs::path>& testing_find_db_path_override()
+std::optional<fs::path>& testing_find_db_path_override()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static boost::optional<fs::path> data = boost::none;
+    static std::optional<fs::path> data{std::nullopt};
     return data;
 }
 

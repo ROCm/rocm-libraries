@@ -29,11 +29,9 @@
 #include <miopen/config.h>
 #if MIOPEN_USE_MLIR
 
-#include <miopen/target_properties.hpp>
-#include <miopen/tmp_dir.hpp>
-#include <miopen/filesystem.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace miopen {
 

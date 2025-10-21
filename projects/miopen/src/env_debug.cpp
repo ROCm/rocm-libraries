@@ -112,7 +112,7 @@ private:
         std::optional<std::string> Get() const override
         {
             if(!var)
-                return std::nullopt;
+                return {};
 
             const auto value = miopen::env::value(var);
 

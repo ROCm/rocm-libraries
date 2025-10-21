@@ -28,7 +28,7 @@
 #define MIOPEN_GUARD_MLOPEN_FUSION_OPS_HPP
 
 #include <ostream>
-#include <boost/any.hpp>
+#include <any>
 
 namespace miopen {
 
@@ -45,7 +45,7 @@ enum miopenFusionOp_t
     miopenFusionOpTensorScaleAdd     = 7,
 };
 
-std::ostream& operator<<(std::ostream& stream, const boost::any& a);
+std::ostream& operator<<(std::ostream& stream, const std::any& a);
 
 } // namespace miopen
 

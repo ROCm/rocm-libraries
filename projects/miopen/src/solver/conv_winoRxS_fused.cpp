@@ -26,19 +26,17 @@
 
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/compiled_in_parameters.hpp>
-#include <miopen/conv/wrw_invoke_params.hpp>
+//#include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/env.hpp>
 #include <miopen/generic_search.hpp>
 #include <miopen/invoke_params.hpp>
 #include <miopen/kernel_build_params.hpp>
-#include <miopen/sequences.hpp>
+//#include <miopen/sequences.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/utils.hpp>
 
-#include <boost/any.hpp>
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <tuple>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)

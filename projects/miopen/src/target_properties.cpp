@@ -25,8 +25,8 @@
  *******************************************************************************/
 #include <miopen/env.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
+
 #include <map>
 #include <string>
 
@@ -84,14 +84,14 @@ void TargetProperties::Init(const Handle* const handle)
     name = GetDeviceNameFromMap(rawName);
     // DKMS driver older than 5.9 may report incorrect state of SRAMECC feature.
     // Therefore we compute default SRAMECC and rely on it for now.
-    sramecc = [&]() -> boost::optional<bool> {
+    sramecc = [&]() -> std::optional<bool> {
         if(name == "gfx906" || name == "gfx908")
             return {true};
         return {};
     }();
     // However we need to store the reported state, even if it is incorrect,
     // to use together with COMGR.
-    sramecc_reported = [&]() -> boost::optional<bool> {
+    sramecc_reported = [&]() -> std::optional<bool> {
 #if WORKAROUND_ISSUE_1204
         if(name == "gfx900")
             return {};
@@ -102,7 +102,7 @@ void TargetProperties::Init(const Handle* const handle)
             return false;
         return sramecc; // default
     }();
-    xnack = [&]() -> boost::optional<bool> {
+    xnack = [&]() -> std::optional<bool> {
         if(rawName.find(":xnack+") != std::string::npos)
             return true;
         if(rawName.find(":xnack-") != std::string::npos)

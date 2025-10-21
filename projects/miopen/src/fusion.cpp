@@ -31,7 +31,6 @@
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
@@ -40,10 +39,8 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/conv/solver_finders.hpp>
 #include <miopen/driver_arguments.hpp>
-#include <miopen/config.hpp>
 
 #include <ostream>
-#include <ios>
 #include <algorithm>
 #include <string>
 #include <half/half.hpp>
@@ -1001,7 +998,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
 
     {
         FindMode findMode(solver::Primitive::Fusion);
-        auto sol = boost::optional<miopenConvSolution_t>{};
+        auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {
             const auto ctx      = FusionContext{handle};
