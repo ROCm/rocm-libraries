@@ -83,7 +83,7 @@ extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
     unsigned col_size =
         out_d_size * out_h_size * out_w_size * wei_d_size * wei_h_size * wei_w_size * im_c_size;
 
-    unsigned int gtid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int gtid        = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int global_size = blockDim.x * gridDim.x;
     for(unsigned tid = gtid; tid < col_size; tid += global_size)
     {
