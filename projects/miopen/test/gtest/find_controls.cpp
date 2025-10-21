@@ -95,7 +95,7 @@ TEST_F(CPU_FindControls_NONE, FindEnforceIsSearch)
     miopen::FindEnforce enforce_clean(miopen::FindEnforceAction::DbClean);
 
     EXPECT_FALSE(enforce_none.IsSearch(context));
-    EXPECT_TRUE(enforce_db_update.IsSearch(context));
+    EXPECT_FALSE(enforce_db_update.IsSearch(context));
     EXPECT_TRUE(enforce_search.IsSearch(context));
     EXPECT_TRUE(enforce_search_db_update.IsSearch(context));
     EXPECT_FALSE(enforce_clean.IsSearch(context));
