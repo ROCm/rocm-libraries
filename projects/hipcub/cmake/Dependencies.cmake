@@ -70,7 +70,7 @@ include(FetchContent)
 # It does so using the git ls-remote command.
 # If the branch cannot be found, the variable described by "branch" is changed to "develop" in the host scope.
 function(find_download_branch git_path branch)
-  set(branch_value "develop" )
+  set(branch_value ${${branch}})
   execute_process(COMMAND ${git_path} "ls-remote" "https://github.com/ROCm/rocm-libraries.git" "refs/heads/${branch_value}" RESULT_VARIABLE ret_code OUTPUT_VARIABLE output)
 
   if(NOT ${ret_code} STREQUAL "0")
