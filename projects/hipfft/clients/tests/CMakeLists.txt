@@ -142,10 +142,11 @@ foreach( target ${TEST_TARGETS} )
     )
   endif()
 
-  if( NOT hiprand_FOUND )
-    find_package( hiprand REQUIRED )
-  endif()
   if( USE_HIPRAND )
+    if( NOT hiprand_FOUND )
+      find_package( hiprand REQUIRED )
+    endif()
+    
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       # nvcc doesn't know what do with hiprand.so.1.1, but we can try linking it to hiprand.so,
       # assuming that it's in the same directory.
