@@ -41,24 +41,22 @@ public:
         {
             return false;
         }
-        bool result = true;
 
         TensorView<T> refView(reference);
         TensorView<T> implView(implementation);
 
-        auto refItr = refView.begin();
-        auto implItr = implView.begin();
+        std::atomic<bool> result(true);
 
-        while(refItr != refView.end() && implItr != implView.end())
-        {
-            T refValue = *refItr++;
-            T implValue = *implItr++;
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValue = refView.getHostValue(indices);
+            T implValue = implView.getHostValue(indices);
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
 
             if(absDiff > threshold)
             {
+                // Log error and mark as failed
                 HIPDNN_LOG_ERROR("Validation failed: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
@@ -68,11 +66,15 @@ public:
                                  threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
-                result = false;
-                break;
+                result.store(false, std::memory_order_relaxed);
             }
-        }
-        return result;
+        };
+
+        // Create and execute parallel functor
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
+
+        return result.load();
     }
 
     bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const

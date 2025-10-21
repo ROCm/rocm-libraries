@@ -315,10 +315,10 @@ protected:
 
         CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
-        EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dscaleTensor.memory(),
-                                                          graphTensorBundle.dscaleTensor.memory()));
-        EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dbiasTensor.memory(),
-                                                          graphTensorBundle.dbiasTensor.memory()));
+        EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dscaleTensor,
+                                                          graphTensorBundle.dscaleTensor));
+        EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dbiasTensor,
+                                                          graphTensorBundle.dbiasTensor));
     }
 
 private:

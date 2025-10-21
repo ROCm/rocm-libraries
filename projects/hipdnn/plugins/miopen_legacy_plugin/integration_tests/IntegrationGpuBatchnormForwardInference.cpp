@@ -286,8 +286,7 @@ protected:
         runCpuBatchnormFwd(cpuTensorBundle);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
-                                              graphTensorBundle.yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor, graphTensorBundle.yTensor));
     }
 
 private:
