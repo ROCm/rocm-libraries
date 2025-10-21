@@ -47,7 +47,14 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define DEBUG_OUTPUT 1
 
 #define STEDC_BDIM 512 // Number of threads per thread-block used in main stedc kernels
-#define STEDC_SOLVE_BDIM 64 // Number of threads per thread-block used in solver kernel
+
+// Number of threads per thread-block used in solver kernel,
+// at this point it must not exceed wave size.
+#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#define STEDC_SOLVE_BDIM 64
+#else
+#define STEDC_SOLVE_BDIM 32
+#endif
 
 // bit indicating base deflation candidate
 #define L_F_BCAND_BIT 0
@@ -1181,7 +1188,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
 
 template <int BDIM, typename S>
-__device__ inline void reduce1(S& val)
+__device__ inline void reduce1_laed(S& val)
 {
     __shared__ S lds[BDIM];
     
@@ -1199,7 +1206,7 @@ __device__ inline void reduce1(S& val)
 }
 
 template <int BDIM, typename S>
-__device__ inline void reduce3(S& val1, S& val2, S& val3)
+__device__ inline void reduce3_laed(S& val1, S& val2, S& val3)
 {
     __shared__ S lds1[BDIM];
     __shared__ S lds2[BDIM];
@@ -1227,8 +1234,8 @@ __device__ inline void reduce3(S& val1, S& val2, S& val3)
     val3 = lds3[0];
 }
 
-template <typename S, typename I>
-__device__ I slaed4_new(I n,
+template <typename S, typename I, I BDIM, bool OVERRIDE_3RD_ORDER_SCHEME = false>
+__device__ I laed4_alt(I n,
                     I i,
                     S* delta,
                     S* z,
@@ -1310,9 +1317,10 @@ __device__ I slaed4_new(I n,
         psi = S(0.);
         for(int j = 1 + hipThreadIdx_x; j <= n - 2; j += hipBlockDim_x)
         {
+            S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
-        reduce1<STEDC_SOLVE_BDIM>(psi);
+        reduce1_laed<BDIM>(psi);
 
         c = rhoinv + psi;
         w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
@@ -1382,7 +1390,7 @@ __device__ I slaed4_new(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+        reduce3_laed<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1475,7 +1483,7 @@ __device__ I slaed4_new(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+        reduce3_laed<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1563,7 +1571,7 @@ __device__ I slaed4_new(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+            reduce3_laed<BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -1599,7 +1607,7 @@ __device__ I slaed4_new(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
-        reduce1<STEDC_SOLVE_BDIM>(psi);
+        reduce1_laed<BDIM>(psi);
 
         phi = S(0.);
         for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
@@ -1607,7 +1615,7 @@ __device__ I slaed4_new(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
-        reduce1<STEDC_SOLVE_BDIM>(phi);
+        reduce1_laed<BDIM>(phi);
 
         c = rhoinv + psi + phi;
         w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
@@ -1693,7 +1701,7 @@ __device__ I slaed4_new(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+        reduce3_laed<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1708,7 +1716,7 @@ __device__ I slaed4_new(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
+        reduce3_laed<BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
         //
@@ -1716,23 +1724,26 @@ __device__ I slaed4_new(I n,
         //        its ii-th element removed.
         //
         swtch3 = false;
-        if(orgati)
+        if(!OVERRIDE_3RD_ORDER_SCHEME)
         {
-            if(w < S(0.))
+            if(orgati)
             {
-                swtch3 = true;
+                if(w < S(0.))
+                {
+                    swtch3 = true;
+                }
             }
-        }
-        else
-        {
-            if(w > S(0.))
+            else
             {
-                swtch3 = true;
+                if(w > S(0.))
+                {
+                    swtch3 = true;
+                }
             }
-        }
-        if(ii == 1 || ii == n)
-        {
-            swtch3 = false;
+            if(ii == 1 || ii == n)
+            {
+                swtch3 = false;
+            }
         }
         temp = Z(ii) / DELTA(ii);
         dw = dpsi + dphi + temp * temp;
@@ -1768,7 +1779,7 @@ __device__ I slaed4_new(I n,
         //        Calculate the new step
         //
         niter = niter + 1;
-        if(!swtch3)
+        if(OVERRIDE_3RD_ORDER_SCHEME || !swtch3)
         {
             if(orgati)
             {
@@ -1875,7 +1886,7 @@ __device__ I slaed4_new(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+        reduce3_laed<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1890,7 +1901,7 @@ __device__ I slaed4_new(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
+        reduce3_laed<BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
         dw = dpsi + dphi + temp * temp;
@@ -1947,7 +1958,7 @@ __device__ I slaed4_new(I n,
             //
             //           Calculate the new step
             //
-            if(!swtch3)
+            if(OVERRIDE_3RD_ORDER_SCHEME || !swtch3)
             {
                 if(!swtch)
                 {
@@ -2088,7 +2099,7 @@ __device__ I slaed4_new(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
+            reduce3_laed<BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -2103,7 +2114,7 @@ __device__ I slaed4_new(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
-            reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
+            reduce3_laed<BDIM>(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
             dw = dpsi + dphi + temp * temp;
@@ -2194,7 +2205,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
             rocblas_int linfo;
 
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = slaed4_new(dd, cc, etmpd + i * n, z + p1, std::abs(p), evs[i]);
+            linfo = laed4_alt<STEDC_SOLVE_BDIM>(dd, cc, etmpd + i * n, z + p1, std::abs(p), evs[i]);
 #else
             if(cc == dd - 1)
                 linfo = seq_solve_ext(dd, etmpd + i * n, z + p1, std::abs(p), evs + i, eps, ssfmin,
@@ -2203,9 +2214,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
                 linfo = seq_solve(dd, etmpd + i * n, z + p1, std::abs(p), cc, evs + i, eps, ssfmin,
                                   ssfmax);
 #endif
+            __syncthreads();
 
-            if(p < 0)
+            if((p < 0) && (threadIdx.x == 0))
+            {
                 evs[i] *= -1;
+            }
         }
     }
 }
@@ -3142,6 +3156,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                 print_device_matrix(std::cout, "D", 1, n, D, 1);
                 print_device_matrix(std::cout, "cd", 1, n, ptr_cd(n, tmpz), 1);
                 //print_device_matrix(std::cout, "etmpd", n, n, tempgemm +n*n, n);
+                print_device_matrix(std::cout, "evs", 1, n, ptr_evs(n, tmpz), 1);
 
                 //print_device_matrix(std::cout, "D", 1, n, D, 1);
 
