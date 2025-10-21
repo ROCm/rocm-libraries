@@ -57,3 +57,11 @@ public:
     }
 
 } * rocsparse_bsrmv_info;
+
+namespace rocsparse
+{
+    /********************************************************************************
+   * \brief Copy csrmv info.
+   *******************************************************************************/
+    rocsparse_status copy_bsrmv_info(rocsparse_bsrmv_info dest, const rocsparse_bsrmv_info src);
+}

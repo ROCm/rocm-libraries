@@ -20,8 +20,8 @@ using namespace hipdnn_plugin;
 class TestMiopenBatchnormPlanBuilder : public ::testing::Test
 {
 protected:
-    MiopenBatchnormPlanBuilder planBuilder;
-    HipdnnEnginePluginHandle dummyHandle;
+    MiopenBatchnormPlanBuilder _planBuilder;
+    HipdnnEnginePluginHandle _dummyHandle;
 };
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
@@ -29,7 +29,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -41,7 +41,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(false));
 
-    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -53,7 +53,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForSupportedSingle
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(true));
 
-    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
     EXPECT_TRUE(applicable);
 }
@@ -62,7 +62,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, GetWorkspaceSizeReturnsExpectedValue)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = planBuilder.getWorkspaceSize(dummyHandle, mockGraph);
+    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -75,7 +75,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedNode)
     HipdnnEnginePluginExecutionContext ctx;
 
     // Should not throw
-    EXPECT_NO_THROW(planBuilder.buildPlan(dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -105,7 +105,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
 
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(planBuilder.buildPlan(dummyHandle, graph, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
                  hipdnn_plugin::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
