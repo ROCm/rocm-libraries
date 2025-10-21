@@ -40,10 +40,12 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-// forward declaration
-template <typename>
-struct is_iterator_system;
+template <typename T>
+struct is_iterator_system
+    : _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, any_system_tag>,
+                               _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, host_system_tag>,
+                                                        _THRUST_STD::is_convertible<T, device_system_tag>>>
+{};
 
 template <typename>
 struct device_iterator_category_to_backend_system;
