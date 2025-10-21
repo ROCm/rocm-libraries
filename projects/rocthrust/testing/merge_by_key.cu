@@ -129,7 +129,7 @@ void TestMergeByKeyDispatchImplicit()
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
@@ -161,7 +161,7 @@ void TestMergeByKey(size_t n)
     const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
     const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-    THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+    if constexpr (_THRUST_STD::is_void<CompareOp>::value)
     {
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
