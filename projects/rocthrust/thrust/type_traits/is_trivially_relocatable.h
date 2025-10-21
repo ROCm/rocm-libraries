@@ -37,6 +37,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
 #  include _THRUST_STD_INCLUDE(__fwd/pair.h)
@@ -45,8 +46,8 @@
 // clang-format on
 #endif
 
-#include <type_traits>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
 #  include <tuple>
 #  include <utility>
 #endif
@@ -225,7 +226,7 @@ struct is_trivially_relocatable_impl
     : integral_constant<bool, _THRUST_STD::is_trivially_copyable<T>::value || proclaim_trivially_relocatable<T>::value>
 {};
 
-template <typename T, std::size_t N>
+template <typename T, _THRUST_STD::size_t N>
 struct is_trivially_relocatable_impl<T[N]> : is_trivially_relocatable_impl<T>
 {};
 
