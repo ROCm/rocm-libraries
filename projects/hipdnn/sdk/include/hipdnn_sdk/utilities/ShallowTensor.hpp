@@ -64,12 +64,12 @@ public:
         return _memory.count();
     }
 
-    const IMigratableMemory<T>& memory() const override
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
     }

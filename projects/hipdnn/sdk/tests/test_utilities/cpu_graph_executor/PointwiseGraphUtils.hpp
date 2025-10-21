@@ -67,7 +67,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseUnaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
-    auto variantPack = tensorBundle.toVariantPack();
+    auto variantPack = tensorBundle.toHostVariantPack();
 
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
@@ -129,7 +129,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto nodeWrap = hipdnn_plugin::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseBinaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
-    auto variantPack = tensorBundle.toVariantPack();
+    auto variantPack = tensorBundle.toHostVariantPack();
 
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }

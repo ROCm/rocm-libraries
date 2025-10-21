@@ -62,7 +62,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.inv_variance_tensor_uid()),
                                        epsilon);
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
+    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
