@@ -401,6 +401,20 @@ TEST(TestTensorView, FourDimensionalTensor)
 // Edge Cases
 // ============================================================================
 
+TEST(TestTensorView, EmptyTensor)
+{
+    std::vector<int64_t> dims = {}; // Zero dimensions
+    Tensor<float> tensor(dims);
+
+    ITensor* iTensor = &tensor;
+    TensorView<float> view(*iTensor);
+
+    auto it = view.begin();
+
+    EXPECT_EQ(it, view.end());
+    EXPECT_THROW(it++, std::out_of_range);
+}
+
 TEST(TestTensorView, SingleElement)
 {
     Tensor<int> tensor({1});
@@ -469,9 +483,9 @@ TEST(TestTensorView, ViewAndDirectAccess)
     EXPECT_EQ(tensor.getHostValue(1, 1), 3.0f);
 }
 
-// // ============================================================================
-// // STL Algorithm Compatibility
-// // ============================================================================
+// ============================================================================
+// STL Algorithm Compatibility
+// ============================================================================
 
 TEST(TestTensorView, StdCount)
 {
