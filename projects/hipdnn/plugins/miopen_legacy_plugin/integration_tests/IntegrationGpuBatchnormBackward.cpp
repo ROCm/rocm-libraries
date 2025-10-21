@@ -310,8 +310,8 @@ protected:
         runCpuBatchnormBwd(cpuTensorBundle);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
-                                              graphTensorBundle.dxTensor.memory()));
+        EXPECT_TRUE(
+            cpuRefValidation.allClose(cpuTensorBundle.dxTensor, graphTensorBundle.dxTensor));
 
         CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
