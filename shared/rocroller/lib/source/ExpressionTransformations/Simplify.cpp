@@ -398,6 +398,75 @@ namespace rocRoller
             }
         };
 
+        struct ConcatenatePartialSimplifyVisitor
+        {
+            ExpressionPtr operator()(CommandArgumentValue const& expr1,
+                                     CommandArgumentValue const& expr2) const
+            {
+                return std::visit(
+                    [](auto const& val1, auto const& val2) -> ExpressionPtr
+                    {
+                        using T1 = std::decay_t<decltype(val1)>;
+                        using T2 = std::decay_t<decltype(val2)>;
+                        if constexpr(std::is_same_v<T1, uint32_t> && std::is_same_v<T2, uint32_t>)
+                        {
+                            uint64_t result = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
+                            return literal(result);
+                        }
+                        return {};
+                    },
+                    expr1, expr2);
+            }
+
+            ExpressionPtr operator()(BitFieldExtract const& expr1,
+                                     BitFieldExtract const& expr2) const
+            {
+                if(expr1.arg == expr2.arg && resultVariableType(expr1.arg).getElementSize() == 8
+                   && expr1.offset == 0 && expr1.width == 32 && expr2.offset == 32
+                   && expr2.width == 32)
+                {
+                    return expr1.arg;
+                }
+
+                return {};
+            }
+
+            template <typename ARG1, typename ARG2>
+            ExpressionPtr operator()(ARG1 const& expr1, ARG2 const& expr2) const
+            {
+                return {};
+            }
+
+            ExpressionPtr call(ExpressionPtr expr1, ExpressionPtr expr2) const
+            {
+                return std::visit(*this, *expr1, *expr2);
+            }
+        };
+
+        Concatenate concatenatePartialSimplify(Concatenate const& expr)
+        {
+            Concatenate                cpy = expr;
+            std::vector<ExpressionPtr> operands;
+            auto const                 visitor = ConcatenatePartialSimplifyVisitor();
+
+            for(size_t i = 0; i < expr.operands.size(); ++i)
+            {
+                if(i + 1 < expr.operands.size())
+                {
+                    if(auto simplified = visitor.call(expr.operands[i], expr.operands[i + 1]))
+                    {
+                        operands.push_back(simplified);
+                        ++i;
+                        continue;
+                    }
+                }
+                operands.push_back(expr.operands[i]);
+            }
+
+            cpy.operands = std::move(operands);
+            return cpy;
+        }
+
         struct SimplifyExpressionVisitor
         {
             template <CUnary Expr>
@@ -504,16 +573,15 @@ namespace rocRoller
             ExpressionPtr operator()(Concatenate const& expr) const
             {
                 auto cpy = expr;
+                AssertFatal(!cpy.operands.empty(), "Concatenate with no operands");
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+
+                cpy = concatenatePartialSimplify(cpy);
 
                 if(cpy.operands.size() == 1)
-                    return call(cpy.operands[0]);
+                    return cpy.operands[0];
 
-                // TODO: Check if two consecutive 32-bit literals can be combined into a single 64-bit literal
-                // TODO: Check if two consecutive BitfieldCombines can be merged into their 64-bit src
-                // TODO: Check if two consecutive BitfieldExtracts can be merged into their 64-bit src
-
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
-                return std::make_shared<Expression>(std::move(cpy));
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
