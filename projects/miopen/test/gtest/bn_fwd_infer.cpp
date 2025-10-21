@@ -101,9 +101,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     const std::vector<size_t> vgd{xgridsize, ygridsize, zgridsize};
     const std::vector<size_t> vld{xlocalsize, ylocalsize, zlocalsize};
 
-    bool useFP32 = (xDesc.GetType() == miopenFloat);
-    bool useFP16 = (xDesc.GetType() == miopenHalf);
-    bool useBFP16 = (xDesc.GetType() == miopenBFloat16);
+    bool useFP32            = (xDesc.GetType() == miopenFloat);
+    bool useFP16            = (xDesc.GetType() == miopenHalf);
+    bool useBFP16           = (xDesc.GetType() == miopenBFloat16);
     const auto build_params = miopen::KernelBuildParameters{
         {"MIOPEN_USE_FP16", static_cast<int>(useFP16)},
         {"MIOPEN_USE_FP32", static_cast<int>(useFP32)},
@@ -249,7 +249,19 @@ struct GPU_bn_fwd_infer_per_act_BFP16
 {
 };
 
-std::vector<miopenActivationMode_t> ActivationConfigs() { return {miopenActivationPASTHRU}; }
+std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode)
+{
+    std::vector<miopenActivationMode_t> activations = {miopenActivationPASTHRU};
+
+    if(mode == miopenBNSpatial)
+    {
+        activations.push_back(miopenActivationRELU);
+        activations.push_back(miopenActivationCLIPPEDRELU);
+        activations.push_back(miopenActivationCLAMP);
+    }
+
+    return activations;
+}
 
 } // namespace BatchNormFwdInfer
 using namespace BatchNormFwdInfer;
@@ -347,30 +359,31 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_spatial_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                      testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_per_act_FP16,
-                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
-                                              miopenBNPerActivation))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_fwd_infer_per_act_FP16,
+    testing::Combine(
+        testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
+        testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_spatial_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                      testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_fwd_infer_per_act_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation))));
