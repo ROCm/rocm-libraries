@@ -183,7 +183,6 @@ public:
     virtual size_t elementSpace() const = 0;
     virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
-    virtual const void* hostDataOffsetFromIndex(int64_t index) = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
     virtual void
@@ -263,11 +262,6 @@ public:
     }
 
     const void* hostDataOffsetFromIndex(int64_t index) const override
-    {
-        return memory().hostData() + index;
-    }
-
-    const void* hostDataOffsetFromIndex(int64_t index) override
     {
         return memory().hostData() + index;
     }
