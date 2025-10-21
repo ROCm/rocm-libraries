@@ -6,40 +6,45 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
-    
-    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
-    
-    if(EXISTS ${ROCM_PATH}/llvm/bin)
-        set(CMAKE_CXX_COMPILER ${ROCM_PATH}/llvm/bin/clang++)
-        set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
-        message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
-    endif()
-    
-    if(NOT WIN32)
-        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-    endif()
+
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
     project(
         hipDNN
         VERSION ${MIOPEN_LEGACY_PLUGIN}
         LANGUAGES CXX)
-        
+
+    if(NOT WIN32)
+        # Only set if not already specified by user
+        if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+            set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+        endif()
+        message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+    endif()
+
+    include(GNUInstallDirs)
+
     set(CMAKE_CXX_STANDARD 17)
+    
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
     
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
     
-    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    list(
+        APPEND
+        CMAKE_MODULE_PATH
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+        ${ROCM_PATH}/lib/cmake/hip
+        ${HIP_DIR}/cmake
+    )
     
     # Enable testing for standalone build
     option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
     
-    if(NOT HIP_DNN_SKIP_TESTS)
-        enable_testing()
-    endif()
-
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS
         -Werror                                  # Treat all warnings as errors
         -Wall                                    # Enable most common warnings
@@ -58,6 +63,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         -Winit-self                              # Warn about variables initialized with itself
         -Wunreachable-code                       # Warn about unreachable code
         -Wno-error=unused-command-line-argument  # Disable error for unused command line arguments
+        -Wswitch-default                         # Warn if a switch statement does not have a default case
     )
     
     # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files; remove when fixed.
@@ -73,8 +79,9 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hip REQUIRED)
     find_package(hipdnn_sdk CONFIG REQUIRED)
     
-    # Setup testing dependencies for standalone build
+    # Setup testing dependencies & tests for standalone build
     include(Dependencies)
+    include(Tests)
     
 else()
     message(STATUS "Building miopen legacy plugin as a dependency")
@@ -94,8 +101,11 @@ add_library(miopen_legacy_plugin_private
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenConvFwdPlan.cpp
+    engines/plans/MiopenConvBwdPlan.cpp
+    engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     EngineManager.cpp
+    MiopenActivationDescriptor.cpp
     MiopenHandleFactory.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
@@ -111,9 +121,6 @@ target_include_directories(miopen_legacy_plugin_private
 )
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_legacy_plugin_private PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_private)
@@ -140,15 +147,27 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin)
 endif()
 
-set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
-
 if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
+
+    if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+        create_test_name_validation_target()
+        
+        finalize_custom_check_target()
+        finalize_unit_check_target()
+        finalize_integration_check_target()
+        
+        add_dependencies(check validate_test_names)
+        add_dependencies(check_ctest validate_test_names)
+       
+        # For standalone builds we need to install the ctest files
+        install_miopen_legacy_plugin_ctest_files()
+    endif()
 endif()
 
 install(
     TARGETS miopen_legacy_plugin
     EXPORT miopen-legacy-plugin
-    LIBRARY DESTINATION ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}
+    LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )

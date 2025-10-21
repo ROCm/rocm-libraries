@@ -15,6 +15,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new cmake option, `BENCHMARK_USE_AMDSMI`. It is set to `OFF` by default. When this option is set to `ON`, it lets benchmarks use AMD SMI to output more GPU statistics.
 * Added `apply_config_improvements.py`, which generates improved configs by taking the best specializations from old and new configs.
   * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
+* Added the first tested example program for `device_search`, which is linked in the documentation.
 
 ### Changed
 

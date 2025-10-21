@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -14,7 +15,9 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
@@ -124,7 +127,10 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        const std::array<const char*, 1> paths = {PLUGIN_PATH};
+        auto pluginPath
+            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
@@ -218,6 +224,8 @@ protected:
         }
 
         yTensorAttr->set_data_type(inputDataType);
+        yTensorAttr->set_dim(graphTensorBundle.yTensor.dims());
+        yTensorAttr->set_stride(graphTensorBundle.yTensor.strides());
 
         // Validate and build graph
         auto result = graph->validate();
@@ -256,7 +264,7 @@ protected:
             cpuTensorBundle.meanTensor,
             cpuTensorBundle.varianceTensor,
             cpuTensorBundle.yTensor,
-            1e-3);
+            BATCHNORM_DEFAULT_EPSILON);
     }
 
     void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)

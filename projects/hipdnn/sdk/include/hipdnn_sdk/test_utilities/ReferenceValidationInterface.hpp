@@ -6,6 +6,7 @@
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <type_traits>
 
 namespace hipdnn_sdk
@@ -21,6 +22,7 @@ class IReferenceValidation
 public:
     virtual ~IReferenceValidation() = default;
 
+    virtual bool allClose(const ITensor& reference, const ITensor& implementation) = 0;
     virtual bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation)
         = 0;
 };
