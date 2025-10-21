@@ -46,7 +46,7 @@ def withWorkingDir(Closure body) {
     }
 }
 
-def runDbSyncJob(def utils)
+def runDbSyncJob(def utils, def nodeLabel = null)
 {
     script {
         withWorkingDir {
@@ -55,7 +55,8 @@ def runDbSyncJob(def utils)
                                 make_targets: 'test_db_sync',
                                 execute_cmd: './bin/test_db_sync',
                                 needs_gpu:false,
-                                build_install: true)
+                                build_install: true,
+                                node_label: nodeLabel)
         }
     }
 }
@@ -165,6 +166,10 @@ pipeline {
             name: "DBSYNC_TEST",
             defaultValue: true,
             description: "Enable database synchronization testing stages")
+        booleanParam(
+            name: "DBSYNC_SAVE_DB",
+            defaultValue: true,
+            description: "Enable saving the cleaned database to the artifact")
         string(name: "DOCKER_IMAGE_OVERRIDE",
             defaultValue: '',
             description: "")
@@ -352,7 +357,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runDbSyncJob(utils)
+                        runDbSyncJob(utils, "gfx908")
                     }
                     post {
                         always {
@@ -370,7 +375,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runDbSyncJob(utils)
+                        runDbSyncJob(utils, "gfx90a")
                     }
                     post {
                         always {
@@ -388,7 +393,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        runDbSyncJob(utils)
+                        runDbSyncJob(utils, "gfx942")
                     }
                     post {
                         always {

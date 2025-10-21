@@ -71,6 +71,7 @@ def cmake_build(Map conf=[:]){
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def build_type_debug = (conf.get("build_type",'release') == 'debug')
     def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.REPO_DIR}/install")
+    def node_label = conf.get("node_label", "")
 
     def mlir_args = " -DMIOPEN_USE_MLIR=" + conf.get("mlir_build", "ON")
     // WORKAROUND_ISSUE_3192 Disabling MLIR for debug builds since MLIR generates sanitizer errors.
@@ -181,14 +182,54 @@ def cmake_build(Map conf=[:]){
     """
 
     echo cmd
-    sh cmd
+    def ret = sh(script: cmd, returnStatus: true)
+    def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"
+    if (ret != 0) {
+
+        if (execute_cmd.contains("test_db_sync") && env.DBSYNC_SAVE_DB == "true") {
+            echo "DB SYNC test failed, saving the cleaned DB"
+            
+            def filePatterns = [
+                "gfx908": "gfx90878",
+                "gfx90a": "gfx90a68 gfx90a6e", 
+                "gfx942": "gfx942130",
+                "gfx950": "gfx942e4"  
+            ]
+            
+            if (filePatterns.containsKey(node_label)) {
+                def patterns = filePatterns[node_label]
+                sh """
+                cd ${db_dir}
+                
+                FILES_TO_TAR=""
+                for pattern in ${patterns}; do
+                    if ls \${pattern}.HIP.fdb.txt \${pattern}.db.txt 1> /dev/null 2>&1; then
+                        FILES_TO_TAR="\$FILES_TO_TAR \${pattern}.HIP.fdb.txt \${pattern}.db.txt"
+                    fi
+                done
+                
+                if [ -n "\$FILES_TO_TAR" ]; then
+                    tar -czf dbsync-${node_label}-\$(date +%Y%m%d-%H%M%S).tar.gz \$FILES_TO_TAR
+                    mv dbsync-*.tar.gz ${env.WORKSPACE}/${env.REPO_DIR}/build/
+                    echo "Archived: \$FILES_TO_TAR"
+                else
+                    echo "No DB files found for ${node_label}"
+                fi
+                """
+            } else {
+                echo "Node label '${node_label}' not configured, not saving the DB"
+            }
+            archiveArtifacts artifacts: "build/dbsync-*.tar.gz", allowEmptyArchive: true, fingerprint: true
+        }
+
+    }
 
     // Only archive from master or develop
     if (package_build == true && (env.BRANCH_NAME == "develop" || env.BRANCH_NAME == "master" ||
         params.PERF_TEST_ARCHIVE == true)) {
         archiveArtifacts artifacts: "build/*.deb", allowEmptyArchive: true, fingerprint: true
         archiveArtifacts artifacts: "build/*.rpm", allowEmptyArchive: true, fingerprint: true
-        stash includes: "build/*tar.gz", name: 'miopen_tar'
+        stash includes: "build/*tar.gz", excludes: "build/dbsync-*.tar.gz", name: 'miopen_tar'
     }
 }
 
