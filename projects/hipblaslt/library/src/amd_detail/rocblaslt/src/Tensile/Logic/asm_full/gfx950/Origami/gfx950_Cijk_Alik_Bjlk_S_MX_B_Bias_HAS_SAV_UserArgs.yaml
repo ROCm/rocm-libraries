@@ -2896,7 +2896,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -3791,8 +3791,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
-    NonTemporalB: 4
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -4015,7 +4015,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -4463,7 +4463,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -4688,7 +4688,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -4912,7 +4912,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -5135,7 +5135,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -5583,7 +5583,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -6032,7 +6032,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -6255,7 +6255,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4

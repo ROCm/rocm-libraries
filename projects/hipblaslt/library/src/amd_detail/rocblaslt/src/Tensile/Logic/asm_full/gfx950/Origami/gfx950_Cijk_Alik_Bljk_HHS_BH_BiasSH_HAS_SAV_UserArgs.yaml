@@ -51511,7 +51511,7 @@
     NonDTLTailLoopA: true
     NonDTLTailLoopB: true
     NonTemporal: -1
-    NonTemporalA: 1
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 7
     NonTemporalD: 5
@@ -52633,7 +52633,7 @@
     NonDTLTailLoopB: true
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 2
+    NonTemporalB: 0
     NonTemporalC: 0
     NonTemporalD: 5
     NonTemporalE: 0

@@ -47178,8 +47178,8 @@
     NoReject: false
     NoTailLoop: false
     NonTemporal: -1
-    NonTemporalA: 4
-    NonTemporalB: 4
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 0
     NonTemporalD: 0
     NonTemporalE: 0
@@ -47612,8 +47612,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: true
     NonTemporal: -1
-    NonTemporalA: 1
-    NonTemporalB: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 1
     NonTemporalD: 1
     NonTemporalE: 0
@@ -47837,8 +47837,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: true
     NonTemporal: -1
-    NonTemporalA: 7
-    NonTemporalB: 2
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 3
     NonTemporalD: 3
     NonTemporalE: 0

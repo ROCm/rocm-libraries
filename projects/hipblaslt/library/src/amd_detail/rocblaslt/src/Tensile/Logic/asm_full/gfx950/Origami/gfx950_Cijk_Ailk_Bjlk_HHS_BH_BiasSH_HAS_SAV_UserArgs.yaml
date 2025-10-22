@@ -42018,7 +42018,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 2
+    NonTemporalB: 0
     NonTemporalC: 0
     NonTemporalD: 2
     NonTemporalE: 0
@@ -42242,8 +42242,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 3
-    NonTemporalB: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 7
     NonTemporalD: 2
     NonTemporalE: 0
