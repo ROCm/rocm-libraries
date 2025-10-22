@@ -1188,7 +1188,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 }
 
 template <int BDIM, typename S>
-__device__ inline void reduce1_laed(S& val)
+__device__ inline void reduce1_lds(S& val)
 {
     __shared__ S lds[BDIM];
 
@@ -1206,8 +1206,22 @@ __device__ inline void reduce1_laed(S& val)
     val = lds[0];
 }
 
+template <int /* BDIM */, typename S>
+__device__ inline void reduce1_dpp(S& val)
+{
+    val += __shfl_down(val, 1);
+    val += __shfl_down(val, 2);
+    val += __shfl_down(val, 4);
+    val += __shfl_down(val, 8);
+    val += __shfl_down(val, 16);
+    if(warpSize > 32)
+        val += __shfl_down(val, 32);
+
+    val = __shfl(val, 0);
+}
+
 template <int BDIM, typename S>
-__device__ inline void reduce3_laed(S& val1, S& val2, S& val3)
+__device__ inline void reduce3_lds(S& val1, S& val2, S& val3)
 {
     __shared__ S lds1[BDIM];
     __shared__ S lds2[BDIM];
@@ -1235,7 +1249,40 @@ __device__ inline void reduce3_laed(S& val1, S& val2, S& val3)
     val3 = lds3[0];
 }
 
-template <typename S, typename I, I BDIM, bool OVERRIDE_3RD_ORDER_SCHEME = false>
+template <int /* BDIM */, typename S>
+__device__ inline void reduce3_dpp(S& val1, S& val2, S& val3)
+{
+    val1 += __shfl_down(val1, 1);
+    val1 += __shfl_down(val1, 2);
+    val1 += __shfl_down(val1, 4);
+    val1 += __shfl_down(val1, 8);
+    val1 += __shfl_down(val1, 16);
+
+    val2 += __shfl_down(val2, 1);
+    val2 += __shfl_down(val2, 2);
+    val2 += __shfl_down(val2, 4);
+    val2 += __shfl_down(val2, 8);
+    val2 += __shfl_down(val2, 16);
+
+    val3 += __shfl_down(val3, 1);
+    val3 += __shfl_down(val3, 2);
+    val3 += __shfl_down(val3, 4);
+    val3 += __shfl_down(val3, 8);
+    val3 += __shfl_down(val3, 16);
+
+    if(warpSize > 32)
+    {
+        val1 += __shfl_down(val1, 32);
+        val2 += __shfl_down(val2, 32);
+        val3 += __shfl_down(val3, 32);
+    }
+
+    val1 = __shfl(val1, 0);
+    val2 = __shfl(val2, 0);
+    val3 = __shfl(val3, 0);
+}
+
+template <typename S, typename I, I BDIM = 32, bool OVERRIDE_3RD_ORDER_SCHEME = false>
 __device__ I laed4_alt(I n,
                        I i,
                        S* delta,
@@ -1246,11 +1293,26 @@ __device__ I laed4_alt(I n,
                        S ssfmin = std::numeric_limits<S>::min(),
                        I MAXIT = 50)
 {
-    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
-    auto lam_sqr = [](auto x) -> auto { return x * x; };
-    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
-    auto lam_max = [](auto x, auto y) -> auto { return std::max(x, y); };
-    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
+    auto lam_abs = [](auto x) -> auto
+    {
+        return std::abs(x);
+    };
+    auto lam_sqr = [](auto x) -> auto
+    {
+        return x * x;
+    };
+    auto lam_sqrt = [](auto x) -> auto
+    {
+        return std::sqrt(x);
+    };
+    auto lam_max = [](auto x, auto y) -> auto
+    {
+        return std::max(x, y);
+    };
+    auto lam_min = [](auto x, auto y) -> auto
+    {
+        return std::min(x, y);
+    };
 
     i = i + 1;
     S zz[3]{};
@@ -1306,7 +1368,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
-        reduce1_laed<BDIM>(psi);
+        reduce1_dpp<BDIM>(psi);
 
         c = rhoinv + psi;
         w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
@@ -1376,7 +1438,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3_laed<BDIM>(psi, dpsi, erretm);
+        reduce3_dpp<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1469,7 +1531,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3_laed<BDIM>(psi, dpsi, erretm);
+        reduce3_dpp<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1557,7 +1619,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce3_laed<BDIM>(psi, dpsi, erretm);
+            reduce3_dpp<BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -1593,7 +1655,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
-        reduce1_laed<BDIM>(psi);
+        reduce1_dpp<BDIM>(psi);
 
         phi = S(0.);
         for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
@@ -1601,7 +1663,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
-        reduce1_laed<BDIM>(phi);
+        reduce1_dpp<BDIM>(phi);
 
         c = rhoinv + psi + phi;
         w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
@@ -1687,7 +1749,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3_laed<BDIM>(psi, dpsi, erretm);
+        reduce3_dpp<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1702,7 +1764,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce3_laed<BDIM>(phi, dphi, erretm2);
+        reduce3_dpp<BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
         //
@@ -1872,7 +1934,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce3_laed<BDIM>(psi, dpsi, erretm);
+        reduce3_dpp<BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1887,7 +1949,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce3_laed<BDIM>(phi, dphi, erretm2);
+        reduce3_dpp<BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
         dw = dpsi + dphi + temp * temp;
@@ -2085,7 +2147,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce3_laed<BDIM>(psi, dpsi, erretm);
+            reduce3_dpp<BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -2100,7 +2162,7 @@ __device__ I laed4_alt(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
-            reduce3_laed<BDIM>(phi, dphi, erretm2);
+            reduce3_dpp<BDIM>(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
             dw = dpsi + dphi + temp * temp;
@@ -2188,23 +2250,19 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
             // 'etmpd' will be updated with the distances D - lambda_i.
             // deflated values are not changed.
             rocblas_int linfo;
+            S dlam{};
 
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            linfo = laed4_alt<S, rocblas_int, STEDC_SOLVE_BDIM>(dd, cc, etmpd + i * n, z + p1,
-                                                                std::abs(p), evs[i]);
+            linfo = slaed4(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
 #else
-            if(cc == dd - 1)
-                linfo = seq_solve_ext(dd, etmpd + i * n, z + p1, std::abs(p), evs + i, eps, ssfmin,
-                                      ssfmax);
-            else
-                linfo = seq_solve(dd, etmpd + i * n, z + p1, std::abs(p), cc, evs + i, eps, ssfmin,
-                                  ssfmax);
-#endif
+            linfo = laed4_alt<S, rocblas_int, STEDC_SOLVE_BDIM>(dd, cc, etmpd + i * n, z + p1,
+                                                                std::abs(p), dlam);
             __syncthreads();
+#endif
 
-            if((p < 0) && (threadIdx.x == 0))
+            if(threadIdx.x == 0)
             {
-                evs[i] *= -1;
+                evs[i] = (p < 0) ? -dlam : dlam;
             }
         }
     }
