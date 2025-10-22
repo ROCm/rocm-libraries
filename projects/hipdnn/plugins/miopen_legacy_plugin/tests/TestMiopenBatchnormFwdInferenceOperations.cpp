@@ -21,7 +21,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/BatchnormCommon.hpp"
-#include "common/GoldenReference.hpp"
+#include "common/GoldenReferenceGpu.hpp"
 #include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;

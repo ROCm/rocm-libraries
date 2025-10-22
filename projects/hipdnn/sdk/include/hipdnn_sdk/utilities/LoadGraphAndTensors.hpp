@@ -75,7 +75,7 @@ struct GraphAndTensorMap
         return *data_objects::GetGraph(graphBuffer.data());
     }
 
-    hipdnn_plugin::GraphWrapper graphWrapper() const
+    hipdnn_plugin::GraphWrapper createGraphWrapper() const
     {
         return hipdnn_plugin::GraphWrapper{graphBuffer.data(), graphBuffer.size()};
     }
@@ -96,7 +96,7 @@ struct GraphAndTensorMap
     {
         std::unordered_map<int64_t, std::unique_ptr<ITensor>> outputTensorMap;
 
-        auto tensorAttributeMap = graphWrapper().getTensorMap();
+        auto tensorAttributeMap = createGraphWrapper().getTensorMap();
         for(int64_t uid : outputTensorUids)
         {
             auto dataType = tensorAttributeMap[uid]->data_type();
@@ -124,7 +124,7 @@ struct GraphAndTensorMap
                          float absTolerance,
                          float relTolerance)
     {
-        auto tensorAttributeMap = graphWrapper().getTensorMap();
+        auto tensorAttributeMap = createGraphWrapper().getTensorMap();
 
         for(auto& mapPair : referenceTensors)
         {
