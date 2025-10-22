@@ -33,7 +33,7 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestFlatbufferTensorAttributesUtils.cpp
     test_utilities/TestLoggingUtils.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
-    test_utilities/TestTempDirectory.cpp
+    test_utilities/TestScopedDirectory.cpp
     test_utilities/TestTestSeeds.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp

@@ -7,12 +7,12 @@
 namespace hipdnn_sdk::test_utilities
 {
 
-class TempDirectory
+class ScopedDirectory
 {
     std::filesystem::path _path;
 
 public:
-    TempDirectory(std::filesystem::path path)
+    ScopedDirectory(std::filesystem::path path)
     {
         if(std::filesystem::create_directory(path))
         {
@@ -20,7 +20,7 @@ public:
         }
         else
         {
-            throw std::runtime_error("TempDirectory: Directory already exists");
+            throw std::runtime_error("ScopedDirectory: Directory already exists");
         }
     }
     const std::filesystem::path& path() const
@@ -28,11 +28,11 @@ public:
         return _path;
     }
 
-    TempDirectory(const TempDirectory&) = delete;
-    TempDirectory& operator=(const TempDirectory&) = delete;
-    TempDirectory(TempDirectory&&) = default;
-    TempDirectory& operator=(TempDirectory&&) = default;
-    ~TempDirectory()
+    ScopedDirectory(const ScopedDirectory&) = delete;
+    ScopedDirectory& operator=(const ScopedDirectory&) = delete;
+    ScopedDirectory(ScopedDirectory&&) = default;
+    ScopedDirectory& operator=(ScopedDirectory&&) = default;
+    ~ScopedDirectory()
     {
         if(!_path.empty())
         {

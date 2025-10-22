@@ -10,6 +10,7 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_sdk/test_utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Visitor.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
@@ -57,21 +58,10 @@ inline std::unique_ptr<ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const hipdnn_sdk::data_objects::TensorAttributes& attributes)
 {
-    std::vector<int64_t> dims(attributes.dims()->begin(), attributes.dims()->end());
-    std::vector<int64_t> strides(attributes.strides()->begin(), attributes.strides()->end());
+    auto tensor = hipdnn_sdk::test_utilities::createTensorFromAttribute(attributes);
+    detail::fillTensorFromFile(*tensor, filepath);
 
-    auto createTensor = [&](auto dataType) {
-        using DataType = std::remove_const_t<decltype(dataType)>;
-
-        auto tensor = std::unique_ptr<ITensor>(new Tensor<DataType>(dims, strides));
-
-        detail::fillTensorFromFile(*tensor, filepath);
-
-        return std::move(tensor);
-    };
-
-    return std::visit(createTensor,
-                      test_utilities::datatypeToNativeVariant(attributes.data_type()));
+    return tensor;
 }
 
 struct GraphAndTensorMap
@@ -223,6 +213,10 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     std::unordered_map<int64_t, std::unique_ptr<ITensor>> tensorMap;
 
+    if(graph->tensors() == nullptr || graph->tensors()->empty())
+    {
+        throw std::runtime_error("Graph needs to include at least one tensor");
+    }
     for(auto attributes : *graph->tensors())
     {
         auto tensorPath

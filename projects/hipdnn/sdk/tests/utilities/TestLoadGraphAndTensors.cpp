@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/test_utilities/ExecuteOnLeavingScope.hpp>
 #include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
+#include <hipdnn_sdk/test_utilities/ScopedExecute.hpp>
 #include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
@@ -22,7 +22,7 @@ TEST(TestFillTensorFromFile, InvalidPath)
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
-    hipdnn_sdk::test_utilities::TempDirectory dir("oijaweorij33");
+    hipdnn_sdk::test_utilities::ScopedDirectory dir("oijaweorij33");
     EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
@@ -39,8 +39,7 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    test_utilities::ExecuteOnLeavingScope fileDeleter(
-        [filename]() { std::filesystem::remove(filename); });
+    test_utilities::ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
