@@ -7,7 +7,7 @@
 #include <ostream>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 namespace test_conv_common

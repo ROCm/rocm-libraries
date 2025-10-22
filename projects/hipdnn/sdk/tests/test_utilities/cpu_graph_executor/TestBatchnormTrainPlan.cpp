@@ -9,7 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
