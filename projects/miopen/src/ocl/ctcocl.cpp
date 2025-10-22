@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,45 +118,6 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
     int beta_offset  = alpha_offset + max_time_step * batch_size * max_S_len;
     int batch_bytes  = 4 * batch_size; // batch size multiples sizeof(int)
 
-#if MIOPEN_BACKEND_OPENCL
-    auto q = handle.GetStream();
-
-    cl_context ctx;
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-
-    clEnqueueWriteBuffer(q, workSpace, CL_FALSE, 0, batch_bytes, inputLengths, 0, nullptr, nullptr);
-    clEnqueueWriteBuffer(
-        q, workSpace, CL_FALSE, batch_bytes, batch_bytes, labelLengths, 0, nullptr, nullptr);
-    clEnqueueWriteBuffer(q,
-                         workSpace,
-                         CL_FALSE,
-                         2ULL * batch_bytes,
-                         batch_bytes,
-                         labels_offset.data(),
-                         0,
-                         nullptr,
-                         nullptr);
-    clEnqueueWriteBuffer(q,
-                         workSpace,
-                         CL_FALSE,
-                         3ULL * batch_bytes,
-                         batch_bytes,
-                         repeat.data(),
-                         0,
-                         nullptr,
-                         nullptr);
-    clEnqueueWriteBuffer(q,
-                         workSpace,
-                         CL_FALSE,
-                         4ULL * batch_bytes,
-                         total_label_len * sizeof(int),
-                         labels,
-                         0,
-                         nullptr,
-                         nullptr);
-
-#elif MIOPEN_BACKEND_HIP
-
     hipMemcpyWithStream(static_cast<int*>(workSpace),
                         inputLengths,
                         batch_bytes,
@@ -182,9 +143,8 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                         total_label_len * sizeof(int),
                         hipMemcpyHostToDevice,
                         handle.GetStream());
-#endif
 
-    std::string program_name = "MIOpenCTCLoss.cl";
+    std::string program_name = "MIOpenCTCLoss.cpp";
     std::string kernel_name  = "CTCLossGPU";
 
     std::string network_config =
@@ -270,25 +230,12 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         params += " -DSOFTMAX_APPLIED=" + std::to_string(static_cast<int>(apply_softmax_layer)) +
                   " -DSOFTMAX_LEN=" + std::to_string(class_sz);
 
-#if MIOPEN_BACKEND_OPENCL
-        if(class_sz <= lcl_mem_per_grp)
-            params += " -DOPT_LCL_MEM_GRAD";
-#endif
-
-        if(static_cast<size_t>(max_S_len) * 2
-#if MIOPEN_BACKEND_OPENCL
-               + class_sz
-#endif
-           <= lcl_mem_per_grp)
+        if(static_cast<size_t>(max_S_len) * 2 <= lcl_mem_per_grp)
         {
             params += " -DOPT_LCL_MEM_BETA";
         }
 
-        if(static_cast<size_t>(max_S_len) * 3
-#if MIOPEN_BACKEND_OPENCL
-               + class_sz
-#endif
-           <= lcl_mem_per_grp)
+        if(static_cast<size_t>(max_S_len) * 3 <= lcl_mem_per_grp)
         {
             params += " -DOPT_LCL_MEM_LB";
         }
@@ -298,15 +245,10 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         else
             params += " -DMIOPEN_USE_FP32=1 -DOPT_ATOMIC_LOGADDEXP";
 
-#if MIOPEN_BACKEND_HIP
         params += " -DUSE_HIP_BACKEND=1";
-#elif MIOPEN_BACKEND_OPENCL
-        params += " -DUSE_OCL_BACKEND=1";
-#endif
 
         const std::vector<size_t> vld{work_per_grp, 1, 1};
         const std::vector<size_t> vgd{glb_sz, 1, 1};
-
         handle.AddKernel(kernel_name, network_config, program_name, kernel_name, vld, vgd, params)(
             probs, workSpace, workSpace, losses, gradients);
     }
