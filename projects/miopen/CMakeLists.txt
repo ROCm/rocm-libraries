@@ -619,14 +619,7 @@ else()
     set(PERFDB_SUFFIX ".txt")
 endif()
 
-# The default behaviour when no list of AMDGPU targets is supplied should be to
-# install for all targets; this was the behaviour before MIOPEN_AMDGPU_TARGETS
-# was added.
-set(VALID_AMDGPU_TARGETS gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1150 gfx1151)
-set(MIOPEN_AMDGPU_TARGETS "${VALID_AMDGPU_TARGETS}" CACHE LIST "List of targets for which to install databases")
-
-# This list should be updated when a new KDB file is added to the project
-set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
+# Per-GPU database artifact installation (PDB's, FDB's KDB's)
 
 function(unpack_db db_bzip2_file)
     get_filename_component(__fname ${db_bzip2_file} NAME_WLE)
@@ -650,8 +643,6 @@ function(unpack_db db_bzip2_file)
     endif()
     set(__fname ${__fname} PARENT_SCOPE)
 endfunction()
-
-# Begin KDB package creation
 
 function(install_kdb FILE_NAME COMPONENT_NAME)
     if(EXISTS "${FILE_NAME}")
@@ -698,6 +689,15 @@ function(add_gpu_target gfx_target)
         endif()
     endforeach()
 endfunction()
+
+# The default behaviour when no list of AMDGPU targets is supplied should be to
+# install for all targets; this was the behaviour before MIOPEN_AMDGPU_TARGETS
+# was added.
+set(VALID_AMDGPU_TARGETS gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1010 gfx1011 gfx1012 gfx1030 gfx1032 gfx1035 gfx1036 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151)
+set(MIOPEN_AMDGPU_TARGETS "${VALID_AMDGPU_TARGETS}" CACHE LIST "List of targets for which to install databases")
+
+# This list should be updated when a new KDB file is added to the project
+set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
 
 foreach(_gfx_target ${MIOPEN_AMDGPU_TARGETS})
     add_gpu_target(${_gfx_target})
