@@ -444,6 +444,11 @@ namespace rocRoller
             }
         };
 
+        /**
+         * Merges consecutive Concatenate operands where possible.
+         * Checks if a pair of operands are two 32-bit BitFieldExtracts from the same 64-bit source
+         * or two constant 32-bit literals that can be combined into a 64-bit literal.
+         */
         Concatenate concatenatePartialSimplify(Concatenate const& expr)
         {
             Concatenate                cpy = expr;
@@ -466,6 +471,89 @@ namespace rocRoller
 
             cpy.operands = std::move(operands);
             return cpy;
+        }
+
+        struct BitfieldCombineSinkVisitor
+        {
+            BitfieldCombineSinkVisitor(ExpressionPtr src,
+                                       uint32_t      srcOffset,
+                                       uint32_t      dstOffset,
+                                       uint32_t      width)
+                : m_src(src)
+                , m_srcOffset(srcOffset)
+                , m_dstOffset(dstOffset)
+                , m_width(width)
+            {
+            }
+
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
+            {
+                uint32_t combineStartBit = expr.dstOffset;
+                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
+                uint32_t startBit        = m_dstOffset;
+                uint32_t endBit          = m_dstOffset + m_width - 1;
+                // Give up if BitfieldCombines overlap
+                if(combineStartBit <= endBit && combineEndBit >= startBit)
+                    return {};
+
+                // Recusively sink into nested BitfieldCombines
+                BitfieldCombine cpy = expr;
+                cpy.rhs             = call(expr.rhs);
+
+                if(!cpy.rhs)
+                    return {};
+
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(CommandArgumentValue const& expr) const
+            {
+                auto sunkBitfieldCombine
+                    = tryEvaluate(bfc(m_src, literal(expr), m_srcOffset, m_dstOffset, m_width));
+
+                if(!sunkBitfieldCombine.has_value())
+                    return {};
+
+                return literal(sunkBitfieldCombine.value());
+            }
+
+            template <typename Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                return {};
+            }
+
+            ExpressionPtr call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return expr;
+
+                return std::visit(*this, *expr);
+            }
+
+        private:
+            ExpressionPtr    m_src;
+            uint32_t         m_srcOffset;
+            mutable uint32_t m_dstOffset;
+            uint32_t         m_width;
+        };
+
+        /**
+         * Tries to sink a BitfieldCombine into its destination if its source is a literal.
+         * Only done in nested BitfieldCombines where the destination is another BitfieldCombine.
+         */
+        ExpressionPtr sinkBitfieldCombine(BitfieldCombine const& expr)
+        {
+            BitfieldCombine cpy = expr;
+
+            auto lhsEval = tryEvaluate(cpy.lhs);
+            if(!lhsEval.has_value())
+                return {};
+
+            auto const visitor
+                = BitfieldCombineSinkVisitor{cpy.lhs, cpy.srcOffset, cpy.dstOffset, cpy.width};
+
+            return visitor.call(expr.rhs);
         }
 
         struct SimplifyExpressionVisitor
@@ -553,6 +641,10 @@ namespace rocRoller
 
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
+
+                auto sunkBitfieldCombine = sinkBitfieldCombine(cpy);
+                if(sunkBitfieldCombine)
+                    return sunkBitfieldCombine;
 
                 return std::make_shared<Expression>(cpy);
             }

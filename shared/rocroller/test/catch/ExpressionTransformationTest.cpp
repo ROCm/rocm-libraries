@@ -979,13 +979,11 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         auto expr  = bfc(reg32, zero64, 0, 16, 8);
         auto expr2 = bfc(ones32, expr, 0, 24, 16);
 
-        auto                                   expect1 = bfc(reg32, zero32, 0, 16, 8);
-        auto                                   expect2 = bfc(ones32, expect1, 0, 24, 8);
+        auto expect1 = bfc(reg32, Expression::literal(0xff000000ul, DataType::UInt32), 0, 16, 8);
         std::vector<Expression::ExpressionPtr> operands{
-            expect2, Expression::literal(0x000000fful, DataType::UInt32)};
+            expect1, Expression::literal(0x000000fful, DataType::UInt32)};
         auto expected = concat(operands, DataType::UInt64);
 
-        // TODO: the BitfieldCombine in expect_2 could be folded into zero32
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
 
@@ -1049,13 +1047,11 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         auto expr  = bfc(reg32, zero128, 0, 90, 12);
         auto expr2 = bfc(four, expr, 0, 110, 8);
 
-        auto                                   expect1 = bfc(reg32, zero32, 0, 26, 6);
-        auto                                   expect2 = bfc(reg32, zero32, 6, 0, 6);
-        auto                                   expect3 = bfc(four, expect2, 0, 14, 8);
-        std::vector<Expression::ExpressionPtr> operands{zero64, expect1, expect3};
+        auto expect1 = bfc(reg32, zero32, 0, 26, 6);
+        auto expect2 = bfc(reg32, Expression::literal(0x00010000ul, DataType::UInt32), 6, 0, 6);
+        std::vector<Expression::ExpressionPtr> operands{zero64, expect1, expect2};
         auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
 
-        // TODO: the 4 in BitfieldCombine in expect_3 could be folded into zero32
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
 }
