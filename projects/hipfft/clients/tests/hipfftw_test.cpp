@@ -80,9 +80,20 @@ namespace
         static const size_t io_byte_size_limit = get_io_byte_size_limit();
         return io_byte_size_limit;
     }
-    // for readability of template specializations
-    constexpr bool valid_value          = true;
-    constexpr int  min_unsupported_rank = 4;
+
+    // Random value generators are defined and used herein for the generation of
+    // argument-validation and/or functional test parameters. In the latter
+    // case, only valid (*and* supported) parameter values must be generated
+    // whereas invalid values need to be (knowingly) generated and thrown in
+    // the mix in the former case. To that end, several get_random* functions
+    // defined below are templated with a ``bool`` parameter reflecting
+    // whether a valid ('true' specialization) or invalid ('false' specialization)
+    // random parameter value is to be returned.
+    // The following constexpr is a self-explanatory placeholder introduced to
+    // improve code readability w.r.t. template specializations used in parameter
+    // generations here below, e.g., "get_random_rank<!valid_value>()" is
+    // a lot more intuitive to understand than "get_random_rank<false>()"
+    constexpr bool valid_value = true;
 
     std::ranlux24_base& get_pseudo_rng()
     {
@@ -952,10 +963,6 @@ namespace
                 {
                     return false;
                 }
-                catch(...)
-                {
-                    throw; // escalate the unexpected exception
-                }
             }
             return true;
         }
@@ -1075,6 +1082,8 @@ namespace
 
     std::vector<int> arg_validation_runtime_rank_range()
     {
+        constexpr int min_unsupported_rank = 4;
+
         std::vector<int> ret = {
             get_random_rank<!valid_value>(), // invalid
             get_random_rank<valid_value, min_unsupported_rank>(), // valid but unsupported
@@ -1377,10 +1386,6 @@ namespace
                 {
                     safe_to_touch_nonnull_io = false;
                     return sizeof(hipfftw_complex_t<prec>); // some nonzero value
-                }
-                catch(...)
-                {
-                    throw;
                 }
             };
             const size_t input_data_size  = compute_io_size(fft_io::fft_io_in);

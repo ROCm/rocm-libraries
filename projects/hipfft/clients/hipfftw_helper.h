@@ -374,7 +374,7 @@ public:
 // function(s) to consider
 enum hipfftw_plan_creation_func : unsigned
 {
-    NONE        = 0x0, // not to be used (exceptfor validating values)
+    NONE        = 0x0, // not to be used (except for validating values)
     PLAN_DFT_ND = 0x1 << 0,
     PLAN_DFT    = 0x1 << 1,
     PLAN_MANY   = 0x1 << 2,
@@ -998,7 +998,7 @@ private:
                 ret = rank_is_valid_for_hipfftw(batch_rank);
                 break;
             default:
-                throw std::runtime_error("hipfftw_helper::has_valid_batych_rank internal error "
+                throw std::runtime_error("hipfftw_helper::has_valid_batch_rank internal error "
                                          "encountered (unexpected value for creation_func)");
             }
         }
