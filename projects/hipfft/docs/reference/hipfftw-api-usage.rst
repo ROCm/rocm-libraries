@@ -125,7 +125,7 @@ Plans capture:
 - the length(s) and batch size(s) of the transform;
 - layout information for input and output data, for example, stride(s), distance(s);
 - pointers to buffers that it should consider as input and output data buffers when computing a transform via a :ref:`generic execution function <hipfftw-execute-with-creation-io>`;
-- its flag value(s) used at creation.
+- the flag value(s) to use at creation.
 
 A plan of interest can be created using more than one plan creation function. For instance, any plan created
 by ``fftw_plan_dft`` (resp. ``fftwf_plan_dft``) could be created by ``fftw_plan_many_dft``
