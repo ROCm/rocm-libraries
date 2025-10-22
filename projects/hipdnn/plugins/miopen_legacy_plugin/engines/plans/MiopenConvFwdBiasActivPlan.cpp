@@ -6,7 +6,6 @@
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
-#include "MiopenUtils.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -56,63 +55,14 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
         }
     }
 
-    using PointwiseMode = hipdnn_sdk::data_objects::PointwiseMode;
-    switch(activAttr.operation())
+    const auto activParams = miopen_utils::mapPointwiseModeToMiopenActivation(activAttr);
+    if(!activParams.has_value())
     {
-    case PointwiseMode::ABS:
-        _activMode = miopenActivationABS;
-        break;
-    case PointwiseMode::ELU_FWD:
-        _activMode = miopenActivationELU;
-        _activAlpha = static_cast<double>(activAttr.elu_alpha().value_or(1.0f));
-        break;
-    case PointwiseMode::RELU_FWD:
-        if(activAttr.relu_upper_clip().has_value())
-        {
-            if(activAttr.relu_lower_clip().has_value())
-            {
-                _activMode = miopenActivationCLAMP;
-                _activAlpha = static_cast<double>(activAttr.relu_lower_clip().value());
-                _activBeta = static_cast<double>(activAttr.relu_upper_clip().value());
-            }
-            else
-            {
-                _activMode = miopenActivationCLIPPEDRELU;
-                _activAlpha = static_cast<double>(activAttr.relu_upper_clip().value());
-            }
-        }
-        else if(activAttr.relu_lower_clip_slope().has_value())
-        {
-            _activMode = miopenActivationLEAKYRELU;
-            _activAlpha = static_cast<double>(activAttr.relu_lower_clip_slope().value());
-        }
-        else
-        {
-            _activMode = miopenActivationRELU;
-        }
-        break;
-    case PointwiseMode::SIGMOID_FWD:
-        _activMode = miopenActivationLOGISTIC;
-        break;
-    case PointwiseMode::SOFTPLUS_FWD:
-        if(activAttr.softplus_beta().has_value() && activAttr.softplus_beta().value() != 1.0f)
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "ConvFwdBiasActivParams: softplus_beta other than 1.0 is not supported by MIOpen");
-        }
-        _activMode = miopenActivationSOFTRELU;
-        break;
-    case PointwiseMode::TANH_FWD:
-        _activMode = miopenActivationTANH;
-        _activAlpha = 1.0;
-        _activBeta = 1.0;
-        break;
-    default:
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ConvFwdBiasActivParams: Unsupported activation mode in ConvFwdBiasActivParams");
     }
+    _activParams = activParams.value();
 }
 
 const MiopenTensor& ConvFwdBiasActivParams::x() const
@@ -135,24 +85,9 @@ const std::optional<MiopenTensor>& ConvFwdBiasActivParams::bias() const
     return _bias;
 }
 
-miopenActivationMode_t ConvFwdBiasActivParams::activMode() const
+const miopen_utils::ActivationParams& ConvFwdBiasActivParams::activParams() const
 {
-    return _activMode;
-}
-
-double ConvFwdBiasActivParams::activAlpha() const
-{
-    return _activAlpha;
-}
-
-double ConvFwdBiasActivParams::activBeta() const
-{
-    return _activBeta;
-}
-
-double ConvFwdBiasActivParams::activGamma() const
-{
-    return _activGamma;
+    return _activParams;
 }
 
 const MiopenTensor& ConvFwdBiasActivParams::y() const
@@ -192,7 +127,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
 
     miopenFusionOpDescriptor_t activOp;
     THROW_ON_MIOPEN_FAILURE(
-        miopenCreateOpActivationForward(fusePlanDesc, &activOp, _params.activMode()));
+        miopenCreateOpActivationForward(fusePlanDesc, &activOp, _params.activParams().mode));
 
     if(compile)
     {
@@ -264,9 +199,9 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                         activOp,
                                                         nullptr, // alpha is not used in MIOpen
                                                         nullptr, // beta is not used in MIOpen
-                                                        _params.activAlpha(),
-                                                        _params.activBeta(),
-                                                        _params.activGamma()));
+                                                        _params.activParams().alpha,
+                                                        _params.activParams().beta,
+                                                        _params.activParams().gamma));
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)

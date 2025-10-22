@@ -14,6 +14,7 @@
 
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenTensor.hpp"
+#include "MiopenUtils.hpp"
 #include "PlanInterface.hpp"
 
 namespace miopen_legacy_plugin
@@ -37,14 +38,8 @@ public:
     const MiopenTensor& x() const;
     const MiopenTensor& w() const;
     const MiopenConvDescriptor& conv() const;
-
     const std::optional<MiopenTensor>& bias() const;
-
-    miopenActivationMode_t activMode() const;
-    double activAlpha() const;
-    double activBeta() const;
-    double activGamma() const;
-
+    const miopen_utils::ActivationParams& activParams() const;
     const MiopenTensor& y() const;
 
 private:
@@ -53,10 +48,7 @@ private:
     MiopenTensor _w;
     MiopenConvDescriptor _conv;
     std::optional<MiopenTensor> _bias;
-    miopenActivationMode_t _activMode;
-    double _activAlpha;
-    double _activBeta;
-    double _activGamma;
+    miopen_utils::ActivationParams _activParams;
     MiopenTensor _y;
 };
 
