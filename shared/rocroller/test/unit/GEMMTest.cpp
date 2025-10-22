@@ -1101,7 +1101,7 @@ namespace GEMMDriverTest
         if(typeAB == DataType::Float && loadLDSA && loadLDSB && storeLDSD
            && (mode != StreamKMode::Standard))
         {
-	    // We run out of LDS in this case
+            // We run out of LDS in this case
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
