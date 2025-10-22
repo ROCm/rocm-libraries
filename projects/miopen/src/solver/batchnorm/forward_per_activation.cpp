@@ -125,9 +125,9 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         auto kernel = KernelInfo{};
 
         kernel.kernel_name = "MIOpenBatchNormFwdTrainPerActivation";
-        kernel.kernel_file = "MIOpenBatchNormFwdTrainPerAct.cl";
+        kernel.kernel_file = "MIOpenBatchNormFwdTrainPerAct.cpp";
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

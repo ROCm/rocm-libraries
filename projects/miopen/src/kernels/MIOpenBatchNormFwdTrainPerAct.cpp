@@ -1,0 +1,155 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#endif
+
+// Disable specific warnings
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconditional-uninitialized"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsometimes-uninitialized"
+#endif
+
+#include "batchnorm_functions.hpp"
+
+// Load the configs to this file
+namespace /*anonymous*/ {
+using mio_config    = miopen::config;
+using mio_bn_config = miopen::batchnorm::config;
+} // namespace
+
+//==================== PER ACTIVATION =======================
+
+extern "C" __global__ void MIOpenBatchNormFwdTrainPerActivation(
+    const typename mio_bn_config::fp_type* __restrict__ in,          /* x input */
+    unsigned int in_nstride,                                         /* C*H*W */
+    unsigned int in_cstride,                                         /* H*W */
+    typename mio_bn_config::fp_type* __restrict__ out,               /* y output */
+    const typename mio_bn_config::fp_prec_type* __restrict__ scale,  /* gamma 1xCxHxW */
+    const typename mio_bn_config::fp_prec_type* __restrict__ bias,   /* beta  1xCxHxW */
+#if(MIO_RUNNING_RESULT == 1)
+    double expAvgFactor, /* input momentum */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningMean,      /* in/out */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningVariance,  /* in/out */
+#endif
+    double epsilon /* input fuzz param > 0 */
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
+    ,
+    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveMean,        /* out only */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveInvVariance  /* out only */
+#endif
+)
+{
+    using fp_type         = typename mio_bn_config::fp_type;
+    using fp_prec_type    = typename mio_bn_config::fp_prec_type;
+    using fp_accum_type   = typename mio_bn_config::fp_accum_type;
+    using fp_accum_c_type = typename mio_bn_config::fp_accum_c_type;
+    using fp_prec_c_type  = typename mio_bn_config::fp_prec_c_type;
+
+    // PER ACTIVATION
+    fp_prec_type mean        = fp_prec_type(0);
+    fp_prec_type variance    = fp_prec_type(0);
+    fp_prec_type invVariance = fp_prec_type(0);
+    fp_prec_type inhat       = fp_prec_type(0);
+    fp_prec_type pvt_scale   = fp_prec_type(0);
+    fp_prec_type pvt_bias    = fp_prec_type(0);
+
+    unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int yglb_sz = gridDim.y * blockDim.y;
+    int cidx             = MIO_BN_HW * static_cast<int>(xgid);
+    int adjIndex, index;
+
+    const fp_prec_type invN = fp_prec_type(1) / fp_prec_type(MIO_BN_N);
+
+    // move across the sections of the image mini_batch stack
+    for(int idx = static_cast<int>(ygid); idx < static_cast<int>(in_cstride); idx += static_cast<int>(yglb_sz))
+    {
+        mean     = fp_prec_type(0);
+        variance = fp_prec_type(0);
+
+        adjIndex = cidx + idx; // gamma and beta tensor index
+        for(int n = 0; n < MIO_BN_N; n++)
+        {
+            index = static_cast<int>(in_nstride) * n + adjIndex;
+            mean += static_cast<fp_prec_type>(in[index]);
+        }
+        mean *= invN;
+
+        for(int n = 0; n < MIO_BN_N; n++)
+        {
+            index                = static_cast<int>(in_nstride) * n + adjIndex;
+            const fp_prec_type x = static_cast<fp_prec_type>(in[index]);
+            const fp_prec_type d = x - mean;
+            variance += d * d;
+        }
+        variance *= invN;
+
+        // epsilon is double in API; cast to precision type for math
+        invVariance = rsqrt(variance + static_cast<fp_prec_type>(epsilon));
+
+        pvt_scale = *(scale + adjIndex);
+        pvt_bias  = *(bias + adjIndex);
+
+#if(MIO_RUNNING_RESULT == 1)
+        // Match the newer HIP templated/namespaced pattern:
+        using StashUpdater = miopen::batchnorm::StashUpdaterPA<fp_accum_c_type>;
+        StashUpdater updater(static_cast<fp_accum_c_type>(mean),
+                             static_cast<fp_accum_c_type>(variance),
+                             static_cast<fp_accum_c_type>(expAvgFactor));
+
+        miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
+            resultRunningMean, resultRunningVariance, updater, adjIndex);
+#endif
+
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
+        // Save per-activation mean and inv-variance in the same (templated) style:
+        miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
+            resultSaveMean, resultSaveInvVariance, mean, invVariance, adjIndex);
+#endif
+
+        for(int n = 0; n < MIO_BN_N; n++)
+        {
+            index = static_cast<int>(in_nstride) * n + adjIndex;
+            const fp_prec_type x = static_cast<fp_prec_type>(in[index]);
+            inhat                = (x - mean) * invVariance;
+
+            // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
+            const fp_prec_type y_prec = fma(pvt_scale, inhat, pvt_bias);
+            out[index]                 = static_cast<fp_type>(y_prec);
+        }
+    }
+}
+
+// Restore warnings
+#ifdef __clang__
+#pragma clang diagnostic pop
+#pragma clang diagnostic pop
+#endif
