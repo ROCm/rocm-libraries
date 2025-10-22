@@ -30,6 +30,10 @@
 #include "kernel_type.hpp"
 #include "solution_selection.hpp"
 
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
+
+
 /**
  * @brief Solution Parameters
  *
@@ -53,11 +57,12 @@ struct SolutionParameters
     int  workgroupSizeY = 2;
 
     // Other options
-    bool loadLDSA    = true;
-    bool loadLDSB    = true;
-    bool storeLDSD   = false;
-    bool direct2LDSA = true;
-    bool direct2LDSB = true;
+    rocRoller::Parameters::Solution::LoadPath loadPathA
+        = rocRoller::Parameters::Solution::LoadPath::BufferToLDS;
+    rocRoller::Parameters::Solution::LoadPath loadPathB
+        = rocRoller::Parameters::Solution::LoadPath::BufferToLDS;
+
+    bool storeLDSD = false;
 
     bool prefetch          = true;
     int  prefetchInFlight  = 2;

@@ -38,6 +38,9 @@
 #include <omp.h>
 #endif
 
+extern size_t max_length_for_hipfftw_test;
+extern size_t max_io_gb_for_hipfftw_test;
+
 // test details
 namespace
 {
