@@ -1020,15 +1020,6 @@ namespace TensileLite
                 auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
-                    defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                            sizes[0],
-                                                            sizes[1],
-                                                            sizes[3],
-                                                            sizes[2],
-                                                            sizeMapping.macroTile.x,
-                                                            sizeMapping.macroTile.y,
-                                                            sizeMapping.depthU,
-                                                            false);
                     defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
                                                                 sizes[0],
                                                                 sizes[1],
@@ -1038,6 +1029,16 @@ namespace TensileLite
                                                                 sizeMapping.macroTile.y,
                                                                 sizeMapping.depthU,
                                                                 false);
+                    defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
+                                                            sizes[0],
+                                                            sizes[1],
+                                                            sizes[3],
+                                                            sizes[2],
+                                                            sizeMapping.macroTile.x,
+                                                            sizeMapping.macroTile.y,
+                                                            sizeMapping.depthU,
+                                                            defaultWGMXCC,
+                                                            false);
                 }
             }
 
