@@ -43,7 +43,6 @@
 
 #include <thrust/advance.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/iterator/detail/minimum_category.h>
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -67,6 +66,9 @@ class zip_iterator;
 
 namespace detail
 {
+template <typename... Ts>
+using minimum_category = minimum_type<Ts...>;
+
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename IteratorTuple>
 struct make_zip_iterator_base
