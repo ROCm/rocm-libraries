@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -38,7 +39,7 @@ protected:
 TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 {
     std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);

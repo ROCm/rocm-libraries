@@ -8,6 +8,8 @@
 #include <random>
 #include <vector>
 
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
+
 namespace test_bn_common
 {
 
@@ -33,7 +35,7 @@ struct Batchnorm2dTestCase
 
 inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         {1, 3, 14, 14, seed},

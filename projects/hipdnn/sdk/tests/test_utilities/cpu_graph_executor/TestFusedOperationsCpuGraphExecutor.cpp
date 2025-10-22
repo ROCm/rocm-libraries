@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/BinaryOperationFunctors.hpp>
@@ -36,7 +37,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 
     float addConstant = 5.0f;
     float multiplyConstant = 2.0f;
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
 
     // DIRECT TENSOR MANAGEMENT - Expert Architecture
     // Graph execution tensors
