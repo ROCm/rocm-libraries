@@ -5848,9 +5848,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return fileString
 
 
-  def setRocIsa(self, data):
+  def setRocIsa(self, data, outOptions):
     ti = rocIsa.getInstance()
     ti.setData(data)
+    ti.setOutputOptions(outOptions)
 
   def updateBranchPlaceHolder(self, module, placeholders, targets, operations):
     phs = [ ph for ph in placeholders ]
