@@ -1,5 +1,8 @@
 # Generic Ownership (broadest rules first)
 **/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
+./CMakeLists.txt                                    @ROCm/rocm-math-lib-build-infra
+./CMakePresets.json                                 @ROCm/rocm-math-lib-build-infra
+/cmake/
 
 # CI ownership
 /.azuredevops/                                      @ROCm/external-ci

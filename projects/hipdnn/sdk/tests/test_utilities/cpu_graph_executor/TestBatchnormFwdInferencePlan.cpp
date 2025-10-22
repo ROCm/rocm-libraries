@@ -9,8 +9,10 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
@@ -39,81 +41,60 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = 1e-3;
+    double epsilon = BATCHNORM_DEFAULT_EPSILON;
     std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
-    BatchnormFwdTensorBundle planTensorBundle(
-        graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
-    BatchnormFwdTensorBundle directTensorBundle(
-        graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
-
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+    BatchnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
+    BatchnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
+
     const auto& attributes
         = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+    const auto& tensorMap = graphWrapper.getTensorMap();
+    BatchnormFwdInferenceParams params(*tensorMap.at(attributes.x_tensor_uid()),
+                                       *tensorMap.at(attributes.y_tensor_uid()),
+                                       *tensorMap.at(attributes.scale_tensor_uid()),
+                                       *tensorMap.at(attributes.bias_tensor_uid()),
+                                       *tensorMap.at(attributes.mean_tensor_uid()),
+                                       *tensorMap.at(attributes.inv_variance_tensor_uid()),
+                                       epsilon);
 
-    BatchnormFwdInferenceParams params;
-    initTensorValues(params.xTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.x_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.x_tensor_uid()]->strides(),
-                     attributes.x_tensor_uid());
-    initTensorValues(params.scaleTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.scale_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.scale_tensor_uid()]->strides(),
-                     attributes.scale_tensor_uid());
-    initTensorValues(params.biasTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.bias_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.bias_tensor_uid()]->strides(),
-                     attributes.bias_tensor_uid());
-    initTensorValues(params.meanTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.mean_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.mean_tensor_uid()]->strides(),
-                     attributes.mean_tensor_uid());
-    initTensorValues(params.invVarianceTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->strides(),
-                     attributes.inv_variance_tensor_uid());
-    initTensorValues(params.yTensor,
-                     DataType::FLOAT,
-                     planTensorBundle.tensors[attributes.y_tensor_uid()]->dims(),
-                     planTensorBundle.tensors[attributes.y_tensor_uid()]->strides(),
-                     attributes.y_tensor_uid());
-    params.epsilon = epsilon;
+    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    BatchnormFwdPlan<float, float, float> patient(std::move(params));
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
+    auto shallowXTensor = createShallowTensor<float>(
+        params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
+    auto shallowScaleTensor = createShallowTensor<float>(
+        params.scaleTensor,
+        directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
+    auto shallowBiasTensor = createShallowTensor<float>(
+        params.biasTensor, directTensorBundle.tensors[attributes.bias_tensor_uid()]->rawHostData());
+    auto shallowMeanTensor = createShallowTensor<float>(
+        params.meanTensor, directTensorBundle.tensors[attributes.mean_tensor_uid()]->rawHostData());
+    auto shallowInvVarTensor = createShallowTensor<float>(
+        params.invVarianceTensor,
+        directTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->rawHostData());
+    auto shallowYTensor = createShallowTensor<float>(
+        params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.x_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.scale_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.bias_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.mean_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.inv_variance_tensor_uid()].get()),
-        *dynamic_cast<TensorBase<float>*>(
-            directTensorBundle.tensors[attributes.y_tensor_uid()].get()),
-        epsilon);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(*shallowXTensor,
+                                                                     *shallowScaleTensor,
+                                                                     *shallowBiasTensor,
+                                                                     *shallowMeanTensor,
+                                                                     *shallowInvVarTensor,
+                                                                     *shallowYTensor,
+                                                                     epsilon);
 
-    patient.execute(variantPack);
+    BatchnormFwdPlan<float, float, float> fwdPlan(std::move(params));
+    fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
-    auto& yDirect = *dynamic_cast<TensorBase<float>*>(
-        directTensorBundle.tensors[attributes.y_tensor_uid()].get());
-    auto& yPlanTensor = *dynamic_cast<TensorBase<float>*>(
-        planTensorBundle.tensors[attributes.y_tensor_uid()].get());
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(yDirect.memory(), yPlanTensor.memory()));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
+        *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
 }
 
 TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)

@@ -16,30 +16,53 @@ namespace utilities
 {
 
 template <class T>
-class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
+class ShallowHostOnlyMigratableMemory : public MigratableMemoryBase<T>
 {
 public:
-    ShallowHostOnlyMigratableMemory(void* memory, size_t count)
-        : _memory(static_cast<T*>(memory))
+    explicit ShallowHostOnlyMigratableMemory(void* shallowMemory = nullptr, size_t count = 0)
+        : _shallowMemory(static_cast<T*>(shallowMemory))
         , _count(count)
     {
     }
 
+    ShallowHostOnlyMigratableMemory(ShallowHostOnlyMigratableMemory&& other) noexcept
+        : _shallowMemory(other._shallowMemory)
+        , _count(other._count)
+    {
+        other._shallowMemory = nullptr;
+        other._count = 0;
+    }
+
+    ShallowHostOnlyMigratableMemory& operator=(ShallowHostOnlyMigratableMemory&& other) noexcept
+    {
+        if(this != &other)
+        {
+            _shallowMemory = other._shallowMemory;
+            _count = other._count;
+            other._shallowMemory = nullptr;
+            other._count = 0;
+        }
+        return *this;
+    }
+
+    ShallowHostOnlyMigratableMemory(const ShallowHostOnlyMigratableMemory&) = delete;
+    ShallowHostOnlyMigratableMemory& operator=(const ShallowHostOnlyMigratableMemory&) = delete;
+
     T* hostData() override
     {
-        return _memory;
+        return _shallowMemory;
     }
     T* hostDataAsync() override
     {
-        return _memory;
+        return _shallowMemory;
     }
     const T* hostData() const override
     {
-        return _memory;
+        return _shallowMemory;
     }
     const T* hostDataAsync() const override
     {
-        return _memory;
+        return _shallowMemory;
     }
     void* deviceData() override
     {
@@ -92,7 +115,7 @@ private:
             "allocations need to be done using MigratableMemeory.");
     }
 
-    T* _memory;
+    T* _shallowMemory;
     size_t _count;
 };
 

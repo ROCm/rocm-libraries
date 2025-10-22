@@ -34,15 +34,12 @@
 #include <memory>
 #include <numeric>
 
-#ifdef WIN32
-#include <windows.h>
-#else
-#include <cstdlib>
-#endif
-
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+extern size_t max_length_for_hipfftw_test;
+extern size_t max_io_gb_for_hipfftw_test;
 
 // test details
 namespace
@@ -108,7 +105,6 @@ namespace
         unsupported_args,
         ill_defined
     };
-
     // for well-defined internal exceptions, we may expect a specific report thereof
     // in the hipfftw exception log (if logging is activated)
     template <hipfftw_internal_exception>
@@ -229,9 +225,9 @@ namespace
         return idx_rng(get_pseudo_rng());
     }
 
-    // calculates the threshold value X such that max_data_idx is no greater
-    // (resp. larger) than num_elems, if all elements of lengths are all no greater
-    // (resp. larger) than X, and lengths.size() == rank [using bisection]
+    // calculates the threshold value X such that the number of relevant elements
+    // is no greater (resp. larger) than num_elems, if all elements of lengths are
+    // all no greater (resp. larger) than X, and lengths.size() == rank [using bisection]
     ptrdiff_t get_len_threshold(size_t num_elems, int rank, bool is_real_inplace)
     {
         if(rank < 1)
@@ -295,6 +291,7 @@ namespace
             , hip_error(hip_status)
 
         {
+            ++n_hip_failures;
         }
     };
     int get_current_device_id()
@@ -352,8 +349,8 @@ namespace
         return func == hipfftw_alloc_func_type::unspecified || func == hipfftw_alloc_func_type::real
                || func == hipfftw_alloc_func_type::complex;
     }
-    // bit mask to prevent allocation kind(s), by increasing "rank" to enable meaningful
-    // comparison operators (implicitly defined based on the underlying type)
+    // bit mask to enable/disable allocation kind(s), listed by increasing "rank"
+    // to enable meaningful comparison operators (implicitly defined based on the underlying type)
     enum hipfftw_alloc_memkind : unsigned
     {
         none          = 0x0,
@@ -603,8 +600,9 @@ namespace
                 // --> the expected_result's must be exactly representable as double values
                 const size_t max_elem = static_cast<size_t>(std::numeric_limits<uint8_t>::max());
                 const size_t cycle_sz = max_elem + 1;
-                const size_t max_representable_result = 1ULL << std::numeric_limits<double>::digits;
-                auto         sum_of_integers          = [](size_t to, size_t from = 0) {
+                const size_t max_representable_result
+                    = (1ULL << std::numeric_limits<double>::digits) - 1;
+                auto sum_of_integers = [](size_t to, size_t from = 0) {
                     if(from > to)
                         throw std::invalid_argument("invalid argument for sum_of_integers lambda");
                     return (to + from) * (to - from + 1) / 2;
@@ -725,7 +723,6 @@ namespace
             }
             catch(const hip_runtime_error& e)
             {
-                ++n_hip_failures;
                 if(skip_runtime_fails)
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
@@ -834,10 +831,11 @@ namespace
     template <fft_precision prec>
     struct hipfftw_input_validation_params
     {
-        hipfftw_plan_creation_func creation_options;
-        std::pair<bool, bool>      creation_io_is_null;
-        hipfftw_execution_io_args  execution_io;
-        hipfftw_helper<prec>       plan_helper;
+        hipfftw_plan_creation_func  creation_options;
+        hipfftw_plan_execution_func execution_option;
+        std::pair<bool, bool>       creation_io_is_null;
+        hipfftw_execution_io_args   execution_io;
+        hipfftw_helper<prec>        plan_helper;
 
         // NOTE: placement is to be respected by tests' choice of I/O at plan creation!
         fft_result_placement creation_placement() const
@@ -882,8 +880,6 @@ namespace
         // overlapping scopes/meaning, in some specific cases
         bool can_be_tested(bool io_allocation_is_allowed = true) const
         {
-            if(!use_creation_io_at_execution())
-                return false; // cannot be done yet
             if(!hipfftw_execution_io_args_are_well_defined(execution_io))
                 return false;
             if(!plan_helper.can_use_creation_options(creation_options))
@@ -898,11 +894,17 @@ namespace
                 if(creation_io_is_null.first && creation_io_is_null.second)
                     return false;
             }
+            if(execution_option != hipfftw_plan_execution_func::DEFAULT
+               && use_creation_io_at_execution()
+                      != (execution_option == hipfftw_plan_execution_func::EXECUTE))
+            {
+                return false;
+            }
             if(execution_placement() == fft_placement_inplace)
             {
                 if(is_execution_arg_null(fft_io::fft_io_in)
                    != is_execution_arg_null(fft_io::fft_io_out))
-                    return false; // woudl be out-of-place at execution
+                    return false; // would be out-of-place at execution
             }
             else
             {
@@ -943,12 +945,9 @@ namespace
             }
             if(!hipfftw_execution_io_args_are_well_defined(execution_io))
                 throw std::runtime_error("invalid plan execution args");
-            if(use_creation_io_at_execution())
-                return !creation_io_is_null.first
-                       && (creation_placement() == fft_placement_inplace
-                           || !creation_io_is_null.second);
-
-            return execution_io == hipfftw_execution_io_args::clean_new_io;
+            return !is_execution_arg_null(fft_io::fft_io_in)
+                   && (creation_placement() == fft_placement_inplace
+                       || !is_execution_arg_null(fft_io::fft_io_out));
         }
 
         // helper to determine if an internal exception may reliably be expected
@@ -958,7 +957,6 @@ namespace
         {
             if(step != hipfftw_step::plan_creation && step != hipfftw_step::plan_execution)
                 throw std::invalid_argument("Invalid step in expected_internal_exception_for");
-
             if(!can_be_tested())
                 throw std::runtime_error(
                     hipfftw_creation_options_to_string(
@@ -987,7 +985,8 @@ namespace
             }
             else
             {
-                if(!plan_can_be_created || !has_valid_io_for(hipfftw_step::plan_execution))
+                if(!plan_can_be_created || !has_valid_io_for(hipfftw_step::plan_execution)
+                   || !plan_helper.can_use_execution_option(execution_option))
                 {
                     return hipfftw_internal_exception::invalid_args;
                 }
@@ -1018,6 +1017,10 @@ namespace
                             : "_different_than_")
                     << "creation_placement";
             }
+            if(execution_option != hipfftw_plan_execution_func::DEFAULT)
+            {
+                ret << "_executed_via_" << hipfftw_execution_option_to_string(execution_option);
+            }
             return ret.str();
         }
 
@@ -1038,8 +1041,8 @@ namespace
         // constexpr used for readability of template specialization values below
         constexpr bool valid_value          = true;
         constexpr int  min_unsupported_rank = 4;
-        // scope of plan hipfftw_helpers configured with (zero or possibly many)
-        // invalid/unsupported parameter value(s)
+        // broad scope of hipfftw_helper structs configured with (zero or possibly
+        // many) invalid/unsupported parameter value(s)
         std::vector<hipfftw_helper<prec>> helper_scope;
         for(auto dft_kind : trans_type_range_full)
         {
@@ -1121,9 +1124,9 @@ namespace
         // create a full-scope map containing all the generated test parameters; the map keys
         // capture the hipfftw's function name that the tests would target
         // --> ease for guaranteeing coverage even with low test probability in the end
-        // TODO: add messed up (new) I/O arguments when new-array executes are enabled
         std::map<std::string, std::vector<hipfftw_input_validation_params<prec>>> full_scope_tests;
         hipfftw_input_validation_params<prec>                                     test_to_add;
+
         for(const auto& helper : helper_scope)
         {
             // do not allocate for the lengths designed to trigger an overflow
@@ -1135,45 +1138,56 @@ namespace
                                                   <= max_byte_size_for_hipfftw_tests();
             for(auto creation : hipfftw_plan_creation_func_candidates)
             {
-                // full range considered for creation_io_is_null and execution_io
-                // parameters: some might be ruled out later on because they can't
-                // be tested (e.g., "not_inplace" required yet using nullptr for
-                // creation input and output would be nonsensical)
-                const std::vector<std::pair<bool, bool>> creation_io_is_null_range
-                    = {{false, false}, {true, false}, {false, true}, {true, true}};
-                for(auto set_creation_io_as_null : creation_io_is_null_range)
+                for(auto execution : {hipfftw_plan_execution_func::EXECUTE,
+                                      hipfftw_plan_execution_func::EXECUTE_DFT,
+                                      hipfftw_plan_execution_func::EXECUTE_DFT_R2C,
+                                      hipfftw_plan_execution_func::EXECUTE_DFT_C2R})
                 {
-                    for(std::underlying_type_t<hipfftw_execution_io_args> exec_io
-                        = hipfftw_execution_io_args::use_creation_io;
-                        exec_io <= hipfftw_execution_io_args::clean_new_io;
-                        exec_io++)
+                    // full range considered for creation_io_is_null and execution_io
+                    // parameters: some might be ruled out later on because they can't
+                    // be tested (e.g., "not_inplace" required yet using nullptr for
+                    // creation input and output would be nonsensical)
+                    const std::vector<std::pair<bool, bool>> creation_io_is_null_range
+                        = {{false, false}, {true, false}, {false, true}, {true, true}};
+                    for(auto set_creation_io_as_null : creation_io_is_null_range)
                     {
-                        test_to_add.creation_options    = creation;
-                        test_to_add.creation_io_is_null = set_creation_io_as_null;
-                        test_to_add.execution_io = static_cast<hipfftw_execution_io_args>(exec_io);
-                        test_to_add.plan_helper  = helper;
-                        // skip params if they can't/shouldn't be used anyways
-                        if(!test_to_add.can_be_tested(test_may_allocate))
-                            continue;
-                        // tests expect a failure at execution at least
-                        if(test_to_add.expected_internal_exception_for(hipfftw_step::plan_execution)
-                           == hipfftw_internal_exception::none)
-                            continue;
-                        if(test_to_add.expected_internal_exception_for(hipfftw_step::plan_creation)
-                               == hipfftw_internal_exception::invalid_args
-                           || test_to_add.expected_internal_exception_for(
-                                  hipfftw_step::plan_creation)
-                                  == hipfftw_internal_exception::unsupported_args)
+                        for(std::underlying_type_t<hipfftw_execution_io_args> exec_io
+                            = hipfftw_execution_io_args::use_creation_io;
+                            exec_io <= hipfftw_execution_io_args::clean_new_io;
+                            exec_io++)
                         {
-                            insert_into_unique_sorted_params(
-                                full_scope_tests[hipfftw_creation_options_to_string(
-                                    creation, helper.get_dft_kind(), helper.get_rank())],
-                                test_to_add);
-                        }
-                        else
-                        {
-                            insert_into_unique_sorted_params(full_scope_tests["execute"],
-                                                             test_to_add);
+                            test_to_add.creation_options    = creation;
+                            test_to_add.execution_option    = execution;
+                            test_to_add.creation_io_is_null = set_creation_io_as_null;
+                            test_to_add.execution_io
+                                = static_cast<hipfftw_execution_io_args>(exec_io);
+                            test_to_add.plan_helper = helper;
+                            // skip params if they can't/shouldn't be tested anyways
+                            if(!test_to_add.can_be_tested(test_may_allocate))
+                                continue;
+                            // tests expect a failure at execution at least
+                            if(test_to_add.expected_internal_exception_for(
+                                   hipfftw_step::plan_execution)
+                               == hipfftw_internal_exception::none)
+                                continue;
+                            if(test_to_add.expected_internal_exception_for(
+                                   hipfftw_step::plan_creation)
+                                   == hipfftw_internal_exception::invalid_args
+                               || test_to_add.expected_internal_exception_for(
+                                      hipfftw_step::plan_creation)
+                                      == hipfftw_internal_exception::unsupported_args)
+                            {
+                                insert_into_unique_sorted_params(
+                                    full_scope_tests[hipfftw_creation_options_to_string(
+                                        creation, helper.get_dft_kind(), helper.get_rank())],
+                                    test_to_add);
+                            }
+                            else
+                            {
+                                insert_into_unique_sorted_params(
+                                    full_scope_tests[hipfftw_execution_option_to_string(execution)],
+                                    test_to_add);
+                            }
                         }
                     }
                 }
@@ -1342,7 +1356,7 @@ namespace
                     // execution must not misbehave (e.g. must not segfault) with invalid argument
                     // (if hipfftw's exception handler is made verbose, it should print failure
                     //  info to the log, and that's verified in the end)
-                    params.plan_helper.execute(exec_in, exec_out);
+                    params.plan_helper.execute(exec_in, exec_out, params.execution_option);
                     log_content = exception_logger->get_log();
                     exception_logger.reset();
                 }
@@ -1580,9 +1594,8 @@ namespace
                 }
             }
             // if using new I/O at execution, they must be clean
-            // TODO: enabled clean_new_io when new-array executes are implemented
             if(execution_io != hipfftw_execution_io_args::use_creation_io
-               /* && execution_io != hipfftw_execution_io_args::clean_new_io*/)
+               && execution_io != hipfftw_execution_io_args::clean_new_io)
             {
                 return false;
             }
@@ -1691,7 +1704,6 @@ namespace
                         = io == fft_io::fft_io_in ? verification_input : verification_output;
                     io_verification_vec.resize(1);
                     io_verification_vec[0].alloc(data_size);
-
                     for(auto step : step_range)
                     {
                         const std::pair<hipfftw_step, fft_io> map_key = {step, io};
@@ -1764,7 +1776,6 @@ namespace
             }
             catch(const hip_runtime_error& e)
             {
-                ++n_hip_failures;
                 if(skip_runtime_fails)
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
@@ -1904,22 +1915,23 @@ namespace
                     else
                         fftw_execute(reference_plan);
                 });
-                auto exception_logger = std::make_unique<hipfftw_exception_logger>();
+                hipfftw_exception_logger exception_logger;
+
                 params.plan_helper.create_plan(
                     test_io_ptr.at({hipfftw_step::plan_creation, fft_io::fft_io_in}),
                     test_io_ptr.at({hipfftw_step::plan_creation, fft_io::fft_io_out}));
                 params.plan_helper.execute(
                     test_io_ptr.at({hipfftw_step::plan_execution, fft_io::fft_io_in}),
                     test_io_ptr.at({hipfftw_step::plan_execution, fft_io::fft_io_out}));
-                if(exception_logger->is_active())
+
+                if(exception_logger.is_active())
                 {
-                    const auto log_content = exception_logger->get_log();
+                    const auto log_content = exception_logger.get_log();
                     if(!log_content.empty())
                     {
                         GTEST_FAIL() << "Non-empty log content detected:\n" << log_content;
                     }
                 }
-                exception_logger.reset();
 
                 // copy hipfftw results back into the execution_results_on_host[0] buffer
                 // for verification purposes
@@ -2005,7 +2017,6 @@ namespace
             }
             catch(const hip_runtime_error e)
             {
-                ++n_hip_failures;
                 if(skip_runtime_fails)
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
@@ -2035,14 +2046,15 @@ namespace
     {
         std::vector<hipfftw_functional_validation_params<prec>> full_list;
         hipfftw_functional_validation_params<prec>              to_add;
+        std::uniform_int_distribution<int>                      coin_toss(0, 1);
         // for readability of template specialization values below
         constexpr bool valid_value        = true;
         const auto&    possible_mem_types = get_possible_data_mem_types();
         while(full_list.size() < desired_full_suite_size)
         {
-            // TODO: randomly alternate between hipfftw_execution_io_args::use_creation_io and
-            // hipfftw_execution_io_args::clean_new_io when the latter is available
-            to_add.execution_io = hipfftw_execution_io_args::use_creation_io;
+            to_add.execution_io = coin_toss(get_pseudo_rng()) == 0
+                                      ? hipfftw_execution_io_args::use_creation_io
+                                      : hipfftw_execution_io_args::clean_new_io;
             const auto dft_kind
                 = trans_type_range_full[get_random_idx(trans_type_range_full.size())];
             const auto rank            = get_random_rank<valid_value, 1, 3>();
