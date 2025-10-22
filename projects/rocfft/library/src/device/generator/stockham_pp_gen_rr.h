@@ -126,9 +126,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         unsigned int                                                             width,
         double                                                                   height,
         ThreadGuardMode                                                          guard,
-        bool                                                                     trans_dir = false,
-        const std::optional<unsigned int>& guard_factor = std::nullopt,
-        const std::optional<unsigned int>& work_length  = std::nullopt) const
+        bool trans_dir = false) const
     {
         StatementList stmts;
         unsigned int  iheight = std::floor(height);
@@ -137,17 +135,15 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         Expression guard_expr = Expression{Literal{"true"}};
 
-        const auto effective_length = work_length ? *work_length : length;
-        const auto thread_guard_cond
-            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+        const auto work_length       = pp_factors_prod;
+        const auto thread_guard_cond = work_length / width;
 
         // do thread gurad when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
-            if((!trans_dir && threads_per_transform_pp > (effective_length / width))
-               || (trans_dir
-                   && workgroup_size / transforms_per_block_pp > (effective_length / width)))
+            if((!trans_dir && threads_per_transform_pp > (work_length / width))
+               || (trans_dir && workgroup_size / transforms_per_block_pp > (work_length / width)))
             {
                 if(writeGuard)
                     guard_expr = Expression{write && (thread < thread_guard_cond)};
@@ -176,7 +172,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             stmts += work;
         }
 
-        if(height > iheight && threads_per_transform_pp < effective_length / width)
+        if(height > iheight && threads_per_transform_pp < work_length / width)
         {
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform_pp;
@@ -358,9 +354,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                             width,
                             height,
                             ThreadGuardMode::GUARD_BY_IF,
-                            false,
-                            std::nullopt,
-                            pp_factors_prod);
+                            false);
 
         return f;
     }
@@ -412,9 +406,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                             width,
                             height,
                             ThreadGuardMode::GUARD_BY_IF,
-                            false,
-                            std::nullopt,
-                            pp_factors_prod);
+                            false);
         return f;
     }
 
@@ -575,9 +567,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                                             width,
                                             height,
                                             ThreadGuardMode::GUARD_BY_IF,
-                                            true,
-                                            std::nullopt,
-                                            pp_factors_prod);
+                                            true);
                 body += If{Not{lds_is_real}, lds2reg_full};
 
                 auto apply_twiddle
@@ -613,9 +603,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                                    width,
                                    height,
                                    ThreadGuardMode::GUARD_BY_IF,
-                                   false,
-                                   std::nullopt,
-                                   pp_factors_prod);
+                                   false);
 
                 body += reg2lds_full;
             }
