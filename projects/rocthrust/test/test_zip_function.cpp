@@ -91,19 +91,20 @@ TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
     device_vector<T> d_result_zip(size);
 
     // Tuple base case
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-              h_result_tuple.begin(),
-              SumThreeTuple{});
+
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+                      h_result_tuple.begin(),
+                      SumThreeTuple{});
     // Zip Function
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-              h_result_zip.begin(),
-              make_zip_function(SumThree{}));
-    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
-              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
-              d_result_zip.begin(),
-              make_zip_function(SumThree{}));
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+                      h_result_zip.begin(),
+                      make_zip_function(SumThree{}));
+    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+                      make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+                      d_result_zip.begin(),
+                      make_zip_function(SumThree{}));
 
     ASSERT_EQ(h_result_tuple, h_result_zip);
     ASSERT_EQ(h_result_tuple, d_result_zip);
