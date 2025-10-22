@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -23,8 +24,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
     Tensor<float> meanTensor({1, 3});
     Tensor<float> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNchw)
@@ -37,7 +43,13 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNchw)
     Tensor<float> varianceTensor({1, 3});
 
     CpuFpReferenceBatchnormImpl<hip_bfloat16, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        meanTensor,
+        varianceTensor,
+        outputTensor,
+        BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceNchw)
@@ -49,8 +61,13 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceNchw)
     Tensor<float> meanTensor({1, 3});
     Tensor<float> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnormImpl<half, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<half, float>::batchnormFwdInference(inputTensor,
+                                                                    scaleTensor,
+                                                                    biasTensor,
+                                                                    meanTensor,
+                                                                    varianceTensor,
+                                                                    outputTensor,
+                                                                    BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceNchw)
@@ -62,8 +79,13 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceNchw)
     Tensor<double> meanTensor({1, 3});
     Tensor<double> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnormImpl<double, double>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<double, double>::batchnormFwdInference(inputTensor,
+                                                                       scaleTensor,
+                                                                       biasTensor,
+                                                                       meanTensor,
+                                                                       varianceTensor,
+                                                                       outputTensor,
+                                                                       BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNhwc)
@@ -75,8 +97,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNhwc)
     Tensor<float> meanTensor({1, 3});
     Tensor<float> varianceTensor({1, 3});
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
@@ -112,8 +139,13 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
     // where inv_variance (named by convention) = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
     const std::vector<double> expectedOutput = {-2.18327084, -0.39442361, 1.39442361, 3.18327084};
 
-    CpuFpReferenceBatchnormImpl<double, double>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<double, double>::batchnormFwdInference(inputTensor,
+                                                                       scaleTensor,
+                                                                       biasTensor,
+                                                                       meanTensor,
+                                                                       varianceTensor,
+                                                                       outputTensor,
+                                                                       BATCHNORM_DEFAULT_EPSILON);
 
     auto tolerance = 1e-6;
 
@@ -142,8 +174,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference2D)
         varianceTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference3D)
@@ -166,8 +203,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInference3D)
         varianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
@@ -189,8 +231,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
         varianceTensor.setHostValue(0.5f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
@@ -211,8 +258,13 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
         varianceTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor, 1e-5);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(inputTensor,
+                                                                     scaleTensor,
+                                                                     biasTensor,
+                                                                     meanTensor,
+                                                                     varianceTensor,
+                                                                     outputTensor,
+                                                                     BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNchw)
@@ -525,7 +577,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)
 
     // Call without optional tensors
     CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
-        inputTensor, scaleTensor, biasTensor, outputTensor, 1e-5f, 0.1f);
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
@@ -545,14 +602,15 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithSavedStats)
     }
 
     // Call with saved statistics for backward pass
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(inputTensor,
-                                                                    scaleTensor,
-                                                                    biasTensor,
-                                                                    outputTensor,
-                                                                    1e-5f,
-                                                                    0.1f,
-                                                                    &savedMean,
-                                                                    &savedInvVariance);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance);
 
     // Verify saved statistics were populated
     for(int i = 0; i < 3; i++)
@@ -585,18 +643,19 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
     float momentum = 0.1f;
 
     // Call with running statistics
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(inputTensor,
-                                                                    scaleTensor,
-                                                                    biasTensor,
-                                                                    outputTensor,
-                                                                    1e-5f,
-                                                                    momentum,
-                                                                    nullptr,
-                                                                    nullptr,
-                                                                    &prevRunningMean,
-                                                                    &prevRunningVariance,
-                                                                    &nextRunningMean,
-                                                                    &nextRunningVariance);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        momentum,
+        nullptr,
+        nullptr,
+        &prevRunningMean,
+        &prevRunningVariance,
+        &nextRunningMean,
+        &nextRunningVariance);
 
     // Verify running statistics were updated
     for(int i = 0; i < 3; i++)
@@ -646,18 +705,19 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
     }
 
     // Call with all optional parameters
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(inputTensor,
-                                                                    scaleTensor,
-                                                                    biasTensor,
-                                                                    outputTensor,
-                                                                    1e-5f,
-                                                                    0.1f,
-                                                                    &savedMean,
-                                                                    &savedInvVariance,
-                                                                    &prevRunningMean,
-                                                                    &prevRunningVariance,
-                                                                    &nextRunningMean,
-                                                                    &nextRunningVariance);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance,
+        &prevRunningMean,
+        &prevRunningVariance,
+        &nextRunningMean,
+        &nextRunningVariance);
 
     // Verify all outputs were populated
     for(int i = 0; i < 3; i++)
@@ -698,14 +758,15 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdTrainingNchw)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<hip_bfloat16, float>::batchnormFwdTraining(inputTensor,
-                                                                           scaleTensor,
-                                                                           biasTensor,
-                                                                           outputTensor,
-                                                                           1e-5f,
-                                                                           0.1f,
-                                                                           &savedMean,
-                                                                           &savedInvVariance);
+    CpuFpReferenceBatchnormImpl<hip_bfloat16, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdTrainingNchw)
@@ -724,14 +785,15 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdTrainingNchw)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<half, float>::batchnormFwdTraining(inputTensor,
-                                                                   scaleTensor,
-                                                                   biasTensor,
-                                                                   outputTensor,
-                                                                   1e-5f,
-                                                                   0.1f,
-                                                                   &savedMean,
-                                                                   &savedInvVariance);
+    CpuFpReferenceBatchnormImpl<half, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingNchw)
@@ -754,7 +816,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingNchw)
                                                                       scaleTensor,
                                                                       biasTensor,
                                                                       outputTensor,
-                                                                      1e-5,
+                                                                      BATCHNORM_DEFAULT_EPSILON,
                                                                       0.1,
                                                                       &savedMean,
                                                                       &savedInvVariance);
@@ -789,7 +851,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
     prevRunningMean.setHostValue(0.0, 0, 0);
     prevRunningVariance.setHostValue(1.0, 0, 0);
 
-    double epsilon = 1e-5;
+    double epsilon = BATCHNORM_DEFAULT_EPSILON;
     double momentum = 0.1;
 
     // During training, batch statistics are calculated:
@@ -849,7 +911,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining2D)
     }
 
     CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
-        inputTensor, scaleTensor, biasTensor, outputTensor, 1e-5f, 0.1f);
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining3D)
@@ -868,7 +935,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTraining3D)
     }
 
     CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
-        inputTensor, scaleTensor, biasTensor, outputTensor, 1e-5f, 0.1f);
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
@@ -888,14 +960,15 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNcdhw)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(inputTensor,
-                                                                    scaleTensor,
-                                                                    biasTensor,
-                                                                    outputTensor,
-                                                                    1e-5f,
-                                                                    0.1f,
-                                                                    &savedMean,
-                                                                    &savedInvVariance);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNdhwc)
@@ -915,12 +988,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNdhwc)
         biasTensor.setHostValue(0.0f, 0, i);
     }
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(inputTensor,
-                                                                    scaleTensor,
-                                                                    biasTensor,
-                                                                    outputTensor,
-                                                                    1e-5f,
-                                                                    0.1f,
-                                                                    &savedMean,
-                                                                    &savedInvVariance);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
+        0.1f,
+        &savedMean,
+        &savedInvVariance);
 }

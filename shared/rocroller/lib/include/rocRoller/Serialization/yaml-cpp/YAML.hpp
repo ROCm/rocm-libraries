@@ -26,6 +26,7 @@
 
 #pragma once
 
+#ifdef ROCROLLER_USE_YAML_CPP
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
@@ -628,3 +629,5 @@ namespace YAML
     };
 
 } // namespace YAML
+
+#endif

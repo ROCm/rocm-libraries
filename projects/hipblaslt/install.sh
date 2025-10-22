@@ -56,6 +56,7 @@ function display_help()
   echo "    [--logic-yaml-filter] logic filter for developer, example: gfx942/Equality/* for building equality of gfx942 only"
   echo "    [--experimental] include logic files in directories named 'Experimental'"
   echo "    [--quiet] Invoke make without VERBOSE=1"
+  echo "    [--enable_asm_comments] Enable assembly comments in generated assembly code"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -449,6 +450,7 @@ use_rocroller=false
 logic_filter=
 legacy_hipblas_direct=false
 quiet=false
+enable_asm_comments=false
 
 
 rocm_path=/opt/rocm
@@ -598,6 +600,9 @@ while true; do
         --logic_yaml_filter|--logic-yaml-filter)
             logic_filter=${2}
             shift 2;;
+        --enable_asm_comments)
+            enable_asm_comments=true
+            shift;;
         --) shift ; break ;;
         *)  echo "Unexpected command line parameter received: '${1}'; aborting";
             exit 1
@@ -843,6 +848,10 @@ pushd .
 
   if [[ "${use_rocroller}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_ROCROLLER=OFF"
+  fi
+
+  if [[ "${enable_asm_comments}" == false ]]; then
+    tensile_opt="${tensile_opt} -DTENSILELITE_ENABLE_ASM_COMMENTS=OFF"
   fi
 
   cmake_common_options="${cmake_common_options} ${tensile_opt}"

@@ -99,6 +99,32 @@ void cvt_inst(nb::module_ m_inst)
             return new rocisa::VCvtU32toF32(self);
         });
 
+    nb::class_<rocisa::VCvtF64toU32, rocisa::VCvtInstruction>(m_inst, "VCvtF64toU32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::optional<rocisa::SDWAModifiers>&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtF64toU32& self, const nb::dict&) {
+            return new rocisa::VCvtF64toU32(self);
+        });
+
+    nb::class_<rocisa::VCvtU32toF64, rocisa::VCvtInstruction>(m_inst, "VCvtU32toF64")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::optional<rocisa::SDWAModifiers>&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtU32toF64& self, const nb::dict&) {
+            return new rocisa::VCvtU32toF64(self);
+        });
+
     nb::class_<rocisa::VCvtI32toF32, rocisa::VCvtInstruction>(m_inst, "VCvtI32toF32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
