@@ -1,20 +1,8 @@
-name: TheRock CI
+name: TheRock CI Nightly
 
 on:
-  push:
-    branches:
-      - develop
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-  workflow_dispatch:
-    inputs:
-      projects:
-        type: string
-        description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
 permissions:
   contents: read
@@ -54,8 +42,6 @@ jobs:
 
       - name: Determine projects to run
         id: projects
-        env:
-          PROJECTS: ${{ inputs.projects }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -95,8 +81,8 @@ jobs:
       project_to_test: ${{ matrix.projects.project_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
 
-  therock_ci_summary:
-    name: TheRock CI Summary
+  therock_ci_nightly_summary:
+    name: TheRock CI Nightly Summary
     if: always()
     needs:
       - setup
