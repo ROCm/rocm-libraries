@@ -110,6 +110,7 @@ namespace origami
                                 size_t            MT_M,
                                 size_t            MT_N,
                                 size_t            MT_K,
+                                size_t            wgmxcc,
                                 bool              print);
 
         double compute_tflops_from_latency(double latency_cycles,
