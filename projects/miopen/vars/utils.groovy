@@ -182,10 +182,11 @@ def cmake_build(Map conf=[:]){
     """
 
     echo cmd
-    def ret = sh(script: cmd, returnStatus: true)
-    def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"
-    if (ret != 0) {
-
+    try {
+        sh cmd  
+    } catch (Exception e) {
+        echo "Command failed: ${e.getMessage()}"
+        def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"       
         if (execute_cmd.contains("test_db_sync") && env.DBSYNC_SAVE_DB == "true") {
             echo "DB SYNC test failed, saving the cleaned DB"
             
@@ -221,7 +222,7 @@ def cmake_build(Map conf=[:]){
             }
             archiveArtifacts artifacts: "build/dbsync-*.tar.gz", allowEmptyArchive: true, fingerprint: true
         }
-
+        throw e
     }
 
     // Only archive from master or develop
