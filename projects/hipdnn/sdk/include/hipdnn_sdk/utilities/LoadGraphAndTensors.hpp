@@ -222,6 +222,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
     std::unordered_map<int64_t, std::unique_ptr<ITensor>> tensorMap;
+
     for(auto attributes : *graph->tensors())
     {
         auto tensorPath

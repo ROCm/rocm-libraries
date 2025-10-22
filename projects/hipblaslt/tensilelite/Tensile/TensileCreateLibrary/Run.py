@@ -96,13 +96,13 @@ class KernelMinResult(NamedTuple):
     pgr: int
     mathclk: int
 
-def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setRocIsa(data)
+    kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
@@ -227,6 +227,7 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
+    disableAsmComments=False,
     errorTolerant=False,
     generateSourcesAndExit=False,
     compress=True,
@@ -265,12 +266,16 @@ def writeSolutionsAndKernels(
         visited.add(base)
     print1(f"Number of duplicate kernels: {duplicates}")
 
+    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
+    outOptions.outputNoComment = disableAsmComments
+
     numAsmKernels = len(asmKernels)
     numKernels = len(asmKernels)
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
         itertools.repeat(rocisa.rocIsa.getInstance().getData()),
+        itertools.repeat(outOptions),
         itertools.repeat(splitGSU),
         asmKernels
     )
@@ -339,6 +344,7 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
+    disableAsmComments=False,
     compress=True,
 ):
     outputPath = Path(outputPath)
@@ -374,10 +380,14 @@ def writeSolutionsAndKernelsTCL(
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
         return result
 
+    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
+    outOptions.outputNoComment = not disableAsmComments
+
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
+        outOptions,
         splitGSU,
     )
 
@@ -730,6 +740,7 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
+        arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
     )
     stop_wsk = timer()
