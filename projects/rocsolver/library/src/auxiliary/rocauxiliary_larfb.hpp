@@ -51,8 +51,8 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
     const auto blocksizex = hipBlockDim_x;
     const auto blocksizey = hipBlockDim_y;
     const auto b = hipBlockIdx_z;
-    const auto j = hipBlockIdx_x * blocksizex + hipThreadIdx_x;
-    const auto i = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
+    const auto i = hipBlockIdx_x * blocksizex + hipThreadIdx_x;
+    const auto j = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
     if(i < order && j < ldw)
@@ -61,7 +61,7 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
         Wp = tmptr + b * strideW;
         Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
 
-        Wp[j + i * ldw] = Ap[j + i * lda];
+        Wp[i + j * ldw] = Ap[i + j * lda];
     }
 }
 
@@ -77,8 +77,8 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
     const auto blocksizex = hipBlockDim_x;
     const auto blocksizey = hipBlockDim_y;
     const auto b = hipBlockIdx_z;
-    const auto j = hipBlockIdx_x * blocksizex + hipThreadIdx_x;
-    const auto i = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
+    const auto i = hipBlockIdx_x * blocksizex + hipThreadIdx_x;
+    const auto j = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
     if(i < order && j < ldw)
@@ -87,7 +87,7 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
         Wp = tmptr + b * strideW;
         Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
 
-        Ap[j + i * lda] -= Wp[j + i * ldw];
+        Ap[i + j * lda] -= Wp[i + j * ldw];
     }
 }
 
