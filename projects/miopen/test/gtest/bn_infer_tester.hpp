@@ -68,6 +68,70 @@ struct BNInferTestCase
     };
 };
 
+template <class T, class Tref, class U, class V = U>
+void batchNormSpatialHostInferenceNHWC(const tensor<T>& input,
+                                       tensor<Tref>& output,
+                                       const tensor<U>& scale,
+                                       const tensor<U>& bias,
+                                       double epsilon,
+                                       const tensor<V>& estimatedMean,
+                                       const tensor<V>& estimatedVariance)
+{
+    int n_batches, height, width, channels;
+    std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
+
+    par_for(channels, 1, [&](int cidx) {
+        for(int row = 0; row < height; row++)
+        {
+            V mean        = estimatedMean(0, row, 0, 0);
+            V variance    = estimatedVariance(0, row, 0, 0);
+            double invVar = 1.0 / sqrt(variance + epsilon);
+            for(int column = 0; column < width; column++)
+            {
+                for(int bidx = 0; bidx < n_batches; bidx++)
+                {
+                    double elemStd = static_cast<double>(input(bidx, row, column, cidx)) - mean;
+                    double inhat   = elemStd * invVar;
+                    output(bidx, row, column, cidx) =
+                        static_cast<T>(scale(0, row, 0, 0) * inhat + bias(0, row, 0, 0));
+                }
+            }
+        }
+    });
+}
+
+template <class T, class U, class V, class Tref>
+void batchNormPerActivHostInferenceNHWC(const tensor<T>& input,
+                                        tensor<Tref>& output,
+                                        const tensor<U>& scale,
+                                        const tensor<U>& bias,
+                                        double epsilon,
+                                        const tensor<V>& estimatedMean,
+                                        const tensor<V>& estimatedVariance)
+{
+    int n_batches, height, width, channels;
+    std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
+
+    par_for(channels, 1, [&](int cidx) {
+        for(int row = 0; row < height; row++)
+        {
+            for(int column = 0; column < width; column++)
+            {
+                double mean       = estimatedMean(0, row, column, cidx);
+                double variance   = estimatedVariance(0, row, column, cidx);
+                double elemInvVar = 1.0 / sqrt(variance + epsilon);
+                for(int bidx = 0; bidx < n_batches; bidx++)
+                {
+                    double elemStd = input(bidx, row, column, cidx) - mean;
+                    double inhat   = elemStd * elemInvVar;
+                    output(bidx, row, column, cidx) =
+                        scale(0, row, column, cidx) * inhat + bias(0, row, column, cidx);
+                }
+            }
+        }
+    });
+}
+
 template <typename XDataType,
           typename YDataType,
           typename ScaleDataType,
@@ -129,13 +193,37 @@ struct BatchNormInferTester
     { // Run the CPU implementation
         if(bn_config.mode == miopenBNPerActivation)
         {
-            batchNormPerActivHostInference(
-                input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            if(input.desc.GetLayout_t() == miopenTensorNHWC)
+            {
+                batchNormPerActivHostInferenceNHWC(
+                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            }
+            else if(input.desc.GetLayout_t() == miopenTensorNCHW)
+            {
+                batchNormPerActivHostInference(
+                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            }
+            else
+            {
+                throw std::runtime_error("Unsupported tensor layout for BN inference.");
+            }
         }
         else
         {
-            batchNormSpatialHostInference(
-                input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            if(input.desc.GetLayout_t() == miopenTensorNHWC)
+            {
+                batchNormSpatialHostInferenceNHWC(
+                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            }
+            else if(input.desc.GetLayout_t() == miopenTensorNCHW)
+            {
+                batchNormSpatialHostInference(
+                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
+            }
+            else
+            {
+                throw std::runtime_error("Unsupported tensor layout for BN inference.");
+            }
         }
         activationHostInfer(
             activ_mode, activ_gamma, activ_beta, activ_alpha, ref_out.data, ref_out.data);
@@ -201,7 +289,7 @@ struct BatchNormInferTester
         }
     }
 
-    BNInferTestCase bn_config;      // Holds the test configuration
+    BNInferTestCase bn_config; // Holds the test configuration
     tensor<XDataType> input;   // Input tensor
     tensor<YDataType> output;  // Output tensor from GPU
     tensor<YDataType> ref_out; // Reference output tensor
