@@ -88,29 +88,8 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {
-    switch(attribute.get_data_type())
-    {
-    case DataType::FLOAT:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<float>>(attribute.get_dim(),
-                                                                      attribute.get_stride());
-    case DataType::HALF:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<half>>(attribute.get_dim(),
-                                                                     attribute.get_stride());
-    case DataType::BFLOAT16:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<hip_bfloat16>>(
-            attribute.get_dim(), attribute.get_stride());
-    case DataType::DOUBLE:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<double>>(attribute.get_dim(),
-                                                                       attribute.get_stride());
-    case DataType::UINT8:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<uint8_t>>(attribute.get_dim(),
-                                                                        attribute.get_stride());
-    case DataType::INT32:
-        return std::make_unique<hipdnn_sdk::utilities::Tensor<int32_t>>(attribute.get_dim(),
-                                                                        attribute.get_stride());
-    default:
-        throw std::runtime_error("Unsupported data type for tensor");
-    }
+    return hipdnn_sdk::utilities::createTensor(
+        toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
 // Visit a tree of INodes with a lambda function
