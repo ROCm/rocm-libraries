@@ -109,7 +109,8 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_mode)},
-        {"MIOPEN_USE_FP16", static_cast<int>(xDesc.GetType() == miopenHalf)},
+        {use_hip ? "MIOPEN_USE_FP16" : "MIOPEN_USE_FPMIX",
+         static_cast<int>(xDesc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(xDesc.GetType() == miopenFloat)}};
 
     std::string kernel_file =
@@ -148,34 +149,70 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     if constexpr(PERF_ENABLE)
     {
         // run the perf test
-        perf_helper.perfTest(handle,
-                             kernel_name,
-                             network_config,
-                             use_hip,
-                             static_cast<float>(activ_alpha),
-                             static_cast<float>(activ_beta),
-                             static_cast<float>(activ_gamma),
-                             static_cast<double>(epsilon),
-                             x,
-                             y,
-                             bnBias,
-                             bnScale,
-                             estimatedMean,
-                             estimatedVariance);
+        if(xDesc.GetType() == miopenFloat)
+        {
+            perf_helper.perfTest(handle,
+                                 kernel_name,
+                                 network_config,
+                                 use_hip,
+                                 static_cast<float>(activ_alpha),
+                                 static_cast<float>(activ_beta),
+                                 static_cast<float>(activ_gamma),
+                                 static_cast<double>(epsilon),
+                                 x,
+                                 y,
+                                 bnBias,
+                                 bnScale,
+                                 estimatedMean,
+                                 estimatedVariance);
+        }
+        else if(xDesc.GetType() == miopenHalf)
+        {
+            perf_helper.perfTest(handle,
+                                 kernel_name,
+                                 network_config,
+                                 use_hip,
+                                 static_cast<_Float16>(activ_alpha),
+                                 static_cast<_Float16>(activ_beta),
+                                 static_cast<_Float16>(activ_gamma),
+                                 static_cast<double>(epsilon),
+                                 x,
+                                 y,
+                                 bnBias,
+                                 bnScale,
+                                 estimatedMean,
+                                 estimatedVariance);
+        }
     }
     else
     {
         // execute the kernel
-        kernelInvoke(static_cast<float>(activ_alpha),
-                     static_cast<float>(activ_beta),
-                     static_cast<float>(activ_gamma),
-                     static_cast<double>(epsilon),
-                     x,
-                     y,
-                     bnBias,
-                     bnScale,
-                     estimatedMean,
-                     estimatedVariance);
+        if(xDesc.GetType() == miopenFloat)
+        {
+            kernelInvoke(static_cast<float>(activ_alpha),
+                         static_cast<float>(activ_beta),
+                         static_cast<float>(activ_gamma),
+                         static_cast<double>(epsilon),
+                         x,
+                         y,
+                         bnBias,
+                         bnScale,
+                         estimatedMean,
+                         estimatedVariance);
+        }
+        else if(xDesc.GetType() == miopenHalf)
+        {
+            kernelInvoke(static_cast<_Float16>(activ_alpha),
+                         static_cast<_Float16>(activ_beta),
+                         static_cast<_Float16>(activ_gamma),
+                         static_cast<double>(epsilon),
+                         x,
+                         y,
+                         bnBias,
+                         bnScale,
+                         estimatedMean,
+                         estimatedVariance);
+        }
     }
 }
 
@@ -243,7 +280,6 @@ struct GPU_bn_activ_infer_per_act_FP32
 {
 };
 
-#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 struct GPU_bn_activ_infer_spatial_FP16
     : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
@@ -253,7 +289,6 @@ struct GPU_bn_activ_infer_per_act_FP16
     : BatchNormActivInferTester<half_float::half, half_float::half, float, float, float>
 {
 };
-#endif
 
 std::vector<miopenActivationMode_t> ActivationConfigs()
 {
@@ -302,7 +337,6 @@ TEST_P(GPU_bn_activ_infer_per_act_FP32, PortTest)
     Verify();
 };
 
-#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 TEST_P(GPU_bn_activ_infer_spatial_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
@@ -332,7 +366,6 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
     // Compare the outputs
     Verify();
 };
-#endif
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
@@ -344,8 +377,6 @@ INSTANTIATE_TEST_SUITE_P(
     GPU_bn_activ_infer_per_act_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
-
-#if !(PERF_ENABLE && COMPARE_WITH_OPENCL)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP16,
@@ -356,4 +387,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
                                           testing::ValuesIn(BNInferTestConfigs<half_float::half>(
                                               miopenBNPerActivation))));
-#endif
