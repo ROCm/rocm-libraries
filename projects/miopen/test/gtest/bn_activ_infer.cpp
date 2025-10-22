@@ -220,12 +220,14 @@ template <typename XDataType,
           typename YDataType,
           typename ScaleDataType,
           typename BiasDataType,
-          typename MeanVarDataType>
+          typename MeanVarDataType,
+          miopenTensorLayout_t TensorLayout = miopenTensorNCHW>
 struct BatchNormActivInferTester : public BatchNormInferTester<XDataType,
                                                                YDataType,
                                                                ScaleDataType,
                                                                BiasDataType,
-                                                               MeanVarDataType>
+                                                               MeanVarDataType,
+                                                               TensorLayout>
 {
 #if PERF_ENABLE
     BatchNormActivInferTester()
@@ -367,23 +369,23 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_spatial_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_bn_activ_infer_spatial_FP32,
+                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                                          testing::ValuesIn(BNInferTestConfigs(miopenBNSpatial,
+                                                                               miopenTensorNCHW))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_bn_activ_infer_per_act_FP32,
+                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                                          testing::ValuesIn(BNInferTestConfigs(
+                                              miopenBNPerActivation, miopenTensorNCHW))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_bn_activ_infer_spatial_FP16,
+                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                                          testing::ValuesIn(BNInferTestConfigs(miopenBNSpatial,
+                                                                               miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_per_act_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
-                                              miopenBNPerActivation))));
+                                          testing::ValuesIn(BNInferTestConfigs(
+                                              miopenBNPerActivation, miopenTensorNCHW))));

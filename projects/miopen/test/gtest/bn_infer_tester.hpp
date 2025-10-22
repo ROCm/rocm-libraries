@@ -24,32 +24,73 @@
  *
  *******************************************************************************/
 
+#pragma once
+
+#include <gtest/gtest.h>
+#include <miopen/miopen.h>
+#include <miopen/solver_id.hpp>
+#include <serialize.hpp>
+#include <fusionHost.hpp>
+
+#include "tensor_util.hpp"
 #include "get_handle.hpp"
-#include "na.hpp"
+#include "random.hpp"
 #include "perf_helper.hpp"
+
+struct BNInferTestCase
+{
+    size_t N;
+    size_t C;
+    size_t H;
+    size_t W;
+    miopenTensorLayout_t layout;
+    miopenBatchNormMode_t mode;
+    bool save;
+    bool keepRunning;
+
+    friend std::ostream& operator<<(std::ostream& ss, const BNInferTestCase& tc)
+    {
+        return ss << "(N: " << tc.N << " C:" << tc.C << " H:" << tc.H << " W:" << tc.W
+                  << " layout: " << tc.layout << " mode: " << tc.mode << " save: " << tc.save
+                  << " keepRunning: " << tc.keepRunning;
+    }
+
+    std::vector<size_t> GetInput()
+    {
+        if(layout == miopenTensorNCHW)
+        {
+            return {N, C, H, W};
+        }
+        else
+        {
+            return {N, H, W, C};
+        }
+    };
+};
 
 template <typename XDataType,
           typename YDataType,
           typename ScaleDataType,
           typename BiasDataType,
-          typename MeanVarDataType>
+          typename MeanVarDataType,
+          miopenTensorLayout_t TensorLayout>
 struct BatchNormInferTester
-    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNTestCase>>
+    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNInferTestCase>>
 {
     void SetUp() override
     {
         std::tie(activ_mode, bn_config) = GetParam();
 
         // Create tensors
-        input              = tensor<XDataType>{bn_config.GetInput()};
-        output             = tensor<YDataType>{bn_config.GetInput()};
-        ref_out            = tensor<YDataType>{bn_config.GetInput()};
+        input              = tensor<XDataType>{TensorLayout, bn_config.GetInput()};
+        output             = tensor<YDataType>{TensorLayout, bn_config.GetInput()};
+        ref_out            = tensor<YDataType>{TensorLayout, bn_config.GetInput()};
         auto derivedBnDesc = miopen::TensorDescriptor{};
         miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, bn_config.mode);
-        scale       = tensor<ScaleDataType>{derivedBnDesc.GetLengths()};
-        shift       = tensor<BiasDataType>{derivedBnDesc.GetLengths()};
-        estMean     = tensor<MeanVarDataType>{derivedBnDesc.GetLengths()};
-        estVariance = tensor<MeanVarDataType>{derivedBnDesc.GetLengths()};
+        scale       = tensor<ScaleDataType>{TensorLayout, derivedBnDesc.GetLengths()};
+        shift       = tensor<BiasDataType>{TensorLayout, derivedBnDesc.GetLengths()};
+        estMean     = tensor<MeanVarDataType>{TensorLayout, derivedBnDesc.GetLengths()};
+        estVariance = tensor<MeanVarDataType>{TensorLayout, derivedBnDesc.GetLengths()};
         // Fill tensors
         auto gen_value = [](auto...) {
             return prng::gen_descreet_uniform_sign<XDataType>(1e-2, 100);
@@ -153,12 +194,14 @@ struct BatchNormInferTester
             }
 
             perf_helper.writeStatsToCSV("batch-norm-infer-perf-" + handle.GetDeviceName() + ".csv",
-                                        "_" + kernel_info + "_" +
-                                            (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
+                                        "_" + input.desc.GetLayout_str() + "_" + kernel_info + "_" +
+                                            ((input.desc.GetType() == miopenHalf)       ? "FP16"
+                                             : (input.desc.GetType() == miopenBFloat16) ? "BFP16"
+                                                                                        : "FP32"));
         }
     }
 
-    BNTestCase bn_config;      // Holds the test configuration
+    BNInferTestCase bn_config;      // Holds the test configuration
     tensor<XDataType> input;   // Input tensor
     tensor<YDataType> output;  // Output tensor from GPU
     tensor<YDataType> ref_out; // Reference output tensor
@@ -181,10 +224,10 @@ struct BatchNormInferTester
     PerfHelper<float> perf_helper;
 };
 
-template <typename T>
-std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
+std::vector<BNInferTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode,
+                                                miopenTensorLayout_t layout)
 {
-    // create an array of input tensor shapes to test
+    // create an array of input tensor shapes (in NCHW layout) to test
     int shapes_to_test[10][4] = {// from resnet50
                                  {64, 128, 56, 56},
                                  {64, 2048, 7, 7},
@@ -197,18 +240,12 @@ std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
                                  {64, 64, 112, 112},
                                  {64, 64, 56, 56}};
 
-    // return a vector of BNTestCase objects created using the above shapes
-    std::vector<BNTestCase> test_cases;
+    // return a vector of BNInferTestCase objects created using the above shapes
+    std::vector<BNInferTestCase> test_cases;
     for(auto& shape : shapes_to_test)
     {
-        test_cases.push_back(BNTestCase{shape[0],
-                                        shape[1],
-                                        shape[2],
-                                        shape[3],
-                                        mode,
-                                        miopen::batchnorm::Direction::ForwardInference,
-                                        0,
-                                        0});
+        test_cases.push_back(
+            BNInferTestCase{shape[0], shape[1], shape[2], shape[3], layout, mode, 0, 0});
     }
 
     return test_cases;
