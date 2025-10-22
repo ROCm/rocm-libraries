@@ -4522,12 +4522,14 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     MIOPEN_INTERNALS_EXPORT bool
     operator==(const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops& other) const;
+    bool UseTF32() const { return use_tf32; }
 
 private:
     template <typename DataType, typename ComputeType = DataType>
-    void Init(const miopen::conv::ProblemDescription&);
+    bool Init(const miopen::conv::ProblemDescription&);
     template <typename DataType, typename ComputeType = DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    mutable bool use_tf32 = false;
 };
 
 struct ConvHipImplicitGemm3DGroupFwdXdlops final

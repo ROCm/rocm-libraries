@@ -218,7 +218,7 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
     // NOLINTEND(*-braces-around-statements)
 
     // only float support tf32
-    bool use_tf32 = (IsInputFp32(problem) && IsOutputFp32(problem) && problem.EnableTF32());
+    bool use_tf32 = (IsInputFp32(problem) && IsOutputFp32(problem) && problem.UseTF32());
     kernel_name << "_" << static_cast<int>(use_tf32);
 
     return kernel_name.str();

@@ -349,7 +349,7 @@ struct CKArgs
 } // namespace
 
 template <typename DataType, typename ComputeType>
-void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
+bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
     const miopen::conv::ProblemDescription& problem)
 {
     switch(problem.GetAlphaBetaCase())
@@ -431,6 +431,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
         }
     }
     kernel_id = valid_kernels[index];
+    if(kernel_id.empty())
+        return false;
+    return true;
 }
 
 template <typename DataType, typename ComputeType>
@@ -478,10 +481,15 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
     case miopenFloat:
-        if(problem.EnableTF32())
-            Init<float, ck::tf32_t>(problem);
+        if(problem.UseTF32() && Init<float, ck::tf32_t>(problem))
+        {
+            use_tf32 = true;
+        }
         else
+        {
+            use_tf32 = false;
             Init<float>(problem);
+        }
         break;
     case miopenInt8: Init<int8_t>(problem); break;
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
@@ -531,10 +539,16 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
     case miopenFloat:
-        if(problem.EnableTF32())
-            return CheckIsSupportCKArgs<float, ck::tf32_t>(problem);
+        if(problem.UseTF32() && CheckIsSupportCKArgs<float, ck::tf32_t>(problem))
+        {
+            use_tf32 = true;
+            return true;
+        }
         else
+        {
+            use_tf32 = false;
             return CheckIsSupportCKArgs<float>(problem);
+        }
     case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
     case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -613,10 +627,14 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat:
-        if(problem.EnableTF32())
-            return CheckCKApplicability<float, ck::tf32_t>(problem);
+        if(problem.UseTF32() && CheckCKApplicability<float, ck::tf32_t>(problem))
+        {
+            return true;
+        }
         else
+        {
             return CheckCKApplicability<float>(problem);
+        }
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -717,7 +735,8 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
                                               miopen::conv::DataInvokeParams>(
                     ctx, problem, config.kernel_id);
             }
-        });
+        },
+        config.UseTF32());
 
 #else
     return {};

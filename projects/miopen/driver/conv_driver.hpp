@@ -1025,7 +1025,8 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
         "wei_cast_type", 'R', "-1", "Cast type for weight tensor, default to not set", "string");
     inflags.AddInputFlag(
         "init_output_nan", 'N', "0", "populate output buffers with nan values (Default=0)", "int");
-    inflags.AddInputFlag("math_type", 'M', "0", "math type of compute (Default=0)", "int");
+    // TODO:(LYM) change back to 0
+    inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
     return 0;
 }

@@ -191,7 +191,7 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
     ss << 'x' << data_type;
 
     std::ostringstream optional;
-    if(data_type == "FP32" && EnableTF32())
+    if(data_type == "FP32" && UseTF32())
         optional << "TF32" << 'x';
 
     if(const auto ct = GetInCastType())
@@ -266,7 +266,7 @@ void ProblemDescription::Serialize(std::ostream& stream) const
             optional << "_co" << GetDataTypeName(*ct);
 
         // cx indicates compute datatype
-        if(data_type == "FP32" && EnableTF32())
+        if(data_type == "FP32" && UseTF32())
             optional << "_cxTF32";
     }
     if(!optional.str().empty())
@@ -327,6 +327,14 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
                  << "x" << GetDataTypeName(GetOutDataType()));
 }
 
+void ProblemDescription::SetupComputeType(const ExecutionContext& ctx) const
+{
+    if(ctx.GetStream().GetDeviceName() == "gfx942" && conv.EnableTF32())
+    {
+        use_tf32 = true;
+    }
+}
+
 std::string ProblemDescription::ComputeLayout(const TensorDescriptor& td) const
 {
     return td.GetLayout_str();
@@ -337,16 +345,6 @@ std::string ProblemDescription::ComputeInLayout() const { return ComputeLayout(i
 std::string ProblemDescription::ComputeOutLayout() const { return ComputeLayout(out); }
 
 std::string ProblemDescription::ComputeWeightsLayout() const { return ComputeLayout(weights); }
-
-void ProblemDescription::InitEnableTF32()
-{
-    /* true only when both EnableTF32() and (MathType==Default) are true. */
-    // temporarily disable TF32 until we fully complete this feature.
-    // TODO:(LYM) change back to &&
-    if((miopen::EnvEnableTF32() || (conv.GetMathType() == miopenMathDefault)))
-        enable_tf32 = true;
-    MIOPEN_LOG_I2("enable_tf32: " << (enable_tf32 ? "true" : "false"));
-}
 
 } // namespace conv
 } // namespace miopen

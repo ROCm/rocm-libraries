@@ -198,6 +198,7 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
                               solver::Id solver_id)
 {
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     ctx.do_search              = false;
     ctx.disable_search_enforce = true;
 
@@ -567,6 +568,7 @@ void ConvolutionDescriptor::FindConvFwdAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -784,6 +786,8 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
     Scalar beta_val(beta, GetScalarDataType(yDesc));
     const auto problem = conv::ProblemDescription{
         xDesc, wDesc, yDesc, *this, conv::Direction::Forward, 0, alpha_val, beta_val};
+    auto ctx = ExecutionContext{&handle};
+    problem.SetupComputeType(ctx);
     ValidateAlphaBeta(problem);
 
     ConvForwardCheckNumerics(handle, tensors, [&]() {
@@ -1106,6 +1110,7 @@ void ConvolutionDescriptor::FindConvBwdDataAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1313,6 +1318,7 @@ void ConvolutionDescriptor::FindConvBwdWeightsAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();

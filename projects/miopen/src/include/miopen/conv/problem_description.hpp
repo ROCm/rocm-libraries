@@ -136,7 +136,6 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
           alpha_beta_case(ClassifyAlphaBeta(alpha, beta))
     {
         HeuristicUpdateLayouts();
-        InitEnableTF32();
     }
 
     // Conv descriptor getters
@@ -297,7 +296,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
         return GetInCastType() || GetWeightsCastType() || GetOutCastType();
     }
 
-    bool EnableTF32() const { return enable_tf32; }
+    bool UseTF32() const { return use_tf32; }
 
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
@@ -399,7 +398,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
             self.GetInDataType(), self.GetWeightsDataType(), self.GetOutDataType());
         f(data_type, "data_type");
         f(self.GetDirectionStr(), "direction");
-        if(data_type == "FP32" && self.EnableTF32())
+        if(data_type == "FP32" && self.UseTF32())
             f("TF32", "compute_datatype");
     }
 
@@ -412,8 +411,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     }
 
     void SetupFloats(ExecutionContext& ctx) const;
-
-    void InitEnableTF32();
+    void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
@@ -433,7 +431,7 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
-    bool enable_tf32                      = false;
+    mutable bool use_tf32                 = false;
 };
 
 } // namespace conv
