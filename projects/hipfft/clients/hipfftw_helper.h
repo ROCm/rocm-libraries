@@ -603,54 +603,6 @@ static bool flags_are_valid_for_hipfftw(unsigned f)
     return (f & hipfftw_valid_flags_mask) == f;
 }
 
-static std::vector<ptrdiff_t> default_strides(fft_transform_type            dft_type,
-                                              fft_result_placement          placement,
-                                              fft_io                        io,
-                                              const std::vector<ptrdiff_t>& lengths)
-{
-    std::vector<ptrdiff_t> ret(lengths.size());
-    ptrdiff_t              def_stride = 1;
-    for(auto dim_idx = lengths.size(); dim_idx-- > 0;)
-    {
-        ret[dim_idx] = def_stride;
-        if(dim_idx == lengths.size() - 1 && is_real(dft_type))
-        {
-            if((io == fft_io_out) == is_fwd(dft_type))
-                def_stride *= (lengths[dim_idx] / 2 + 1);
-            else
-            {
-                if(placement == fft_placement_inplace)
-                    def_stride *= 2 * (lengths[dim_idx] / 2 + 1);
-                else
-                    def_stride *= lengths[dim_idx];
-            }
-        }
-        else
-            def_stride *= lengths[dim_idx];
-    }
-    return ret;
-}
-
-static std::vector<ptrdiff_t> default_distances(fft_transform_type            dft_type,
-                                                fft_result_placement          placement,
-                                                fft_io                        io,
-                                                const std::vector<ptrdiff_t>& lengths,
-                                                const std::vector<ptrdiff_t>& batches)
-{
-    std::vector<ptrdiff_t> ret(batches.size());
-    if(batches.empty() || lengths.empty())
-        return ret;
-    auto temp_lengths = lengths;
-    temp_lengths.insert(temp_lengths.begin(), 1);
-    auto def_dist = default_strides(dft_type, placement, io, temp_lengths).front();
-    for(auto batch_dim = 0; batch_dim < batches.size(); batch_dim++)
-    {
-        ret[batch_dim] = def_dist;
-        def_dist *= batches[batch_dim];
-    }
-    return ret;
-}
-
 template <
     fft_precision prec,
     std::enable_if_t<prec == fft_precision_single || prec == fft_precision_double, bool> = true>
