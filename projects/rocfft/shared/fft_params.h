@@ -2552,6 +2552,10 @@ public:
     // output after we get it from the reference FFT
     void apply_host_store_ops(std::vector<hostbuf>& output) const
     {
+        // cuFFT does not support any store ops, and CUDA implements
+        // some conflicting half-precision operators that prevent
+        // result scaling from compiling
+#ifndef _CUFFT_BACKEND
         // Don't bother iterating over the data if we don't have to
         if(scale_factor == 1.0)
             return;
@@ -2688,6 +2692,7 @@ public:
             // this is FFTW data which should always be interleaved (if complex)
             abort();
         }
+#endif
     }
 };
 
