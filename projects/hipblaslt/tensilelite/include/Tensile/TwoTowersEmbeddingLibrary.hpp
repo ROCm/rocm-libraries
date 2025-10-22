@@ -131,7 +131,10 @@ namespace TensileLite
             std::iota(cent_indexes.begin(), cent_indexes.end(), 0);
             std::vector<float> cent_similarities(embeddings->centroids.size());
 
-            int max_sim_idx = inner_product(embeddings->centroids, queryEmb, cent_similarities);
+            int max_sim_idx
+                = (embeddings->centroids.size()) > 1
+                      ? inner_product(embeddings->centroids, queryEmb, cent_similarities)
+                      : 0;
 
             std::vector<std::pair<float, std::shared_ptr<MySolution>>> rankedSolutions;
             rankedSolutions.reserve(numSolutions);
@@ -141,6 +144,7 @@ namespace TensileLite
                                             embeddings->embeddings[max_sim_idx],
                                             embeddings->cluster_sols[max_sim_idx],
                                             problem,
+                                            hardware,
                                             rankedSolutions);
             if(remSolutions > 0)
             {
@@ -161,6 +165,7 @@ namespace TensileLite
                                                 embeddings->embeddings[cidx],
                                                 embeddings->cluster_sols[cidx],
                                                 problem,
+                                                hardware,
                                                 rankedSolutions);
                     ++currentIndex;
                 }
@@ -247,6 +252,7 @@ namespace TensileLite
             const std::vector<std::vector<float>>&                      kernel_embeddings,
             const std::vector<int>&                                     cluster_solutions,
             const MyProblem&                                            problem,
+            const Hardware&                                             hardware,
             std::vector<std::pair<float, std::shared_ptr<MySolution>>>& rankedSolutions) const
         {
             std::vector<float> kernel_similarities(kernel_embeddings.size());
@@ -255,13 +261,16 @@ namespace TensileLite
                 = inner_product(kernel_embeddings, query_embedding, kernel_similarities);
 
             auto sol = solutions[cluster_solutions[max_sim_idx]];
-
             if((*(sol->problemPredicate))(problem))
             {
-                rankedSolutions.emplace_back(kernel_similarities[max_sim_idx], sol);
-                if(remSolutions == 1)
+                Task task(hardware, problem, *(sol));
+                if((*sol->taskPredicate)(task))
                 {
-                    return 0;
+                    rankedSolutions.emplace_back(kernel_similarities[max_sim_idx], sol);
+                    if(remSolutions == 1)
+                    {
+                        return 0;
+                    }
                 }
             }
 
@@ -283,8 +292,12 @@ namespace TensileLite
 
                 if((*(sol->problemPredicate))(problem))
                 {
-                    rankedSolutions.emplace_back(kernel_similarities[kidx], sol);
-                    remSolutions--;
+                    Task task(hardware, problem, *(sol));
+                    if((*sol->taskPredicate)(task))
+                    { // (*sol->hardwarePredicate)(hardware)
+                        rankedSolutions.emplace_back(kernel_similarities[kidx], sol);
+                        remSolutions--;
+                    }
                 }
                 ++currentIndex;
             }
