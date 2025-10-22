@@ -66,15 +66,15 @@ template <typename Derived,
 struct make_iterator_adaptor_base
 {
 private:
-  using value     = replace_if_use_default<Value, iterator_value<Base>>;
+  using value     = replace_if_use_default<Value, lazy_trait<it_value_t, Base>>;
   using system    = replace_if_use_default<System, iterator_system<Base>>;
   using traversal = replace_if_use_default<Traversal, iterator_traversal<Base>>;
   using reference =
     replace_if_use_default<Reference,
                            ::internal::If<_THRUST_STD::is_same_v<Value, use_default>,
-                                          iterator_reference<Base>,
+                                          lazy_trait<it_reference_t, Base>,
                                           _THRUST_STD::add_lvalue_reference<Value>>>;
-  using difference = replace_if_use_default<Difference, iterator_difference<Base>>;
+  using difference = replace_if_use_default<Difference, lazy_trait<it_difference_t, Base>>;
 
 public:
   using type = iterator_facade<Derived, value, system, traversal, reference, difference>;

@@ -130,7 +130,7 @@ struct make_counting_iterator_base
                                    eval_if<::internal::is_integral<Incrementable>::value,
                                            numeric_difference<Incrementable>,
                                            identity_<_THRUST_STD::ptrdiff_t>>,
-                                   iterator_difference<Incrementable>>>;
+                                   lazy_trait<it_difference_t, Incrementable>>>;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference

@@ -28,6 +28,10 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
 // WAR NVIDIA/cccl#1731
 // Some tests miscompile for non-CUDA backends on MSVC 2017 and 2019 (though 2022 is fine).
 // This is due to a bug in the compiler that breaks __THRUST_DEFINE_HAS_MEMBER_FUNCTION.
@@ -279,8 +283,8 @@ void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t
   system.validate_dispatch();
 
   thrust::device_system_tag device_sys;
-  thrust::pointer<typename thrust::iterator_traits<Pointer>::value_type, 
-                           thrust::device_system_tag> device_ptr(p.get());
+  thrust::pointer<typename _THRUST_STD::iterator_traits<Pointer>::value_type, thrust::device_system_tag> device_ptr(
+    p.get());
   thrust::return_temporary_buffer(device_sys, device_ptr, n);
 }
 // [NON-CCCL PARITY END]

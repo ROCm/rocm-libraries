@@ -149,8 +149,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 {
   using size_type = size_t;
 
-  using KeyType   = typename iterator_traits<KeysIt1>::value_type;
-  using ValueType = typename iterator_traits<ItemsIt1>::value_type;
+  using KeyType   = thrust::detail::it_value_t<KeysIt1>;
+  using ValueType = thrust::detail::it_value_t<ItemsIt1>;
 
   predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 

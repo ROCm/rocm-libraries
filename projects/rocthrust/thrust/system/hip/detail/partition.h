@@ -74,8 +74,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type  = typename iterator_traits<InputIt>::difference_type;
-  using value_type = typename iterator_traits<InputIt>::value_type;
+  using size_type  = thrust::detail::it_difference_t<InputIt>;
+  using value_type = thrust::detail::it_value_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes     = 0;
@@ -137,8 +137,8 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type  = typename iterator_traits<InputIt>::difference_type;
-  using value_type = typename iterator_traits<InputIt>::value_type;
+  using size_type  = thrust::detail::it_difference_t<InputIt>;
+  using value_type = thrust::detail::it_value_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes = 0;
@@ -200,7 +200,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes     = 0;
@@ -274,7 +274,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes = 0;
@@ -349,7 +349,7 @@ inplace_partition(execution_policy<Derived>& policy, InputIt first, InputIt last
   }
 
   // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
+  using value_t         = thrust::detail::it_value_t<InputIt>;
   std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
@@ -375,7 +375,7 @@ THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
   }
 
   // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
+  using value_t         = thrust::detail::it_value_t<InputIt>;
   std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition

@@ -39,8 +39,7 @@ namespace detail
 // --------------------------------------------------
 // it is okay to dereference iterator in the usual way
 template <typename DerivedPolicy, typename Iterator>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<Iterator>::value_type
-get_iterator_value(thrust::execution_policy<DerivedPolicy>&, Iterator it)
+THRUST_HOST_DEVICE it_value_t<Iterator> get_iterator_value(thrust::execution_policy<DerivedPolicy>&, Iterator it)
 {
   return *it;
 } // get_iterator_value(exec,Iterator);

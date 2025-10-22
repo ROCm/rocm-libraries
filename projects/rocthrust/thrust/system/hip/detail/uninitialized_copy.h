@@ -59,8 +59,8 @@ struct functor
   InputIt input;
   OutputIt output;
 
-  using InputType  = typename iterator_traits<InputIt>::value_type;
-  using OutputType = typename iterator_traits<OutputIt>::value_type;
+  using InputType  = thrust::detail::it_value_t<InputIt>;
+  using OutputType = thrust::detail::it_value_t<OutputIt>;
 
   THRUST_HIP_FUNCTION
   functor(InputIt input_, OutputIt output_)

@@ -124,7 +124,7 @@ template <typename SORT_ITEMS, typename Derived, typename KeysIt, typename Items
 THRUST_HIP_RUNTIME_FUNCTION void merge_sort(
   execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<KeysIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeysIt>;
 
   size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
 
@@ -281,7 +281,7 @@ template <typename SORT_ITEMS, typename Derived, typename KeysIt, typename Items
 THRUST_HIP_RUNTIME_FUNCTION void
 radix_sort(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp)
 {
-  using size_type = typename iterator_traits<KeysIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeysIt>;
 
   const size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
 
@@ -334,7 +334,7 @@ template <class SORT_ITEMS,
           class KeysIt,
           class ItemsIt,
           class CompareOp,
-          ::std::enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+          ::std::enable_if_t<!can_use_primitive_sort<thrust::detail::it_value_t<KeysIt>, CompareOp>::value, int> = 0>
 THRUST_HIP_RUNTIME_FUNCTION void
 smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -347,7 +347,7 @@ template <class SORT_ITEMS,
           class KeysIt,
           class ItemsIt,
           class CompareOp,
-          ::std::enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+          ::std::enable_if_t<can_use_primitive_sort<thrust::detail::it_value_t<KeysIt>, CompareOp>::value, int> = 0>
 THRUST_HIP_RUNTIME_FUNCTION void smart_sort(
   execution_policy<Policy>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -368,7 +368,7 @@ void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt f
   {
     THRUST_HOST static void par(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, CompareOp compare_op)
     {
-      using item_t  = thrust::iterator_value_t<ItemsIt>;
+      using item_t  = thrust::detail::it_value_t<ItemsIt>;
       item_t* null_ = nullptr;
       __smart_sort::smart_sort<thrust::detail::false_type, thrust::detail::false_type>(
         policy, first, last, null_, compare_op);
@@ -432,14 +432,14 @@ void THRUST_HOST_DEVICE sort_by_key(
 template <class Derived, class ItemsIt>
 void THRUST_HOST_DEVICE sort(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using item_type = typename thrust::iterator_value<ItemsIt>::type;
+  using item_type = thrust::detail::it_value_t<ItemsIt>;
   hip_rocprim::sort(policy, first, last, less<item_type>());
 }
 
 template <class Derived, class ItemsIt>
 void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using item_type = typename thrust::iterator_value<ItemsIt>::type;
+  using item_type = thrust::detail::it_value_t<ItemsIt>;
   hip_rocprim::stable_sort(policy, first, last, less<item_type>());
 }
 
@@ -447,7 +447,7 @@ template <class Derived, class KeysIt, class ValuesIt>
 void THRUST_HOST_DEVICE
 sort_by_key(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values)
 {
-  using key_type = typename thrust::iterator_value<KeysIt>::type;
+  using key_type = thrust::detail::it_value_t<KeysIt>;
   hip_rocprim::sort_by_key(policy, keys_first, keys_last, values, less<key_type>());
 }
 
@@ -455,7 +455,7 @@ template <class Derived, class KeysIt, class ValuesIt>
 void THRUST_HOST_DEVICE
 stable_sort_by_key(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values)
 {
-  using key_type = typename thrust::iterator_value<KeysIt>::type;
+  using key_type = thrust::detail::it_value_t<KeysIt>;
   hip_rocprim::stable_sort_by_key(policy, keys_first, keys_last, values, less<key_type>());
 }
 

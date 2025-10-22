@@ -91,7 +91,7 @@ Input THRUST_HIP_FUNCTION for_each_n(execution_policy<Derived>& policy, Input fi
 template <class Derived, class Input, class UnaryOp>
 Input THRUST_HIP_FUNCTION for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
 {
-  using size_type = typename iterator_traits<Input>::difference_type;
+  using size_type = thrust::detail::it_difference_t<Input>;
   size_type count = static_cast<size_type>(thrust::distance(first, last));
 
   return THRUST_NS_QUALIFIER::hip_rocprim::for_each_n(policy, first, count, op);

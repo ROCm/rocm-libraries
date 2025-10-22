@@ -131,8 +131,8 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
   using UnwrapInputIt  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
   using UnwrapOutputIt = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
-  using InputValueT  = thrust::iterator_value_t<UnwrapInputIt>;
-  using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
+  using InputValueT  = thrust::detail::it_value_t<UnwrapInputIt>;
+  using OutputValueT = thrust::detail::it_value_t<UnwrapOutputIt>;
 
   constexpr bool can_compare_iterators =
     ::std::is_pointer<UnwrapInputIt>::value && ::std::is_pointer<UnwrapOutputIt>::value
@@ -215,7 +215,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HOST_DEVICE
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  using input_type = typename iterator_traits<InputIt>::value_type;
+  using input_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::adjacent_difference(policy, first, last, result, minus<input_type>());
 }
 

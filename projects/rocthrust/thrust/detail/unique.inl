@@ -303,7 +303,7 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -315,7 +315,7 @@ THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::unique_count;
@@ -324,7 +324,7 @@ THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
 unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary_pred)
 {
   using thrust::system::detail::generic::select_system;
@@ -338,7 +338,7 @@ unique_count(ForwardIterator first, ForwardIterator last, BinaryPredicate binary
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename ForwardIterator>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator>
 unique_count(ForwardIterator first, ForwardIterator last)
 {
   using thrust::system::detail::generic::select_system;

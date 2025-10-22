@@ -112,7 +112,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
   -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items       = thrust::distance(first, last);
   size_t temp_storage_bytes = 0;
@@ -172,7 +172,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
   -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items = thrust::distance(first, last);
   hipStream_t stream  = hip_rocprim::stream(policy);
@@ -216,7 +216,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   Predicate predicate)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items       = static_cast<size_type>(thrust::distance(first, last));
   size_t temp_storage_bytes = 0;

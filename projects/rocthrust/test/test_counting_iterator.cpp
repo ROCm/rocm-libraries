@@ -277,7 +277,7 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
   using Iterator   = thrust::counting_iterator<std::uint64_t>;
-  using Difference = thrust::iterator_difference<Iterator>::type;
+  using Difference = thrust::detail::it_difference_t<Iterator>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 

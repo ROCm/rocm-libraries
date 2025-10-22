@@ -75,7 +75,7 @@ THRUST_HOST_DEVICE OutputIterator unique_copy(
   BinaryPredicate binary_pred);
 
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   ForwardIterator first,
   ForwardIterator last,
@@ -99,7 +99,7 @@ THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
   BinaryPred binary_pred)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  //  using size_type = typename iterator_traits<ItemsInputIt>::difference_type;
+  //  using size_type = thrust::detail::it_difference_t<ItemsInputIt>;
   using size_type = int;
 
   size_type num_items       = static_cast<size_type>(thrust::distance(items_first, items_last));
@@ -188,7 +188,7 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
 template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HOST_DEVICE unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  using input_type = typename iterator_traits<InputIt>::value_type;
+  using input_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::unique_copy(policy, first, last, result, equal_to<input_type>());
 }
 
@@ -221,7 +221,7 @@ unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, Binar
 template <class Derived, class ForwardIt>
 ForwardIt THRUST_HOST_DEVICE unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last)
 {
-  using input_type = typename iterator_traits<ForwardIt>::value_type;
+  using input_type = thrust::detail::it_value_t<ForwardIt>;
   return hip_rocprim::unique(policy, first, last, equal_to<input_type>());
 }
 
@@ -239,7 +239,7 @@ struct zip_adj_not_predicate
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ForwardIt, class BinaryPred>
-typename thrust::iterator_traits<ForwardIt>::difference_type THRUST_HOST_DEVICE
+thrust::detail::it_difference_t<ForwardIt> THRUST_HOST_DEVICE
 unique_count(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
 {
   if (first == last)

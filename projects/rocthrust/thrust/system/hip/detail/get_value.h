@@ -39,7 +39,7 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 template <typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE iterator_value_t<Pointer>
+THRUST_HOST_DEVICE thrust::detail::it_value_t<Pointer>
 get_value([[maybe_unused]] execution_policy<DerivedPolicy>& exec, Pointer ptr)
 {
   // Because of https://docs.nvidia.com/cuda/cuda-c-programming-guide/#cuda-arch point 2., if a call from a __host__
@@ -51,7 +51,7 @@ get_value([[maybe_unused]] execution_policy<DerivedPolicy>& exec, Pointer ptr)
     THRUST_HOST auto operator()(execution_policy<DerivedPolicy>& exec, Pointer ptr)
     {
       // implemented with assign_value, which requires a type with a default constructor
-      iterator_value_t<Pointer> result;
+      thrust::detail::it_value_t<Pointer> result;
       host_system_tag host_tag;
       cross_system<host_system_tag, DerivedPolicy> systems(host_tag, exec);
       assign_value(systems, &result, ptr);

@@ -518,7 +518,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
   ValInputIt value_first,
   ValOutputIt value_result)
 {
-  using value_type = typename thrust::iterator_traits<ValInputIt>::value_type;
+  using value_type = thrust::detail::it_value_t<ValInputIt>;
   return hip_rocprim::exclusive_scan_by_key(policy, key_first, key_last, value_first, value_result, value_type{});
 }
 

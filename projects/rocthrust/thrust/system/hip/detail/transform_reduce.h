@@ -43,7 +43,6 @@
 #  include <thrust/detail/alignment.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
-#  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/iterator/transform_iterator.h>
@@ -65,7 +64,7 @@ template <class Derived, class InputIt, class TransformOp, class T, class Reduce
 T THRUST_HOST_DEVICE transform_reduce(
   execution_policy<Derived>& policy, InputIt first, InputIt last, TransformOp transform_op, T init, ReduceOp reduce_op)
 {
-  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  using size_type              = thrust::detail::it_difference_t<InputIt>;
   const size_type num_items    = static_cast<size_type>(thrust::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, T, T>;
 

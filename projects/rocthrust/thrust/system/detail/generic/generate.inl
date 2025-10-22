@@ -59,8 +59,7 @@ generate(thrust::execution_policy<ExecutionPolicy>& exec, ForwardIterator first,
   // nice solution that validates the const_cast and doesn't take away any
   // functionality.
   THRUST_STATIC_ASSERT_MSG(
-    !_THRUST_STD::is_const<
-      _THRUST_STD::remove_reference_t<typename thrust::iterator_traits<ForwardIterator>::reference>>::value,
+    !_THRUST_STD::is_const<_THRUST_STD::remove_reference_t<thrust::detail::it_reference_t<ForwardIterator>>>::value,
     "generating to `const` iterators is not allowed");
   thrust::for_each(exec, first, last, typename thrust::detail::generate_functor<ExecutionPolicy, Generator>::type(gen));
 } // end generate()
@@ -81,8 +80,7 @@ generate_n(thrust::execution_policy<ExecutionPolicy>& exec, OutputIterator first
   // nice solution that validates the const_cast and doesn't take away any
   // functionality.
   THRUST_STATIC_ASSERT_MSG(
-    !_THRUST_STD::is_const<
-      _THRUST_STD::remove_reference_t<typename thrust::iterator_traits<OutputIterator>::reference>>::value,
+    !_THRUST_STD::is_const<_THRUST_STD::remove_reference_t<thrust::detail::it_reference_t<OutputIterator>>>::value,
     "generating to `const` iterators is not allowed");
   return thrust::for_each_n(
     exec, first, n, typename thrust::detail::generate_functor<ExecutionPolicy, Generator>::type(gen));

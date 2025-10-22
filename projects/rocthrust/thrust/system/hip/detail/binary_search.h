@@ -54,7 +54,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt lower_bound(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -118,7 +118,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt upper_bound(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -182,7 +182,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt binary_search(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -422,7 +422,7 @@ template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
 THRUST_HIP_FUNCTION HaystackIt
 lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
+  using difference_type = thrust::detail::it_difference_t<HaystackIt>;
 
   // struct workaround is required for HIP-clang
   struct workaround
@@ -481,7 +481,7 @@ template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
 THRUST_HIP_FUNCTION HaystackIt
 upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
+  using difference_type = thrust::detail::it_difference_t<HaystackIt>;
 
   // struct workaround is required for HIP-clang
   struct workaround

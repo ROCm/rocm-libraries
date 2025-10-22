@@ -79,14 +79,14 @@ struct make_zip_iterator_base
 template <typename... Its>
 struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
 {
-  // reference type is the type of the tuple obtained from the iterators' reference types.
-  using reference = tuple_of_iterator_references<iterator_reference_t<Its>...>;
+  // reference type is the type of the tuple obtained from the iterator's reference types.
+  using reference = tuple_of_iterator_references<it_reference_t<Its>...>;
 
   // Boost's Value type is the same as reference type. using value_type = reference;
-  using value_type = _THRUST_STD::tuple<iterator_value_t<Its>...>;
+  using value_type = _THRUST_STD::tuple<it_value_t<Its>...>;
 
   // Difference type is the first iterator's difference type
-  using difference_type = iterator_difference_t<_THRUST_STD::tuple_element_t<0, _THRUST_STD::tuple<Its...>>>;
+  using difference_type = it_difference_t<_THRUST_STD::tuple_element_t<0, _THRUST_STD::tuple<Its...>>>;
 
   // Iterator system is the minimum system tag in the iterator tuple
   using system = _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_system_t<Its>...>,
@@ -155,7 +155,7 @@ struct dereference_iterator
   template <typename Iterator>
   struct apply
   {
-    using type = typename iterator_traits<Iterator>::reference;
+    using type = thrust::detail::it_reference_t<Iterator>;
   }; // end apply
 
   // XXX silence warnings of the form "calling a __host__ function from a __host__ __device__ function is not allowed
@@ -234,11 +234,22 @@ inline THRUST_HOST_DEVICE Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f)
 
 } // namespace tuple_impl_specific
 
+namespace internal
+{
+
+template <typename Iterator>
+struct iterator_value
+{
+  using type = thrust::detail::it_value_t<Iterator>;
+};
+
+} // namespace internal
+
 // Metafunction to obtain the type of the tuple whose element types
 // are the value_types of an iterator tuple.
 //
 template <typename IteratorTuple>
-struct tuple_of_value_types : tuple_meta_transform<IteratorTuple, iterator_value>
+struct tuple_of_value_types : tuple_meta_transform<IteratorTuple, internal::iterator_value>
 {}; // end tuple_of_value_types
 
 struct minimum_category_lambda
@@ -291,11 +302,17 @@ struct tuple_of_iterator_references_helper<Tuple, thrust::index_sequence<Is...>>
   using type = thrust::detail::tuple_of_iterator_references<typename thrust::tuple_element<Is, Tuple>::type...>;
 };
 
+template <typename Iterator>
+struct iterator_reference
+{
+  using type = typename ::std::iterator_traits<Iterator>::reference;
+};
+
 template <typename IteratorTuple>
 struct tuple_of_iterator_references
 {
   // get a thrust::tuple of the iterators' references
-  using tuple_of_references = typename tuple_meta_transform<IteratorTuple, thrust::iterator_reference>::type;
+  using tuple_of_references = typename tuple_meta_transform<IteratorTuple, iterator_reference>::type;
 
   // map thrust::tuple<T...> to tuple_of_iterator_references<T...>
   using type = typename tuple_of_iterator_references_helper<
@@ -325,8 +342,7 @@ struct make_zip_iterator_base
   using value_type = typename tuple_of_value_types<IteratorTuple>::type;
 
   // Difference type is the first iterator's difference type
-  using difference_type =
-    typename thrust::iterator_traits<typename thrust::tuple_element<0, IteratorTuple>::type>::difference_type;
+  using difference_type = thrust::detail::it_difference_t<typename thrust::tuple_element<0, IteratorTuple>::type>;
 
   // Iterator system is the minimum system tag in the
   // iterator tuple
@@ -619,3 +635,20 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
 //! \} // end iterators
 
 THRUST_NAMESPACE_END
+
+// libcu++ iterator traits fail for complex zip_iterators in C++17, see e.g.: https://godbolt.org/z/7jb4qG3bb
+// The reason is that libcu++ backported the C++20 range iterator machinery to C++17, but C++17 has slightly different
+// language rules, especially regarding `void`. We deemed to it too hard to work around the issues.
+#if THRUST_CPP_DIALECT < 2020 && !defined(THRUST_DOXYGEN_INVOKED)
+_THRUST_STD_NAMESPACE_BEGIN
+template <typename IteratorTuple>
+struct iterator_traits<THRUST_NS_QUALIFIER::zip_iterator<IteratorTuple>>
+{
+  using It                = THRUST_NS_QUALIFIER::zip_iterator<IteratorTuple>;
+  using value_type        = typename It::value_type;
+  using reference         = typename It::reference;
+  using iterator_category = typename It::iterator_category;
+  using difference_type   = typename It::difference_type;
+};
+_THRUST_STD_NAMESPACE_END
+#endif // THRUST_CPP_DIALECT < 2020 && !defined(THRUST_DOXYGEN_INVOKED)
