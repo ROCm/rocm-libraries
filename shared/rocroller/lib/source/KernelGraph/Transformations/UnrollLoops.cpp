@@ -356,6 +356,7 @@ namespace rocRoller
                 std::visit(
                     overloaded{
                         [](Identify const&) {},
+                        [](Forget const&) {},
                         [&](PassThrough const&) {
                             int child
                                 = *graph.coordinates.getNeighbours<GD::Downstream>(output).begin();
