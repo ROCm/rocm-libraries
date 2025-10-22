@@ -86,7 +86,7 @@ from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
-from math import ceil, floor, log
+from math import ceil, floor, log, prod
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -10294,7 +10294,7 @@ class KernelWriterAssembly(KernelWriter):
 
     swapMask: int = kernel[f"LdsOffsetA_Blk"]
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-    ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group1")
+    ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
     module: Module = Module()
     module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
     return module
@@ -16468,17 +16468,30 @@ class KernelWriterAssembly(KernelWriter):
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
     sizeTile0, sizeTile1 = du, mt
-    ldsOffset: int = kernel[f"LdsOffset{tc}"]
+    bpe: int = int(tP["bpeGR"])
+    #TODO: temp hack
+    numWaves: int = prod(kernel["MIWaveGroup"])
+    wavelen: int = kernel["WavefrontSize"]
+    ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), descSgprName(2), descSgprName(3)))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
-    mod.add(comp.setLdsAddr(descSgprName(0), ldsOffset))
+
+    #TODO: currently TN only
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numWaves * bpe * du, "woffset = wId * mt // numWaves * bpe * du"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
     mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self))
-    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1, self))
+    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName()))
     return mod
 

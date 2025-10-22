@@ -3,8 +3,9 @@ from ..Common.DataType import DataType
 from typing import Mapping
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
-    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds
-from rocisa.container import sgpr, vgpr
+    SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
+from rocisa.container import sgpr, vgpr, RegisterContainer
+from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 class TensorDataMoverLoad(TensorDataMover):
@@ -19,25 +20,36 @@ class TensorDataMoverLoad(TensorDataMover):
         pass
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
-        #here we assume TN
+        #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
         tIdx: int = 0 if tp["isA"] else 1
         bpe: int = int(tp["bpeGR"])
+        assert bpe > 0, "bpe must > 0"
         sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[tp['idx']]}"
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
+        vgprThreadIdName: str = "Serial"
+        #TODO: temp hack
+        numWaves: int = prod(kernel["MIWaveGroup"])
+        wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
 
         mod.addComment(f"TDM calc start addr of {tc}")
 
-        with writer.allocTmpSgpr(2) as tmpSgprRes:
+        with writer.allocTmpSgpr(3) as tmpSgprRes:
             tmpSgprIdx = tmpSgprRes.idx
+            waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
             mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprStrideName), mt * bpe, f"stride * MT({mt}) * bpe({bpe})"))
             mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
+            #add wave offset
+            mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
+            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), f"wId=fTid // {wavelen}"))
+            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numWaves * bpe, "woffset = wId * mt // numWaves * bpe"))
+            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
+            mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
-            #TODO: add wave offset
             #TODO: support strided batch
             #TODO: support GSU
         return mod
@@ -86,10 +98,10 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SOrB32(sgpr(group1), sgpr(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
         return mod
 
-    def setLdsAddr(self, group0: int | str, ldsAddr: int) -> Module:
+    def setLdsAddr(self, group0: int | str, ldsAddr: int | RegisterContainer) -> Module:
         mod = Module()
         mod.addComment("TDM set LDS addr")
-        mod.add(SMovB32(sgpr(f"{group0}+1"), hex(ldsAddr)))
+        mod.add(SMovB32(sgpr(f"{group0}+1"), ldsAddr))
         return mod
 
     def getLdsAddrSgprName(self, group0: int | str) -> str:
@@ -113,7 +125,7 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def setIterationEnabled(self, group1, enabled: bool) -> Module:
         mod = Module()
-        mask = 1 << 19 if enabled else ~(1 << 19)
+        mask = 1 << 19 if enabled else 0xFFF7FFFF
         mod.add(SAndB32(sgpr(group1), sgpr(group1), hex(mask)))
         return mod
 
