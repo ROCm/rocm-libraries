@@ -52,7 +52,6 @@ BatchnormBwdParams::BatchnormBwdParams(
     {
         _optMean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
     }
-
     if(attributes.inv_variance_tensor_uid().has_value())
     {
         _optInvVariance
@@ -187,7 +186,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     }
     else
     {
-        // Maybe use nullptr with new api 
+        // Maybe use nullptr with new api
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationBackward_V2(
             handle.miopenHandle,
             MIOPEN_BATCHNORM_MODE,
@@ -212,7 +211,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
             dbiasBuffer.ptr,
             epsilon,
             meanBuffer.ptr,
-            invVarianceBuffr.ptr));
+            invVarianceBuffer.ptr));
     }
 }
 

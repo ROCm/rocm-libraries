@@ -18,23 +18,46 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
-    if(opGraph.nodeCount() != 1)
+    if(opGraph.nodeCount() == 1)
     {
-        HIPDNN_LOG_INFO(
-            "Batchnorm plan builder is applicable only for single node graphs. Graph has {} nodes",
-            opGraph.nodeCount());
+        if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
+               hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+               hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
+        {
+            HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
+            return false;
+        }
+        return true;
+    }
+
+    if(opGraph.nodeCount() == 2)
+    {
+        const auto& node0 = opGraph.getNode(0);
+        const auto& node1 = opGraph.getNode(1);
+
+        // activation -> batchnorm backward
+        bool isActivationFirst = (node0.attributes_type()
+                                  == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes);
+        bool isBatchnormBwdSecond
+            = (node1.attributes_type()
+               == hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes);
+
+        if(isActivationFirst && isBatchnormBwdSecond)
+        {
+            HIPDNN_LOG_INFO(
+                "Batchnorm plan builder applicable for activation + batchnorm backward fusion");
+            return true;
+        }
+
+        HIPDNN_LOG_INFO("Batchnorm plan builder requires activation first, batchnorm backward "
+                        "second. Current order not supported");
         return false;
     }
 
-    if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
-           hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-           hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
-    {
-        HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
-        return false;
-    }
-
-    return true;
+    HIPDNN_LOG_INFO(
+        "Batchnorm plan builder is applicable only for 1 or 2 node graphs. Graph has {} nodes",
+        opGraph.nodeCount());
+    return false;
 }
 
 size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
@@ -91,6 +114,35 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanBwdWithActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                const hipdnn_plugin::IGraph& opGraph,
+                                HipdnnEnginePluginExecutionContext& executionContext)
+{
+    const auto& node0 = opGraph.getNode(0);
+    const auto& node1 = opGraph.getNode(1);
+
+    const auto* actAttr = node0.attributes_as_PointwiseAttributes();
+    if(actAttr == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Failed to convert attributes to PointwiseAttributes for node: " + getNodeName(node0));
+    }
+
+    const auto* bnAttr = node1.attributes_as_BatchnormBackwardAttributes();
+    if(bnAttr == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Failed to convert attributes to BatchnormBackwardAttributes for node: "
+                + getNodeName(node1));
+    }
+
+    BatchnormBwdParams params(*bnAttr, *actAttr, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void MiopenBatchnormPlanBuilder::buildPlan(
@@ -98,8 +150,15 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     const hipdnn_plugin::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    const auto& node = opGraph.getNode(0);
+    // TODO: generalize to any 2 node graph
+    if(opGraph.nodeCount() == 2)
+    {
+        HIPDNN_LOG_INFO("Building batchnorm backward + activation fusion plan");
+        buildPlanBwdWithActivation(handle, opGraph, executionContext);
+        return;
+    }
 
+    const auto& node = opGraph.getNode(0);
     std::string nodeName = getNodeName(node);
     switch(node.attributes_type())
     {
