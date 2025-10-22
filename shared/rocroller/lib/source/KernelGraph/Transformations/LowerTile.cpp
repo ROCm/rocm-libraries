@@ -1996,7 +1996,7 @@ namespace rocRoller
                                          jammedTiles,
                                          useSwappedAccess);
                 }
-                if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
+                else if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                 {
                     // We are storing entire workgroup tiles
                     std::vector<uint> jammedTiles = {1, 1};
