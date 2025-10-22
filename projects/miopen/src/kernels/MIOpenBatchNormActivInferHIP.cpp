@@ -42,9 +42,9 @@ using FLOAT_ACCUM_VEC_TYPE =
     typename miopen::mapped_vector_type<FLOAT_ACCUM, MIOPEN_READ_UNIT>::type;
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    MIOpenBatchNormActivInferSpatialEst(const FLOAT_ACCUM alpha,
-                                        const FLOAT_ACCUM beta,
-                                        const FLOAT_ACCUM gamma,
+    MIOpenBatchNormActivInferSpatialEst(const FLOAT alpha,
+                                        const FLOAT beta,
+                                        const FLOAT gamma,
                                         const double epsilon,
                                         const FLOAT* __restrict in,
                                         FLOAT* __restrict out,
@@ -94,7 +94,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             bnRes[i] =
                 fma(pscale, (static_cast<FLOAT_ACCUM>(data[i]) - pmean) * invVariance, pbias);
         }
-        ActivationFunction(actRes, bnRes, gamma, beta, alpha);
+        ActivationFunction(
+            actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
 
         // write the output data
         if constexpr(MIOPEN_USE_FP16)
@@ -116,9 +117,9 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 }
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    MIOpenBatchNormActivInferPerActEst(const FLOAT_ACCUM alpha,
-                                       const FLOAT_ACCUM beta,
-                                       const FLOAT_ACCUM gamma,
+    MIOpenBatchNormActivInferPerActEst(const FLOAT alpha,
+                                       const FLOAT beta,
+                                       const FLOAT gamma,
                                        const double epsilon,
                                        const FLOAT* __restrict in,
                                        FLOAT* __restrict out,
@@ -178,7 +179,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                            (static_cast<FLOAT_ACCUM>(data[i]) - pmean[i]) * invVariance[i],
                            pbias[i]);
         }
-        ActivationFunction(actRes, bnRes, gamma, beta, alpha);
+        ActivationFunction(
+            actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
 
         // write the output data
         if constexpr(MIOPEN_USE_FP16)
