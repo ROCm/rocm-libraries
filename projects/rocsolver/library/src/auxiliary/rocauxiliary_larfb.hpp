@@ -55,7 +55,7 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
     const auto j = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
-    if(i < order && j < ldw)
+    if(i < ldw && j < order)
     {
         T const* __restrict const Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
         T* __restrict const Wp = tmptr + b * strideW;
@@ -80,7 +80,7 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
     const auto j = hipBlockIdx_y * blocksizey + hipThreadIdx_y;
     rocblas_stride strideW = rocblas_stride(ldw) * order;
 
-    if(i < order && j < ldw)
+    if(i < ldw && j < order)
     {
         T* __restrict const Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
         T const* __restrict const Wp = tmptr + b * strideW;
