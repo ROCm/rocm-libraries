@@ -128,8 +128,8 @@ Plans capture:
 - the flag value(s) to use at creation.
 
 A plan of interest can be created using more than one plan creation function. For instance, any plan created
-by ``fftw_plan_dft`` (resp. ``fftwf_plan_dft``) could be created by ``fftw_plan_many_dft``
-(resp. ``fftwf_plan_many_dft``) without any difference.
+by ``fftw_plan_dft`` (or ``fftwf_plan_dft``) could be created by ``fftw_plan_many_dft``
+(or ``fftwf_plan_many_dft``) without any difference.
 
 For all plan creation functions, the requested plan is said to be configured for in-place operations if identical
 input and output buffers are used when the plan is created. The plan is configured for out-of-place operations otherwise.
