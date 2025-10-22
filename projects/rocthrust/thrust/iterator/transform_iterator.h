@@ -54,6 +54,7 @@
 #endif
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
 #  include <utility>
 #endif
 
@@ -69,7 +70,7 @@ template <class UnaryFunc, class Iterator>
 struct transform_iterator_reference
 {
   // by default, dereferencing the iterator yields the same as the function.
-  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<iterator_value_t<Iterator>>()));
+  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<it_value_t<Iterator>>()));
 };
 
 // for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
@@ -77,13 +78,13 @@ struct transform_iterator_reference
 template <class Iterator>
 struct transform_iterator_reference<::internal::identity, Iterator>
 {
-  using type = iterator_value_t<Iterator>;
+  using type = it_value_t<Iterator>;
 };
 template <typename Eval, class Iterator>
 struct transform_iterator_reference<functional::actor<Eval>, Iterator>
 {
   using type = _THRUST_STD::remove_reference_t<decltype(_THRUST_STD::declval<functional::actor<Eval>>()(
-    _THRUST_STD::declval<iterator_value_t<Iterator>>()))>;
+    _THRUST_STD::declval<it_value_t<Iterator>>()))>;
 };
 
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
@@ -100,7 +101,7 @@ public:
                      Iterator,
                      value_type,
                      use_default,
-                     typename iterator_traits<Iterator>::iterator_category,
+                     typename _THRUST_STD::iterator_traits<Iterator>::iterator_category,
                      reference>;
 };
 
@@ -337,7 +338,7 @@ private:
     // The workaround is to create a temporary to allow iterators with wrapped/proxy references to convert to their
     // value type before calling m_f. This also loads values from a different memory space (cf. `device_reference`).
     // Note that this disallows mutable operations through m_f.
-    iterator_value_t<Iterator> const& x = *this->base();
+    detail::it_value_t<Iterator> const& x = *this->base();
     // FIXME(bgruber): x may be a reference to a temporary (e.g. if the base iterator is a counting_iterator). If `m_f`
     // does not produce an independent copy and super_t::reference is a reference, we return a dangling reference (e.g.
     // for any `[thrust|_THRUST_STD]::identity` functor).

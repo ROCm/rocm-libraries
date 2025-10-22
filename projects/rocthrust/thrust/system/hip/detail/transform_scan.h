@@ -55,11 +55,11 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
   ScanOp scan_op)
 {
   // Use the transformed input iterator's value type per https://wg21.link/P0571
-  using input_type  = typename thrust::iterator_value<InputIt>::type;
+  using input_type  = thrust::detail::it_value_t<InputIt>;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
   using value_type  = ::internal::remove_cvref_t<result_type>;
 
-  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, value_type, value_type>;
 
@@ -76,11 +76,11 @@ OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
   InitialValueType init,
   ScanOp scan_op)
 {
-  using input_type  = typename thrust::iterator_value<InputIt>::type;
+  using input_type  = thrust::detail::it_value_t<InputIt>;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
   using value_type  = ::internal::remove_cvref_t<result_type>;
 
-  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, value_type, value_type>;
 
@@ -101,7 +101,7 @@ OutputIt THRUST_HOST_DEVICE transform_exclusive_scan(
   // Use the initial value type per https://wg21.link/P0571
   using result_type = ::internal::remove_cvref_t<InitialValueType>;
 
-  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  using size_type              = thrust::detail::it_difference_t<InputIt>;
   size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, result_type, result_type>;
 

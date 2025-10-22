@@ -30,6 +30,10 @@
 
 #include "include/host_device.h"
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
 // this example illustrates how to make repeated access to a range of values
 // examples:
 //   repeated_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3]
@@ -41,7 +45,9 @@ template <typename Iterator>
 class repeated_range
 {
 public:
-  using difference_type = typename thrust::iterator_difference<Iterator>::type;
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  using difference_type = typename _THRUST_STD::iterator_traits<Iterator>::difference_type;
 
   struct repeat_functor
   {
@@ -71,12 +77,12 @@ public:
       , repeats(repeats)
   {}
 
-  iterator begin(void) const
+  iterator begin() const
   {
     return PermutationIterator(first, TransformIterator(CountingIterator(0), repeat_functor(repeats)));
   }
 
-  iterator end(void) const
+  iterator end() const
   {
     return begin() + repeats * (last - first);
   }
@@ -87,7 +93,7 @@ protected:
   difference_type repeats;
 };
 
-int main(void)
+int main()
 {
   thrust::device_vector<int> data(4);
   data[0] = 10;

@@ -26,6 +26,8 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(array)
+#else
+#  include <iterator>
 #endif
 
 TESTS_DEFINE(UniqueTests, FullTestsParams);
@@ -108,7 +110,7 @@ TEST(UniqueTests, TestUniqueCopyDispatchImplicit)
 }
 
 template <typename ForwardIterator>
-typename thrust::iterator_traits<ForwardIterator>::difference_type
+typename _THRUST_STD::iterator_traits<ForwardIterator>::difference_type
 unique_count(my_system& system, ForwardIterator, ForwardIterator)
 {
   system.validate_dispatch();
@@ -128,7 +130,8 @@ TEST(UniqueTests, TestUniqueCountDispatchExplicit)
 }
 
 template <typename ForwardIterator>
-typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(my_tag, ForwardIterator, ForwardIterator)
+typename _THRUST_STD::iterator_traits<ForwardIterator>::difference_type
+unique_count(my_tag, ForwardIterator, ForwardIterator)
 {
   return 13;
 }

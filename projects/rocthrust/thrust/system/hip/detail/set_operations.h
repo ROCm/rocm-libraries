@@ -139,7 +139,7 @@ THRUST_HIP_DEVICE_FUNCTION Size biased_binary_search(It data, Size count, T key,
 template <bool UpperBound, class Size, class It1, class It2, class Comp>
 THRUST_HIP_DEVICE_FUNCTION Size merge_path(It1 a, Size aCount, It2 b, Size bCount, Size diag, Comp comp)
 {
-  using T = typename thrust::iterator_traits<It1>::value_type;
+  using T = thrust::detail::it_value_t<It1>;
 
   Size begin = _THRUST_STD::max<Size>(0, diag - bCount);
   Size end   = _THRUST_STD::min<Size>(diag, aCount);
@@ -166,7 +166,7 @@ template <class It1, class It2, class Size, class Size2, class CompareOp>
 THRUST_HIP_DEVICE_FUNCTION pair<Size, Size>
 balanced_path(It1 keys1, It2 keys2, Size num_keys1, Size num_keys2, Size diag, Size2 levels, CompareOp compare_op)
 {
-  using T = typename iterator_traits<It1>::value_type;
+  using T = thrust::detail::it_value_t<It1>;
 
   Size index1 = merge_path<false>(keys1, num_keys1, keys2, num_keys2, diag, compare_op);
   Size index2 = diag - index1;
@@ -233,8 +233,8 @@ template <class Config,
           bool HAS_VALUES>
 struct SetOpAgent
 {
-  using key_type   = typename iterator_traits<KeysIt1>::value_type;
-  using value_type = typename iterator_traits<ValuesIt1>::value_type;
+  using key_type   = thrust::detail::it_value_t<KeysIt1>;
+  using value_type = thrust::detail::it_value_t<ValuesIt1>;
 
   static constexpr int BLOCK_THREADS    = Config::block_size;
   static constexpr int ITEMS_PER_THREAD = Config::items_per_thread;
@@ -1045,7 +1045,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
 
-  using size_type     = typename iterator_traits<KeysIt1>::difference_type;
+  using size_type     = thrust::detail::it_difference_t<KeysIt1>;
   size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
   size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
 
@@ -1137,7 +1137,7 @@ OutputIt THRUST_HOST_DEVICE set_difference(
   OutputIt result,
   CompareOp compare)
 {
-  using items1_t = thrust::iterator_value_t<ItemsIt1>;
+  using items1_t = thrust::detail::it_value_t<ItemsIt1>;
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
@@ -1180,7 +1180,7 @@ OutputIt THRUST_HOST_DEVICE set_difference(
   ItemsIt2 items2_last,
   OutputIt result)
 {
-  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt1>;
   return hip_rocprim::set_difference(
     policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
@@ -1198,7 +1198,7 @@ OutputIt THRUST_HOST_DEVICE set_intersection(
   OutputIt result,
   CompareOp compare)
 {
-  using items1_t = thrust::iterator_value_t<ItemsIt1>;
+  using items1_t = thrust::detail::it_value_t<ItemsIt1>;
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       false,
@@ -1240,7 +1240,7 @@ OutputIt THRUST_HOST_DEVICE set_intersection(
   ItemsIt2 items2_last,
   OutputIt result)
 {
-  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt1>;
   return hip_rocprim::set_intersection(
     policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
@@ -1258,7 +1258,7 @@ OutputIt THRUST_HOST_DEVICE set_symmetric_difference(
   OutputIt result,
   CompareOp compare)
 {
-  using items1_t = thrust::iterator_value_t<ItemsIt1>;
+  using items1_t = thrust::detail::it_value_t<ItemsIt1>;
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       false,
@@ -1300,7 +1300,7 @@ OutputIt THRUST_HOST_DEVICE set_symmetric_difference(
   ItemsIt2 items2_last,
   OutputIt result)
 {
-  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt1>;
   return hip_rocprim::set_symmetric_difference(
     policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
@@ -1318,7 +1318,7 @@ OutputIt THRUST_HOST_DEVICE set_union(
   OutputIt result,
   CompareOp compare)
 {
-  using items1_t = thrust::iterator_value_t<ItemsIt1>;
+  using items1_t = thrust::detail::it_value_t<ItemsIt1>;
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__set_operations::set_operations<
       false,
@@ -1360,7 +1360,7 @@ OutputIt THRUST_HOST_DEVICE set_union(
   ItemsIt2 items2_last,
   OutputIt result)
 {
-  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt1>;
   return hip_rocprim::set_union(
     policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
@@ -1446,7 +1446,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_difference_by_key(
   KeysOutputIt keys_result,
   ItemsOutputIt items_result)
 {
-  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  using value_type = thrust::detail::it_value_t<KeysIt1>;
   return hip_rocprim::set_difference_by_key(
     policy,
     keys1_first,
@@ -1532,7 +1532,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_intersection_by_key(
   KeysOutputIt keys_result,
   ItemsOutputIt items_result)
 {
-  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  using value_type = thrust::detail::it_value_t<KeysIt1>;
   return hip_rocprim::set_intersection_by_key(
     policy,
     keys1_first,
@@ -1620,7 +1620,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_symmetric_difference_by
   KeysOutputIt keys_result,
   ItemsOutputIt items_result)
 {
-  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  using value_type = thrust::detail::it_value_t<KeysIt1>;
   return hip_rocprim::set_symmetric_difference_by_key(
     policy,
     keys1_first,
@@ -1709,7 +1709,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_union_by_key(
   KeysOutputIt keys_result,
   ItemsOutputIt items_result)
 {
-  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  using value_type = thrust::detail::it_value_t<KeysIt1>;
   return hip_rocprim::set_union_by_key(
     policy,
     keys1_first,

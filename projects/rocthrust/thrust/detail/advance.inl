@@ -32,6 +32,10 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/advance.h>
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 __THRUST_DEFINE_HAS_NESTED_TYPE(has_difference_type, difference_type)
@@ -43,7 +47,7 @@ THRUST_HOST_DEVICE void advance(InputIterator& i, Distance n)
 }
 
 template <typename InputIterator>
-THRUST_HOST_DEVICE InputIterator next(InputIterator i, typename iterator_traits<InputIterator>::difference_type n = 1)
+THRUST_HOST_DEVICE InputIterator next(InputIterator i, thrust::detail::it_difference_t<InputIterator> n = 1)
 {
   thrust::system::detail::generic::advance(i, n);
   return i;
@@ -51,15 +55,16 @@ THRUST_HOST_DEVICE InputIterator next(InputIterator i, typename iterator_traits<
 
 template <typename BidirectionalIterator>
 THRUST_HOST_DEVICE BidirectionalIterator
-prev(BidirectionalIterator i, typename iterator_traits<BidirectionalIterator>::difference_type n = 1)
+prev(BidirectionalIterator i, thrust::detail::it_difference_t<BidirectionalIterator> n = 1)
 {
   thrust::system::detail::generic::advance(i, -n);
   return i;
 }
 
+// FIXME(bgruber): what does this prevent against?
 template <typename BidirectionalIterator>
 THRUST_HOST_DEVICE
-typename detail::disable_if<has_difference_type<iterator_traits<BidirectionalIterator>>::value,
+typename detail::disable_if<has_difference_type<_THRUST_STD::iterator_traits<BidirectionalIterator>>::value,
                             BidirectionalIterator>::type
 prev(BidirectionalIterator i, typename detail::pointer_traits<BidirectionalIterator>::difference_type n = 1)
 {

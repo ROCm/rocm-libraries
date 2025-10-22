@@ -337,7 +337,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename ScanOp
 THRUST_HOST_DEVICE OutputIt inclusive_scan(
   thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
@@ -351,7 +351,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan(
   T init,
   ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
@@ -404,7 +404,7 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan(
   T init,
   ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
@@ -420,7 +420,7 @@ template <typename Derived, typename InputIt, typename OutputIt>
 THRUST_HOST_DEVICE OutputIt
 exclusive_scan(thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  using init_type = typename thrust::iterator_traits<InputIt>::value_type;
+  using init_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::exclusive_scan(policy, first, last, result, init_type{});
 }
 

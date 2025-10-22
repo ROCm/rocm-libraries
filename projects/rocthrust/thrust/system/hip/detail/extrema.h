@@ -55,6 +55,8 @@
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
+#  include _THRUST_STD_INCLUDE(iterator)
+
 #  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
@@ -236,8 +238,8 @@ element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPr
     return last;
   }
 
-  using InputType = typename iterator_traits<ItemsIt>::value_type;
-  using IndexType = typename iterator_traits<ItemsIt>::difference_type;
+  using InputType = thrust::detail::it_value_t<ItemsIt>;
+  using IndexType = thrust::detail::it_difference_t<ItemsIt>;
 
   IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
 
@@ -273,7 +275,7 @@ min_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, Bina
 template <class Derived, class ItemsIt>
 ItemsIt THRUST_HOST_DEVICE min_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = typename iterator_value<ItemsIt>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt>;
   return hip_rocprim::min_element(policy, first, last, less<value_type>());
 }
 
@@ -293,7 +295,7 @@ max_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, Bina
 template <class Derived, class ItemsIt>
 ItemsIt THRUST_HOST_DEVICE max_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = typename iterator_value<ItemsIt>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt>;
   return hip_rocprim::max_element(policy, first, last, less<value_type>());
 }
 
@@ -306,8 +308,8 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 {
   auto ret = thrust::make_pair(last, last);
 
-  using InputType = typename iterator_traits<ItemsIt>::value_type;
-  using IndexType = typename iterator_traits<ItemsIt>::difference_type;
+  using InputType = thrust::detail::it_value_t<ItemsIt>;
+  using IndexType = thrust::detail::it_difference_t<ItemsIt>;
 
   using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
@@ -338,7 +340,7 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 template <class Derived, class ItemsIt>
 pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = typename iterator_value<ItemsIt>::type;
+  using value_type = thrust::detail::it_value_t<ItemsIt>;
   return hip_rocprim::minmax_element(policy, first, last, less<value_type>());
 }
 

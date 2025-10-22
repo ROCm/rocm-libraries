@@ -128,7 +128,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, result, new_value_if_t(predicate, new_value));
 }
@@ -143,7 +143,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t(predicate, new_value));
 }
