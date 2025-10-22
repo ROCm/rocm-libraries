@@ -3,7 +3,7 @@
 
 find_package(LAPACK QUIET)
 
-if(NOT LAPACK_FOUND AND HIPSARSELT_ENABLE_FETCH)
+if(NOT LAPACK_FOUND AND HIPSPARSELT_ENABLE_FETCH)
   include(FetchContent)
   FetchContent_Declare(
     lapack
@@ -23,6 +23,6 @@ elseif(LAPACK_FOUND)
 else()
   message(FATAL_ERROR 
     "LAPACK not found. Install with your package manager (recommended) or "
-    "opt-in to fetch with `-DHIPSARSELT_ENABLE_FETCH=ON`."
+    "opt-in to fetch with `-DHIPSPARSELT_ENABLE_FETCH=ON`."
   )
 endif()

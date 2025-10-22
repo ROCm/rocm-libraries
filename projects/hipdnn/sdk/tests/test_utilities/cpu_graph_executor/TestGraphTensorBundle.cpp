@@ -114,7 +114,7 @@ TEST_F(TestGraphTensorBundle, ToVariantPackReturnsCorrectMapping)
 
     GraphTensorBundle bundle(tensorMap);
 
-    auto variantPack = bundle.toVariantPack();
+    auto variantPack = bundle.toHostVariantPack();
 
     EXPECT_EQ(variantPack.size(), bundle.tensors.size());
 
