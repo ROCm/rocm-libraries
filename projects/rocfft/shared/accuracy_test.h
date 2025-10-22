@@ -352,7 +352,7 @@ inline void execute_gpu_fft(Tparams&              params,
     // Execute the transform:
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
-        throw std::runtime_error("rocFFT plan execution failure");
+        throw std::runtime_error("FFT plan execution failure");
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
@@ -363,9 +363,9 @@ inline void execute_gpu_fft(Tparams&              params,
 
     // if output is in multiple bricks, collect it into the
     // host buffer where the results need to go
-    if(!params.ofields.empty())
-        params.multi_gpu_finalize(gpu_output, obuffer, pobuffer);
-    else
+    params.multi_gpu_finalize(gpu_output, obuffer, pobuffer);
+
+    if(params.ofields.empty())
     {
         // otherwise, copy directly from the device
         for(unsigned int idx = 0; idx < gpu_output.size(); ++idx)
@@ -594,8 +594,7 @@ inline void run_round_trip_inverse(Tparams&              params,
             // shouldn't have been touched.
             if(params.check_output_strides)
             {
-                auto hip_status
-                    = hipMemset(obuffer[i].data(), OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
+                auto hip_status = hipMemset(pobuffer[i], OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
                 if(hip_status != hipSuccess)
                 {
                     ++n_hip_failures;
@@ -612,6 +611,16 @@ inline void run_round_trip_inverse(Tparams&              params,
                 }
             }
         }
+    }
+
+    if(params.multiGPU > 1)
+    {
+        if(verbose > 0)
+        {
+            std::cout << "scattering data for multi-GPU inverse" << std::endl;
+        }
+        std::vector<hostbuf> cpu_input;
+        params.multi_gpu_prepare(cpu_input, obuffer, pibuffer, pobuffer);
     }
 
     // execute GPU transform
@@ -1408,7 +1417,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params_inverse.inverse_from_forward(params);
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, ibuffer, pobuffer, pibuffer, gpu_input_data);
+            params_inverse, *obuffer, pobuffer, pibuffer, gpu_input_data);
     }
 
     if(fftw_compare)

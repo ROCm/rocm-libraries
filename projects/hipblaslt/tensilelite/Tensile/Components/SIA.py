@@ -33,7 +33,6 @@ from ..Component import SIA
 
 from copy import deepcopy
 from typing import Tuple
-
 PRECISION = 100
 class SIA3(SIA):
     kernel = {"ScheduleIterAlg": 3}
@@ -258,6 +257,11 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
+    
+    if kernel["ForceUnrollSubIter"]:
+        if ( kernel["ProblemType"]["DataType"].isComplex()):
+            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
+
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
     if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:

@@ -14,6 +14,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanUtils.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -148,12 +149,11 @@ public:
                                            *tensorMap.at(nodeAttributes->bias_tensor_uid()),
                                            *tensorMap.at(nodeAttributes->mean_tensor_uid()),
                                            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()),
-                                           1e-3);
+                                           utilities::BATCHNORM_DEFAULT_EPSILON);
 
         return std::make_unique<
             BatchnormFwdPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(
             std::move(params));
     }
 };
-
 }
