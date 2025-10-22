@@ -31,6 +31,7 @@
 #include <thrust/iterator/detail/host_system_tag.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
+#include <thrust/type_traits/detail/conditional.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -41,43 +42,27 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 template <typename T>
-struct is_iterator_system
-    : _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, any_system_tag>,
-                               _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, host_system_tag>,
-                                                        _THRUST_STD::is_convertible<T, device_system_tag>>>
-{};
-
-template <typename>
-struct device_iterator_category_to_backend_system;
+// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
+inline constexpr bool is_iterator_system =
+  _THRUST_STD::is_convertible_v<T, any_system_tag> || _THRUST_STD::is_convertible_v<T, host_system_tag>
+  || _THRUST_STD::is_convertible_v<T, device_system_tag>;
 
 // XXX this should work entirely differently
 // we should just specialize this metafunction for iterator_category_with_system_and_traversal
 template <typename Category>
 struct iterator_category_to_system
+{
+  using type =
     // convertible to host iterator?
-    : eval_if<
-        _THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_host_iterator_tag>,
-                                 _THRUST_STD::is_convertible<Category, thrust::output_host_iterator_tag>>::value,
-
-        detail::identity_<thrust::host_system_tag>,
-
-        // convertible to device iterator?
-        eval_if<_THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_device_iterator_tag>,
-                                         _THRUST_STD::is_convertible<Category, thrust::output_device_iterator_tag>>::value,
-
-                detail::identity_<thrust::device_system_tag>,
-
-                // unknown system
-                detail::identity_<void>> // if device
-        > // if host
-{}; // end iterator_category_to_system
-
-template <typename CategoryOrTraversal>
-struct iterator_category_or_traversal_to_system
-    : eval_if<is_iterator_system<CategoryOrTraversal>::value,
-              detail::identity_<CategoryOrTraversal>,
-              iterator_category_to_system<CategoryOrTraversal>>
-{}; // end iterator_category_or_traversal_to_system
-
+    ::internal::If<_THRUST_STD::is_convertible_v<Category, input_host_iterator_tag>
+                     || _THRUST_STD::is_convertible_v<Category, output_host_iterator_tag>,
+                   host_system_tag,
+                   // convertible to device iterator?
+                   ::internal::If<_THRUST_STD::is_convertible_v<Category, input_device_iterator_tag>
+                                    || _THRUST_STD::is_convertible_v<Category, output_device_iterator_tag>,
+                                  device_system_tag,
+                                  // unknown system
+                                  void>>;
+};
 } // namespace detail
 THRUST_NAMESPACE_END
