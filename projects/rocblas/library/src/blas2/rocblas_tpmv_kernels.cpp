@@ -59,7 +59,8 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvn_kernel_calc(bool        is_upper,
             }
             for(rocblas_int col = tid + 1; col < n; ++col)
             {
-                res += AP[index += col] * x[col * incx];
+                index += col;
+                res += AP[index] * x[col * incx];
             }
         }
         else
@@ -117,7 +118,8 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvc_kernel_calc(bool        is_upper,
             }
             for(rocblas_int row = tid + 1; row < n; ++row)
             {
-                res += conj(AP[++index]) * x[row * incx];
+                ++index;
+                res += conj(AP[index]) * x[row * incx];
             }
         }
         workspace[tid] = res;
@@ -166,7 +168,8 @@ ROCBLAS_KERNEL_ILF void rocblas_tpmvt_kernel_calc(bool        is_upper,
 
             for(row = tid + 1; row < n; ++row)
             {
-                res += AP[++index] * x[row * incx];
+                ++index;
+                res += AP[index] * x[row * incx];
             }
         }
         workspace[tid] = res;
