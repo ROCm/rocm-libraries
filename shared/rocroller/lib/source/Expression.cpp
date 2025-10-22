@@ -137,7 +137,7 @@ namespace rocRoller
                 bool offset = (a.offset == b.offset);
                 bool width  = (a.width == b.width);
 
-                return call(a.arg, b.arg) && offset && width;
+                return offset && width && call(a.arg, b.arg);
             }
 
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)

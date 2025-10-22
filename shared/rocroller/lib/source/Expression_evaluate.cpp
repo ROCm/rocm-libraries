@@ -196,9 +196,7 @@ namespace rocRoller
 
         std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr)
         {
-            if(evaluationTimes(expr)[EvaluationTime::Translate])
-                return evaluate(expr);
-            return std::nullopt;
+            return expr ? tryEvaluate(*expr) : std::nullopt;
         }
 
         std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr)
