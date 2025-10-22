@@ -186,4 +186,40 @@ TEST_CASE("ForLoop utils", "[kernel-graph]")
         // The new loop re-uses the ForLoop coordinate
         CHECK(graph.coordinates.allElements().to<std::vector>().size() == 5);
     }
+
+    SECTION("Complex cloneForLoop")
+    {
+        // Manually make a ForLoop, where the condition doesn't
+        // exactly match the size of the ForLoop dimension (like will
+        // happen in StreamK kernels).
+
+        auto [forLoopCoordTag, forLoopOpTag]
+            = KernelGraph::rangeFor(graph, Expression::literal(10u), "DummyLoop");
+
+        auto [_ignore, forLoopIteratorTag] = getForLoopCoords(forLoopOpTag, graph);
+
+        auto forLoopCoord = graph.coordinates.get<CT::ForLoop>(forLoopCoordTag).value();
+
+        auto forLoopOp = graph.control.get<CF::ForLoopOp>(forLoopOpTag).value();
+        forLoopOp.condition
+            = Expression::dataFlowTag(forLoopIteratorTag, Register::Type::Scalar, DataType::UInt32)
+              < Expression::literal(15u);
+        graph.control.setElement(forLoopOpTag, forLoopOp);
+
+        auto clonedForLoopOpTag = KernelGraph::cloneForLoop(graph, forLoopOpTag);
+
+        auto clonedForLoopOp = graph.control.get<CF::ForLoopOp>(clonedForLoopOpTag).value();
+
+        // The ForLoop coord size should be unchanged, and is 10.
+        CHECK(Expression::identical(forLoopCoord.size, Expression::literal(10u)));
+
+        // The cloned ForLoopOp condition should be unchanged AND IS NOT "i < 10".
+        auto [_ignore1, originalUpper]
+            = Expression::split<Expression::LessThan>(forLoopOp.condition);
+        auto [_ignore2, clonedUpper]
+            = Expression::split<Expression::LessThan>(clonedForLoopOp.condition);
+
+        CHECK(not Expression::identical(clonedUpper, Expression::literal(10u)));
+        CHECK(Expression::identical(originalUpper, clonedUpper));
+    }
 }

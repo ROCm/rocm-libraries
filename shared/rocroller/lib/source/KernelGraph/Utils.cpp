@@ -258,19 +258,38 @@ namespace rocRoller
             return {forLoopCoord, forLoop};
         }
 
-        int cloneForLoop(KernelGraph& graph, int tag)
+        int cloneForLoop(KernelGraph& graph, int forLoopOpTag)
         {
-            auto maybeForLoopOp = graph.control.get<CG::ForLoopOp>(tag);
+            auto maybeForLoopOp = graph.control.get<CG::ForLoopOp>(forLoopOpTag);
             AssertFatal(maybeForLoopOp, "cloneForLoop is being called on a non-ForLoopOp");
 
-            auto forLoopDim = graph.mapper.get<CT::ForLoop>(tag);
+            // Make a range based for loop that is roughly equivalent.
+            // It shares the same ForLoop coordinate as the original
+            // loop.
+            auto forLoopOp       = maybeForLoopOp.value();
+            auto forLoopCoordTag = graph.mapper.get<CT::ForLoop>(forLoopOpTag);
+            auto forLoopSize     = graph.coordinates.get<CT::ForLoop>(forLoopCoordTag)->size;
 
-            auto forLoopSize = graph.coordinates.get<CT::ForLoop>(forLoopDim)->size;
+            auto [loopIterator, loopCondition] = split<Expression::LessThan>(forLoopOp.condition);
 
-            auto clone = rangeFor(
-                graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
+            auto [cloneForLoopCoordTag, clonedForLoopOpTag]
+                = rangeFor(graph, forLoopSize, forLoopOp.loopName, DataType::None, forLoopCoordTag);
 
-            return clone.second;
+            // Reset the condition to match the original loop more
+            // precisely.  This is necessary for, eg, StreamK loops
+            // because their conditions are not simply based on the
+            // size of the original ForLoop coordinate.
+            auto clonedForLoopOp = graph.control.get<CG::ForLoopOp>(clonedForLoopOpTag).value();
+
+            auto [cloneLoopIterator, clonedLoopCondition]
+                = split<Expression::LessThan>(clonedForLoopOp.condition);
+
+            auto newCondition = cloneLoopIterator < loopCondition;
+            copyComment(newCondition, maybeForLoopOp->condition);
+            clonedForLoopOp.condition = newCondition;
+            graph.control.setElement(clonedForLoopOpTag, clonedForLoopOp);
+
+            return clonedForLoopOpTag;
         }
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)

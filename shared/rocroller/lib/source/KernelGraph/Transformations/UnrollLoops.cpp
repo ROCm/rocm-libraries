@@ -796,18 +796,6 @@ namespace rocRoller
                 graph.control.setElement(*init, initOp);
             }
 
-            // Reset the condition
-            {
-                auto tailLoopOp = graph.control.get<ForLoopOp>(tailLoop).value();
-                auto [loopVariable, _ignoreloopSize]
-                    = split<Expression::LessThan>(tailLoopOp.condition);
-
-                auto newCondition = loopVariable < loopSize;
-                copyComment(newCondition, loopOp.condition);
-                tailLoopOp.condition = newCondition;
-                graph.control.setElement(tailLoop, tailLoopOp);
-            }
-
             // Duplicate the body of the original for loop into the tail.
             {
                 auto loopBodies = graph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
