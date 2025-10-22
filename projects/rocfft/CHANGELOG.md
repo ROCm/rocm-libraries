@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.36 (unreleased)
 
+### Optimized
+
+* Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
+* Enabled optimization of 3D pencil decompositions for single-process multi-GPU transforms.
+
 ### Resolved issues
 
 * Fixed potential division by zero when constructing plans using dimensions of length 1.

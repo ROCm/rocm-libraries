@@ -11,6 +11,7 @@
 
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 
 namespace hipdnn_sdk
 {
@@ -25,7 +26,7 @@ using namespace hipdnn_sdk::utilities;
 // RMS check is only relative tolerance based. We recommend using cpu_fp_reference_validation
 // instead, but this class can be used to compare with MIOpen tolerance checks.
 template <class T>
-class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation<T>
+class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation
 {
 public:
     CpuFpReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
@@ -39,7 +40,7 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(const ITensor& reference, const ITensor& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -56,11 +57,16 @@ public:
         double maxRefMagnitude = 0.0;
         double maxImplMagnitude = 0.0;
 
-        iterateAlongDimensions(reference.dims(), [&](const std::vector<int64_t>& indices) {
-            auto refIdx = reference.getIndex(indices);
-            auto implIdx = implementation.getIndex(indices);
-            T refValueT = *static_cast<const T*>(reference.hostDataOffsetFromIndex(refIdx));
-            T implValueT = *static_cast<const T*>(implementation.hostDataOffsetFromIndex(implIdx));
+        TensorView<T> refView(reference);
+        TensorView<T> implView(implementation);
+
+        auto refItr = refView.begin();
+        auto implItr = implView.begin();
+
+        while(refItr != refView.end() && implItr != implView.end())
+        {
+            T refValueT = *refItr++;
+            T implValueT = *implItr++;
 
             auto refValue = static_cast<double>(refValueT);
             auto implValue = static_cast<double>(implValueT);
@@ -71,13 +77,13 @@ public:
             // Track maximum magnitudes
             maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
             maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-        });
+        }
 
         return checkRmsError(
             squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
     }
 
-    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
+    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
     {
         if(reference.count() != implementation.count())
         {

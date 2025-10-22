@@ -231,7 +231,9 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
         const auto& brick       = bricks[i];
         size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride, 0, 0);
 
-        if(brick.rank != mpi_rank)
+        // The rank that this brick is on needs to send to rank 0,
+        // and rank 0 needs to receive all bricks
+        if(brick.rank != mpi_rank && mpi_rank != 0)
             continue;
 
         void* brick_ptr   = nullptr;
