@@ -78,7 +78,9 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
     if len(params.afterok) > 0:
         batchscript += "#SBATCH --dependency=afterok:" + ",".join(
             str(x) for x in params.afterok) + "\n"
-
+    if len(params.afterany) > 0 or len(params.afterok) > 0:
+        batchscript += "#SBATCH --kill-on-invalid-dep=yes\n"
+        
     for module in params.modules:
         batchscript += "module load " + module + "\n"
     for export in params.exports:

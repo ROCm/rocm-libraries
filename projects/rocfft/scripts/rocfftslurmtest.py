@@ -72,6 +72,10 @@ def main():
                         type=str,
                         default=None,
                         help='build directory')
+    parser.add_argument('--srcdir',
+                        type=str,
+                        default=None,
+                        help='source directory')
     parser.add_argument('--build',
                         type=lambda x: bool(x.lower() in
                                             ("yes", "true", "t", "1")),
@@ -164,6 +168,14 @@ def main():
 
     buildjob = None
     if args.build:
+        if args.srcdir == None:
+            print("You must specify source dir if you are going to build")
+            sys.exit(1)
+        if not os.path.exists(args.srcdir):
+            print("Source dir " + args.srcdir + " does not exist")
+            sys.exit(1)
+        
+        
         # Run a compile job first.
         buildcmd = "cmake"
         buildcmd += " -DCMAKE_CXX_COMPILER=amdclang++"
@@ -176,7 +188,7 @@ def main():
         buildcmd += " -DROCFFT_MPI_ENABLE=on "
         if args.buildcraympi:
             buildcmd += " -DROCFFT_CRAY_MPI_ENABLE=on"
-        buildcmd += " .."
+        buildcmd += " " + args.srcdir
         buildcmd += " && make"
 
         # Set up the basic slurm parameters:
