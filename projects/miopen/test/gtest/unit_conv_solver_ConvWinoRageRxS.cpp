@@ -65,6 +65,15 @@ auto GetConvTestCasesWrw(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X);
+        return p;
+    }();
+    return params;
+}
+
+const auto& GetTestParamsFP16()
+{
+    static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx120X);
         return p;
     }();
@@ -82,7 +91,11 @@ using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32 = GPU_UnitTestConvSolverWrw_FP32
 using GPU_UnitTestConvSolverWinoRage2x3Fwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverWinoRage2x3Bwd_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
 using GPU_UnitTestConvSolverWinoRage2x3Wrw_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
-using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE =
+using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP16 =
+    CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32 =
+    CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+using CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_BFP16 =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
 
 TEST_P(GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16, ConvWinoRageRxSf2x3)
@@ -130,7 +143,17 @@ TEST_P(GPU_UnitTestConvSolverWinoRage2x3Wrw_BFP16, ConvWinoRageRxSf2x3)
     this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
 };
 
-TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE, ConvWinoRageRxSf2x3)
+TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP16, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32, ConvWinoRageRxSf2x3)
+{
+    this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
+};
+
+TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_BFP16, ConvWinoRageRxSf2x3)
 {
     this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
 };
@@ -138,19 +161,19 @@ TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE, ConvWinoRageRx
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverWinoRage2x3Bwd_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesWrw(miopenHalf))));
 
@@ -192,6 +215,16 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP16,
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(GetConvTestCases(miopenHalf)[0])));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(GetConvTestCases(miopenFloat)[0])));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(GetConvTestCases(miopenBFloat16)[0])));
