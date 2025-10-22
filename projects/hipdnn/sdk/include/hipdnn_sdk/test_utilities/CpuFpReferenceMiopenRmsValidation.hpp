@@ -98,45 +98,6 @@ public:
             squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
     }
 
-    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
-    {
-        if(reference.count() != implementation.count())
-        {
-            return false;
-        }
-
-        size_t elementCount = reference.count();
-
-        if(elementCount == 0)
-        {
-            return true;
-        }
-
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
-
-        double squareDifference = 0.0;
-        double maxRefMagnitude = 0.0;
-        double maxImplMagnitude = 0.0;
-
-        // Iterate through all elements to calculate square differences and find max magnitudes
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            auto refValue = static_cast<double>(refData[i]);
-            auto implValue = static_cast<double>(implData[i]);
-
-            // Accumulate square differences
-            auto diff = refValue - implValue;
-            squareDifference += diff * diff;
-
-            // Track maximum magnitudes
-            maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
-            maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-        }
-
-        return checkRmsError(squareDifference, maxRefMagnitude, maxImplMagnitude, elementCount);
-    }
-
 private:
     bool checkRmsError(double squareDifference,
                        double maxRefMagnitude,

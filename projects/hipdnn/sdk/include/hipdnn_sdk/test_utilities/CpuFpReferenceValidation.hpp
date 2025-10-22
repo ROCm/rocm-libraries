@@ -77,45 +77,6 @@ public:
         return result.load();
     }
 
-    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
-    {
-        if(reference.count() != implementation.count())
-        {
-            return false;
-        }
-
-        size_t elementCount = reference.count();
-
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
-
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            T refValue = refData[i];
-            T implValue = implData[i];
-
-            T absDiff = std::fabs(implValue - refValue);
-            T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
-
-            if(absDiff > threshold)
-            {
-                HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {} (atol={}, rtol={})",
-                                 i,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
-                return false;
-            }
-        }
-
-        return true;
-    }
-
 private:
     // Tolerances for comparison
     T _absoluteTolerance;

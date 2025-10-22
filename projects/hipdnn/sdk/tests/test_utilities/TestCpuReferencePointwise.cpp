@@ -1182,7 +1182,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testUnarySingleElementTensor()
@@ -1201,7 +1201,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 };
 
