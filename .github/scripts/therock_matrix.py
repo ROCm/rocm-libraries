@@ -38,7 +38,7 @@ project_map = {
         "project_to_test": "hipblaslt, rocblas, hipblas",
     },
     "miopen": {
-        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         "project_to_test": "miopen",
     },
     "fft": {
