@@ -2552,10 +2552,11 @@ public:
     // output after we get it from the reference FFT
     void apply_host_store_ops(std::vector<hostbuf>& output) const
     {
-        // cuFFT does not support any store ops, and CUDA implements
-        // some conflicting half-precision operators that prevent
-        // result scaling from compiling
-#ifndef _CUFFT_BACKEND
+        // Store ops like result scaling are only supported on AMD
+        // backend, and CUDA implements some conflicting
+        // half-precision operators that prevent result scaling from
+        // compiling
+#ifdef __HIP_PLATFORM_AMD__
         // Don't bother iterating over the data if we don't have to
         if(scale_factor == 1.0)
             return;
