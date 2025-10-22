@@ -216,7 +216,7 @@ void* host_calloc(size_t nmemb, size_t size)
     if(host_mem_safe(nmemb * size))
     {
         void* ptr = calloc(nmemb, size);
-        alloc_ptr_use(ptr, size);
+        alloc_ptr_use(ptr, nmemb * size);
         return ptr;
     }
     else
