@@ -392,7 +392,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionDescriptor : miopenConvolutionDescript
     std::size_t GetSolutionCountFallback(const ExecutionContext& ctx,
                                          const conv::ProblemDescription& problem) const;
 
-    bool EnableTF32() const; 
+    bool EnableTF32() const;
 
     friend void to_json(nlohmann::json& json, const ConvolutionDescriptor& conv);
     friend void from_json(const nlohmann::json& json, ConvolutionDescriptor& conv);
