@@ -909,7 +909,7 @@ struct perf_syrk_ex<
     std::enable_if_t<
         !std::is_same_v<
             Ti,
-            void> && !(std::is_same_v<Ti, To> && std::is_same_v<Ti, Tc> && std::is_same_v<Ti, rocblas_bfloat16>)>>
+            void> && !(std::is_same_v<Ti, To> && std::is_same_v<Ti, Tc> && (std::is_same_v<Tc, rocblas_half> || std::is_same_v<Tc, rocblas_bfloat16>))>>
     : rocblas_test_valid
 {
     void operator()(const Arguments& arg)
