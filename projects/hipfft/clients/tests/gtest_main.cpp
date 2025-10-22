@@ -108,16 +108,6 @@ int mp_ranks = 1;
 // Multi-process launch command (e.g. mpirun --np 4 /path/to/hipfft_mpi_worker)
 std::string mp_launch;
 
-// Some variables are set differently on Windows vs Linux, so a helper function is helpful.
-bool os_is_windows()
-{
-#ifdef WIN32
-    return true;
-#else
-    return false;
-#endif
-}
-
 void init_gtest_flags()
 {
     // HACK: gtest maintains a "should run" flag on each test case,
@@ -296,7 +286,7 @@ int main(int argc, char* argv[])
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
-        ->default_val(os_is_windows() ? 0.2 : 1.0)
+        ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
