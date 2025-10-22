@@ -31,7 +31,7 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
 
-        auto const& path = GetParam();
+        const auto& path = GetParam();
 
         // TODO: Temporary fix until reference data can be properly installed
         if(path.empty())
@@ -80,7 +80,7 @@ protected:
     }
 };
 
-auto getGoldenReferenceParams(std::filesystem::path const& subDirectory)
+auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(
         hipdnn_sdk::test_utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(

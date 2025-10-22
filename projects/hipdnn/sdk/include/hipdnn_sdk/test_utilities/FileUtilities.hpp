@@ -41,22 +41,22 @@ public:
     }
 };
 
-inline std::vector<std::filesystem::path> filesInDirectoryWithExt(std::filesystem::path const& path,
-                                                                  std::string const& ext)
+inline std::vector<std::filesystem::path> filesInDirectoryWithExt(const std::filesystem::path& path,
+                                                                  const std::string& ext)
 {
     std::vector<std::filesystem::path> paths;
     std::copy_if(std::filesystem::directory_iterator(path),
                  std::filesystem::directory_iterator(),
                  std::back_inserter(paths),
-                 [ext](std::filesystem::path const& p) { return p.extension() == ext; });
+                 [ext](const std::filesystem::path& p) { return p.extension() == ext; });
 
     return paths;
 }
 
 // Temporary helper function
 inline std::vector<std::filesystem::path>
-    filesInDirectoryWithExtReturnEmptyPathOnThrow(std::filesystem::path const& path,
-                                                  std::string const& ext)
+    filesInDirectoryWithExtReturnEmptyPathOnThrow(const std::filesystem::path& path,
+                                                  const std::string& ext)
 {
     try
     {

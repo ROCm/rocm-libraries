@@ -58,7 +58,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(PointwiseMode,
                               {PointwiseMode::TANH_FWD, "tanh_fwd"}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline void to_json(nlohmann::json& pointwiseJson, PointwiseAttributes const& pw)
+inline void to_json(nlohmann::json& pointwiseJson, const PointwiseAttributes& pw)
 {
     auto& inputs = pointwiseJson["inputs"] = {};
 

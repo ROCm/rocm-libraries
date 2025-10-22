@@ -8,7 +8,7 @@
 namespace hipdnn_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline void to_json(nlohmann::json& batchnormJson, BatchnormInferenceAttributes const& bn)
+inline void to_json(nlohmann::json& batchnormJson, const BatchnormInferenceAttributes& bn)
 {
     auto& inputs = batchnormJson["inputs"] = {};
 

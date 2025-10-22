@@ -22,7 +22,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::NONE, ""}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
+inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
 {
     auto type = node.attributes_type();
 
@@ -50,7 +50,7 @@ inline void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
+inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
 {
     graphJson["nodes"] = graph.nodes();
     graphJson["compute_type"] = graph.compute_type();

@@ -10,7 +10,7 @@ namespace hipdnn_sdk::data_objects
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& tensorAttrJson,
-                    data_objects::TensorAttributes const& tensorAttr)
+                    const data_objects::TensorAttributes& tensorAttr)
 {
     tensorAttrJson["uid"] = tensorAttr.uid();
     tensorAttrJson["data_type"] = tensorAttr.data_type();

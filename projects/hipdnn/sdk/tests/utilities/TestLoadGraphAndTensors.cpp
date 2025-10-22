@@ -27,7 +27,7 @@ TEST(TestFillTensorFromFile, PathToDirectory)
 }
 
 template <class T>
-void writeVectorToFile(std::filesystem::path const& filename, std::vector<T> const& values)
+void writeVectorToFile(const std::filesystem::path& filename, const std::vector<T>& values)
 {
     std::ofstream f(filename, std::ios_base::binary);
     ASSERT_TRUE(f.good());

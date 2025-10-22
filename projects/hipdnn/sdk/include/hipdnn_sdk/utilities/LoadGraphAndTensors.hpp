@@ -22,12 +22,6 @@ namespace hipdnn_sdk::utilities
 namespace detail
 {
 
-template <class... Ts>
-struct TensorVariant
-{
-    using Type = std::variant<std::unique_ptr<Tensor<Ts>>...>;
-};
-
 template <class T>
 struct DatatypeFromTensor
 {
@@ -39,7 +33,7 @@ struct DatatypeFromTensor<Tensor<T>>
     using Type = T;
 };
 
-inline void fillTensorFromFile(ITensor& tensor, std::filesystem::path const& path)
+inline void fillTensorFromFile(ITensor& tensor, const std::filesystem::path& path)
 {
 
     std::ifstream fileInputStream(path, std::ios::binary);
@@ -55,17 +49,13 @@ inline void fillTensorFromFile(ITensor& tensor, std::filesystem::path const& pat
 }
 }
 
-using TensorVariant = detail::TensorVariant<float, double, half, hip_bfloat16, int32_t>::Type;
-
-using TensorVariantMap = std::unordered_map<int64_t, TensorVariant>;
-
 template <class T>
 using DataTypeFromTensor =
     typename detail::DatatypeFromTensor<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
 
 inline std::unique_ptr<ITensor>
-    tensorFromFileAndAttributes(std::filesystem::path const& filepath,
-                                hipdnn_sdk::data_objects::TensorAttributes const& attributes)
+    tensorFromFileAndAttributes(const std::filesystem::path& filepath,
+                                const hipdnn_sdk::data_objects::TensorAttributes& attributes)
 {
     std::vector<int64_t> dims(attributes.dims()->begin(), attributes.dims()->end());
     std::vector<int64_t> strides(attributes.strides()->begin(), attributes.strides()->end());
@@ -102,7 +92,6 @@ struct GraphAndTensorMap
 
     std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers()
     {
-
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 
         for(auto& [uid, tensor] : tensorMap)
@@ -192,7 +181,7 @@ inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
 {
     std::vector<int64_t> outputTensorUids;
 
-    for(auto const& node : graph.at("nodes"))
+    for(const auto& node : graph.at("nodes"))
     {
         for(auto& [name, value] : node.at("outputs").items())
         {
@@ -208,13 +197,12 @@ inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
     return outputTensorUids;
 }
 
-inline GraphAndTensorMap loadGraphAndTensors(std::filesystem::path const& path
-                                             /*bool separateOutputs = false*/)
+inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 {
     auto basePath = path;
     basePath.replace_extension();
 
-    nlohmann::json graphJson = [](auto const& path) {
+    nlohmann::json graphJson = [](const auto& path) {
         std::ifstream graphFileStream(path);
         if(!graphFileStream)
         {
