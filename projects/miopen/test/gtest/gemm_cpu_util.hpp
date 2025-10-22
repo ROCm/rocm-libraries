@@ -53,27 +53,27 @@ void CallGemm(miopen::GemmDescriptor gemm_desc,
         std::swap(gemm_desc.strideA, gemm_desc.strideB);
     }
 
-    size_t a_col = gemm_desc.transA ? gemm_desc.m : gemm_desc.k;
-    size_t a_row = gemm_desc.transA ? gemm_desc.k : gemm_desc.m;
+    // size_t a_col = gemm_desc.transA ? gemm_desc.m : gemm_desc.k;
+    // size_t a_row = gemm_desc.transA ? gemm_desc.k : gemm_desc.m;
 
-    size_t b_col = gemm_desc.transB ? gemm_desc.k : gemm_desc.n;
-    size_t b_row = gemm_desc.transB ? gemm_desc.n : gemm_desc.k;
+    // size_t b_col = gemm_desc.transB ? gemm_desc.k : gemm_desc.n;
+    // size_t b_row = gemm_desc.transB ? gemm_desc.n : gemm_desc.k;
 
     RNN_mm_cpu_batched<T>(a_ptr,
-                          a_col,
-                          a_row,
+                          gemm_desc.k,
+                          gemm_desc.m,
                           gemm_desc.lda,
                           gemm_desc.strideA,
                           gemm_desc.transA,
                           b_ptr,
-                          b_col,
-                          b_row,
+                          gemm_desc.n,
+                          gemm_desc.k,
                           gemm_desc.ldb,
                           gemm_desc.strideB,
                           gemm_desc.transB,
                           c_ptr,
-                          gemm_desc.n,
-                          gemm_desc.m,
+                          gemm_desc.transB ? gemm_desc.k : gemm_desc.n,
+                          gemm_desc.transA ? gemm_desc.k : gemm_desc.m,
                           gemm_desc.ldc,
                           gemm_desc.strideC,
                           gemm_desc.batch_count,
