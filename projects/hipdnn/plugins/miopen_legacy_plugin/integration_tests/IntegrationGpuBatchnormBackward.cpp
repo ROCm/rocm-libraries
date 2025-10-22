@@ -21,6 +21,7 @@
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -77,7 +78,7 @@ class BatchnormBackward : public ::testing::TestWithParam<TestCaseType>
     struct TensorBundle
     {
         TensorBundle(const std::vector<int64_t>& dims,
-                     unsigned int seed = 1,
+                     unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                      const TensorLayout& layout = TensorLayout::NCHW)
             : derivedDims(getDerivedShape(dims))
             , xTensor(dims, layout)
@@ -292,10 +293,7 @@ protected:
         auto inputDataType = getDataTypeEnumFromType<InputType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
-        // unsigned int seed = std::random_device{}(); // Temporarily disabled random seed.
-        // MIOpen fixes its seed, and BWDs has a tight tolerance range.
-        // Therefore, we fix the seed too for now.
-        unsigned int seed = 1;
+        unsigned int seed = getGlobalTestSeed();
         HIPDNN_LOG_INFO("Test is using {} for its random seed", seed);
 
         TensorBundle graphTensorBundle(testCase.getDims(), seed, layout);
@@ -389,7 +387,7 @@ class IntegrationGpuBatchnormBackwardNdhwcFp16
 
 std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
 
     return std::vector<Batchnorm2dTestCase>{
         {1, 3, 14, 14, seed},
@@ -407,7 +405,7 @@ std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 
 std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
 
     return std::vector<Batchnorm3dTestCase>{
         {2, 3, 3, 1, 1, seed},

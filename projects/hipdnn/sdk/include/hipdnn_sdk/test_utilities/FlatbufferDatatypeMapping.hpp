@@ -41,6 +41,33 @@ constexpr auto datatypeToNative()
     }
 }
 
+inline std::variant<float, half, double, int32_t, hip_bfloat16>
+    datatypeToNativeVariant(hipdnn_sdk::data_objects::DataType type)
+{
+    using DataType = hipdnn_sdk::data_objects::DataType;
+
+    switch(type)
+    {
+    case DataType::FLOAT:
+        return float{};
+        break;
+    case DataType::HALF:
+        return half{};
+        break;
+    case DataType::DOUBLE:
+        return double{};
+        break;
+    case DataType::INT32:
+        return int32_t{};
+        break;
+    case DataType::BFLOAT16:
+        return hip_bfloat16{};
+        break;
+    default:
+        throw std::runtime_error("Error: Invalid type");
+    }
+}
+
 template <typename T>
 constexpr hipdnn_sdk::data_objects::DataType nativeTypeToDataType()
 {
