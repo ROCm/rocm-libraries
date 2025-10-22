@@ -12,16 +12,15 @@ hipFFT is an FFT (fast Fourier transform) marshalling library. It supports eithe
 NVIDIA CUDA cuFFT_ as the backend. hipFFT sits between the
 application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
-hipFFT requires its computational input and output data to be GPU-visible; data residing in device memory is
-recommended as it typically delivers best performance.
+hipFFT requires its computational input and output data to be GPU-visible. Data residing in device memory is
+recommended as it typically delivers the best performance.
 
-hipFFTW is a GPU-aware library for fast Fourier transforms using rocFFT_ as backend. It exports an interface
-borrowing the most commonly-used symbols of FFTW_. hipFFTW does not require its computational input and output
-to be directly accessible by the GPU.
+hipFFTW is a GPU-aware library for fast Fourier transforms using :doc:`rocFFT <rocfft:index>` as the backend. It
+exports an interface borrowing the most commonly-used symbols of FFTW_. hipFFTW does not require its
+computational input and output to be directly accessible by the GPU.
 
 For more information, see the :ref:`overview-of-hipfft-and-hipfftw`.
 
-.. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
 .. _cuFFT: https://developer.nvidia.com/cufft
 .. _FFTW: https://www.fftw.org/
 

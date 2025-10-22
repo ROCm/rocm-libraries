@@ -35,7 +35,7 @@ Flag values
 -----------
 
 All the hipFFTW :ref:`plan creation functions <hipfftw-plan-creation>` request an ``unsigned flags`` argument.
-The value of that argument conditions what hipFFTW may or may not consider when creating the requested plan. Valid
+The value of that argument conditions what hipFFTW will consider when creating the requested plan. Valid
 values are bitwise OR of zero of more of the following constant values.
 
 .. doxygendefine:: FFTW_MEASURE
@@ -57,7 +57,7 @@ values are bitwise OR of zero of more of the following constant values.
 .. doxygendefine:: FFTW_WISDOM_ONLY
 
 .. note::
-  Even if seemingly accepted, flag values are currently ignored by hipFFTW. In particular, note that
+  Even if seemingly accepted, flag values are currently ignored by hipFFTW. In particular, note that:
 
   - no measurement is ever done at plan creation (plan configurations are chosen based on heuristics);
   - preservation of input data is never guaranteed;
@@ -102,15 +102,15 @@ hipFFTW supports the following buffer-management functions.
 .. doxygenfunction:: fftwf_free
 
 The memory blocks allocated by any of the above ``{fftw,fftwf}_{malloc,alloc_real,alloc_complex}``
-are always directly accessible to the host, but not necessarily to GPU. hipFFTW decides on the type
-of memory being allocated following a ranked-choice strategy: it attempts to allocate
+are always directly accessible to the host, but not necessarily to the GPU. hipFFTW decides on the
+type of memory being allocated following a ranked-choice strategy. It attempts to allocate:
 
-1. pinned host memory, first;
-2. pageable host memory, if the latter failed (or if the request exceeds a :ref:`user-defined threshold <hipfftw-env-byte-size-host-alloc>`).
+1. pinned host memory (first);
+2. pageable host memory (if the latter failed or if the request exceeds a :ref:`user-defined threshold <hipfftw-env-byte-size-host-alloc>`).
 
 .. important::
   Every buffer allocated via ``fftw_malloc``, ``fftwf_malloc``, ``fftw_alloc_real``, ``fftwf_alloc_real``,
-  ``fftw_alloc_complex`` or ``fftwf_alloc_complex`` **must** be freed using ``fftw_free`` or ``fftwf_free``.
+  ``fftw_alloc_complex``, or ``fftwf_alloc_complex`` **must** be freed using ``fftw_free`` or ``fftwf_free``.
 
 .. _hipfftw-plan-creation:
 
@@ -119,25 +119,25 @@ Plan creation
 
 hipFFTW supports the creation of :ref:`basic <hipfftw-basic-plan-creation>`, :ref:`advanced <hipfftw-advanced-plan-creation>`,
 and :ref:`general <hipfftw-general-plan-creation>` plans, using interleaved formats for complex floating-point data.
-Plans capture
+Plans capture:
 
-- the type of transform, *i.e.*, complex or real, forward or backward (inverse) discrete Fourier transform;
+- the type of transform, namely, complex or real, forward or backward (inverse) discrete Fourier transform;
 - the length(s) and batch size(s) of the transform;
-- layout information for input and output data, *e.g.*, stride(s), distance(s);
+- layout information for input and output data, for example, stride(s), distance(s);
 - pointers to buffers that it should consider as input and output data buffers when computing a transform via a :ref:`generic execution function <hipfftw-execute-with-creation-io>`;
 - its flag value(s) used at creation.
 
-A plan of interest may be created via more than one plan creation function. For instance, any plan created
+A plan of interest can be created using more than one plan creation function. For instance, any plan created
 by ``fftw_plan_dft`` (resp. ``fftwf_plan_dft``) could be created by ``fftw_plan_many_dft``
 (resp. ``fftwf_plan_many_dft``) without any difference.
 
-For all plan creation functions, the requested plan is said to be configured for in-place (resp. out-of-place)
-operations if identical (resp. different) input and output buffers are used when the plan is created.
+For all plan creation functions, the requested plan is said to be configured for in-place operations if identical
+input and output buffers are used when the plan is created. The plan is configured for out-of-place operations otherwise.
 
 .. note::
   - hipFFTW does not support split complex formats, real-to-real transforms, nor distributed transforms;
-  - hipFFTW does not support transforms of more than 3 dimensions, *i.e.*, ``rank > 3`` is not supported;
-  - hipFFTW does not support transforms of more than 1 batch dimension, *i.e.*, ``batch_rank > 1`` is not supported.
+  - hipFFTW does not support transforms of more than 3 dimensions, that is, ``rank > 3`` is not supported;
+  - hipFFTW does not support transforms of more than 1 batch dimension, that is, ``batch_rank > 1`` is not supported.
 
 .. _hipfftw-basic-plan-creation:
 
@@ -155,7 +155,7 @@ default data layouts use strides :math:`s_i` along dimension :math:`i` where
     - :math:`n_{d-1}` otherwise.
 - if :math:`d > 2`, :math:`s_{i} = n_{i+1}s_{i+1}` for :math:`0 \leq i < d-2`.
 
-The following functions may be used for creating basic hipFFTW plans.
+The following functions can be used for creating basic hipFFTW plans.
 
 .. doxygenfunction:: fftw_plan_dft_1d
 .. doxygenfunction:: fftwf_plan_dft_1d
@@ -201,9 +201,9 @@ Arbitrary plans
 Plan execution
 ==============
 
-Once successfully created, hipFFTW plans may be executed, *i.e.*, used for computing the discrete Fourier transform that they capture.
+After they are successfully created, hipFFTW plans can be executed, that is, used for computing the discrete Fourier transform that they capture.
 The :ref:`generic execution functions <hipfftw-execute-with-creation-io>` implicitly reuse the input and output buffers that were set
-at :ref:`plan creation <hipfftw-plan-creation>`. If that is not possible or impractical, new input and output buffers may be communicated
+at :ref:`plan creation <hipfftw-plan-creation>`. If that is not possible or impractical, new input and output buffers can be communicated
 instead by using the :ref:`new-arrays execution functions <hipfftw-execute-with-new-io>`.
 
 .. _hipfftw-execute-with-creation-io:
@@ -247,8 +247,8 @@ matching the plan's precision.
 Other utility functions (existing yet non-functional)
 =====================================================
 
-The following functions exist in hipFFTW but are **not** functional in any way: they are effectively ignoring all
-arguments and made to systematically return ``0.0`` when a ``double`` value is to be returned.
+The following functions exist in hipFFTW but are **not** functional in any way. They effectively ignore all
+arguments and systematically return ``0.0`` when a ``double`` value needs to be returned.
 
 - ``fftw_print_plan`` and ``fftwf_print_plan``;
 - ``fftw_set_timelimit`` and ``fftwf_set_timelimit``;
@@ -271,22 +271,22 @@ By setting any of the environment variables
 - ``HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC``;
 - ``HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC``;
 
-to a non-negative integer value, users can instruct hipFFTW to observe the value set so as the maximal
-byte size that may be considered for the corresponding kind of host-accessible memory for any individual
+to a non-negative integer value, users can instruct hipFFTW to observe the value set for the maximal
+byte size that can be considered for the corresponding kind of host-accessible memory for any individual
 allocation requested via the :ref:`buffer allocation functions <hipfftw-buffer-management>`. Setting
 any of the above variables to ``0`` effectively prevents the corresponding kind of memory to be
-considered in user-requested buffer allocations altogether, for instance.
+considered in user-requested buffer allocations altogether.
 
 .. _hipfftw-env-verbose-exceptions:
 
-Turning hipFFTW verbose
------------------------
+Making hipFFTW verbose
+----------------------
 
-Debugging failures or errors suspected to be triggered by hipFFTW may turn challenging, particularly
-if the root-cause lies in any of the :ref:`execution functions <hipfftw-execution>` given
+Debugging failures or errors suspected to be triggered by hipFFTW can be challenging, particularly
+if the root cause lies in any of the :ref:`execution functions <hipfftw-execution>`, given
 that these functions' signatures make such errors silent by design. Setting the environment variable
 ``HIPFFTW_LOG_EXCEPTIONS`` to a strictly positive integer value effectively instructs hipFFTW to become
-verbose about internal exceptions it may encounter by reporting about them into the standard error stream.
+verbose about internal exceptions it might encounter by reporting them to the standard error stream.
 
 .. note::
   The hipFFTW interface is C-compatible, even when ``HIPFFTW_LOG_EXCEPTIONS`` is set as

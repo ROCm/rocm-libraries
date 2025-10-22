@@ -17,16 +17,16 @@ application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
 
 hipFFTW exports an interface that is a subset of FFTW_'s interface. Applications using
-the latter for computing discrete Fourier transforms (on CPUs) may use hipFFTW as a
-drop-in substitution that would leverage GPU computations instead with minimal
+the latter for computing discrete Fourier transforms (on CPUs) can use hipFFTW as a
+drop-in substitution to leverage GPU computations instead with minimal
 modifications to their source code. Namely, it is recommended to replace
-inclusions of ``fftw3.h`` by inclusions of ``hipfft/hipfftw.h`` and link
+inclusions of ``fftw3.h`` with inclusions of ``hipfft/hipfftw.h`` and link
 with hipFFTW instead of fftw3 or fftw3f. For more details, see the
 :doc:`hipFFTW API reference <../reference/hipfftw-api-usage>`.
 
 .. note::
    hipFFTW supports single- and double-precision calculations; long-double and
-   quad-precision floating point arithmetics are not supported.
+   quad-precision floating point operations are not supported.
 
 
 =====================
