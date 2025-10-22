@@ -62,16 +62,20 @@ protected:
                      unsigned int seed,
                      const IReferenceValidation& validator)
     {
-        GraphTensorBundle gpuBundle = generateBundle(graph);
-        GraphTensorBundle cpuBundle = generateBundle(graph);
 
-        verifyGraph(graph, seed, cpuBundle, gpuBundle, validator);
+        GraphTensorBundle gpuBundle, cpuBundle;
+        std::vector<int64_t> outputTensorIds;
+
+        generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
+
+        verifyGraph(graph, seed, cpuBundle, gpuBundle, outputTensorIds, validator);
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
                      unsigned int seed,
                      GraphTensorBundle& cpuBundle,
                      GraphTensorBundle& gpuBundle,
+                     std::vector<int64_t>& outputTensorIds,
                      const IReferenceValidation& validator)
     {
         initializeBundle(graph, gpuBundle, seed);
@@ -83,7 +87,10 @@ protected:
         executeGpuGraph(_handle, graph, gpuBundle);
         executeCpuGraph(graph, cpuBundle);
 
-        for(const auto& tensorId : getAllNonVirtualOutputTensorIds(graph))
+        ASSERT_GE(outputTensorIds.size(), 1)
+            << "At least one output tensor id must be specified for validation.";
+
+        for(const auto& tensorId : outputTensorIds)
         {
             auto& cpuTensor = cpuBundle.tensors.at(tensorId);
             auto& gpuTensor = gpuBundle.tensors.at(tensorId);
@@ -99,10 +106,11 @@ protected:
         }
     }
 
-    virtual GraphTensorBundle generateBundle(hipdnn_frontend::graph::Graph& graph)
+    virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
+                                 GraphTensorBundle cpuBundle,
+                                 GraphTensorBundle gpuBundle,
+                                 std::vector<int64_t>& outputTensorIds)
     {
-        GraphTensorBundle bundle;
-
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
@@ -110,9 +118,11 @@ protected:
                     continue;
 
                 const auto& tensorId = tensorAttr->get_uid();
-                if(bundle.tensors.find(tensorId) == bundle.tensors.end())
+                if(cpuBundle.tensors.find(tensorId) == cpuBundle.tensors.end())
                 {
-                    bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                    cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                    gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                    outputTensorIds.push_back(tensorId);
                 }
             }
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
@@ -121,9 +131,10 @@ protected:
                     continue;
 
                 const auto& tensorId = tensorAttr->get_uid();
-                if(bundle.tensors.find(tensorId) == bundle.tensors.end())
+                if(cpuBundle.tensors.find(tensorId) == cpuBundle.tensors.end())
                 {
-                    bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                    cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                    gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
                 }
             }
         });
@@ -175,23 +186,6 @@ private:
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
-    }
-
-    std::vector<int64_t> getAllNonVirtualOutputTensorIds(hipdnn_frontend::graph::Graph& graph)
-    {
-        std::vector<int64_t> tensorIds;
-
-        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(tensorAttr->get_is_virtual())
-                    continue;
-
-                tensorIds.push_back(tensorAttr->get_uid());
-            }
-        });
-
-        return tensorIds;
     }
 
     hipdnnHandle_t _handle = nullptr;
