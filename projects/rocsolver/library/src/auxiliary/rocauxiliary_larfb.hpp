@@ -35,6 +35,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include "ideal_sizes.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -313,11 +314,9 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    const rocblas_int nx = 32;
-    const rocblas_int ny = 32;
-    rocblas_int blocksx = (ldw - 1) / nx + 1;
-    rocblas_int blocksy = (order - 1) / ny + 1;
-    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(nx, ny), 0, stream,
+    rocblas_int blocksx = (ldw - 1) / BS2 + 1;
+    rocblas_int blocksy = (order - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     // compute: V1' * A1
@@ -370,7 +369,7 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
 
     // compute: A1 - V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A1 - (A1 * V1 + A2 * V2) * trans(T) * V1'
-    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream,
+    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     rocblas_set_pointer_mode(handle, old_mode);
@@ -588,11 +587,9 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     uploT = (forward ? rocblas_fill_upper : rocblas_fill_lower);
 
     // copy A1 to tmptr
-    const rocblas_int nx = 32;
-    const rocblas_int ny = 32;
-    rocblas_int blocksx = (ldw - 1) / nx + 1;
-    rocblas_int blocksy = (order - 1) / ny + 1;
-    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(nx, ny), 0, stream,
+    rocblas_int blocksx = (ldw - 1) / BS2 + 1;
+    rocblas_int blocksy = (order - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     // compute: V1' * A1
@@ -651,7 +648,7 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
 
     // compute: A1 - V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A1 - (A1 * V1 + A2 * V2) * trans(T) * V1'
-    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0, stream,
+    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0, stream,
                             ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     rocblas_set_pointer_mode(handle, old_mode);
