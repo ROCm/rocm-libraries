@@ -40,6 +40,17 @@
 #include <vector>
 #include <unordered_map>
 
+// Debug macro - can be disabled by commenting out the define
+#define COMGR_DEBUG_ENABLED
+
+#ifdef COMGR_DEBUG_ENABLED
+    #define COMGR_DEBUG(msg) std::cout << msg << std::endl
+    #define COMGR_DEBUG_NOLN(msg) std::cout << msg
+#else
+    #define COMGR_DEBUG(msg) ((void)0)
+    #define COMGR_DEBUG_NOLN(msg) ((void)0)
+#endif
+
 namespace rocRoller
 {
     namespace Serialization
@@ -72,11 +83,14 @@ namespace rocRoller
             template <typename T>
             void mapOptional(const char* key, T& obj)
             {
+                std::cout << "enter mapOptional key: " << key << std::endl;
                 amd_comgr_metadata_node_t value;
                 auto status = amd_comgr_metadata_lookup(node, key, &value);
+                std::cout << "mapOptional status = " << status << std::endl;
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
                     input(value, obj);
+                    std::cout << "called input from mapOptional" << std::endl;
                     amd_comgr_destroy_metadata(value);
                 }
             }
@@ -177,6 +191,12 @@ namespace rocRoller
                     auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
                     std::cout << "status: " << status << std::endl;
                     std::cout << "kind: " << kind << std::endl;
+                    
+                    // Get and output the actual string
+                    std::string str(size - 1, '\0');
+                    status = amd_comgr_get_metadata_string(n, &size, str.data());
+                    std::cout << "size: " << size << std::endl;
+                    std::cout << "node string: " << str << std::endl;
                 }
                 else
                 {
@@ -197,6 +217,32 @@ namespace rocRoller
             status = amd_comgr_get_metadata_string(n, &size, val.data());
             AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get string");
             std::cout << "string specialization done" << std::endl;
+        }
+
+        template <>
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, bool& val)
+        {
+            // First try to get it as an integer
+            amd_comgr_metadata_kind_t kind;
+            amd_comgr_get_metadata_kind(n, &kind);
+            
+            if(kind == AMD_COMGR_METADATA_KIND_STRING)
+            {
+                std::string str;
+                comgrNodeInputHelper(n, str);
+                // Handle string representations of boolean
+                if(str == "true" || str == "1")
+                    val = true;
+                else if(str == "false" || str == "0")
+                    val = false;
+                else
+                    AssertFatal(false, "Invalid boolean string: ", str);
+            }
+            else
+            {
+                AssertFatal(false, "Unsupported metadata kind for boolean");
+            }
+            std::cout << "boolean specialization done, value: " << val << std::endl;
         }
 
         template <>
