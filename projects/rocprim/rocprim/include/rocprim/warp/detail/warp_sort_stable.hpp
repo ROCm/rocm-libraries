@@ -77,11 +77,13 @@ private:
             ROCPRIM_UNROLL
             for(auto j = i & 1u; j < ItemsPerThread - 1u; j += 2u)
             {
-                if(j + 1 < thread_input_size
-                   && compare_function(thread_keys[j + 1], thread_keys[j]))
-                {
-                    ::rocprim::swap(thread_keys[j + 1], thread_keys[j]);
-                }
+                const bool swap = j + 1 < thread_input_size
+                                  && compare_function(thread_keys[j + 1], thread_keys[j]);
+
+                ::rocprim::detail::swap_if<rocprim::detail::swap_method::ternary>(
+                    swap,
+                    thread_keys[j + 1],
+                    thread_keys[j]);
             }
         }
     }
@@ -102,12 +104,17 @@ private:
             ROCPRIM_UNROLL
             for(auto j = i & 1u; j < ItemsPerThread - 1u; j += 2u)
             {
-                if(j + 1 < thread_input_size
-                   && compare_function(thread_keys[j + 1], thread_keys[j]))
-                {
-                    ::rocprim::swap(thread_keys[j + 1], thread_keys[j]);
-                    ::rocprim::swap(thread_values[j + 1], thread_values[j]);
-                }
+                const bool swap = j + 1 < thread_input_size
+                                  && compare_function(thread_keys[j + 1], thread_keys[j]);
+
+                ::rocprim::detail::swap_if<::rocprim::detail::swap_method::ternary>(
+                    swap,
+                    thread_keys[j + 1],
+                    thread_keys[j]);
+                ::rocprim::detail::swap_if<::rocprim::detail::swap_method::ternary>(
+                    swap,
+                    thread_values[j + 1],
+                    thread_values[j]);
             }
         }
     }
@@ -402,8 +409,9 @@ private:
             // to be before any equal elements, but in the right subsequence it must be after.
             auto key_a = thread_key;
             auto key_b = warp_shuffle(thread_key, mid);
-            if(is_lower)
-                ::rocprim::swap(key_a, key_b);
+            ::rocprim::detail::swap_if<::rocprim::detail::swap_method::ternary>(is_lower,
+                                                                                key_a,
+                                                                                key_b);
 
             const auto mid_smaller = ((!is_incomplete || (lane < valid_items && mid < valid_items))
                                       && compare_function(key_a, key_b))

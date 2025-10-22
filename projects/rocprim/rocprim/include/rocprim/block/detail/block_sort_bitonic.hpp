@@ -348,20 +348,9 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key                        next_key = storage_.key[next_item_id * BlockSize + next_id];
-        // swap items instead of branching for compare function, to achieve superior perf (ROCm 5.3)
-        if(dir)
-        {
-            rocprim::swap(next_key, key);
-        }
-        bool swap = compare_function(next_key, key);
-        if(dir)
-        {
-            rocprim::swap(next_key, key);
-        }
-        if(swap)
-        {
-            key = next_key;
-        }
+
+        bool swap = compare_function(dir ? key : next_key, dir ? next_key : key);
+        key       = swap ? next_key : key;
     }
 
     template<class BinaryFunction>
@@ -375,20 +364,9 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key                        next_key = storage_.key[next_item_id * BlockSize + next_id];
-        // swap items instead of branching for compare function, to achieve superior perf (ROCm 5.3)
-        if(dir)
-        {
-            rocprim::swap(next_key, keys[item]);
-        }
-        bool swap = compare_function(next_key, keys[item]);
-        if(dir)
-        {
-            rocprim::swap(next_key, keys[item]);
-        }
-        if(swap)
-        {
-            keys[item] = next_key;
-        }
+
+        bool swap  = compare_function(dir ? keys[item] : next_key, dir ? next_key : keys[item]);
+        keys[item] = swap ? next_key : keys[item];
     }
 
     template<class BinaryFunction>
@@ -403,21 +381,10 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key                        next_key = storage_.key[next_item_id * BlockSize + next_id];
-        // swap items instead of branching for compare function, to achieve superior perf (ROCm 5.3)
-        if(dir)
-        {
-            rocprim::swap(next_key, key);
-        }
-        bool swap = compare_function(next_key, key);
-        if(dir)
-        {
-            rocprim::swap(next_key, key);
-        }
-        if(swap)
-        {
-            key   = next_key;
-            value = storage_.value[next_item_id * BlockSize + next_id];
-        }
+
+        bool swap = compare_function(dir ? key : next_key, dir ? next_key : key);
+        key       = swap ? next_key : key;
+        value     = swap ? storage_.value[next_item_id * BlockSize + next_id] : value;
     }
 
     template<class BinaryFunction>
@@ -432,21 +399,10 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key                        next_key = storage_.key[next_item_id * BlockSize + next_id];
-        // swap items instead of branching for compare function, to achieve superior perf (ROCm 5.3)
-        if(dir)
-        {
-            rocprim::swap(next_key, keys[item]);
-        }
-        bool swap = compare_function(next_key, keys[item]);
-        if(dir)
-        {
-            rocprim::swap(next_key, keys[item]);
-        }
-        if(swap)
-        {
-            keys[item]   = next_key;
-            values[item] = storage_.value[next_item_id * BlockSize + next_id];
-        }
+
+        bool swap    = compare_function(dir ? keys[item] : next_key, dir ? next_key : keys[item]);
+        keys[item]   = swap ? next_key : keys[item];
+        values[item] = swap ? storage_.value[next_item_id * BlockSize + next_id] : values[item];
     }
 
     template<unsigned int Size, class BinaryFunction, class... KeyValue>
