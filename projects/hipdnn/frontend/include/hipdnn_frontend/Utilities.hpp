@@ -92,38 +92,6 @@ inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
-// Visit a tree of INodes with a lambda function
-// Performs pre-order traversal (visits parent before children)
-// Example usage:
-//   visitTree(rootNode, [](INode& node) {
-//       // Process node
-//   });
-template <typename Func>
-inline void visitGraph(INode& root, Func&& visitor)
-{
-    // Visit current node first (pre-order traversal)
-    visitor(root);
-
-    // Then visit all children
-    for(const auto& child : root.getSubNodes())
-    {
-        if(child)
-        {
-            visitGraph(*child, std::forward<Func>(visitor));
-        }
-    }
-}
-
-// Overload for shared_ptr
-template <typename Func>
-inline void visitGraph(const std::shared_ptr<INode>& root, Func&& visitor)
-{
-    if(root)
-    {
-        visitGraph(*root, std::forward<Func>(visitor));
-    }
-}
-
 }
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)

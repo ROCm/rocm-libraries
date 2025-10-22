@@ -83,7 +83,7 @@ TEST(TestUtilities, VisitGraphSingleNode)
     auto root = std::make_shared<MockNode>(1);
     std::vector<int> visitedValues;
 
-    visitGraph(root, [&visitedValues](INode& node) {
+    root->visit([&visitedValues](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
@@ -106,7 +106,7 @@ TEST(TestUtilities, VisitGraphWithChildren)
     root->addChild(child2);
 
     std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
+    root->visit([&visitedValues](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
@@ -140,7 +140,7 @@ TEST(TestUtilities, VisitGraphDeepHierarchy)
     child2->addChild(child4);
 
     std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
+    root->visit([&visitedValues](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
@@ -154,17 +154,6 @@ TEST(TestUtilities, VisitGraphDeepHierarchy)
     EXPECT_EQ(visitedValues[4], 4);
 }
 
-TEST(TestUtilities, VisitGraphNullSharedPtr)
-{
-    std::shared_ptr<MockNode> nullRoot = nullptr;
-    int visitCount = 0;
-
-    // Should handle null gracefully without crashing
-    visitGraph(nullRoot, [&visitCount]([[maybe_unused]] INode& node) { visitCount++; });
-
-    EXPECT_EQ(visitCount, 0);
-}
-
 TEST(TestUtilities, VisitGraphWithNullChildren)
 {
     auto root = std::make_shared<MockNode>(1);
@@ -175,7 +164,7 @@ TEST(TestUtilities, VisitGraphWithNullChildren)
     root->addChild(std::make_shared<MockNode>(3));
 
     std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
+    root->visit([&visitedValues](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
@@ -197,7 +186,7 @@ TEST(TestUtilities, VisitGraphReferenceOverload)
     root.addChild(child2);
 
     std::vector<int> visitedValues;
-    visitGraph(root, [&visitedValues](INode& node) {
+    root.visit([&visitedValues](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
@@ -218,7 +207,7 @@ TEST(TestUtilities, VisitGraphModifyNodes)
     root->addChild(child2);
 
     // Modify all node values during traversal
-    visitGraph(root, [](INode& node) {
+    root->visit([](INode& node) {
         auto& mockNode = static_cast<MockNode&>(node);
         mockNode.value *= 10;
     });

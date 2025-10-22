@@ -103,7 +103,7 @@ protected:
     {
         GraphTensorBundle bundle;
 
-        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(tensorAttr->get_is_virtual())
@@ -181,7 +181,7 @@ private:
     {
         std::vector<int64_t> tensorIds;
 
-        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(tensorAttr->get_is_virtual())
