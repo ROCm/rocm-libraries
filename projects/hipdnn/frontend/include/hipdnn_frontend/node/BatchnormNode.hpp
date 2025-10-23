@@ -136,26 +136,6 @@ public:
         }
     }
 
-    Error populate_hipdnn_tensor_ids(
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorLookup,
-        int64_t& currentTensorId,
-        std::unordered_set<int64_t>& usedIds) const override
-    {
-        BaseNode<BatchnormNode>::populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-
-        for(auto& tensor : attributes.peer_stats)
-        {
-            if(tensor && !tensor->has_uid())
-            {
-                tensor->set_uid(get_unused_tensor_uid(currentTensorId, usedIds));
-            }
-
-            tensorLookup[tensor->get_uid()] = tensor;
-        }
-
-        return {};
-    }
-
     flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {

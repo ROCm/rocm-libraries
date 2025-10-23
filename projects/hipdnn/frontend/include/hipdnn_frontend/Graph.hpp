@@ -217,6 +217,37 @@ private:
         return usedIds;
     }
 
+    static int64_t getUnusedTensorUid(int64_t& currentTensorId,
+                                      std::unordered_set<int64_t>& usedIds)
+    {
+        while(usedIds.find(currentTensorId) != usedIds.end())
+        {
+            ++currentTensorId;
+        }
+        usedIds.insert(currentTensorId);
+        return currentTensorId++;
+    }
+
+    static void populateHipdnnTensorIds(
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors,
+        std::unordered_set<int64_t>& usedIds)
+    {
+        int64_t currentTensorId = 0;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(!tensor)
+            {
+                continue;
+            }
+
+            if(!tensor->has_uid())
+            {
+                tensor->set_uid(getUnusedTensorUid(currentTensorId, usedIds));
+            }
+        }
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -315,15 +346,13 @@ public:
 
         auto usedIds = getUsedIds(allTensors);
 
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-        int64_t currentTensorId = 0;
+        populateHipdnnTensorIds(allTensors, usedIds);
 
-        populateHipdnnTensorIdsSubtree(tensorLookup, currentTensorId, usedIds);
         flatbuffers::FlatBufferBuilder builder;
 
         std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
-        for(auto& [_, tensor] : tensorLookup)
+        for(auto& tensor : allTensors)
         {
             if(tensor)
             {
