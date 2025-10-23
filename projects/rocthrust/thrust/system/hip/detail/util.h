@@ -41,11 +41,14 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/error.h>
-#include <thrust/system_error.h>
 
-#include <cstdio>
-#include <exception>
+#if !THRUST_COMPILER(NVRTC)
+#  include <thrust/system/hip/error.h>
+#  include <thrust/system_error.h>
+
+#  include <cstdio>
+#endif // !THRUST_COMPILER(NVRTC)
+
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>
 #endif
@@ -162,6 +165,7 @@ THRUST_HOST_DEVICE hipError_t synchronize_optional(Policy& policy)
   return synchronize_stream_optional(derived_cast(policy));
 }
 
+#if !THRUST_COMPILER(NVRTC)
 template <class Type>
 THRUST_HIP_HOST_FUNCTION hipError_t
 trivial_copy_from_device(Type* dst, Type const* src, size_t count, hipStream_t stream)
@@ -233,6 +237,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
   status = hip_rocprim::synchronize_optional(policy);
   return status;
 }
+#endif // !THRUST_COMPILER(NVRTC)
 
 THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 {
