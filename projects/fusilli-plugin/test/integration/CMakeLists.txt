@@ -26,4 +26,8 @@ target_compile_definitions(fusilli_plugin_integration_tests PRIVATE
     FUSILLI_PLUGIN_ENGINE_ID="${FUSILLI_PLUGIN_ENGINE_ID}"
 )
 # Register with CTest
-gtest_discover_tests(fusilli_plugin_integration_tests)
+gtest_discover_tests(fusilli_plugin_integration_tests
+    # Ensure that tests pick up libhipdnn_backend.so in build directory, not
+    # from the global TheRock install.
+    PROPERTIES ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib"
+)
