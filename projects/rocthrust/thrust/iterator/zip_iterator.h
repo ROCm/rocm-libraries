@@ -47,12 +47,11 @@
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/type_traits/integer_sequence.h>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <thrust/detail/tuple_meta_transform.h>
-#  include <thrust/detail/tuple_transform.h>
 #  include <thrust/iterator/iterator_categories.h>
 #  include <thrust/tuple.h>
-#  include <thrust/type_traits/integer_sequence.h>
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
@@ -358,6 +357,37 @@ public:
   using type = thrust::
     iterator_facade<zip_iterator<IteratorTuple>, value_type, system, traversal_category, reference, difference_type>;
 }; // end make_zip_iterator_base
+
+namespace internal
+{
+
+template <typename Tuple,
+          template <typename>
+          class UnaryMetaFunction,
+          typename UnaryFunction,
+          typename IndexSequence = thrust::make_index_sequence<thrust::tuple_size<Tuple>::value>>
+struct tuple_transform_functor;
+
+template <typename Tuple, template <typename> class UnaryMetaFunction, typename UnaryFunction, size_t... Is>
+struct tuple_transform_functor<Tuple, UnaryMetaFunction, UnaryFunction, thrust::index_sequence<Is...>>
+{
+  static THRUST_HOST_DEVICE typename tuple_meta_transform<Tuple, UnaryMetaFunction>::type
+  do_it_on_the_host_or_device(const Tuple& t, UnaryFunction f)
+  {
+    using XfrmTuple = typename tuple_meta_transform<Tuple, UnaryMetaFunction>::type;
+
+    return XfrmTuple(f(thrust::get<Is>(t))...);
+  }
+};
+
+template <template <typename> class UnaryMetaFunction, typename Tuple, typename UnaryFunction>
+typename tuple_meta_transform<Tuple, UnaryMetaFunction>::type THRUST_HOST_DEVICE
+tuple_host_device_transform(const Tuple& t, UnaryFunction f)
+{
+  return tuple_transform_functor<Tuple, UnaryMetaFunction, UnaryFunction>::do_it_on_the_host_or_device(t, f);
+}
+
+} // namespace internal
 #endif
 } // namespace detail
 
@@ -502,7 +532,7 @@ private:
 #else
     using namespace detail::tuple_impl_specific;
 
-    return thrust::detail::tuple_host_device_transform<detail::dereference_iterator::template apply>(
+    return thrust::detail::internal::tuple_host_device_transform<detail::dereference_iterator::template apply>(
       get_iterator_tuple(), detail::dereference_iterator());
 #endif
   }
