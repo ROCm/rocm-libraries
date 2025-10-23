@@ -49,20 +49,22 @@ namespace PermLanesTest
     {
     };
 
-    void executePermLanesBlockScale(rocRoller::ContextPtr context, const int miMN, const int miK)
+    void executePermLanesBlockScale(rocRoller::ContextPtr context,
+                                    const int             waveMN,
+                                    const int             waveK,
+                                    const int             miMN,
+                                    const int             miK)
     {
-        int  MN     = 256;
-        int  K      = 4;
+        int  MN     = waveMN * 4;
+        int  K      = waveK;
         auto unit   = Expression::literal(1);
-        auto exprMN = Expression::literal(256);
-        auto exprK  = Expression::literal(4);
+        auto exprMN = Expression::literal(MN);
+        auto exprK  = Expression::literal(K);
 
-        int macMN  = 256;
-        int macK   = 4;
-        int waveMN = 64;
-        int waveK  = 4;
-        int waveB  = 1;
-        int miB    = 1;
+        int macMN = MN;
+        int macK  = K;
+        int waveB = 1;
+        int miB   = 1;
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
@@ -164,44 +166,45 @@ namespace PermLanesTest
                 result.data(), dResult.get(), result.size() * sizeof(uint8_t), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        int nWaves = 4;
-        int factor = waveK / miK;
-        int nLanes = 16;
+        int nWaves        = 4;
+        int nLanes        = 16;
+        int nSIMDsPerWave = 4;
+        int nSIMDIndex    = waveMN / nLanes;
+        int nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
+        int nVGPRIndex    = nSIMDIndex;
+        int nVGPRBlock    = nSIMDBlock;
+        std::cout << nSIMDIndex << std::endl;
 
         // clang-format off
         for(int wave      = 0;      wave < nWaves; wave++)
-        for(int simdBlock = 0; simdBlock < miK;    simdBlock++)
-        for(int simdIndex = 0; simdIndex < factor; simdIndex++)
+        for(int simdIndex = 0; simdIndex < nSIMDIndex; simdIndex++)
         for(int lane      = 0;      lane < nLanes; lane++)
-        for(int vgprBlock = 0; vgprBlock < factor; vgprBlock++)
-        for(int vgprIndex = 0; vgprIndex < miK;    vgprIndex++)
+        for(int simdBlock = 0; simdBlock < nSIMDBlock; simdBlock++)
+        for(int vgprBlock = 0; vgprBlock < nVGPRBlock; vgprBlock++)
+        for(int vgprIndex = 0; vgprIndex < nVGPRIndex;    vgprIndex++)
         {
-            auto aIdx = wave * waveK * nLanes * waveK
-                        + simdBlock * factor * nLanes * waveK
-                        + simdIndex * nLanes * waveK
-                        + lane * waveK
-                        + vgprBlock * miK
-                        + vgprIndex;
+            auto aIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRBlock * nVGPRIndex
+                        + vgprBlock * nVGPRIndex + vgprIndex;
 
-            auto resultIdx = wave * waveK * nLanes * waveK
-                             + vgprIndex * factor * nLanes * waveK
-                             + simdIndex * nLanes * waveK
-                             + lane * waveK
-                             + vgprBlock * miK
-                             + simdBlock;
+            auto resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + (vgprBlock * nVGPRIndex + vgprIndex) * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndex;
 
             ASSERT_EQ(a[aIdx], result[resultIdx]);
         }
         // clang-format on
 
-        std::vector<size_t> sizes = {static_cast<size_t>(miK),
-                                     static_cast<size_t>(factor),
+        std::vector<size_t> sizes = {static_cast<size_t>(nVGPRIndex),
+                                     static_cast<size_t>(nVGPRBlock),
+                                     static_cast<size_t>(nSIMDBlock),
                                      static_cast<size_t>(nLanes),
-                                     static_cast<size_t>(factor),
-                                     static_cast<size_t>(miK),
+                                     static_cast<size_t>(nSIMDIndex),
                                      static_cast<size_t>(nWaves)};
-
-        auto order = {4, 1, 2, 3, 0, 5};
 
         TensorDescriptor src(DataType::E8M0, sizes);
         auto dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
@@ -210,16 +213,23 @@ namespace PermLanesTest
         EXPECT_EQ(a_reordered, result);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale16x4GPUTest)
+    TEST_F(PermLanesTest, PermLanesBlockScale64x4MI16x4GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes16);
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
-        executePermLanesBlockScale(m_context, 16, 4);
+        executePermLanesBlockScale(m_context, 64, 4, 16, 4);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale32x2GPUTest)
+    TEST_F(PermLanesTest, PermLanesBlockScale32x8MI16x4GPUTest)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes16);
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
+        executePermLanesBlockScale(m_context, 32, 8, 16, 4);
+    }
+
+    TEST_F(PermLanesTest, PermLanesBlockScale64x4MI32x2GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
-        executePermLanesBlockScale(m_context, 32, 2);
+        executePermLanesBlockScale(m_context, 64, 4, 32, 2);
     }
 }

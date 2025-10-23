@@ -37,7 +37,8 @@ namespace rocRoller
         std::pair<int, T> KernelGraph::getDimension(int                         controlIndex,
                                                     Connections::ConnectionSpec conn) const
         {
-            int  tag     = mapper.get(controlIndex, conn);
+            int tag = mapper.get(controlIndex, conn);
+            AssertFatal(tag != -1, ShowValue(controlIndex), ShowValue(conn));
             auto element = coordinates.getElement(tag);
             AssertFatal(std::holds_alternative<CoordinateGraph::Dimension>(element),
                         "Invalid connection: element isn't a Dimension.",
