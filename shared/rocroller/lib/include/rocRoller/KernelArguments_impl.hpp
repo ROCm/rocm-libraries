@@ -198,6 +198,8 @@ namespace rocRoller
     template <typename T>
     inline void KernelArguments::writeValue(size_t offset, T value)
     {
+        std::cout << "offset = " << offset << "\nsize = " << sizeof(T) << "\nm_data.size() = " << m_data.size() << std::endl;
+
         if(offset + sizeof(T) > m_data.size())
         {
             throw std::runtime_error("Value exceeds allocated bounds.");

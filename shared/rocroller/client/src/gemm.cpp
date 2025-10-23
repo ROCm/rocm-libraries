@@ -267,7 +267,7 @@ namespace rocRoller::Client::GEMMClient
 
         commandKernel->loadKernel();
 
-        auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
+        auto commandArgs = gemm->commandArguments(command, problemParams, runParams); // Breaking here
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
         commandArgs.setArgument(aTag, ArgumentType::Value, (A*)deviceA.get());
