@@ -157,6 +157,8 @@ public:
     std::vector<long long int> ll_inembed;
     std::vector<long long int> ll_onembed;
 
+    std::vector<int> gpus;
+    
     template <typename T>
     struct many_api_layout_args
     {
@@ -1559,6 +1561,13 @@ private:
         size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
                                                ? tmp_worksize.data()
                                                : auto_allocated_worksizes.data();
+        if(gpus.size() > 1)
+        {
+            auto ret = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+            if(HIPFFT_SUCCESS != ret)
+                return ret;
+        }
+        
         switch(dim())
         {
         case 1:

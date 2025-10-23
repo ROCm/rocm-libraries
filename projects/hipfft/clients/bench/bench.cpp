@@ -42,9 +42,6 @@ int main(int argc, char* argv[])
     // Control output verbosity:
     int verbose{};
 
-    // hip Device number for running tests:
-    int deviceId{};
-
     // Number of performance trial samples
     int ntrial{};
 
@@ -123,7 +120,14 @@ int main(int argc, char* argv[])
     CLI::Option* opt_ioffset = non_token->add_option("--ioffset", params.ioffset, "Input offset");
     CLI::Option* opt_ooffset = non_token->add_option("--ooffset", params.ooffset, "Output offset");
 
-    app.add_option("--device", deviceId, "Select a specific device id")->default_val(0);
+    non_token->add_option("--ngpus", "Number of GPUs to use")
+        ->default_val(1)
+        ->check(CLI::NonNegativeNumber)
+        ->each([&](const std::string& val){
+            int ngpus = std::stoi(val);
+            params.gpus.resize(ngpus);
+            std::iota(params.gpus.begin(), params.gpus.end(), 0);
+        });
     app.add_option("--verbose", verbose, "Control output verbosity")->default_val(0);
     app.add_option("-N, --ntrial", ntrial, "Trial size for the problem")
         ->default_val(1)
@@ -215,10 +219,6 @@ int main(int argc, char* argv[])
     }
 
     std::cout << std::flush;
-
-    // Fixme: set the device id properly after the IDs are synced
-    // bewteen hip runtime and rocm-smi.
-    // HIP_V_THROW(hipSetDevice(deviceId), "set device failed!");
 
     params.validate();
 
