@@ -65,9 +65,8 @@ Tests:
   uplo: [ U, L ]
   transA: [ N, T ]
   matrix_size: *quick_matrix_size_range
-  alpha: [ 1 ]
-  beta: [ 1 ]
-  initialization: hpl
+  alpha_beta: *alpha_beta_range
+  initialization: rand_int
 
 - name: syrk_ex_NaN
   category: pre_checkin
@@ -88,7 +87,7 @@ Tests:
   matrix_size: *medium_matrix_size_range 
   alpha_beta: *alpha_beta_range
   devices: 1
-  initialization: hpl
+  initialization: rand_int
 
 - name: syrk_ex_nighlty
   category: nightly
