@@ -372,20 +372,20 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_spatial_FP32,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs(miopenBNSpatial,
-                                                                               miopenTensorNCHW))));
+                                          testing::ValuesIn(BNInferTestConfigs<float>(
+                                              miopenBNSpatial, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_per_act_FP32,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs(
+                                          testing::ValuesIn(BNInferTestConfigs<float>(
                                               miopenBNPerActivation, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_spatial_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs(miopenBNSpatial,
-                                                                               miopenTensorNCHW))));
+                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
+                                              miopenBNSpatial, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_per_act_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs(
+                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
                                               miopenBNPerActivation, miopenTensorNCHW))));

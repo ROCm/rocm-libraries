@@ -312,6 +312,7 @@ struct BatchNormInferTester
     PerfHelper<float> perf_helper;
 };
 
+template <typename T>
 std::vector<BNInferTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode,
                                                 miopenTensorLayout_t layout)
 {
