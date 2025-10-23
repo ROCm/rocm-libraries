@@ -47,8 +47,7 @@ template <typename DerivedPolicy, typename InputIterator, typename UnaryFunction
 THRUST_HOST_DEVICE InputIterator
 for_each(thrust::execution_policy<DerivedPolicy>&, InputIterator first, InputIterator, UnaryFunction)
 {
-  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<InputIterator, false>::value),
-                           "unimplemented for this system");
+  static_assert(thrust::detail::depend_on_instantiation<InputIterator, false>::value, "unimplemented for this system");
   return first;
 } // end for_each()
 
@@ -56,8 +55,7 @@ template <typename DerivedPolicy, typename InputIterator, typename Size, typenam
 THRUST_HOST_DEVICE InputIterator
 for_each_n(thrust::execution_policy<DerivedPolicy>&, InputIterator first, Size, UnaryFunction)
 {
-  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<InputIterator, false>::value),
-                           "unimplemented for this system");
+  static_assert(thrust::detail::depend_on_instantiation<InputIterator, false>::value, "unimplemented for this system");
   return first;
 } // end for_each_n()
 

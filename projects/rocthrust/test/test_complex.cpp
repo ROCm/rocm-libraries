@@ -147,11 +147,11 @@ TYPED_TEST(ComplexTests, TestComplexSizeAndAlignment)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  THRUST_STATIC_ASSERT(sizeof(thrust::complex<T>) == sizeof(T) * 2);
-  THRUST_STATIC_ASSERT(alignof(thrust::complex<T>) == alignof(T) * 2);
+  static_assert(sizeof(thrust::complex<T>) == sizeof(T) * 2);
+  static_assert(alignof(thrust::complex<T>) == alignof(T) * 2);
 
-  THRUST_STATIC_ASSERT(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
-  THRUST_STATIC_ASSERT(alignof(thrust::complex<T const>) == alignof(T) * 2);
+  static_assert(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
+  static_assert(alignof(thrust::complex<T const>) == alignof(T) * 2);
 }
 
 TYPED_TEST(ComplexTests, TestComplexConstructionAndAssignment)
