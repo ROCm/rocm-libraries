@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -57,9 +58,10 @@ public:
             if(absDiff > threshold)
             {
                 // Log error and mark as failed
-                HIPDNN_LOG_ERROR("Validation failed: reference value = {}, "
+                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
+                                 indices,
                                  refValue,
                                  implValue,
                                  absDiff,
