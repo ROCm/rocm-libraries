@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_sdk/logging/Logger.hpp>
+#include <spdlog/spdlog.h>
 
 template <>
 struct fmt::formatter<std::vector<int64_t>> : fmt::formatter<std::string>
