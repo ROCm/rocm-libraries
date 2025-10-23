@@ -73,27 +73,52 @@ public:
             // registers (asume warp size of at least hardware warp-size)
             output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
         }
-#ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
-        if(VirtualWaveSize > 16)
+
+        // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
+        // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
+        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
-            // row_bcast:15
-            output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
-        }
-        if(VirtualWaveSize > 32)
-        {
-            // row_bcast:31
-            output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
-        }
-        static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+            if(VirtualWaveSize > 16)
+            {
+                // row_bcast:15
+                output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
+            }
+
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 32,
+                          "VirtualWaveSize > 32 is not supported without DPP broadcasts");
 #else
-        if(VirtualWaveSize > 16)
-        {
-            // row_bcast:15
-            output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
-        }
-        static_assert(VirtualWaveSize <= 32,
-                      "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+            if constexpr(VirtualWaveSize > 32)
+            {
+                ROCPRIM_PRINT_ERROR_ONCE(
+                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                return;
+            }
 #endif
+        }
+        else
+        {
+            if(VirtualWaveSize > 16)
+            {
+                // row_bcast:15
+                output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
+            }
+            if(VirtualWaveSize > 32)
+            {
+                // row_bcast:31
+                output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
+            }
+
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+#else
+            if constexpr(VirtualWaveSize > 64)
+            {
+                ROCPRIM_PRINT_ERROR_ONCE("VirtualWaveSize > 64 is not supported");
+                return;
+            }
+#endif
+        }
         // Read the result from the last lane of the logical warp
         output = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
     }
