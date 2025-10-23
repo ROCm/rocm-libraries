@@ -459,9 +459,6 @@ TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
     ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-
     node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
 }
 
