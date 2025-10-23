@@ -9,6 +9,8 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
@@ -37,7 +39,7 @@ protected:
 TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 {
     std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     BatchnormBwdTensorBundle<float, float, float> planTensorBundle(dims, seed, TensorLayout::NHWC);
     BatchnormBwdTensorBundle<float, float, float> directTensorBundle(
         dims, seed, TensorLayout::NHWC);
@@ -77,8 +79,8 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     bwdPlan.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(1e-3),
-                                                           static_cast<float>(1e-3));
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(
+        batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dxTensor.memory(),
                                                 planTensorBundle.dxTensor.memory()));

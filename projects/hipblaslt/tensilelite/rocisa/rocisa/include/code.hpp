@@ -103,7 +103,7 @@ namespace rocisa
         std::string toString() const override
         {
             std::string t = getLabelName() + ":";
-            if(!comment.empty())
+            if(!comment.empty() && !rocIsa::getInstance().getOutputOptions().outputNoComment)
             {
                 t += "  /// " + comment;
             }
@@ -138,7 +138,9 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return text;
+            if(!rocIsa::getInstance().getOutputOptions().outputNoComment)
+                return text;
+            return "";
         }
     };
 
@@ -730,7 +732,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatStr(false, ".endif", comment);
+            return formatStr(
+                false, ".endif", comment, rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
     };
 
