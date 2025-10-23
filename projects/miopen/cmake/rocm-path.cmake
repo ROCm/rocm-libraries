@@ -24,5 +24,9 @@
 #
 ################################################################################
 
-# Find the compiler path when building rocBLAS
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+# Find the compiler path when building MIOpen
+if(WIN32)
+    list(APPEND CMAKE_PREFIX_PATH $ENV{HIP_PATH})
+else()
+    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+endif()

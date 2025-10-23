@@ -30,13 +30,11 @@ import os
 
 def get_changed_files(ref1, ref2, path_to_folder):
     """Return a set of files changed between two git refs."""
+    args = ["git", "diff", "--name-only", ref1, ref2]
     if path_to_folder:
-        path_to_folder = "-- " + path_to_folder
+        args += ["--", path_to_folder]
     try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2, path_to_folder],
-            capture_output=True, text=True, check=True
-        )
+        result = subprocess.run(args, capture_output=True, text=True, check=True)
         files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
         return files
     except subprocess.CalledProcessError as e:
