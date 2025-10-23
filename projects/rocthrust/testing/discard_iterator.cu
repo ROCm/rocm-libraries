@@ -15,11 +15,48 @@
  *  limitations under the License.
  */
 
+#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/discard_iterator.h>
 
 #include <unittest/unittest.h>
 
-void TestDiscardIteratorIncrement(void)
+#include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
+// ensure that we properly support thrust::discard_iterator from _THRUST_STD
+void TestDiscardIteratorTraits()
+{
+  using it       = thrust::discard_iterator<>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
+                                                                               thrust::any_system_tag,
+                                                                               thrust::random_access_traversal_tag>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, thrust::detail::any_assign>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, thrust::detail::any_assign&>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::thrust::detail::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+  static_assert(_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
+}
+DECLARE_UNITTEST(TestDiscardIteratorTraits);
+
+void TestDiscardIteratorIncrement()
 {
   thrust::discard_iterator<> lhs(0);
   thrust::discard_iterator<> rhs(0);
@@ -44,10 +81,10 @@ void TestDiscardIteratorIncrement(void)
   ASSERT_EQUAL(-2, lhs - rhs);
 }
 DECLARE_UNITTEST(TestDiscardIteratorIncrement);
-static_assert(std::is_trivially_copy_constructible<thrust::discard_iterator<>>::value, "");
-static_assert(std::is_trivially_copyable<thrust::discard_iterator<>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::discard_iterator<>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copyable<thrust::discard_iterator<>>::value, "");
 
-void TestDiscardIteratorComparison(void)
+void TestDiscardIteratorComparison()
 {
   thrust::discard_iterator<> iter1(0);
   thrust::discard_iterator<> iter2(0);
@@ -73,7 +110,7 @@ void TestDiscardIteratorComparison(void)
 }
 DECLARE_UNITTEST(TestDiscardIteratorComparison);
 
-void TestMakeDiscardIterator(void)
+void TestMakeDiscardIterator()
 {
   thrust::discard_iterator<> iter0 = thrust::make_discard_iterator(13);
 
@@ -87,7 +124,7 @@ void TestMakeDiscardIterator(void)
 }
 DECLARE_UNITTEST(TestMakeDiscardIterator);
 
-void TestZippedDiscardIterator(void)
+void TestZippedDiscardIterator()
 {
   using namespace thrust;
 
