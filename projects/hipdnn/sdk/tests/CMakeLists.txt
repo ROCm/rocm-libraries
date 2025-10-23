@@ -32,9 +32,9 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestFlatbufferDatatypeMapping.cpp
     test_utilities/TestFlatbufferTensorAttributesUtils.cpp
     test_utilities/TestLoggingUtils.cpp
+    test_utilities/TestScopedDirectory.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
-    test_utilities/TestTempDirectory.cpp
-    test_utilities/TestTestSeeds.cpp
+    test_utilities/TestSeeds.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
@@ -55,6 +55,7 @@ add_executable(hipdnn_sdk_tests
     utilities/TestCallbackLogger.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
+    utilities/TestLoadGraphAndTensors.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestPointwiseValidation.cpp
