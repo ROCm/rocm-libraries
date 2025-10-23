@@ -255,17 +255,19 @@ TEST(TestBatchnormNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> duplicateIds;
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(4) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(5) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(9) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(10) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(biasTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(epsilonTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+
     EXPECT_TRUE(duplicateIds.empty());
 }
 
@@ -303,15 +305,18 @@ TEST(TestBatchnormNode, GatherHipdnnTensorsCollectsDuplicates)
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> duplicateIds;
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(4) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(5) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(biasTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(epsilonTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
 
     // Check that duplicates are collected
     EXPECT_TRUE(duplicateIds.find(3) != duplicateIds.end());

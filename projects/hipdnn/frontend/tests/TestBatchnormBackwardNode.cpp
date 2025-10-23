@@ -145,12 +145,14 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(9) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(10) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+
     EXPECT_TRUE(duplicateIds.empty());
 }
 
@@ -181,12 +183,15 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensorsCollectsDuplicates)
     GraphAttributes graphAttributes;
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(9) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(10) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(duplicatePeerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+
     EXPECT_TRUE(duplicateIds.find(9) != duplicateIds.end());
 }
 
@@ -212,6 +217,7 @@ TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
     int64_t currentTensorId = 1;
+
     std::unordered_set<int64_t> usedIds;
     auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
     EXPECT_EQ(error.code, ErrorCode::OK);

@@ -743,13 +743,15 @@ TEST(TestConvolutionNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+
     EXPECT_TRUE(duplicateIds.empty());
 }
 
@@ -776,12 +778,15 @@ TEST(TestConvolutionNode, GatherHipdnnTensorsCollectsDuplicates)
     GraphAttributes graphAttributes;
     ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
-    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
+    std::unordered_set<int64_t> duplicateIds;
+    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+
     EXPECT_TRUE(duplicateIds.find(1) != duplicateIds.end());
     EXPECT_EQ(duplicateIds.size(), 1);
 }
