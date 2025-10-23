@@ -380,6 +380,7 @@ namespace TensileLite
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
                         int32_t                             defaultWGM,
+                        uint32_t                            defaultWGMXCC,
                         uint32_t                            autoGsuVal) const;
 
         template <typename KA>
@@ -558,6 +559,7 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
+        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const& problem, Hardware const* hardware) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 
