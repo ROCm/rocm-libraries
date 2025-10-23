@@ -29,6 +29,7 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
     * :doc:`Apply the memory model <./howto/memory>`
     * :doc:`Use multi-level logging <./howto/logging>`
     * :doc:`Run rocSOLVER clients <./howto/clients>`
+    * :doc:`Introduction to rocSOLVER solvers <./howto/intro-solvers>`
     * :doc:`Contribute to rocSOLVER <./howto/contribute>`
 
   .. grid-item-card:: Examples
