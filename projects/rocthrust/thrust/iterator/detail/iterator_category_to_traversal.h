@@ -25,6 +25,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
@@ -38,60 +39,29 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-template <typename Category>
-using host_system_category_to_traversal = ::internal::If<
-  _THRUST_STD::is_convertible_v<Category, random_access_host_iterator_tag>,
-  random_access_traversal_tag,
-  ::internal::If<
-    _THRUST_STD::is_convertible_v<Category, bidirectional_host_iterator_tag>,
-    bidirectional_traversal_tag,
-    ::internal::If<_THRUST_STD::is_convertible_v<Category, forward_host_iterator_tag>,
-                   forward_traversal_tag,
-                   ::internal::If<_THRUST_STD::is_convertible_v<Category, input_host_iterator_tag>,
-                                  single_pass_traversal_tag,
-                                  ::internal::If<_THRUST_STD::is_convertible_v<Category, output_host_iterator_tag>,
-                                                 incrementable_traversal_tag,
-                                                 void>>>>>;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(...) -> void;
 
-template <typename Category>
-using device_system_category_to_traversal = ::internal::If<
-  _THRUST_STD::is_convertible_v<Category, random_access_device_iterator_tag>,
-  random_access_traversal_tag,
-  ::internal::If<
-    _THRUST_STD::is_convertible_v<Category, bidirectional_device_iterator_tag>,
-    bidirectional_traversal_tag,
-    ::internal::If<_THRUST_STD::is_convertible_v<Category, forward_device_iterator_tag>,
-                   forward_traversal_tag,
-                   ::internal::If<_THRUST_STD::is_convertible_v<Category, input_device_iterator_tag>,
-                                  single_pass_traversal_tag,
-                                  ::internal::If<_THRUST_STD::is_convertible_v<Category, output_device_iterator_tag>,
-                                                 incrementable_traversal_tag,
-                                                 void>>>>>;
+// host
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const random_access_host_iterator_tag&) -> random_access_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const bidirectional_host_iterator_tag&) -> bidirectional_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const forward_host_iterator_tag&) -> forward_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const input_host_iterator_tag&) -> single_pass_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const output_host_iterator_tag&) -> incrementable_traversal_tag;
 
-template <typename Category>
-using category_to_traversal =
-  // check for host system
-  ::internal::If<_THRUST_STD::is_convertible_v<Category, input_host_iterator_tag>
-                   || _THRUST_STD::is_convertible_v<Category, output_host_iterator_tag>,
-                 host_system_category_to_traversal<Category>,
-                 // check for device system
-                 ::internal::If<_THRUST_STD::is_convertible_v<Category, input_device_iterator_tag>
-                                  || _THRUST_STD::is_convertible_v<Category, output_device_iterator_tag>,
-                                device_system_category_to_traversal<Category>,
-                                // unknown category
-                                void>>;
-
-template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
-inline constexpr bool is_iterator_traversal = _THRUST_STD::is_convertible_v<T, incrementable_traversal_tag>;
+// device
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const random_access_device_iterator_tag&) -> random_access_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const bidirectional_device_iterator_tag&) -> bidirectional_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const forward_device_iterator_tag&) -> forward_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const input_device_iterator_tag&) -> single_pass_traversal_tag;
+THRUST_HOST_DEVICE auto cat_to_traversal_impl(const output_device_iterator_tag&) -> incrementable_traversal_tag;
 
 template <typename CategoryOrTraversal>
 struct iterator_category_to_traversal
 {
-  using type = ::internal::
-    If<is_iterator_traversal<CategoryOrTraversal>, CategoryOrTraversal, category_to_traversal<CategoryOrTraversal>>;
+  using type = ::internal::If<_THRUST_STD::is_convertible_v<CategoryOrTraversal, incrementable_traversal_tag>,
+                              CategoryOrTraversal,
+                              decltype(cat_to_traversal_impl(CategoryOrTraversal{}))>;
 };
-
 } // namespace detail
 
 THRUST_NAMESPACE_END
