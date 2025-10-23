@@ -4,9 +4,10 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -58,9 +59,7 @@ protected:
         = 0;
 
 protected:
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph,
-                     unsigned int seed,
-                     const IReferenceValidation& validator)
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
 
         GraphTensorBundle gpuBundle, cpuBundle;
@@ -68,15 +67,14 @@ protected:
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 
-        verifyGraph(graph, seed, cpuBundle, gpuBundle, outputTensorIds, validator);
+        verifyGraph(graph, seed, cpuBundle, gpuBundle, outputTensorIds);
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
                      unsigned int seed,
                      GraphTensorBundle& cpuBundle,
                      GraphTensorBundle& gpuBundle,
-                     std::vector<int64_t>& outputTensorIds,
-                     const IReferenceValidation& validator)
+                     std::vector<int64_t>& outputTensorIds)
     {
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, cpuBundle, seed);
@@ -101,45 +99,37 @@ protected:
             // by the validation step.
             gpuTensor->markDeviceModified();
 
-            bool valid = validator.allClose(*cpuTensor, *gpuTensor);
-            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId;
+            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*cpuTensor, *gpuTensor);
+            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
+                               << ", name: " << _tensorIdToNameMap.at(tensorId);
         }
     }
 
+    void registerValidator(
+        int64_t tensorId,
+        std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation> validator)
+    {
+        _tensorIdToValidatorMap.insert({tensorId, std::move(validator)});
+    }
+
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
-                                 GraphTensorBundle cpuBundle,
-                                 GraphTensorBundle gpuBundle,
+                                 GraphTensorBundle& cpuBundle,
+                                 GraphTensorBundle& gpuBundle,
                                  std::vector<int64_t>& outputTensorIds)
     {
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(tensorAttr->get_is_virtual())
-                    continue;
-
-                const auto& tensorId = tensorAttr->get_uid();
-                if(cpuBundle.tensors.find(tensorId) == cpuBundle.tensors.end())
+                if(addTensorToBundles(tensorAttr, cpuBundle, gpuBundle))
                 {
-                    cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
-                    gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
-                    outputTensorIds.push_back(tensorId);
+                    outputTensorIds.push_back(tensorAttr->get_uid());
                 }
             }
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
             {
-                if(tensorAttr->get_is_virtual())
-                    continue;
-
-                const auto& tensorId = tensorAttr->get_uid();
-                if(cpuBundle.tensors.find(tensorId) == cpuBundle.tensors.end())
-                {
-                    cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
-                    gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
-                }
+                addTensorToBundles(tensorAttr, cpuBundle, gpuBundle);
             }
         });
-
-        return bundle;
     }
 
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
@@ -188,9 +178,35 @@ private:
             flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
     }
 
+    std::string getOutputTensorName(int64_t tensorId)
+    {
+        return _tensorIdToNameMap.at(tensorId);
+    }
+
+    bool addTensorToBundles(
+        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
+        GraphTensorBundle& cpuBundle,
+        GraphTensorBundle& gpuBundle)
+    {
+        int64_t tensorId = tensorAttr->get_uid();
+
+        if(tensorAttr->get_is_virtual()
+           || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+            return false;
+
+        cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+        gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+        _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
+
+        return true;
+    }
+
     hipdnnHandle_t _handle = nullptr;
     hipStream_t _stream = nullptr;
     int _deviceId = 0;
+    std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>>
+        _tensorIdToValidatorMap;
 };
 
 // NOLINTEND (portability-template-virtual-member-function

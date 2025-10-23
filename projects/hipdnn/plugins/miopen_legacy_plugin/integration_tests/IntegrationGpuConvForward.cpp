@@ -66,8 +66,11 @@ protected:
         yAttr->set_dim(testCase.yDims);
         yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
-        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        this->verifyGraph(graphObj, testCase.seed, validator);
+        this->registerValidator(
+            yAttr->get_uid(),
+            createAllCloseValidator(toSdkType(yAttr->get_data_type()), tolerance, tolerance));
+
+        this->verifyGraph(graphObj, testCase.seed);
     }
 };
 
