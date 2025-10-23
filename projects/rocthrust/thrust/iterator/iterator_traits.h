@@ -99,7 +99,8 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_value_t instead") iterator_value
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::value_type or _THRUST_STD::iter_value_t instead")
+  iterator_value
 {
 #ifndef THRUST_DOXYGEN_INVOKED
   using type = typename iterator_traits<Iterator>::value_type;
@@ -108,7 +109,8 @@ struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_value_t instead") iterator
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-using iterator_value_t THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_value_t instead") = iterator_value<Iterator>;
+using iterator_value_t THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::value_type or "
+                                                 "_THRUST_STD::iter_value_t instead") = iterator_value<Iterator>;
 
 // pointer
 
@@ -129,7 +131,8 @@ using iterator_pointer_t THRUST_DEPRECATED = typename iterator_pointer<Iterator>
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_reference_t instead") iterator_reference
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::reference or _THRUST_STD::iter_reference_t "
+                                 "instead") iterator_reference
 {
 #ifndef THRUST_DOXYGEN_INVOKED
   using type = typename iterator_traits<Iterator>::reference;
@@ -138,14 +141,16 @@ struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_reference_t instead") iter
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-using iterator_reference_t
-  THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_reference_t instead") = typename iterator_reference<Iterator>::type;
+using iterator_reference_t THRUST_DEPRECATED_BECAUSE(
+  "Use _THRUST_STD::iterator_traits<>::reference or "
+  "_THRUST_STD::iter_reference_t instead") = typename iterator_reference<Iterator>::type;
 
 // difference
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_difference_t instead") iterator_difference
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::difference_t or _THRUST_STD::iter_difference_t"
+                                 "instead") iterator_difference
 {
 #ifndef THRUST_DOXYGEN_INVOKED
   using type = typename iterator_traits<Iterator>::difference_type;
@@ -154,8 +159,9 @@ struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_difference_t instead") ite
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-using iterator_difference_t
-  THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::it_difference_t instead") = typename iterator_difference<Iterator>::type;
+using iterator_difference_t THRUST_DEPRECATED_BECAUSE(
+  "Use _THRUST_STD::iterator_traits<>::difference_t or "
+  "_THRUST_STD::iter_difference_t instead") = typename iterator_difference<Iterator>::type;
 
 // traversal
 
