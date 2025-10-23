@@ -174,6 +174,7 @@ template <typename MiopenConfig,
           int Variant,
           int NCHW,
           int MaxN,
+          int NElements,
           int N,
           int C,
           int HW,
@@ -216,6 +217,7 @@ struct proto_config
     static constexpr auto launch_dim           = LaunchDim{};
     static constexpr unsigned int nchw         = static_cast<unsigned int>(NCHW);
     static constexpr unsigned int max_n        = static_cast<unsigned int>(MaxN);
+    static constexpr unsigned int n_elements   = static_cast<unsigned int>(NElements);
     static constexpr unsigned int n            = static_cast<unsigned int>(N);
     static constexpr unsigned int c            = static_cast<unsigned int>(C);
     static constexpr unsigned int hw           = static_cast<unsigned int>(HW);
@@ -287,6 +289,7 @@ using config = miopen::batchnorm::detail::proto_config<
     MIO_BN_VARIANT,
     MIO_BN_NCHW,
     MIO_BN_MAXN,
+    MIO_BN_N_ELEMENTS,
     MIO_BN_N,
     MIO_BN_C,
     MIO_BN_HW,
