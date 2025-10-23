@@ -93,6 +93,11 @@ namespace rocRoller
         ExpressionPtr combineShifts(ExpressionPtr expr);
 
         /**
+         * Splits BitfieldCombine expressions that target more than 32 bits into a Concatenate of 32 bit sub-expressions.
+         */
+        ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
+
+        /**
          * @brief Simplify expressions
          *
          * @param expr Input expression

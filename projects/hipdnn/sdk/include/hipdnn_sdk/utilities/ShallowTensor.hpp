@@ -24,14 +24,13 @@ public:
     ShallowTensor(void* memory,
                   const std::vector<int64_t>& dims,
                   const std::vector<int64_t>& strides)
-        : _memory(memory, TensorBase<T>::calculateItemCount(dims))
-        , _dims(dims)
+        : _dims(dims)
         , _strides(strides)
+        , _elementCount(TensorBase<T>::calculateItemCount(dims))
+        , _packed(TensorBase<T>::computeIsPacked(dims, strides))
     {
-        if(!TensorBase<T>::isPacked(dims, strides))
-        {
-            throw std::invalid_argument("Tensor must be packed");
-        }
+        _memory = ShallowHostOnlyMigratableMemory<T>(
+            memory, TensorBase<T>::calculateElementSpace(dims, strides));
     }
 
     ShallowTensor(const ShallowTensor&) = delete;
@@ -50,12 +49,27 @@ public:
         return _strides;
     }
 
-    const IMigratableMemory<T>& memory() const override
+    bool isPacked() const override
+    {
+        return _packed;
+    }
+
+    size_t elementCount() const override
+    {
+        return _elementCount;
+    }
+
+    size_t elementSpace() const override
+    {
+        return _memory.count();
+    }
+
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
     }
@@ -72,6 +86,13 @@ public:
         throwNotSupported();
     }
 
+    size_t fillWithData([[maybe_unused]] const void* data,
+                        [[maybe_unused]] size_t maxBytesCopied) override
+    {
+        throwNotSupported();
+        return 0;
+    }
+
 private:
     static void throwNotSupported()
     {
@@ -82,6 +103,8 @@ private:
     ShallowHostOnlyMigratableMemory<T> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
+    size_t _elementCount;
+    bool _packed;
 };
 
 }

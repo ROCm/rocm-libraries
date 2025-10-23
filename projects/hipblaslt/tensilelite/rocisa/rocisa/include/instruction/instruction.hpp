@@ -154,19 +154,28 @@ namespace rocisa
 
         std::string formatOnly(const std::string& instStr, const std::string& comment) const
         {
-            return formatStr(outputInlineAsm, instStr, comment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             comment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         std::string formatWithComment(const std::string& instStr) const
         {
-            return formatStr(outputInlineAsm, instStr, comment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             comment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         std::string formatWithExtraComment(const std::string& instStr,
                                            const std::string& extraComment) const
         {
             std::string combinedComment = comment + extraComment;
-            return formatStr(outputInlineAsm, instStr, combinedComment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             combinedComment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         void setInst(const std::string& instStr)
