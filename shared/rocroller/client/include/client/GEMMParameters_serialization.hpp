@@ -42,6 +42,25 @@ namespace rocRoller::Serialization
     }
 
     template <typename IO>
+    struct MappingTraits<Client::GEMMClient::MNKTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::MNKTuple& x)
+        {
+            iot::mapRequired(io, "m", x.m);
+            iot::mapRequired(io, "n", x.n);
+            iot::mapRequired(io, "k", x.k);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::MNKTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::TypeParameters, IO, EmptyContext>
     {
         static const bool flow = false;
@@ -196,6 +215,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
             iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
+            iot::mapRequired(io, "swizzleTileSize", params.swizzleTileSize);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
             iot::mapRequired(io, "streamK", params.streamK);

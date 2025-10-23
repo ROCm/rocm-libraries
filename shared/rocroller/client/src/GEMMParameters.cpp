@@ -154,6 +154,17 @@ namespace rocRoller
                 return s;
             }
 
+            std::string toString(MNKTuple mnk)
+            {
+                return fmt::format("{}x{}x{}", mnk.m, mnk.n, mnk.k);
+            }
+
+            std::ostream& operator<<(std::ostream& s, MNKTuple const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x)
             {
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
@@ -179,37 +190,35 @@ namespace rocRoller
 
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x)
             {
-                s << "Arch:      " << x.architecture.toString() << std::endl;
+                s << "Version:         " << x.version << std::endl;
+                s << "Arch:            " << x.architecture.toString() << std::endl;
                 if(x.streamK)
                 {
-                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile
+                    s << "Algorithm:       StreamK twoTile:" << x.streamKTwoTile
                       << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
                 }
                 else
                 {
-                    s << "Algorithm: DataParallel" << std::endl;
+                    s << "Algorithm:       DataParallel" << std::endl;
                 }
-                s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
-                s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
-                  << std::endl;
-                s << std::endl;
-                s << "SwizzleScale:        " << x.swizzleScale << std::endl;
-                s << "Load A: " << x.loadPathA << std::endl;
-                s << "Load B: " << x.loadPathB << std::endl;
-                s << "Store D LDS: " << x.storeLDSD << std::endl;
-                s << "LSDScale:  " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
-                s << "Prefetch:  "
+                s << "Tiling:          " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
+                s << "MI:              " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x"
+                  << x.waveB << std::endl;
+                s << "SwizzleScale:    " << x.swizzleScale << std::endl;
+                s << "PrefetchScale:   " << x.prefetchScale << std::endl;
+                s << "SwizzleTileSize: " << x.swizzleTileSize << std::endl;
+                s << "Load A:          " << x.loadPathA << std::endl;
+                s << "Load B:          " << x.loadPathB << std::endl;
+                s << "Store D LDS:     " << x.storeLDSD << std::endl;
+                s << "LSDScale:        " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
+                s << "Prefetch:        "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
-                  << " LDS:" << x.prefetchLDSFactor << std::endl;
-                s << "Unroll:    X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
-                s << "Scheduler: " << x.scheduler << std::endl;
-                s << "WG size:   " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
-                if(x.workgroupMappingDim != -1)
-                {
-                    s << "WG Mapping Dim: " << x.workgroupMappingDim << std::endl;
-                }
-
-                s << "WG XCC Remap: " << x.workgroupRemapXCC;
+                  << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps << std::endl;
+                s << "Unroll:          X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
+                s << "Scheduler:       " << x.scheduler << std::endl;
+                s << "WG size:         " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
+		s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;
+                s << "WG XCC Remap:    " << x.workgroupRemapXCC;
                 if(x.workgroupRemapXCC)
                 {
                     if(x.workgroupRemapXCCValue != -1)
@@ -218,12 +227,11 @@ namespace rocRoller
                     }
                     else
                     {
-                        s << " Default";
+                        s << " default";
                     }
                 }
                 s << std::endl;
                 s << x.types;
-                s << "Version:   " << x.version << std::endl;
                 return s;
             }
 

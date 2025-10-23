@@ -279,6 +279,10 @@ matchMemoryAccess: true
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  n: 0
+  k: 0
 prefetchScale: false
 ...
 
@@ -334,6 +338,10 @@ types:
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  n: 0
+  k: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
@@ -391,6 +399,10 @@ types:
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  n: 0
+  k: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
@@ -479,6 +491,9 @@ def build_solution_params():
 
         scaleA.maybe_add_block_size(params)
         scaleB.maybe_add_block_size(params)
+
+        if scaleA.mode == "Separate" or scaleB.mode == "Separate":
+            params.extend(["--sts", "64x64x8"])
 
         solution_params.append(params)
 
@@ -592,6 +607,89 @@ def test_gemm_example(tmp_path):
     example = tmp_path / "example.yaml"
     subprocess.run([gemm, "example", example], check=True)
     assert example.exists()
+
+
+def test_gemm_options(tmp_path):
+    """GEMM options."""
+
+    example = tmp_path / "example.yaml"
+
+    def run_and_load_example_yaml(cmd):
+        subprocess.run(cmd, check=True)
+        yaml_contents = example.read_text()
+        return yaml.load(yaml_contents, Loader=yaml.Loader)
+
+    # fails
+    with pytest.raises(subprocess.CalledProcessError):
+        # overspecify tile size is bad
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgts=128x128x128",
+                "--mac_M=256",
+            ],
+            check=True,
+        )
+
+    # setting tile size via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]
+    )
+    assert post["mac_m"] == 1024
+    assert post["mac_n"] == 2048
+    assert post["mac_k"] == 4096
+
+    # setting lds options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--lds=AB"]
+    )
+    assert post["load_A"] == "BufferToLDSViaVGPR"
+    assert post["load_B"] == "BufferToLDSViaVGPR"
+    assert post["storeLDS_D"] == False
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
+    )
+    assert post["load_A"] == "BufferToVGPR"
+    assert post["load_B"] == "BufferToLDSViaVGPR"
+    assert post["storeLDS_D"] == True
+
+    # setting d2l options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--d2lds=AB"]
+    )
+    assert post["load_A"] == "BufferToLDS"
+    assert post["load_B"] == "BufferToLDS"
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--d2lds=A"]
+    )
+    assert post["load_A"] == "BufferToLDS"
+    assert post["load_B"] == "BufferToVGPR"
+
+    # setting mxlds options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
+    )
+    assert post["loadLDSScale_A"] == True
+    assert post["loadLDSScale_B"] == True
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mxlds=B"]
+    )
+    assert post["loadLDSScale_A"] == False
+    assert post["loadLDSScale_B"] == True
+
+    # setting swizzle tile size
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--sts=5x7x11"]
+    )
+    assert post["swizzleTileSize"]["m"] == 5
+    assert post["swizzleTileSize"]["n"] == 7
+    assert post["swizzleTileSize"]["k"] == 11
 
 
 def test_gemm_config(tmp_path):

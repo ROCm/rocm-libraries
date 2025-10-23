@@ -379,6 +379,13 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
+                    if(solutionParams.types.scaleA == Operations::ScaleMode::Separate
+                       || solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        AssertFatal(solutionParams.swizzleTileSize.m > 0
+                                        && solutionParams.swizzleTileSize.n > 0
+                                        && solutionParams.swizzleTileSize.k > 0,
+                                    "Invalid SwizzleTileSize.");
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
@@ -420,7 +427,12 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE,
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.k,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
                     }
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
@@ -433,7 +445,12 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE,
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.k,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 

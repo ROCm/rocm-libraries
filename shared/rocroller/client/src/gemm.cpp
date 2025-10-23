@@ -71,11 +71,6 @@ namespace rocRoller::Client::GEMMClient
 {
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
 
-    struct MNKTuple
-    {
-        int m, n, k;
-    };
-
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
         validate(std::vector<typename PackedTypeOf<A>::type> const&      h_A,
@@ -1142,7 +1137,7 @@ namespace rocRoller::Client::GEMMClient::CLI
             fail = true;
         }
 
-        fail |= (mnk.m < 1) || (mnk.n < 1) || (mnk.k < 1);
+        fail |= (mnk.m < 0) || (mnk.n < 0) || (mnk.k < 0);
 
         if(fail)
         {
@@ -1170,6 +1165,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--loadLDSScale_A", &SolutionParameters::loadLDSScaleA),
         std::make_pair("--loadLDSScale_B", &SolutionParameters::loadLDSScaleB),
         std::make_pair("--swizzleScale", &SolutionParameters::swizzleScale),
+        std::make_pair("--sts", &SolutionParameters::swizzleTileSize),
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
         std::make_pair("--load_A", &SolutionParameters::loadPathA),
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
@@ -1221,9 +1217,26 @@ namespace rocRoller::Client::GEMMClient::CLI
             return rocRoller::Client::GEMMClient::CLI::getSolutionParameterArgumentName(x);
         };
 
-        auto update = [&](const std::string& optionName, auto& value) {
-            if(app.get_option(optionName)->count())
-                value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+        auto update = [&](const std::string& optionName, auto& value) -> bool {
+            if constexpr(std::is_same_v<std::decay_t<decltype(value)>, MNKTuple>)
+            {
+                if(app.get_option(optionName)->count())
+                {
+                    auto status = ParseMNK(app.get_option(optionName)->as<std::string>(), value);
+                    AssertFatal(status == PARSE_SUCCESS,
+                                "Unable to parse MNK tuple for " + optionName);
+                    return true;
+                }
+            }
+            else
+            {
+                if(app.get_option(optionName)->count())
+                {
+                    value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                    return true;
+                }
+            }
+            return false;
         };
 
         // Architecture
@@ -1236,6 +1249,7 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup tile size
 
+        bool wgtsSet = false;
         if(app.get_option("--wgts")->count())
         {
             rocRoller::Client::GEMMClient::MNKTuple mnk{0, 0, 0};
@@ -1244,11 +1258,18 @@ namespace rocRoller::Client::GEMMClient::CLI
             solution.macM = mnk.m;
             solution.macN = mnk.n;
             solution.macK = mnk.k;
+            wgtsSet       = true;
         }
 
-        update(SN(&SP::macM), solution.macM);
-        update(SN(&SP::macN), solution.macN);
-        update(SN(&SP::macK), solution.macK);
+        bool macSet = false;
+        macSet |= update(SN(&SP::macM), solution.macM);
+        macSet |= update(SN(&SP::macN), solution.macN);
+        macSet |= update(SN(&SP::macK), solution.macK);
+        if(wgtsSet && macSet)
+        {
+            Throw<FatalError>("Workgroup tile size was overspecified.  Please use only --wgts or "
+                              "the --mac_M, --mac_N, and --mac_K arguments; but not both.");
+        }
 
         // Matrix instruction
 
@@ -1332,6 +1353,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Swizzling
 
         update(SN(&SP::swizzleScale), solution.swizzleScale);
+        update(SN(&SP::swizzleTileSize), solution.swizzleTileSize);
         update(SN(&SP::prefetchScale), solution.prefetchScale);
 
         // Prefetching
@@ -1625,6 +1647,7 @@ int main(int argc, const char* argv[])
     app.add_option("--mxlds", "Use LDS for A/B scales.");
 
     app.add_flag(SN(&SP::swizzleScale), "Use Swizzle when loading A and B scale.");
+    app.add_option(SN(&SP::swizzleTileSize), "Size of swizzle tile.");
     app.add_flag(SN(&SP::prefetchScale), "Prefetch scale values with using Swizzled scales.");
 
     app.add_option("--workgroupMappingValue",

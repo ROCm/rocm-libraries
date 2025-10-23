@@ -54,6 +54,11 @@ namespace rocRoller
                 Count
             };
 
+            struct MNKTuple
+            {
+                int m, n, k;
+            };
+
             std::string toString(TransposeType trans);
 
             struct TypeParameters
@@ -140,8 +145,9 @@ namespace rocRoller
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool swizzleScale  = false;
-                bool prefetchScale = false;
+                bool     swizzleScale    = false;
+                MNKTuple swizzleTileSize = {0, 0, 0};
+                bool     prefetchScale   = false;
 
                 // Other options
                 Parameters::Solution::LoadPath loadPathA{
@@ -181,6 +187,7 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
