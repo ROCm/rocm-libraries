@@ -605,7 +605,7 @@ class Configuration(object):
     def configure_cxx_stdlib_under_test(self):
         default_stdlib_under_test = 'libstdc++' if self.cxx.type=='hipcc' else 'libc++'
         self.cxx_stdlib_under_test = self.get_lit_conf(
-            "cxx_stdlib_under_test", "libc++",  default_stdlib_under_test
+            "cxx_stdlib_under_test", default_stdlib_under_test
         )
         if self.cxx_stdlib_under_test not in [
             "libc++",
