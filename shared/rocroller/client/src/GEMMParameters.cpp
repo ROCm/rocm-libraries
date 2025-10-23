@@ -165,6 +165,17 @@ namespace rocRoller
                 return s;
             }
 
+            std::string toString(MKNLTuple x)
+            {
+                return fmt::format("{}x{}/{}x{}", x.m, x.k, x.n, x.l);
+            }
+
+            std::ostream& operator<<(std::ostream& s, MKNLTuple const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x)
             {
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
@@ -213,11 +224,12 @@ namespace rocRoller
                 s << "LSDScale:        " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
                 s << "Prefetch:        "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
-                  << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps << std::endl;
+                  << " LDS:" << x.prefetchLDSFactor << " mixMemOps: " << x.prefetchMixMemOps
+                  << std::endl;
                 s << "Unroll:          X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler:       " << x.scheduler << std::endl;
                 s << "WG size:         " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
-		s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;
+                s << "WG Mapping Dim:  " << x.workgroupMappingDim << std::endl;
                 s << "WG XCC Remap:    " << x.workgroupRemapXCC;
                 if(x.workgroupRemapXCC)
                 {

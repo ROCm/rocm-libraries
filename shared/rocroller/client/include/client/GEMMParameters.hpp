@@ -59,6 +59,11 @@ namespace rocRoller
                 int m, n, k;
             };
 
+            struct MKNLTuple
+            {
+                int m, k, n, l;
+            };
+
             std::string toString(TransposeType trans);
 
             struct TypeParameters
@@ -145,9 +150,9 @@ namespace rocRoller
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool     swizzleScale    = false;
-                MNKTuple swizzleTileSize = {0, 0, 0};
-                bool     prefetchScale   = false;
+                bool      swizzleScale    = false;
+                MKNLTuple swizzleTileSize = {0, 0, 0, 0};
+                bool      prefetchScale   = false;
 
                 // Other options
                 Parameters::Solution::LoadPath loadPathA{

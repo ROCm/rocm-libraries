@@ -379,12 +379,15 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
-                    if(solutionParams.types.scaleA == Operations::ScaleMode::Separate
-                       || solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                    if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                         AssertFatal(solutionParams.swizzleTileSize.m > 0
-                                        && solutionParams.swizzleTileSize.n > 0
                                         && solutionParams.swizzleTileSize.k > 0,
-                                    "Invalid SwizzleTileSize.");
+                                    "Invalid SwizzleTileSize for A.");
+
+                    if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        AssertFatal(solutionParams.swizzleTileSize.n > 0
+                                        && solutionParams.swizzleTileSize.l > 0,
+                                    "Invalid SwizzleTileSize for B.");
 
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
@@ -449,7 +452,7 @@ namespace rocRoller
                             {},
                             {solutionParams.swizzleTileSize.m,
                              solutionParams.swizzleTileSize.n,
-                             solutionParams.swizzleTileSize.k,
+                             solutionParams.swizzleTileSize.l,
                              1});
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }

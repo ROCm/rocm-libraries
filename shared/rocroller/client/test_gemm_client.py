@@ -281,8 +281,9 @@ loadLDSScale_B: false
 swizzleScale: false
 swizzleTileSize:
   m: 0
-  n: 0
   k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 ...
 
@@ -340,8 +341,9 @@ loadLDSScale_B: false
 swizzleScale: false
 swizzleTileSize:
   m: 0
-  n: 0
   k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
@@ -401,8 +403,9 @@ loadLDSScale_B: false
 swizzleScale: false
 swizzleTileSize:
   m: 0
-  n: 0
   k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
@@ -685,11 +688,12 @@ def test_gemm_options(tmp_path):
 
     # setting swizzle tile size
     post = run_and_load_example_yaml(
-        [gemm, "example", example, "--arch=gfx950", "--sts=5x7x11"]
+        [gemm, "example", example, "--arch=gfx950", "--sts=5x7/11x13"]
     )
     assert post["swizzleTileSize"]["m"] == 5
-    assert post["swizzleTileSize"]["n"] == 7
-    assert post["swizzleTileSize"]["k"] == 11
+    assert post["swizzleTileSize"]["k"] == 7
+    assert post["swizzleTileSize"]["n"] == 11
+    assert post["swizzleTileSize"]["l"] == 13
 
 
 def test_gemm_config(tmp_path):

@@ -1148,6 +1148,48 @@ namespace rocRoller::Client::GEMMClient::CLI
         return PARSE_SUCCESS;
     }
 
+    static bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        bool fail = false;
+        try
+        {
+            std::istringstream iss(arg);
+            std::string        token;
+
+            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
+            std::getline(iss, token, 'x');
+            x.m = std::stoi(token);
+            std::getline(iss, token, '/');
+            x.k = std::stoi(token);
+            std::getline(iss, token, 'x');
+            x.n = std::stoi(token);
+            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
+            std::getline(iss, token, 'x');
+            x.l = std::stoi(token);
+        }
+        catch(const std::invalid_argument&)
+        {
+            fail = true;
+        }
+        catch(const std::ios_base::failure&)
+        {
+            fail = true;
+        }
+
+        fail |= (x.m < 0) || (x.k < 0) || (x.n < 0) || (x.l < 0);
+
+        if(fail)
+        {
+            std::cerr << "Invalid format for MxK/NxL tuple." << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
     constexpr auto SolutionParameterArguments = std::make_tuple(
         std::make_pair("--arch", &SolutionParameters::architecture),
         std::make_pair("--mac_m", &SolutionParameters::macM),
@@ -1218,13 +1260,13 @@ namespace rocRoller::Client::GEMMClient::CLI
         };
 
         auto update = [&](const std::string& optionName, auto& value) -> bool {
-            if constexpr(std::is_same_v<std::decay_t<decltype(value)>, MNKTuple>)
+            if constexpr(std::is_same_v<std::decay_t<decltype(value)>, MKNLTuple>)
             {
                 if(app.get_option(optionName)->count())
                 {
-                    auto status = ParseMNK(app.get_option(optionName)->as<std::string>(), value);
+                    auto status = ParseMKNL(app.get_option(optionName)->as<std::string>(), value);
                     AssertFatal(status == PARSE_SUCCESS,
-                                "Unable to parse MNK tuple for " + optionName);
+                                "Unable to parse MxK/NxL tuple for " + optionName);
                     return true;
                 }
             }

@@ -66,6 +66,19 @@ class MNKTuple:
         return f"{self.m}x{self.n}x{self.k}"
 
 
+@dataclass(unsafe_hash=True)
+class MKNLTuple:
+    """MxK/NxL tuple"""
+
+    m: int
+    k: int
+    n: int
+    l: int
+
+    def __str__(self):
+        return f"{self.m}x{self.k}/{self.n}x{self.l}"
+
+
 @dataclass
 class RRPerfResult:
     """Base class for timing results.
@@ -212,7 +225,7 @@ class GEMMSolution:
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False
-    swizzleTileSize: MNKTuple = MNKTuple(0, 0, 0)
+    swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
 
     streamK: bool = False
