@@ -255,17 +255,17 @@ TEST(TestBatchnormNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
     std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
+    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(4) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(5) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
+    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(4) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(5) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(9) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(10) != uidToTensor.end());
     EXPECT_TRUE(duplicateIds.empty());
 }
 
@@ -303,15 +303,15 @@ TEST(TestBatchnormNode, GatherHipdnnTensorsCollectsDuplicates)
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
     std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
+    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(4) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(5) != usedIds.end());
+    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(4) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(5) != uidToTensor.end());
 
     // Check that duplicates are collected
     EXPECT_TRUE(duplicateIds.find(3) != duplicateIds.end());
@@ -336,9 +336,10 @@ TEST(TestBatchnormNode, PopulateHipdnnTensorIds)
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
+    std::unordered_set<int64_t> uidToTensor;
     int64_t currentTensorId = 1;
 
+    std::unordered_set<int64_t> usedIds;
     auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
     EXPECT_EQ(error.code, ErrorCode::OK);
 

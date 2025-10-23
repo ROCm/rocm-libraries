@@ -458,12 +458,13 @@ TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
+    node.gather_hipdnn_tensor_ids(uidToTensor, duplicateIds);
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
+    EXPECT_TRUE(uidToTensor.find(1) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(2) != uidToTensor.end());
+    EXPECT_TRUE(uidToTensor.find(3) != uidToTensor.end());
 }
 
 TEST(TestConvolutionWgradNode, PopulateHipdnnTensorIds)
@@ -481,9 +482,9 @@ TEST(TestConvolutionWgradNode, PopulateHipdnnTensorIds)
     ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
 
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
     int64_t currentTensorId = 1;
 
+    std::unordered_set<int64_t> usedIds;
     auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 

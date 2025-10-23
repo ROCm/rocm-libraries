@@ -231,10 +231,10 @@ public:
 
     Error checkNoDuplicateTensorIds()
     {
-        std::unordered_set<int64_t> usedTensorUids;
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
         std::unordered_set<int64_t> duplicateTensorUids;
 
-        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorUids);
+        gatherHipdnnTensorIdsSubtree(uidToTensor, duplicateTensorUids);
 
         if(!duplicateTensorUids.empty())
         {
@@ -283,10 +283,17 @@ public:
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        std::unordered_set<int64_t> usedTensorUids;
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> uidToTensor;
         std::unordered_set<int64_t> duplicateTensorIds;
 
-        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorIds);
+        gatherHipdnnTensorIdsSubtree(uidToTensor, duplicateTensorIds);
+
+        // Extract UIDs from the map for use with populateHipdnnTensorIdsSubtree
+        std::unordered_set<int64_t> usedTensorUids;
+        for(const auto& [uid, _] : uidToTensor)
+        {
+            usedTensorUids.insert(uid);
+        }
 
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
         int64_t currentTensorId = 0;
