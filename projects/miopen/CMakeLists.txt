@@ -117,8 +117,8 @@ endif()
 set(MIOPEN_LOG_FUNC_TIME_ENABLE Off CACHE BOOL "")
 set(MIOPEN_ENABLE_SQLITE_BACKOFF On CACHE BOOL "")
 
-option( BUILD_DEV "Build for development only" OFF)
-option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
+option(BUILD_DEV "Build for development only" OFF)
+option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen" OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 
@@ -491,6 +491,13 @@ if(MIOPEN_USE_HIPRTC)
     endif()
     find_package(hiprtc REQUIRED)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
+endif()
+
+if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+  option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
+# The FindBoost module has been removed since CMake 3.30. Use the Boost 1.83 configuration file instead.
+  add_definitions(-DBOOST_ALL_NO_LIB=1)
+  find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 endif()
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
