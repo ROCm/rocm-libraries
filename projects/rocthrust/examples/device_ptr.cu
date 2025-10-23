@@ -27,7 +27,7 @@
 #include <cassert>
 #include <iostream>
 
-int main(void)
+int main()
 {
   // allocate memory buffer to store 10 integers on the device
   thrust::device_ptr<int> d_ptr = thrust::device_malloc<int>(10);
@@ -57,9 +57,6 @@ int main(void)
   // back to where we started
   assert(wrapped_ptr == d_ptr);
   (void) wrapped_ptr; // for when NDEBUG is defined
-
-  // Avoid warning
-  THRUST_UNUSED_VAR(wrapped_ptr);
 
   // deallocate device memory
   thrust::device_free(d_ptr);

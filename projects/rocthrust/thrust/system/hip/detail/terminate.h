@@ -64,7 +64,7 @@ inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
   THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0
-  THRUST_UNUSED_VAR(message);
+  (void) message;
 #endif
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   _THRUST_STD_NOVERSION::terminate();

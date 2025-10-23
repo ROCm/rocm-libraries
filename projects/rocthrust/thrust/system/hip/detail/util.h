@@ -125,8 +125,7 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 {
   hipError_t result;
 
-  THRUST_CDP_DISPATCH((result = hipStreamSynchronize(stream(policy));),
-                      (THRUST_UNUSED_VAR(policy); result = hipSuccess;));
+  THRUST_CDP_DISPATCH((result = hipStreamSynchronize(stream(policy));), ((void) policy; result = hipSuccess;));
 
   return result;
 }
@@ -135,8 +134,7 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 template <class Policy>
 THRUST_HOST_DEVICE hipError_t synchronize(Policy& policy)
 {
-  THRUST_CDP_DISPATCH((return synchronize_stream(derived_cast(policy));),
-                      (THRUST_UNUSED_VAR(policy); return hipSuccess;));
+  THRUST_CDP_DISPATCH((return synchronize_stream(derived_cast(policy));), ((void) policy; return hipSuccess;));
 }
 
 // Fallback implementation of the customization point.
@@ -244,9 +242,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
 #ifdef THRUST_RDC_ENABLED
-  THRUST_UNUSED_VAR(hipGetLastError());
+  (void) hipGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, (THRUST_UNUSED_VAR(hipGetLastError());));
+  NV_IF_TARGET(NV_IS_HOST, ((void) hipGetLastError();));
 #endif
 
   if (hipSuccess != status)
@@ -284,9 +282,9 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
 #ifdef THRUST_RDC_ENABLED
-  THRUST_UNUSED_VAR(hipGetLastError());
+  (void) hipGetLastError();
 #else
-  NV_IF_TARGET(NV_IS_HOST, (THRUST_UNUSED_VAR(hipGetLastError());));
+  NV_IF_TARGET(NV_IS_HOST, ((void) hipGetLastError();));
 #endif
 
   if (hipSuccess != status)
