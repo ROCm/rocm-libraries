@@ -249,27 +249,27 @@ struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
 
 namespace BatchNormFwdInfer {
 
-struct GPU_bn_fwd_infer_spatial_FP32_NCHW
+struct GPU_bn_fwd_infer_spatial_NCHW_FP32
     : BatchNormFwdInferTester<float, float, float, float, float, miopenTensorNCHW>
 {
 };
 
-struct GPU_bn_fwd_infer_spatial_FP32_NHWC
+struct GPU_bn_fwd_infer_spatial_NHWC_FP32
     : BatchNormFwdInferTester<float, float, float, float, float, miopenTensorNHWC>
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_FP32_NCHW
+struct GPU_bn_fwd_infer_per_act_NCHW_FP32
     : BatchNormFwdInferTester<float, float, float, float, float, miopenTensorNCHW>
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_FP32_NHWC
+struct GPU_bn_fwd_infer_per_act_NHWC_FP32
     : BatchNormFwdInferTester<float, float, float, float, float, miopenTensorNHWC>
 {
 };
 
-struct GPU_bn_fwd_infer_spatial_FP16_NCHW : BatchNormFwdInferTester<half_float::half,
+struct GPU_bn_fwd_infer_spatial_NCHW_FP16 : BatchNormFwdInferTester<half_float::half,
                                                                     half_float::half,
                                                                     float,
                                                                     float,
@@ -278,7 +278,7 @@ struct GPU_bn_fwd_infer_spatial_FP16_NCHW : BatchNormFwdInferTester<half_float::
 {
 };
 
-struct GPU_bn_fwd_infer_spatial_FP16_NHWC : BatchNormFwdInferTester<half_float::half,
+struct GPU_bn_fwd_infer_spatial_NHWC_FP16 : BatchNormFwdInferTester<half_float::half,
                                                                     half_float::half,
                                                                     float,
                                                                     float,
@@ -287,7 +287,7 @@ struct GPU_bn_fwd_infer_spatial_FP16_NHWC : BatchNormFwdInferTester<half_float::
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_FP16_NCHW : BatchNormFwdInferTester<half_float::half,
+struct GPU_bn_fwd_infer_per_act_NCHW_FP16 : BatchNormFwdInferTester<half_float::half,
                                                                     half_float::half,
                                                                     float,
                                                                     float,
@@ -296,7 +296,7 @@ struct GPU_bn_fwd_infer_per_act_FP16_NCHW : BatchNormFwdInferTester<half_float::
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_FP16_NHWC : BatchNormFwdInferTester<half_float::half,
+struct GPU_bn_fwd_infer_per_act_NHWC_FP16 : BatchNormFwdInferTester<half_float::half,
                                                                     half_float::half,
                                                                     float,
                                                                     float,
@@ -305,22 +305,22 @@ struct GPU_bn_fwd_infer_per_act_FP16_NHWC : BatchNormFwdInferTester<half_float::
 {
 };
 
-struct GPU_bn_fwd_infer_spatial_BFP16_NCHW
+struct GPU_bn_fwd_infer_spatial_NCHW_BFP16
     : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float, miopenTensorNCHW>
 {
 };
 
-struct GPU_bn_fwd_infer_spatial_BFP16_NHWC
+struct GPU_bn_fwd_infer_spatial_NHWC_BFP16
     : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float, miopenTensorNHWC>
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_BFP16_NCHW
+struct GPU_bn_fwd_infer_per_act_NCHW_BFP16
     : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float, miopenTensorNCHW>
 {
 };
 
-struct GPU_bn_fwd_infer_per_act_BFP16_NHWC
+struct GPU_bn_fwd_infer_per_act_NHWC_BFP16
     : BatchNormFwdInferTester<bfloat16, bfloat16, float, float, float, miopenTensorNHWC>
 {
 };
@@ -342,7 +342,7 @@ std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode
 } // namespace BatchNormFwdInfer
 using namespace BatchNormFwdInfer;
 
-TEST_P(GPU_bn_fwd_infer_spatial_FP32_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NCHW_FP32, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -357,7 +357,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP32_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_spatial_FP32_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NHWC_FP32, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -372,7 +372,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP32_NHWC, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_FP32_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NCHW_FP32, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -387,7 +387,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP32_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_FP32_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NHWC_FP32, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -402,7 +402,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP32_NHWC, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_spatial_FP16_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NCHW_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -417,7 +417,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP16_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_spatial_FP16_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NHWC_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -432,7 +432,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP16_NHWC, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_FP16_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NCHW_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -447,7 +447,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP16_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_FP16_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NHWC_FP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -462,7 +462,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP16_NHWC, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_spatial_BFP16_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NCHW_BFP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -477,7 +477,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_BFP16_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_spatial_BFP16_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_spatial_NHWC_BFP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -492,7 +492,7 @@ TEST_P(GPU_bn_fwd_infer_spatial_BFP16_NHWC, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_BFP16_NCHW, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NCHW_BFP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -507,7 +507,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16_NCHW, PortTest)
     Verify();
 };
 
-TEST_P(GPU_bn_fwd_infer_per_act_BFP16_NHWC, PortTest)
+TEST_P(GPU_bn_fwd_infer_per_act_NHWC_BFP16, PortTest)
 {
 #if COMPARE_WITH_OPENCL
     // Run the OpenCL implementation
@@ -523,68 +523,68 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16_NHWC, PortTest)
 };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_FP32_NCHW,
+                         GPU_bn_fwd_infer_spatial_NCHW_FP32,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<float>(
                                               miopenBNSpatial, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_FP32_NHWC,
+                         GPU_bn_fwd_infer_spatial_NHWC_FP32,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<float>(
                                               miopenBNSpatial, miopenTensorNHWC))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_FP32_NCHW,
+    GPU_bn_fwd_infer_per_act_NCHW_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation,
                                                                  miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_FP32_NHWC,
+    GPU_bn_fwd_infer_per_act_NHWC_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation,
                                                                  miopenTensorNHWC))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_FP16_NCHW,
+                         GPU_bn_fwd_infer_spatial_NCHW_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<half_float::half>(
                                               miopenBNSpatial, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_FP16_NHWC,
+                         GPU_bn_fwd_infer_spatial_NHWC_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<half_float::half>(
                                               miopenBNSpatial, miopenTensorNHWC))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_FP16_NCHW,
+    GPU_bn_fwd_infer_per_act_NCHW_FP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation,
                                                                             miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_FP16_NHWC,
+    GPU_bn_fwd_infer_per_act_NHWC_FP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation,
                                                                             miopenTensorNHWC))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_BFP16_NCHW,
+                         GPU_bn_fwd_infer_spatial_NCHW_BFP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<bfloat16>(
                                               miopenBNSpatial, miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_fwd_infer_spatial_BFP16_NHWC,
+                         GPU_bn_fwd_infer_spatial_NHWC_BFP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
                                           testing::ValuesIn(BNInferTestConfigs<bfloat16>(
                                               miopenBNSpatial, miopenTensorNHWC))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_BFP16_NCHW,
+    GPU_bn_fwd_infer_per_act_NCHW_BFP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation,
                                                                     miopenTensorNCHW))));
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_bn_fwd_infer_per_act_BFP16_NHWC,
+    GPU_bn_fwd_infer_per_act_NHWC_BFP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
                      testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation,
                                                                     miopenTensorNHWC))));
