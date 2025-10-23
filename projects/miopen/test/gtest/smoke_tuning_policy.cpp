@@ -10,6 +10,7 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
 
 class CPU_TuningPolicy_NONE : public ::testing::Test
 {
+protected:
     void testSetInvalidValue(const miopenTuningPolicy_t original_policy, int invalid)
     {
         auto&& handle                           = get_handle();
