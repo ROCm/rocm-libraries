@@ -566,3 +566,21 @@ TEST(TupleTests, TestTupleCTAD)
   ASSERT_EQ(b, b2);
   ASSERT_EQ(c, c2);
 }
+
+TEST(TupleTests, TestTupleOfIteratorReferenceAssignsFromConst)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // tuple of mutable references
+  thrust::device_vector<int> v(10);
+  using devref = decltype(v[0]);
+  auto refs    = thrust::detail::tuple_of_iterator_references<devref>{thrust::tuple<devref>(v[0])};
+
+  // tuple of const references
+  const thrust::device_vector<int> cv(10);
+  using devcref = decltype(cv[0]);
+  auto crefs    = thrust::detail::tuple_of_iterator_references<devcref>{thrust::tuple<devcref>(cv[0])};
+
+  // should compile:
+  refs = crefs;
+}
