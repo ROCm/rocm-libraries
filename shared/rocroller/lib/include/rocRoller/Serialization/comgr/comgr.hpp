@@ -101,7 +101,7 @@ namespace rocRoller
             {
                 std::cout << "CMappedType or EmptyMappedType" << std::endl;
                 ComgrNodeInput subInput(n, context);
-                std:: cout << "Created subInput" << std::endl;
+                std::cout << "Created subInput" << std::endl;
                 EmptyContext ctx;
                 std::cout << "Calling MappingTraits" << std::endl;
                 MappingTraits<T, ComgrNodeInput>::mapping(subInput, obj, ctx);
