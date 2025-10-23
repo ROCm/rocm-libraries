@@ -745,14 +745,11 @@ TEST(TestConvolutionNode, GatherHipdnnTensorIds)
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+    node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
-
-    EXPECT_TRUE(duplicateIds.empty());
 }
 
 TEST(TestConvolutionNode, GatherHipdnnTensorsCollectsDuplicates)
@@ -780,15 +777,11 @@ TEST(TestConvolutionNode, GatherHipdnnTensorsCollectsDuplicates)
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+    node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
-
-    EXPECT_TRUE(duplicateIds.find(1) != duplicateIds.end());
-    EXPECT_EQ(duplicateIds.size(), 1);
 }
 
 TEST(TestConvolutionNode, PopulateHipdnnTensorIds)

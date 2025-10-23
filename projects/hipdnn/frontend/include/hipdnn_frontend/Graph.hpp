@@ -203,6 +203,20 @@ private:
         _sub_nodes = std::move(reorderedNodes);
     }
 
+    static std::unordered_set<int64_t>
+        getUsedIds(const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
+    {
+        std::unordered_set<int64_t> usedIds;
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                usedIds.insert(tensor->get_uid());
+            }
+        }
+        return usedIds;
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -232,14 +246,27 @@ public:
     Error checkNoDuplicateTensorIds()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        std::unordered_set<int64_t> duplicateTensorUids;
+        gatherHipdnnTensorsSubtree(allTensors);
 
-        gatherHipdnnTensorIdsSubtree(allTensors, duplicateTensorUids);
+        std::unordered_set<int64_t> seenUids;
+        std::unordered_set<int64_t> duplicateUids;
 
-        if(!duplicateTensorUids.empty())
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                auto uid = tensor->get_uid();
+                if(!seenUids.insert(uid).second)
+                {
+                    duplicateUids.insert(uid);
+                }
+            }
+        }
+
+        if(!duplicateUids.empty())
         {
             std::string errorMsg = "Duplicate tensor UIDs found in the graph: ";
-            for(const auto& uid : duplicateTensorUids)
+            for(const auto& uid : duplicateUids)
             {
                 errorMsg += std::to_string(uid) + ", ";
             }
@@ -284,19 +311,9 @@ public:
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        std::unordered_set<int64_t> duplicateTensorIds;
+        gatherHipdnnTensorsSubtree(allTensors);
 
-        gatherHipdnnTensorIdsSubtree(allTensors, duplicateTensorIds);
-
-        // Extract UIDs from allTensors
-        std::unordered_set<int64_t> usedIds;
-        for(const auto& tensor : allTensors)
-        {
-            if(tensor && tensor->has_uid())
-            {
-                usedIds.insert(tensor->get_uid());
-            }
-        }
+        auto usedIds = getUsedIds(allTensors);
 
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
         int64_t currentTensorId = 0;

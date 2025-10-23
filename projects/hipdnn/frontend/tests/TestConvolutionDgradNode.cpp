@@ -477,16 +477,13 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> duplicateIds;
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+    node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dxTensor) != allTensors.end());
-
-    EXPECT_TRUE(duplicateIds.empty());
 }
 
 TEST(TestConvolutionDgradNode, GatherHipdnnTensorsCollectsDuplicates)
@@ -514,15 +511,11 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensorsCollectsDuplicates)
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(allTensors, duplicateIds);
+    node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dxTensor) != allTensors.end());
-
-    EXPECT_TRUE(duplicateIds.find(1) != duplicateIds.end());
-    EXPECT_EQ(duplicateIds.size(), 1);
 }
 
 TEST(TestConvolutionDgradNode, PopulateHipdnnTensorIds)
