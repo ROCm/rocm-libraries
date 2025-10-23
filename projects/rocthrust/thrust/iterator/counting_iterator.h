@@ -94,11 +94,11 @@ using counting_iterator_difference_type = ::internal::If<
                  // any other type, if it can represent the difference, can be used as difference type,
                  // otherwise also ptrdiff_t
                  ::internal::If<_THRUST_STD::numeric_limits<Number>::is_signed
-                                      && (!_THRUST_STD::numeric_limits<Number>::is_bounded
-                                          || _THRUST_STD::numeric_limits<Number>::digits
-                                               > _THRUST_STD::numeric_limits<_THRUST_STD::ptrdiff_t>::digits),
-                                    Number,
-                                    _THRUST_STD::ptrdiff_t>>>;
+                                  && (!_THRUST_STD::numeric_limits<Number>::is_bounded
+                                      || _THRUST_STD::numeric_limits<Number>::digits
+                                           > _THRUST_STD::numeric_limits<_THRUST_STD::ptrdiff_t>::digits),
+                                Number,
+                                _THRUST_STD::ptrdiff_t>>>;
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct make_counting_iterator_base
@@ -108,7 +108,7 @@ struct make_counting_iterator_base
 
   using traversal = replace_if_use_default<Traversal, ::internal::type_identity<random_access_traversal_tag>>;
   using difference =
-    typename replace_if_use_default<Difference, ::internal::type_identity<counting_iterator_difference_type<Incrementable>>>::type;
+    replace_if_use_default<Difference, ::internal::type_identity<counting_iterator_difference_type<Incrementable>>>;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference
