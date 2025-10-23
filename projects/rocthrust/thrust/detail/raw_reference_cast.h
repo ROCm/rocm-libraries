@@ -25,10 +25,12 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/tuple_transform.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
+#include <thrust/tuple.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
