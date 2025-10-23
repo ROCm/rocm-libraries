@@ -72,7 +72,8 @@ LayernormForward::GetSolution(const ExecutionContext& context,
 
         auto layout   = problem.GetXDesc().GetLayoutEnum();
         size_t stride = 1;
-        if(problem.GetNormalizedDim() > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+        if(problem.GetNormalizedDim() > 1 && layout.has_value() &&
+           (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
         {
             stride = problem.GetXDesc().GetLengths()[1]; // stride = C
         }
@@ -85,7 +86,7 @@ LayernormForward::GetSolution(const ExecutionContext& context,
                 outer_size *= dims[i];
             }
         }
-        
+
         size_t inner_size = 1;
         for(size_t i = problem.GetNormalizedDim(); i < dims.size(); i++)
         {

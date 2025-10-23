@@ -70,7 +70,8 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
 
     auto layout   = problem.GetXDesc().GetLayoutEnum();
     size_t stride = 1;
-    if(problem.GetNormalizedDim() > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+    if(problem.GetNormalizedDim() > 1 && layout.has_value() &&
+       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
     {
         stride = problem.GetXDesc().GetLengths()[1]; // stride = C
     }
@@ -83,8 +84,8 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
             outer_size *= dims[i];
         }
     }
-    auto inner_size =
-        std::accumulate(dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
+    auto inner_size = std::accumulate(
+        dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
 
     auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
 
@@ -135,8 +136,7 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
 
     if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
     {
-        auto parallelism_size =
-            get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+        auto parallelism_size = get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
 
         {
             size_t xlocalsize = LOCAL_SIZE;
@@ -283,10 +283,11 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                 decltype(auto) weight_bias_kernel          = handle_.Run(kernels[2]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::BwdInvokeParams>();
 
-                auto dims = params.dyDesc->GetLengths();
+                auto dims     = params.dyDesc->GetLengths();
                 auto layout   = params.dyDesc->GetLayoutEnum();
                 size_t stride = 1;
-                if(params.normalized_dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+                if(params.normalized_dim > 1 && layout.has_value() &&
+                   (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
                 {
                     stride = dims[1]; // stride = C
                 }
@@ -299,8 +300,10 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                         outer_size *= dims[i];
                     }
                 }
-                auto inner_size =
-                    std::accumulate(dims.begin() + params.normalized_dim, dims.end(), 1ULL, std::multiplies<size_t>());
+                auto inner_size = std::accumulate(dims.begin() + params.normalized_dim,
+                                                  dims.end(),
+                                                  1ULL,
+                                                  std::multiplies<size_t>());
 
                 auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_);
                 auto parallelism_size =
@@ -349,10 +352,10 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel        = handle_.Run(kernels[0]);
+                decltype(auto) kernel             = handle_.Run(kernels[0]);
                 decltype(auto) weight_bias_kernel = handle_.Run(kernels[1]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::BwdInvokeParams>();
-                
+
                 auto elapsed = 0.f;
                 HipEventPtr start;
                 HipEventPtr stop;
@@ -372,12 +375,8 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                        params.dx,
                        static_cast<int32_t>(params.mode));
 
-                weight_bias_kernel(params.dy,
-                                   params.x,
-                                   params.mean,
-                                   params.rstd,
-                                   params.dw,
-                                   params.db);
+                weight_bias_kernel(
+                    params.dy, params.x, params.mean, params.rstd, params.dw, params.db);
 
                 if(handle_.IsProfilingEnabled())
                 {
@@ -400,11 +399,11 @@ LayernormBackward::GetWorkspaceSize(const ExecutionContext& context,
 {
     auto dims = problem.GetDYDesc().GetLengths();
 
-    auto outer_size =
-        std::accumulate(dims.begin(), dims.begin() + problem.GetNormalizedDim(), 1ULL, std::multiplies<size_t>());
+    auto outer_size = std::accumulate(
+        dims.begin(), dims.begin() + problem.GetNormalizedDim(), 1ULL, std::multiplies<size_t>());
 
-    auto inner_size =
-        std::accumulate(dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
+    auto inner_size = std::accumulate(
+        dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
 
     auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
 

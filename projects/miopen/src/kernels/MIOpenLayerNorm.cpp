@@ -140,9 +140,9 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
 
     __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
     __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
-    FLOAT_ACCUM sum_dy_weight = 0;
+    FLOAT_ACCUM sum_dy_weight   = 0;
     FLOAT_ACCUM sum_dy_weight_x = 0;
-    
+
     // Reduce sums
     if(dy)
     {
@@ -150,9 +150,11 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         {
             size_t x_idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-            FLOAT_ACCUM pdy_pweight = CVT_FLOAT2ACCUM(dy[x_idx]) * ((mode == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
-                                                                                                        : CVT_FLOAT2ACCUM(weight[i]));
-            
+            FLOAT_ACCUM pdy_pweight =
+                CVT_FLOAT2ACCUM(dy[x_idx]) * ((mode == MIOPEN_ELEMENTWISE_AFFINE)
+                                                  ? CVT_FP32_2ACCUM(1.0f)
+                                                  : CVT_FLOAT2ACCUM(weight[i]));
+
             sum_dy_weight += pdy_pweight;
             sum_dy_weight_x += pdy_pweight * CVT_FLOAT2ACCUM(x[x_idx]);
         }
@@ -171,25 +173,25 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         __syncthreads();
     }
 
-    sum_dy_weight = ltmp1[0];
-    sum_dy_weight_x = ltmp2[0];
+    sum_dy_weight     = ltmp1[0];
+    sum_dy_weight_x   = ltmp2[0];
     FLOAT_ACCUM scale = 1.0f / INNER_SIZE;
     FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[gid]);
     FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[gid]);
-    FLOAT_ACCUM a = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
-    FLOAT_ACCUM b = prstd * sum_dy_weight * scale - a * pmean;
+    FLOAT_ACCUM a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+    FLOAT_ACCUM b     = prstd * sum_dy_weight * scale - a * pmean;
 
     // Backward calculation
     for(uint64_t i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        FLOAT_ACCUM pdy = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
+        FLOAT_ACCUM pdy     = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
         FLOAT_ACCUM pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
                                                                   : CVT_FLOAT2ACCUM(weight[i]);
 
         FLOAT_ACCUM val = prstd * pdy * pweight - a * CVT_FLOAT2ACCUM(x[idx]) - b;
-        dx[idx] = CVT_ACCUM2FLOAT(val);
+        dx[idx]         = CVT_ACCUM2FLOAT(val);
     }
 }
 
@@ -207,7 +209,7 @@ __device__ void layernormbwdweightbias(const TI* __restrict__ dy,
     {
         FLOAT_ACCUM sum_dw = 0;
         FLOAT_ACCUM sum_db = 0;
-        
+
         // Backward calculation
         for(uint64_t o = 0; o < OUTER_SIZE; ++o)
         {
@@ -217,7 +219,7 @@ __device__ void layernormbwdweightbias(const TI* __restrict__ dy,
 
                 FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[o * STRIDE + s]);
                 FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[o * STRIDE + s]);
-                FLOAT_ACCUM pdy = dy ? CVT_FLOAT2ACCUM(dy[input_idx]) : 0;
+                FLOAT_ACCUM pdy   = dy ? CVT_FLOAT2ACCUM(dy[input_idx]) : 0;
 
                 sum_dw += prstd * pdy * (CVT_FLOAT2ACCUM(x[input_idx]) - pmean);
                 sum_db += pdy;
@@ -258,27 +260,26 @@ __device__ void layernormbwdweightbiasparallel(const TI* __restrict__ dy,
         // Backward calculation
         for(uint64_t i = pid; i < OUTER_SIZE * STRIDE; i += PARALLEL_SIZE)
         {
-            uint64_t o = i / STRIDE;
-            uint64_t s = i % STRIDE;
+            uint64_t o         = i / STRIDE;
+            uint64_t s         = i % STRIDE;
             uint64_t input_idx = o * INNER_SIZE * STRIDE + s_lid + s;
 
             FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[i]);
             FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[i]);
-            FLOAT_ACCUM pdy = CVT_FLOAT2ACCUM(dy[input_idx]);
+            FLOAT_ACCUM pdy   = CVT_FLOAT2ACCUM(dy[input_idx]);
 
             sum_dw += pdy * prstd * (CVT_FLOAT2ACCUM(x[input_idx]) - pmean);
             sum_db += pdy;
         }
     }
 
-    workspace[gid] = CVT_ACCUM2FLOAT(sum_dw);
+    workspace[gid]                              = CVT_ACCUM2FLOAT(sum_dw);
     workspace[gid + PARALLEL_SIZE * INNER_SIZE] = CVT_ACCUM2FLOAT(sum_db);
 }
 
 template <typename TI, typename TO>
-__device__ void layernormbwdreducesum(const TI* __restrict__ workspace,
-                                      TO* __restrict__ dw,
-                                      TO* __restrict__ db)
+__device__ void
+layernormbwdreducesum(const TI* __restrict__ workspace, TO* __restrict__ dw, TO* __restrict__ db)
 {
     const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -318,8 +319,7 @@ extern "C" __global__ void LayernormFwd(const INPUT_TYPE* __restrict__ x,
                                         const int32_t mode)
 {
     // instantiate the kernel
-    layernormfwd<INPUT_TYPE, OUTPUT_TYPE>(
-        x, weight, bias, y, mean, rstd, eps, mode);
+    layernormfwd<INPUT_TYPE, OUTPUT_TYPE>(x, weight, bias, y, mean, rstd, eps, mode);
 }
 
 extern "C" __global__ void LayernormBwd(const INPUT_TYPE* __restrict__ dy,
@@ -331,8 +331,7 @@ extern "C" __global__ void LayernormBwd(const INPUT_TYPE* __restrict__ dy,
                                         const int32_t mode)
 {
     // instantiate the kernel
-    layernormbwd<INPUT_TYPE, OUTPUT_TYPE>(
-        dy, x, weight, mean, rstd, dx, mode);
+    layernormbwd<INPUT_TYPE, OUTPUT_TYPE>(dy, x, weight, mean, rstd, dx, mode);
 }
 
 extern "C" __global__ void LayernormBwdWeightBias(const INPUT_TYPE* __restrict__ dy,
@@ -342,8 +341,7 @@ extern "C" __global__ void LayernormBwdWeightBias(const INPUT_TYPE* __restrict__
                                                   OUTPUT_TYPE* __restrict__ dw,
                                                   OUTPUT_TYPE* __restrict__ db)
 {
-    layernormbwdweightbias<INPUT_TYPE, OUTPUT_TYPE>(
-        dy, x, mean, rstd, dw, db);
+    layernormbwdweightbias<INPUT_TYPE, OUTPUT_TYPE>(dy, x, mean, rstd, dw, db);
 }
 
 extern "C" __global__ void LayernormBwdWeightBiasParallel(const INPUT_TYPE* __restrict__ dy,
@@ -352,14 +350,12 @@ extern "C" __global__ void LayernormBwdWeightBiasParallel(const INPUT_TYPE* __re
                                                           const INPUT_TYPE* __restrict__ rstd,
                                                           OUTPUT_TYPE* __restrict__ workspace)
 {
-    layernormbwdweightbiasparallel<INPUT_TYPE, OUTPUT_TYPE>(
-        dy, x, mean, rstd, workspace);
+    layernormbwdweightbiasparallel<INPUT_TYPE, OUTPUT_TYPE>(dy, x, mean, rstd, workspace);
 }
 
 extern "C" __global__ void LayernormBwdReduceSum(const INPUT_TYPE* __restrict__ workspace,
                                                  OUTPUT_TYPE* __restrict__ dw,
                                                  OUTPUT_TYPE* __restrict__ db)
 {
-    layernormbwdreducesum<INPUT_TYPE, OUTPUT_TYPE>(
-        workspace, dw, db);
+    layernormbwdreducesum<INPUT_TYPE, OUTPUT_TYPE>(workspace, dw, db);
 }

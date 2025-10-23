@@ -46,7 +46,8 @@ void cpu_layernorm_forward(tensor<T> input,
 {
     auto layout   = input.desc.GetLayoutEnum();
     size_t stride = 1;
-    if(dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+    if(dim > 1 && layout.has_value() &&
+       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
     {
         stride = input.desc.GetLengths()[1]; // stride = C
     }
@@ -89,9 +90,11 @@ void cpu_layernorm_forward(tensor<T> input,
             miopen::ford(inner_size)([&](int32_t i) {
                 float weight_v =
                     (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float bias_v = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<float>(bias[i]);
+                float bias_v =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<float>(bias[i]);
                 ref_output[o * inner_size * stride + i * stride + s] = static_cast<T>(
-                    (static_cast<float>(input[o * inner_size * stride + i * stride + s]) - mean_v) * rstd_v * weight_v +
+                    (static_cast<float>(input[o * inner_size * stride + i * stride + s]) - mean_v) *
+                        rstd_v * weight_v +
                     bias_v);
             });
         });
@@ -134,14 +137,16 @@ void cpu_layernorm_backward(tensor<T> dy,
 
     miopen::par_ford(outer_size)([&](int32_t o) {
         miopen::ford(stride)([&](int32_t s) {
-            float sum_dy_weight = 0;
+            float sum_dy_weight   = 0;
             float sum_dy_weight_x = 0;
 
             miopen::ford(inner_size)([&](int32_t i) {
                 float pweight =
                     (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
-                float px      = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
+                float pdy = (dy.GetSize() != 0)
+                                ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
+                                : 0;
+                float px  = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
                 sum_dy_weight += pdy * pweight;
                 sum_dy_weight_x += pdy * px * pweight;
             });
@@ -155,9 +160,12 @@ void cpu_layernorm_backward(tensor<T> dy,
             miopen::ford(inner_size)([&](int32_t i) {
                 float pweight =
                     (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
+                float pdy = (dy.GetSize() != 0)
+                                ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
+                                : 0;
 
-                float val = prstd * pdy * pweight - a * static_cast<float>(x[o * inner_size * stride + i * stride + s]) - b;
+                float val = prstd * pdy * pweight -
+                            a * static_cast<float>(x[o * inner_size * stride + i * stride + s]) - b;
                 ref_dx[o * inner_size * stride + i * stride + s] = static_cast<T>(val);
             });
         });
@@ -205,7 +213,9 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
             miopen::ford(outer_size)([&](int32_t o) {
                 float prstd = static_cast<float>(rstd[o * stride + s]);
                 float pmean = static_cast<float>(mean[o * stride + s]);
-                float pdy   = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
+                float pdy   = (dy.GetSize() != 0)
+                                  ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
+                                  : 0;
                 float px    = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
 
                 sum_dw += pdy * (px - pmean) * prstd;
@@ -234,7 +244,8 @@ struct LayerNormTestCase
     {
         return os << " N:" << tc.N << " C:" << tc.C << " D:" << tc.D << " H:" << tc.H
                   << " W:" << tc.W << " dim:" << tc.normalized_dim << " eps:" << tc.eps
-                  << " LayerNorm_mode:" << tc.ln_mode << " layout: " << (tc.layout.has_value() ? std::to_string(tc.layout.value()) : "null");
+                  << " LayerNorm_mode:" << tc.ln_mode << " layout: "
+                  << (tc.layout.has_value() ? std::to_string(tc.layout.value()) : "null");
     }
 
     std::vector<size_t> GetInput()
@@ -416,7 +427,8 @@ protected:
 
         auto in_dim = layernorm_config.GetInput();
 
-        input = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim}).generate(gen_value);
+        input = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim})
+                    .generate(gen_value);
 
         std::vector<size_t> inner_dim;
         if(normalized_dim == in_dim.size())
@@ -512,8 +524,8 @@ protected:
 
         error = miopen::rms_range(ref_rstd, rstd);
         EXPECT_TRUE(miopen::range_distance(ref_rstd) == miopen::range_distance(rstd));
-        EXPECT_TRUE(error < threshold * 4)
-            << "Error rstd beyond tolerance Error:" << error << ",  Threshold x 4: " << threshold * 4;
+        EXPECT_TRUE(error < threshold * 4) << "Error rstd beyond tolerance Error:" << error
+                                           << ",  Threshold x 4: " << threshold * 4;
     }
     LayerNormTestCase layernorm_config;
 
@@ -557,7 +569,8 @@ protected:
 
         auto in_dim = layernorm_config.GetInput();
 
-        x = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim}).generate(gen_value);
+        x = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim})
+                .generate(gen_value);
 
         std::vector<size_t> inner_dim;
         if(normalized_dim == in_dim.size())
@@ -584,8 +597,10 @@ protected:
         else
             outer_dim = {in_dim.begin(), in_dim.begin() + normalized_dim};
 
-        x    = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim}).generate(gen_value);
-        dy   = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim}).generate(gen_value);
+        x = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim})
+                .generate(gen_value);
+        dy = (layout.has_value() ? tensor<T>{layout.value(), in_dim} : tensor<T>{in_dim})
+                 .generate(gen_value);
         mean = tensor<T>{outer_dim}.generate(gen_value);
         rstd = tensor<T>{outer_dim}.generate(gen_value);
 

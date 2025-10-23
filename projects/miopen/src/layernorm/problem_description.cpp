@@ -47,8 +47,9 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     }
     else
     {
-        auto layout   = xDesc.GetLayoutEnum();
-        if(normalized_dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+        auto layout = xDesc.GetLayoutEnum();
+        if(normalized_dim > 1 && layout.has_value() &&
+           (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
         {
             stride = xDesc.GetLengths()[1]; // stride = C
         }
