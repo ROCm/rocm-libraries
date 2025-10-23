@@ -28,7 +28,8 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
-#include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelGraph/Utils_impl.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph
@@ -76,13 +77,13 @@ namespace rocRoller
                                 = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
 
                             const auto isLoadInLoop  = maybeForLoopOfLoad.has_value();
-                            const auto isLoadInStore = maybeForLoopOfStore.has_value();
+                            const auto isStoreInLoop = maybeForLoopOfStore.has_value();
 
                             const auto bothInSameLoop
-                                = isLoadInLoop && isLoadInStore
+                                = isLoadInLoop && isStoreInLoop
                                   && maybeForLoopOfLoad.value() == maybeForLoopOfStore.value();
 
-                            const auto bothNotInLoop = not isLoadInLoop && not isLoadInStore;
+                            const auto bothNotInLoop = not isLoadInLoop && not isStoreInLoop;
 
                             if(bothInSameLoop || bothNotInLoop)
                             {
@@ -92,6 +93,31 @@ namespace rocRoller
                     }
                 }
                 return result;
+            }
+
+            void replaceLoadTiled(KernelGraph& kgraph,
+                                  int          loadTiledTag,
+                                  int          storeLDSTileTag,
+                                  int          loadTileDirect2LDSTag)
+            {
+                using namespace ControlGraph;
+
+                const auto element = kgraph.control.getElement(loadTileDirect2LDSTag);
+                AssertFatal(std::holds_alternative<Operation>(element),
+                            concatenate("Expected Operation but got Edge",
+                                        ShowValue(loadTileDirect2LDSTag)));
+
+                const auto op = std::get<Operation>(element);
+                AssertFatal(isGlobalToLDSOp(kgraph, loadTileDirect2LDSTag),
+                            fmt::format("Expected LoadTileDirect2LDS but got {}", toString(op)));
+
+                auto codegen = getCodeGeneratorCoordinates(kgraph, storeLDSTileTag);
+
+                moveConnections(kgraph, loadTiledTag, loadTileDirect2LDSTag, 0);
+                moveConnections(kgraph, storeLDSTileTag, loadTileDirect2LDSTag, codegen.size());
+
+                replaceWith(kgraph, loadTiledTag, loadTileDirect2LDSTag, false);
+                Log::debug("  Replaced LoadTiled {} with {}.", loadTiledTag, loadTileDirect2LDSTag);
             }
         }
 
@@ -136,15 +162,7 @@ namespace rocRoller
                 auto variableType = getVariableType(kgraph, loadTiledTag);
                 auto direct2lds   = kgraph.control.addElement(LoadTileDirect2LDS(variableType));
 
-                { // Is this necessary?
-                    const auto macroTileTag = kgraph.mapper.get<MacroTile>(loadTiledTag);
-                    MacroTile  macroTile{*kgraph.coordinates.get<MacroTile>(macroTileTag)};
-                    macroTile.memoryType = MemoryType::VGPR;
-                    kgraph.coordinates.setElement(macroTileTag, macroTile);
-                }
-
-                replaceLoadTiledWithGlobalToLDSOp(
-                    kgraph, loadTiledTag, storeLDSTileTag, direct2lds);
+                replaceLoadTiled(kgraph, loadTiledTag, storeLDSTileTag, direct2lds);
                 nodesToPurge.insert(loadTiledTag);
 
                 if(nodesToPurge.count(storeLDSTileTag) == 0)

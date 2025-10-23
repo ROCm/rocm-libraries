@@ -728,48 +728,7 @@ namespace rocRoller
                     SrcOpType,
                     ControlGraph::
                         StoreLDSTile> && std::is_same_v<DstOpType, ControlGraph::LoadTiled>))
-            std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag)
-        {
-            using namespace ControlGraph;
-            using namespace CoordinateGraph;
-
-            const auto element = kgraph.control.getElement(srcOpTag);
-            AssertFatal(std::holds_alternative<Operation>(element),
-                        concatenate("Expected Operation but got Edge", ShowValue(srcOpTag)));
-
-            const auto op = std::get<Operation>(element);
-            AssertFatal(std::holds_alternative<SrcOpType>(op),
-                        fmt::format("Expected {} but got {}", typeName<SrcOpType>(), toString(op)));
-
-            auto macroTileTag = kgraph.mapper.get<MacroTile>(srcOpTag);
-
-            std::vector<int> rv{};
-
-            for(auto conn : kgraph.mapper.getCoordinateConnections(macroTileTag))
-            {
-                const auto dstOpTag = conn.control;
-                const auto element  = kgraph.control.getElement(dstOpTag);
-                AssertFatal(std::holds_alternative<Operation>(element),
-                            concatenate("Expected Operation but got Edge", ShowValue(dstOpTag)));
-
-                const auto op = std::get<Operation>(element);
-                if(std::holds_alternative<DstOpType>(op))
-                {
-                    rv.push_back(dstOpTag);
-                }
-            }
-            return rv;
-        }
-
-        /**
-         * @brief Replaces LoadTiled associated with tag @loadTiledTag with
-         * a Global To LDS op associated with tag @globalToLDSTag. Also moves
-         * all connections from both LoadTiled and StoreLDSTile to Global To LDS op.
-         */
-        void replaceLoadTiledWithGlobalToLDSOp(KernelGraph& kgraph,
-                                               int          loadTiledTag,
-                                               int          storeLDSTileTag,
-                                               int          globalToLDSTag);
+            std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag);
 
         /**
         * @brief Return true for operations that read from global to store into LDS and false otherwise.

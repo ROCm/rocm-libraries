@@ -1396,30 +1396,6 @@ namespace rocRoller
             return controlStack(control, graph.control);
         }
 
-        void replaceLoadTiledWithGlobalToLDSOp(KernelGraph& kgraph,
-                                               int          loadTiledTag,
-                                               int          storeLDSTileTag,
-                                               int          globalToLDSTag)
-        {
-            using namespace ControlGraph;
-
-            const auto element = kgraph.control.getElement(globalToLDSTag);
-            AssertFatal(std::holds_alternative<Operation>(element),
-                        concatenate("Expected Operation but got Edge", ShowValue(globalToLDSTag)));
-
-            const auto op = std::get<Operation>(element);
-            AssertFatal(isGlobalToLDSOp(kgraph, globalToLDSTag),
-                        fmt::format("Expected a Global to LDS op but got {}", toString(op)));
-
-            auto codegen = getCodeGeneratorCoordinates(kgraph, storeLDSTileTag);
-
-            moveConnections(kgraph, loadTiledTag, globalToLDSTag, 0);
-            moveConnections(kgraph, storeLDSTileTag, globalToLDSTag, codegen.size());
-
-            replaceWith(kgraph, loadTiledTag, globalToLDSTag, false);
-            Log::debug("  Replaced LoadTiled {} with {}.", loadTiledTag, globalToLDSTag);
-        }
-
         bool isGlobalToLDSOp(KernelGraph const& graph, int op)
         {
             return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value();
