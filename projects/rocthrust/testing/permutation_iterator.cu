@@ -17,6 +17,7 @@
 
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/permutation_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
@@ -25,6 +26,40 @@
 #include <unittest/unittest.h>
 
 #include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
+// ensure that we properly support thrust::permutation_iterator from _THRUST_STD
+void TestPermutationIteratorTraits()
+{
+  using base_it = thrust::host_vector<int>::iterator;
+
+  using it       = thrust::permutation_iterator<base_it, base_it>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = _THRUST_STD::random_access_iterator_tag;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, int&>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::thrust::detail::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+  static_assert(_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
+}
+DECLARE_UNITTEST(TestPermutationIteratorTraits);
 
 template <class Vector>
 void TestPermutationIteratorSimple()

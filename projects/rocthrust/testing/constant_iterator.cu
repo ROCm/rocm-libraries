@@ -17,6 +17,7 @@
 
 #include <thrust/copy.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
 
@@ -24,6 +25,40 @@
 
 #include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
+// ensure that we properly support thrust::constant_iterator from _THRUST_STD
+void TestConstantIteratorTraits()
+{
+  using it       = thrust::constant_iterator<int>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
+                                                                               thrust::any_system_tag,
+                                                                               thrust::random_access_traversal_tag>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, signed int>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::thrust::detail::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
+}
+DECLARE_UNITTEST(TestConstantIteratorTraits);
 
 void TestConstantIteratorConstructFromConvertibleSystem()
 {

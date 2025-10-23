@@ -32,21 +32,34 @@ THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 // ensure that we properly support thrust::counting_iterator from _THRUST_STD
-void test_iterator_traits()
+void TestCountingIteratorTraits()
 {
-  using It       = _THRUST_STD::iterator_traits<thrust::counting_iterator<int>>;
+  using it       = thrust::counting_iterator<int>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
   using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 
-  static_assert(_THRUST_STD::is_same<It::difference_type, ptrdiff_t>::value, "");
-  static_assert(_THRUST_STD::is_same<It::value_type, int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::pointer, void>::value, "");
-  static_assert(_THRUST_STD::is_same<It::reference, signed int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::iterator_category, category>::value, "");
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, signed int>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
 
-  static_assert(::thrust::detail::is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::thrust::detail::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
 }
+DECLARE_UNITTEST(TestCountingIteratorTraits);
 
 template <typename T>
 void TestCountingDefaultConstructor()
