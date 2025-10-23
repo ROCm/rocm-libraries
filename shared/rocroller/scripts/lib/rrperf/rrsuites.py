@@ -27,7 +27,7 @@ import pathlib
 from itertools import product
 from typing import List
 
-from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters
+from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters, MNKTuple
 from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
@@ -1022,6 +1022,7 @@ def fp4_target():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1069,6 +1070,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1145,6 +1147,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1206,6 +1209,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1409,6 +1413,7 @@ def mxfp8_target_128x256():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1456,6 +1461,7 @@ def mxfp8_target_256x128():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1503,6 +1509,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1558,6 +1565,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1613,6 +1621,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MNKTuple(64, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
