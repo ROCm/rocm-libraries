@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _CUDA___BIT_BITMASK_H
 #define _CUDA___BIT_BITMASK_H
 
@@ -34,6 +56,8 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA
 template <typename _Tp>
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shl(const _Tp __value, int __shift) noexcept
 {
+  // Note(HIP/AMD): bfind uses ptx which is not available for AMD hardware
+  /*
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint64_t))
@@ -43,12 +67,15 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shl(const _Tp __value,
                           return _CUDA_VPTX::shl(static_cast<_Up>(__value), __shift);))
     }
   }
+  */
   return (__shift >= _CUDA_VSTD::numeric_limits<_Tp>::digits) ? _Tp{0} : __value << __shift;
 }
 
 template <typename _Tp>
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shr(const _Tp __value, int __shift) noexcept
 {
+  // Note(HIP/AMD): bfind uses ptx which is not available for AMD hardware
+  /*
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint64_t))
@@ -58,6 +85,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shr(const _Tp __value,
                           return _CUDA_VPTX::shr(static_cast<_Up>(__value), __shift);))
     }
   }
+  */
   return (__shift >= _CUDA_VSTD::numeric_limits<_Tp>::digits) ? _Tp{0} : __value >> __shift;
 }
 
@@ -69,6 +97,8 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bitmask(int __start, int
   _CCCL_ASSERT(__width >= 0 && __width <= __digits, "width out of range");
   _CCCL_ASSERT(__start >= 0 && __start <= __digits, "start position out of range");
   _CCCL_ASSERT(__start + __width <= __digits, "start position + width out of range");
+  // Note(HIP/AMD): bfind uses ptx which is not available for AMD hardware
+  /*
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint32_t))
@@ -76,6 +106,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bitmask(int __start, int
       NV_IF_TARGET(NV_PROVIDES_SM_70, (return _CUDA_VPTX::bmsk_clamp(__start, __width);))
     }
   }
+  */
   return ::cuda::__shl(static_cast<_Tp>(::cuda::__shl(_Tp{1}, __width) - 1), __start);
 }
 
