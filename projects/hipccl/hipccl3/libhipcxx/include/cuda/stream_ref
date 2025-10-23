@@ -65,7 +65,9 @@ private:
 #  pragma system_header
 #endif // no system header
 
+#ifndef __HIP_PLATFORM_AMD__
 #include <cuda_runtime_api.h>
+#endif
 
 #include <cuda/std/__cuda/api_wrapper.h>
 #include <cuda/std/__exception/cuda_error.h>
