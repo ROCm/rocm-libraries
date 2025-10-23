@@ -22,17 +22,20 @@
 #ifndef FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_HANDLE_H
 #define FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_HANDLE_H
 
-#include "fusilli/backend/handle.h"
 #include <flatbuffers/detached_buffer.h>
+#include <fusilli.h>
+#include <hip/hip_runtime.h>
+
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
 struct HipdnnEnginePluginHandle {
 public:
-  fusilli::Handle fusilliHandle;
+  const int deviceId;
 
-  HipdnnEnginePluginHandle(fusilli::Handle &&handle)
-      : fusilliHandle(std::move(handle)) {}
+  HipdnnEnginePluginHandle(int deviceId) : deviceId(deviceId) {}
 
   // Take ownership of a flatbuffers::DetachedBuffer and store it associated
   // with its memory address.
@@ -46,7 +49,29 @@ public:
     _engineDetailsBuffers.erase(ptr);
   }
 
+  // Get or create fusilli::Handle just in time. As the engine API may set the
+  // stream (through `hipdnnEnginePluginSetStream`) after initial handle
+  // creation (in `hipdnnEnginePluginCreate`) we defer the fusilli::Handle
+  // creation until we know if a stream has been set.
+  fusilli::ErrorOr<std::reference_wrapper<fusilli::Handle>> getFusilliHandle() {
+    if (!_fusilliHandle.has_value())
+      _fusilliHandle = FUSILLI_TRY(
+          fusilli::Handle::create(fusilli::Backend::AMDGPU, deviceId,
+                                  reinterpret_cast<uintptr_t>(_stream)));
+    return fusilli::ok(
+        std::reference_wrapper<fusilli::Handle>(*_fusilliHandle));
+  }
+
+  void setStream(hipStream_t stream) { _stream = stream; }
+
 private:
+  // Default to creating a handle on the null (default) stream.
+  hipStream_t _stream = 0;
+
+  // Fusilli handle, will be created on the first call to `getFusilliHandle`.
+  std::optional<fusilli::Handle> _fusilliHandle;
+
+  // Storage for engine details.
   std::unordered_map<const void *, std::unique_ptr<flatbuffers::DetachedBuffer>>
       _engineDetailsBuffers;
 };

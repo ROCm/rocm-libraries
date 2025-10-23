@@ -15,13 +15,13 @@
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApi.h>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <spdlog/spdlog.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <spdlog/spdlog.h>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -367,4 +367,41 @@ TEST(TestFusilliPluginApi, CreateExecutionContext) {
   EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContext(handle, executionContext),
             HIPDNN_PLUGIN_STATUS_SUCCESS);
   EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, SetStreamSuccess) {
+  // Create plugin handle.
+  hipdnnEnginePluginHandle_t handle = nullptr;
+  ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  // Create a HIP stream.
+  hipStream_t stream;
+  ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+  // Set the stream on the handle.
+  EXPECT_EQ(hipdnnEnginePluginSetStream(handle, stream),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+  // Clean up.
+  EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+  EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestFusilliPluginApi, SetStreamNullHandle) {
+  // Create a HIP stream.
+  hipStream_t stream;
+  ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+  // Attempt to set stream with null handle should fail.
+  EXPECT_EQ(hipdnnEnginePluginSetStream(nullptr, stream),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+
+  // Verify error was set.
+  const char *errorStr = nullptr;
+  hipdnnPluginGetLastErrorString(&errorStr);
+  ASSERT_NE(errorStr, nullptr);
+  EXPECT_GT(strlen(errorStr), 0u);
+
+  // Clean up.
+  EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
 }

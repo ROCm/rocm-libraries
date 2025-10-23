@@ -24,7 +24,6 @@
 #include <memory>
 #include <unordered_map>
 
-#include "fusilli/support/logging.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 
 // Convert from hipDNN DataType to fusilli DataType.

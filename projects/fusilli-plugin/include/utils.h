@@ -13,12 +13,16 @@
 #ifndef FUSILLI_PLUGIN_SRC_UTILS_H
 #define FUSILLI_PLUGIN_SRC_UTILS_H
 
-#include "fusilli/attributes/types.h"
-#include "fusilli/support/logging.h"
+#include <fusilli.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
 #include <iree/hal/buffer_view.h>
+
+#include <type_traits>
+
+namespace fusilli_plugin {
 
 // Checks for null, sets the plugin last error manager and returns error if
 // null.
@@ -92,6 +96,28 @@ findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
     std ::move(*errorOr);                                                      \
   })
 
+template <typename T> fusilli::ErrorObject convertToErrorObject(T &&error) {
+  using DecayT = std::decay_t<T>;
+  if constexpr (std::is_convertible_v<DecayT, fusilli::ErrorObject>) {
+    return std::forward<T>(error);
+  } else if constexpr (std::is_same_v<DecayT, hipError_t>) {
+    // Convert HIP error to fusilli ErrorObject
+    if (error != hipSuccess) {
+      return fusilli::error(fusilli::ErrorCode::InternalError,
+                            hipGetErrorString(error));
+    }
+    return fusilli::ok();
+  } else {
+    static_assert(
+        std::is_convertible_v<DecayT, fusilli::ErrorObject> ||
+            std::is_same_v<DecayT, hipError_t>,
+        "convertToErrorObject requires fusilli::ErrorObject or hipError_t");
+    // Unreachable
+    return fusilli::error(fusilli::ErrorCode::InternalError,
+                          "Unknown error type");
+  }
+}
+
 // Set plugin error manager last error and return failed status from enclosing
 // scope if expression evaluates to a fusilli::ErrorObject in an error state; or
 // in the case of fusilli::ErrorOr<T> is convertible to an fusilli::ErrorObject
@@ -107,7 +133,7 @@ findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
 //   }
 #define FUSILLI_PLUGIN_CHECK_ERROR(expr)                                       \
   do {                                                                         \
-    fusilli::ErrorObject err = (expr);                                         \
+    fusilli::ErrorObject err = convertToErrorObject(expr);                     \
     if (isError(err)) {                                                        \
       return hipdnn_plugin::PluginLastErrorManager::setLastError(              \
           HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, err.getMessage());              \
@@ -147,5 +173,7 @@ fusilliDataTypeToIreeHalDataType(fusilli::DataType fusilliDataType) {
         "unknown data type in fusilli -> iree runtime data type conversion");
   }
 }
+
+} // namespace fusilli_plugin
 
 #endif // FUSILLI_PLUGIN_SRC_UTILS_H

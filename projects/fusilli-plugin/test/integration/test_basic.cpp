@@ -11,7 +11,7 @@
 #include <filesystem>
 #include <string>
 
-std::vector<std::string> getLoadedPlugins(hipdnnHandle_t handle) {
+static std::vector<std::string> getLoadedPlugins(hipdnnHandle_t handle) {
   size_t numPlugins = 0;
   size_t maxPathLength = 0;
   auto status = hipdnnGetLoadedEnginePluginPaths_ext(handle, &numPlugins,
