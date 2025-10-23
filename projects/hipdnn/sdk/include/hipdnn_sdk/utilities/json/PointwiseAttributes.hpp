@@ -58,7 +58,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(PointwiseMode,
                               {PointwiseMode::TANH_FWD, "tanh_fwd"}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& pointwiseJson, PointwiseAttributes const& pw)
+inline void to_json(nlohmann::json& pointwiseJson, const PointwiseAttributes& pw)
 {
     auto& inputs = pointwiseJson["inputs"] = {};
 
@@ -80,8 +80,8 @@ void to_json(nlohmann::json& pointwiseJson, PointwiseAttributes const& pw)
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::PointwiseAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                           const nlohmann::json& entry)
+inline auto to<data_objects::PointwiseAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                  const nlohmann::json& entry)
 {
     using namespace data_objects;
     auto& inputs = entry.at("inputs");

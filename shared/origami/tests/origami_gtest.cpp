@@ -321,8 +321,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         for(const auto& input_case : test.inputs)
         {
             BestWGM(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("MI_M"), 
-                          input_case.values.at("MI_N"), input_case.values.at("MI_K"), input_case.values.at("element_size"), input_case.values.at("H_L2"));
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"));
         }
     }
     else if(test.name == "UtilsTFlopsFromLatency")

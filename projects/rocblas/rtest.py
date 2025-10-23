@@ -272,7 +272,7 @@ def batch(script, xml):
     global OS_info
     global args
     #
-    cwd = pathlib.os.curdir
+    cwd = os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
     rtest_path = test_xml()
     if 'rocblas_rtest.xml' in rtest_path:

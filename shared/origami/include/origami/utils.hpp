@@ -92,22 +92,25 @@ namespace origami
                                                         = {},
                                                         bool print = false);
 
-        std::pair<double, size_t> select_best_wgm(
-            size_t                     M,
-            size_t                     N,
-            size_t                     K,
-            size_t                     batch,
-            const hardware_t&          hardware,
-            size_t                     MT_M,
-            size_t                     MT_N,
-            size_t                     MT_K,
-            size_t                     MI_M,
-            size_t                     MI_N,
-            size_t                     MI_K,
-            const std::vector<size_t>& WGM_list,
-            size_t                     element_size,
-            double H_L2, // not needed for L2 hit rate but retained if your code expects it
-            bool   print);
+        size_t select_best_wgmxcc(const hardware_t& hardware,
+                                  size_t            M,
+                                  size_t            N,
+                                  size_t            K,
+                                  size_t            batch,
+                                  size_t            MT_M,
+                                  size_t            MT_N,
+                                  size_t            MT_K,
+                                  bool              print);
+
+        int32_t select_best_wgm(const hardware_t& hardware,
+                                size_t            M,
+                                size_t            N,
+                                size_t            K,
+                                size_t            batch,
+                                size_t            MT_M,
+                                size_t            MT_N,
+                                size_t            MT_K,
+                                bool              print);
 
         double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,
