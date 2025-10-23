@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -45,7 +46,7 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
     std::vector<int64_t> dilation = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     ConvolutionBwdTensorBundle<float> planTensorBundle(
         dxDims, wDims, dyDims, seed, TensorLayout::NHWC);
     ConvolutionBwdTensorBundle<float> directTensorBundle(
