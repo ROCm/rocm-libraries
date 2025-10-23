@@ -84,21 +84,8 @@ class counting_iterator;
 namespace detail
 {
 template <typename Number>
-using counting_iterator_difference_type = ::internal::If<
-  ::internal::is_integral_v<Number>,
-  // the difference between two int values can be larger than what an int can represent
-  ::internal::If<sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>,
-  // floating points use ptrdiff_t
-  ::internal::If<_THRUST_STD::is_floating_point_v<Number>,
-                 _THRUST_STD::ptrdiff_t,
-                 // any other type, if it can represent the difference, can be used as difference type,
-                 // otherwise also ptrdiff_t
-                 ::internal::If<_THRUST_STD::numeric_limits<Number>::is_signed
-                                  && (!_THRUST_STD::numeric_limits<Number>::is_bounded
-                                      || _THRUST_STD::numeric_limits<Number>::digits
-                                           > _THRUST_STD::numeric_limits<_THRUST_STD::ptrdiff_t>::digits),
-                                Number,
-                                _THRUST_STD::ptrdiff_t>>>;
+using counting_iterator_difference_type =
+  ::internal::If<::internal::is_integral_v<Number> && sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>;
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct make_counting_iterator_base
