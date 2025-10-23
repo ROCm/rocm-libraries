@@ -614,6 +614,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_logb(_Tp
 #endif // !_MSVC
 
 #if defined(_CCCL_COMPILER_HIPCC) && defined(_LIBCUDACXX_HAS_NVFP16)
+#include <hip/hip_fp16.h>
 template <>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_logb(__half __x)
 {
