@@ -270,12 +270,12 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macK},
                 LayoutType::MATRIX_A,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+                GetMemoryType(gemm.loadPathA));
             auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macK, gemm.macN},
                 LayoutType::MATRIX_B,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+                GetMemoryType(gemm.loadPathB));
             auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,

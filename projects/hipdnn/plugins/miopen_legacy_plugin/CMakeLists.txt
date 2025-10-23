@@ -105,6 +105,7 @@ add_library(miopen_legacy_plugin_private
     engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     EngineManager.cpp
+    MiopenActivationDescriptor.cpp
     MiopenHandleFactory.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp

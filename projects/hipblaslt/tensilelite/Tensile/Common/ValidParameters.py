@@ -510,12 +510,13 @@ validParameters = { # we need to make sure this matches develop
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
     "WorkGroupMappingXCC": [
-        1,
-        2,
-        4,
-        8,
-        16,
-        32,
+        -1,
+         1,
+         2,
+         4,
+         8,
+         16,
+         32,
     ],  # change a workgroup's id so that contiguous workgroup can map on same XCC
     # -1 : WorkGroupMappingXCCGroup will be set to CU_count at runtime. Please ensure that (CU_count % WGMXCC == 0).
     "WorkGroupMappingXCCGroup": list(
@@ -684,7 +685,7 @@ validParameters = { # we need to make sure this matches develop
     "StreamKAtomic": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
-    # 0: uses default workgroup assignment
+    #  0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
     "StreamKXCCMapping": [0] + list(range(2, 9)),
     # Enables using a Tree-reduction for the fixup step of StreamK algorithm

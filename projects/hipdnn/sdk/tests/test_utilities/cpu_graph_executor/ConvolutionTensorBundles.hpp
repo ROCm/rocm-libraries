@@ -6,6 +6,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 using namespace hipdnn_sdk::utilities;
@@ -20,7 +21,7 @@ struct ConvolutionFwdTensorBundle
     ConvolutionFwdTensorBundle(const std::vector<int64_t>& xDims,
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& yDims,
-                               unsigned int seed = 1,
+                               unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                                const TensorLayout& layout = TensorLayout::NCHW)
         : xTensor(xDims, layout)
         , wTensor(wDims, layout)
@@ -55,7 +56,7 @@ struct ConvolutionBwdTensorBundle
     ConvolutionBwdTensorBundle(const std::vector<int64_t>& dxDims,
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& dyDims,
-                               unsigned int seed = 1,
+                               unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                                const TensorLayout& layout = TensorLayout::NCHW)
         : dxTensor(dxDims, layout)
         , wTensor(wDims, layout)

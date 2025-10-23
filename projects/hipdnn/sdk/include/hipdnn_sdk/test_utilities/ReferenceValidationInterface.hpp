@@ -16,15 +16,12 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class T>
 class IReferenceValidation
 {
 public:
     virtual ~IReferenceValidation() = default;
 
-    virtual bool allClose(const ITensor& reference, const ITensor& implementation) = 0;
-    virtual bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation)
-        = 0;
+    virtual bool allClose(ITensor& reference, ITensor& implementation) const = 0;
 };
 
 } // namespace test_utilities
