@@ -38,7 +38,6 @@
 #include <omp.h>
 #endif
 
-extern double      hipfftw_test_prob;
 extern size_t      max_length_for_hipfftw_test;
 extern size_t      max_io_gb_for_hipfftw_test;
 extern size_t      max_num_arg_validation_tests_per_hipfftw_plan_type;
@@ -1346,12 +1345,11 @@ namespace
             {
                 const double roll = hash_prob(random_seed, test.to_string());
                 // not distinguishing between real/complex for this list generation
-                if(roll > hipfftw_test_prob)
+                if(roll > test_prob)
                 {
                     if(verbose > 4)
                     {
-                        std::cout << "Test skipped: (roll=" << roll << " > " << hipfftw_test_prob
-                                  << ")\n";
+                        std::cout << "Test skipped: (roll=" << roll << " > " << test_prob << ")\n";
                     }
                     continue;
                 }
@@ -2405,8 +2403,7 @@ namespace
         {
             const double roll = hash_prob(random_seed, test.to_string());
             const double run_prob
-                = hipfftw_test_prob
-                  * (is_real(test.plan_helper.get_dft_kind()) ? real_prob_factor : 1.0);
+                = test_prob * (is_real(test.plan_helper.get_dft_kind()) ? real_prob_factor : 1.0);
 
             if(roll > run_prob)
             {
