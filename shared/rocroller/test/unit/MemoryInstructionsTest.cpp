@@ -35,6 +35,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -491,16 +492,22 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, supportedISATuples());
 
-    struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int>
+    struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int, bool>
     {
         int numBytesParam()
         {
             return std::get<1>(GetParam());
         }
 
+        bool useBufferExprParam()
+        {
+            return std::get<2>(GetParam());
+        }
+
         void genBufferTest()
         {
-            int N = numBytesParam();
+            int  N             = numBytesParam();
+            bool useBufferExpr = useBufferExprParam();
 
             auto k = m_context->kernel();
 
@@ -533,10 +540,34 @@ namespace MemoryInstructionsTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
+                std::shared_ptr<rocRoller::BufferDescriptor> bufDesc;
+
+                if(!useBufferExpr)
+                {
+                    bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+                    co_yield bufDesc->setup();
+                    co_yield bufDesc->setBasePointer(s_a);
+                    co_yield bufDesc->setSize(Register::Value::Literal(N));
+                }
+                else
+                {
+                    auto v = Register::Value::Placeholder(m_context,
+                                                          Register::Type::Scalar,
+                                                          {DataType::None, PointerType::Buffer},
+                                                          1);
+
+                    // Manually create buffer descriptor expression
+                    uint32_t opts = rocRoller::BufferDescriptor::getDefaultOptionsValue(m_context);
+                    auto     bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                    bufferExpr = bfc(Expression::literal(2147483548), bufferExpr, 0, 64, 32);
+                    bufferExpr = bfc(Expression::literal(opts), bufferExpr, 0, 96, 32);
+                    // TODO: this bfc generates two redundant bfe instructions
+                    bufferExpr = bfc(s_a->expression(), bufferExpr, 0, 0, 64);
+                    bufferExpr = bfc(Expression::literal(N), bufferExpr, 0, 64, 32);
+
+                    co_yield Expression::generate(v, bufferExpr, m_context);
+                    bufDesc = std::make_shared<rocRoller::BufferDescriptor>(v, m_context);
+                }
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
@@ -605,7 +636,8 @@ namespace MemoryInstructionsTest
     INSTANTIATE_TEST_SUITE_P(BufferMemoryInstructionsTest,
                              BufferMemoryInstructionsTest,
                              ::testing::Combine(supportedISAValues(),
-                                                ::testing::Values(1, 2, 3, 4, 8, 16, 20, 44, 47)));
+                                                ::testing::Values(1, 2, 3, 4, 8, 16, 20, 44, 47),
+                                                ::testing::Values(false, true)));
 
     struct MemoryInstructionsLDSTest : public CurrentGPUContextFixture
     {

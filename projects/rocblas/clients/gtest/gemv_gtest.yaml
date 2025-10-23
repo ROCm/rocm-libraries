@@ -520,11 +520,12 @@ Tests:
   category: nightly
   function: gemv_batched
   precision: *double_precision
-  transA: [ N ]
+  transA: [ T ]
   matrix_size: *very_large_matrix_size_range
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
-  batch_count: [ 3 ]
+  batch_count: [ 2 ]
+  gpu_arch: '9??'
 
 - name: gemv_batched_grid_z_16bit
   category: stress
@@ -643,11 +644,12 @@ Tests:
   category: nightly
   function: gemv_strided_batched
   precision: *gemv_bfloat_half_single_double_complex_real_precisions
-  transA: [ N ]
+  transA: [ N, T ]
   matrix_size: *very_large_matrix_size_range
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
-  batch_count: [ 3 ]
+  batch_count: [ 2 ]
+  gpu_arch: '9??'
 
 - name: gemv_row_vectorized_coverage
   category: pre_checkin

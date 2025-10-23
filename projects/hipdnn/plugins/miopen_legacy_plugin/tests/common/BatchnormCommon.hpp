@@ -8,7 +8,7 @@
 #include <random>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 
 namespace test_bn_common
 {
