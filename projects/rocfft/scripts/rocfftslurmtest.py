@@ -177,15 +177,19 @@ def main():
 
         buildcmd = ""
 
-        # If we need a new cmake, get it.
-        buildcmd += "TEMP_DIR=$(mktemp -d) && cd ${TEMP_DIR}\n"
-        buildcmd += "wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7.tar.gz -O cmake-3.31.7.tar.gz\n"
-        buildcmd += "tar -xf cmake-3.31.7.tar.gz && cd cmake-3.31.7\n"
-        buildcmd += "mkdir build && cd build\n"
-        buildcmd += "cmake -DCMAKE_INSTALL_PREFIX=${TEMP_DIR}/cmake .. && make && make install\n"
-        buildcmd += "export PATH=${TEMP_DIR}/cmake/bin:$PATH\n"
+        # # If we need a new cmake, get it.
+        # buildcmd += "TEMP_DIR=$(mktemp -d) && cd ${TEMP_DIR}\n"
+        # buildcmd += "wget -q https://github.com/Kitware/CMake/releases/download/v3.31.7/cmake-3.31.7.tar.gz -O cmake-3.31.7.tar.gz\n"
+        # buildcmd += "tar -xf cmake-3.31.7.tar.gz && cd cmake-3.31.7\n"
+        # buildcmd += "mkdir build && cd build\n"
+        # buildcmd += "cmake -DCMAKE_INSTALL_PREFIX=${TEMP_DIR}/cmake .. &&  make -j && make install\n"
+        # buildcmd += "export PATH=${TEMP_DIR}/cmake/bin:$PATH\n"
+
+        buildcmd += "which cmake\n"
+        buildcmd += "cmake --version\n"
 
         # Run a compile job first.
+        buildcmd += "cd " + args.builddir + "\n"
         buildcmd += "cmake"
         buildcmd += " -DCMAKE_CXX_COMPILER=amdclang++"
         buildcmd += " -DCMAKE_C_COMPILER=amdclang"
@@ -198,7 +202,7 @@ def main():
         if args.buildcraympi:
             buildcmd += " -DROCFFT_CRAY_MPI_ENABLE=on"
         buildcmd += " " + args.srcdir
-        buildcmd += " && make"
+        buildcmd += " && make -j"
 
         # Set up the basic slurm parameters:
         buildparams = rocslurm.sbatchparams()
@@ -216,7 +220,7 @@ def main():
         buildjob = rocslurm.sbatch("build",
                                    buildparams,
                                    args.logdir,
-                                   args.builddir,
+                                   args.srcdir,
                                    buildcmd,
                                    verbose=args.verbose)
 

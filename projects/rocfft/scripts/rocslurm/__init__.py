@@ -80,6 +80,9 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
             str(x) for x in params.afterok) + "\n"
     if len(params.afterany) > 0 or len(params.afterok) > 0:
         batchscript += "#SBATCH --kill-on-invalid-dep=yes\n"
+
+    batchscript += "#SBATCH --exclusive\n"
+        
         
     for module in params.modules:
         batchscript += "module load " + module + "\n"
@@ -164,8 +167,9 @@ def reportonjobs(params, logdir, jobs, verbose=0):
     for job in jobs:
         joblogdir = os.path.dirname(os.path.realpath(job.outfilename))
         #print(joblogdir)
+        reportcmd += "if [ -e " + joblogdir + " ]; then\n" 
         reportcmd += "cp -r " + joblogdir + " " + logdir + "/$SLURM_JOB_ID\n"
-
+        reportcmd += "fi\n" 
 
     reportcmd += "sacct -X -j " + ",".join(str(x) for x in jobids) \
         + " -o JobName,JobID,state,Elapsed,ExitCode\n"
@@ -185,8 +189,6 @@ def reportonjobs(params, logdir, jobs, verbose=0):
         byteline = str.encode(line + "\n")
         p.stdin.write(byteline)
     p.stdin.close()
-
-    #sacct -X -j 9628127,9628128 -o JobID,state,ExitCode
 
     #reportjob = sbatch("finalreport", params, logdir, workdir, jobcmd, verbose=False):
 
