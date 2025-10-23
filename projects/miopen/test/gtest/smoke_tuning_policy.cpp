@@ -44,9 +44,6 @@ TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterValidValues)
               miopenStatusSuccess);
     EXPECT_EQ(miopenGetTuningPolicy(&handle, &test_tuning_policy), miopenStatusSuccess);
     EXPECT_EQ(test_tuning_policy, miopenTuningPolicy_t::miopenTuningPolicyNone);
-
-    EXPECT_EQ(miopenGetTuningPolicy(&handle, &test_tuning_policy), miopenStatusSuccess);
-    EXPECT_EQ(test_tuning_policy, miopenTuningPolicy_t::miopenTuningPolicyNone);
 }
 
 TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterErrorHandling)
