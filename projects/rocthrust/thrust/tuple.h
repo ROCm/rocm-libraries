@@ -45,6 +45,7 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>
 #  include <type_traits>
+#  include <utility>
 #endif
 
 // If 'libcudacxx' or 'libhipcxx' is available (_THRUST_HAS_DEVICE_SYSTEM_STD), we will
@@ -760,6 +761,24 @@ tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& 
 
 /*! \} // utility
  */
+
+#  ifndef THRUST_DOXYGEN_INVOKED
+namespace internal
+{
+template <typename F, typename Tuple, size_t... Is>
+constexpr auto apply_tuple_impl(F&& f, Tuple&& t, ::std::index_sequence<Is...>)
+{
+  return f(get<Is>(::std::forward<Tuple>(t))...);
+}
+} // namespace internal
+
+template <typename F, typename Tuple>
+constexpr auto apply(F&& f, Tuple&& t)
+{
+  constexpr ::std::size_t N = tuple_size<::std::remove_reference_t<Tuple>>::value;
+  return internal::apply_tuple_impl(::std::forward<F>(f), ::std::forward<Tuple>(t), ::std::make_index_sequence<N>{});
+}
+#  endif
 
 THRUST_NAMESPACE_END
 
