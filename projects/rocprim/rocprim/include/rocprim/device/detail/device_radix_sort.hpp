@@ -1268,6 +1268,8 @@ struct onesweep_iteration_helper
         {
             if constexpr(NKey != ItemsPerThread)
             {
+                ::rocprim::syncthreads();
+
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
@@ -1300,8 +1302,6 @@ struct onesweep_iteration_helper
                     }
                 }
             }
-
-            ::rocprim::syncthreads();
         }
 
         // Gather and scatter values if necessary.
@@ -1342,6 +1342,8 @@ struct onesweep_iteration_helper
             for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NValue);
                 ++j, x += (BlockSize * NValue))
             {
+                ::rocprim::syncthreads();
+
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
@@ -1367,8 +1369,6 @@ struct onesweep_iteration_helper
                         values_output[rank + global_offset] = value;
                     }
                 }
-
-                ::rocprim::syncthreads();
             }
         }
 
