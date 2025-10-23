@@ -26,6 +26,30 @@ template <typename DataType, typename IntermediateType, typename TestCaseType>
 class BatchnormBackward : public GraphVerifierTest<DataType, TestCaseType>
 {
 protected:
+    std::unordered_map<graph::BatchnormBackwardAttributes::InputNames, int64_t> _inputTensorIds;
+
+    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
+                          GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::X))
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::DY))
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+
+        bundle.tensors
+            .at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::SCALE))
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::MEAN))
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+
+        bundle.tensors
+            .at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::INV_VARIANCE))
+            ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+    }
+
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
         const TestCaseType& testCase = this->GetParam();
@@ -48,6 +72,8 @@ protected:
                                           generateStrides(testCase.getDims(), layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        _inputTensorIds.insert(
+            {graph::BatchnormBackwardAttributes::InputNames::X, xTensorAttr->get_uid()});
 
         auto dyAttr
             = graph::makeTensorAttributes("dy",
@@ -56,22 +82,30 @@ protected:
                                           generateStrides(testCase.getDims(), layout.strideOrder));
         dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        _inputTensorIds.insert(
+            {graph::BatchnormBackwardAttributes::InputNames::DY, dyTensorAttr->get_uid()});
 
         auto scaleAttr = graph::makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         scaleAttr.set_uid(uid++);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        _inputTensorIds.insert(
+            {graph::BatchnormBackwardAttributes::InputNames::SCALE, scaleTensorAttr->get_uid()});
 
         auto meanAttr = graph::makeTensorAttributes(
             "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         meanAttr.set_uid(uid++);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+        _inputTensorIds.insert(
+            {graph::BatchnormBackwardAttributes::InputNames::MEAN, meanTensorAttr->get_uid()});
 
         auto invVarianceAttr = graph::makeTensorAttributes(
             "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         invVarianceAttr.set_uid(uid++);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
+        _inputTensorIds.insert({graph::BatchnormBackwardAttributes::InputNames::INV_VARIANCE,
+                                invVarianceTensorAttr->get_uid()});
 
         graph::BatchnormBackwardAttributes bnAttrs;
         bnAttrs.set_name("batchnorm_backward");
