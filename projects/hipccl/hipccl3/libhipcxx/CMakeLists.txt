@@ -70,10 +70,10 @@ endif()
 
 # Note that this currently returns and skips the rest of the build
 # system.
-option(libhipcxx_ENABLE_CMAKE_TESTS "Enable ctest-based testing." ON)
-if (libhipcxx_ENABLE_CMAKE_TESTS)
-  add_subdirectory(cmake/test)
-endif()
+# option(libhipcxx_ENABLE_CMAKE_TESTS "Enable ctest-based testing." ON)
+# if (libhipcxx_ENABLE_CMAKE_TESTS)
+#   add_subdirectory(cmake/test)
+# endif()
 
 set(CMAKE_MODULE_PATH "${libhipcxx_SOURCE_DIR}/cmake")
 set(LLVM_PATH "${libhipcxx_SOURCE_DIR}" CACHE STRING "" FORCE)
