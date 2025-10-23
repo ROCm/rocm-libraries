@@ -25,35 +25,50 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/system/detail/generic/copy_if.h>
-#include <thrust/system/omp/detail/copy_if.h>
+
+#include <thrust/detail/type_traits/minimum_type.h>
+#include <thrust/system/detail/generic/copy.h>
+#include <thrust/system/detail/sequential/copy.h>
+#include <thrust/system/omp/detail/copy.h>
+
+#include <cuda/std/type_traits>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::omp::detail
 {
-namespace omp
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
+OutputIterator
+copy(execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
 {
-namespace detail
-{
+  using traversal1 = typename iterator_traversal<InputIterator>::type;
+  using traversal2 = typename iterator_traversal<OutputIterator>::type;
 
-template <typename DerivedPolicy,
-          typename InputIterator1,
-          typename InputIterator2,
-          typename OutputIterator,
-          typename Predicate>
-OutputIterator copy_if(
-  execution_policy<DerivedPolicy>& exec,
-  InputIterator1 first,
-  InputIterator1 last,
-  InputIterator2 stencil,
-  OutputIterator result,
-  Predicate pred)
-{
-  // omp prefers generic::copy_if to cpp::copy_if
-  return thrust::system::detail::generic::copy_if(exec, first, last, stencil, result, pred);
-} // end copy_if()
+  using traversal = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
 
-} // namespace detail
-} // namespace omp
-} // namespace system
+  if constexpr (::cuda::std::is_convertible_v<traversal, random_access_traversal_tag>)
+  {
+    return system::detail::generic::copy(exec, first, last, result);
+  }
+  else
+  {
+    return system::detail::sequential::copy(exec, first, last, result);
+  }
+}
+
+template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
+OutputIterator copy_n(execution_policy<DerivedPolicy>& exec, InputIterator first, Size n, OutputIterator result)
+{
+  using traversal1 = typename iterator_traversal<InputIterator>::type;
+  using traversal2 = typename iterator_traversal<OutputIterator>::type;
+  using traversal  = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
+  if constexpr (::cuda::std::is_convertible_v<traversal, random_access_traversal_tag>)
+  {
+    return system::detail::generic::copy_n(exec, first, n, result);
+  }
+  else
+  {
+    return system::detail::sequential::copy_n(exec, first, n, result);
+  }
+}
+} // namespace system::omp::detail
 THRUST_NAMESPACE_END
