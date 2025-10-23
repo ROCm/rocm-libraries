@@ -25,44 +25,28 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/type_traits.h>
-#include <thrust/iterator/detail/any_system_tag.h>
+
 #include <thrust/iterator/detail/device_system_tag.h>
 #include <thrust/iterator/detail/host_system_tag.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
-#include <thrust/type_traits/detail/conditional.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
-inline constexpr bool is_iterator_system =
-  _THRUST_STD::is_convertible_v<T, any_system_tag> || _THRUST_STD::is_convertible_v<T, host_system_tag>
-  || _THRUST_STD::is_convertible_v<T, device_system_tag>;
+THRUST_HOST_DEVICE auto cat_to_system_impl(...) -> void;
 
-// XXX this should work entirely differently
-// we should just specialize this metafunction for iterator_category_with_system_and_traversal
+THRUST_HOST_DEVICE auto cat_to_system_impl(const input_host_iterator_tag&) -> host_system_tag;
+THRUST_HOST_DEVICE auto cat_to_system_impl(const output_host_iterator_tag&) -> host_system_tag;
+
+THRUST_HOST_DEVICE auto cat_to_system_impl(const input_device_iterator_tag&) -> device_system_tag;
+THRUST_HOST_DEVICE auto cat_to_system_impl(const output_device_iterator_tag&) -> device_system_tag;
+
 template <typename Category>
 struct iterator_category_to_system
 {
-  using type =
-    // convertible to host iterator?
-    ::internal::If<_THRUST_STD::is_convertible_v<Category, input_host_iterator_tag>
-                     || _THRUST_STD::is_convertible_v<Category, output_host_iterator_tag>,
-                   host_system_tag,
-                   // convertible to device iterator?
-                   ::internal::If<_THRUST_STD::is_convertible_v<Category, input_device_iterator_tag>
-                                    || _THRUST_STD::is_convertible_v<Category, output_device_iterator_tag>,
-                                  device_system_tag,
-                                  // unknown system
-                                  void>>;
+  using type = decltype(cat_to_system_impl(Category{}));
 };
 } // namespace detail
 THRUST_NAMESPACE_END
