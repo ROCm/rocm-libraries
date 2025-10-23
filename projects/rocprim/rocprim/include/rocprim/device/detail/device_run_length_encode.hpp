@@ -880,13 +880,16 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                          load_input_method,
                                          scan_algorithm>;
 
-    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH ROCPRIM_SHARED_MEMORY union
+    ROCPRIM_SHARED_MEMORY union
     {
-        typename detail::raw_storage<typename block_processor::storage_type> storage;
-        typename BlockIdWrapper::storage_type                                ordered_bid_storage;
-    };
-    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-    const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), ordered_bid_storage);
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+        typename detail::raw_storage<typename block_processor::storage_type>
+            block_processor_storage;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+        typename BlockIdWrapper::storage_type ordered_bid_storage;
+    } storage;
+
+    const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), storage.ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;
     const InputIterator block_input  = input + block_offset;
@@ -903,18 +906,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                         block_id,
                                         grid_size,
                                         size,
-                                        storage.get());
+                                        storage.block_processor_storage.get());
     }
     else if(valid_in_last_block > 0)
     {
-        OffsetCountPairType total = block_processor{}.process_block(block_input,
-                                                                    offsets_output,
-                                                                    counts_output,
-                                                                    scan_state,
-                                                                    block_id,
-                                                                    grid_size,
-                                                                    size,
-                                                                    storage.get());
+        OffsetCountPairType total
+            = block_processor{}.process_block(block_input,
+                                              offsets_output,
+                                              counts_output,
+                                              scan_state,
+                                              block_id,
+                                              grid_size,
+                                              size,
+                                              storage.block_processor_storage.get());
         // First thread of last block sets the total number of non-trivial runs found and updates
         // the counts with the last run's length if necessary.
         if(threadIdx.x == 0)
