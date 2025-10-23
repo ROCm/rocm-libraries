@@ -47,6 +47,7 @@ namespace internal
 
 using _THRUST_STD::is_arithmetic;
 using _THRUST_STD::is_integral;
+using _THRUST_STD::is_integral_v;
 using _THRUST_STD::make_unsigned;
 
 template <typename T>
@@ -71,6 +72,7 @@ using _And = _THRUST_STD::_And<Pred...>;
 // Keeping standard versions for now until compatibility is resolved.
 using ::std::is_arithmetic;
 using ::std::is_integral;
+using ::std::is_integral_v;
 using ::std::make_unsigned;
 
 template <typename T>

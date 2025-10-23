@@ -46,8 +46,8 @@ static_assert(diff_type_is<int64_t, ptrdiff_t>);
 static_assert(diff_type_is<uint64_t, ptrdiff_t>);
 #if !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__)) \
   && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
-static_assert(diff_type_is<__int128_t, __int128_t>);
-static_assert(diff_type_is<__uint128_t, long>);
+static_assert(diff_type_is<__int128_t, ptrdiff_t>);
+static_assert(diff_type_is<__uint128_t, ptrdiff_t>);
 #endif
 static_assert(diff_type_is<float, ptrdiff_t>);
 static_assert(diff_type_is<double, ptrdiff_t>);

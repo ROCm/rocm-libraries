@@ -44,73 +44,61 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/type_traits/detail/conditional.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(type_traits)
+#else
+
+#  include <rocprim/type_traits.hpp>
+
+#  include <limits>
+#endif
+
+#ifndef THRUST_DOXYGEN_INVOKED
+namespace internal
+{
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+
+using _THRUST_STD::type_identity;
+
+#  else
+
+template <typename Tp>
+struct type_identity
+{
+  using type = Tp;
+};
+
+#  endif
+} // namespace internal
 #endif
 
 THRUST_NAMESPACE_BEGIN
 
-// forward declaration of counting_iterator
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 class counting_iterator;
 
 namespace detail
 {
-template <typename T>
-struct num_digits
-    : eval_if<_THRUST_STD::numeric_limits<T>::is_specialized,
-              integral_constant<int, _THRUST_STD::numeric_limits<T>::digits>,
-              integral_constant<int,
-                                sizeof(T) * _THRUST_STD::numeric_limits<unsigned char>::digits
-                                  - (_THRUST_STD::numeric_limits<T>::is_signed ? 1 : 0)>>::type
-{}; // end num_digits
-
-template <typename Integer>
-struct integer_difference
-//: eval_if<
-//    sizeof(Integer) >= sizeof(intmax_t),
-//    eval_if<
-//      is_signed<Integer>::value,
-//      identity_<Integer>,
-//      identity_<intmax_t>
-//    >,
-//    eval_if<
-//      sizeof(Integer) < sizeof(std::ptrdiff_t),
-//      identity_<std::ptrdiff_t>,
-//      identity_<intmax_t>
-//    >
-//  >
-{
-private:
-
-public:
-  using type =
-    typename eval_if<_THRUST_STD::numeric_limits<Integer>::is_signed
-                       && (!_THRUST_STD::numeric_limits<Integer>::is_bounded
-                           || (int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 >= num_digits<intmax_t>::value)),
-                     identity_<Integer>,
-                     eval_if<int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 < num_digits<int>::value,
-                             identity_<int>,
-                             eval_if<int(_THRUST_STD::numeric_limits<Integer>::digits) + 1 < num_digits<long>::value,
-                                     identity_<long>,
-                                     identity_<intmax_t>>>>::type;
-}; // end integer_difference
-
 template <typename Number>
-struct numeric_difference
-    : eval_if<::internal::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
-{}; // end numeric_difference
-
-template <typename Number>
-THRUST_HOST_DEVICE typename numeric_difference<Number>::type numeric_distance(Number x, Number y)
-{
-  using difference_type = typename numeric_difference<Number>::type;
-  return difference_type(y) - difference_type(x);
-} // end numeric_distance
+using counting_iterator_difference_type = ::internal::If<
+  ::internal::is_integral_v<Number>,
+  // the difference between two int values can be larger than what an int can represent
+  ::internal::If<sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>,
+  // floating points use ptrdiff_t
+  ::internal::If<_THRUST_STD::is_floating_point_v<Number>,
+                 _THRUST_STD::ptrdiff_t,
+                 // any other type, if it can represent the difference, can be used as difference type,
+                 // otherwise also ptrdiff_t
+                 ::internal::If<_THRUST_STD::numeric_limits<Number>::is_signed
+                                      && (!_THRUST_STD::numeric_limits<Number>::is_bounded
+                                          || _THRUST_STD::numeric_limits<Number>::digits
+                                               > _THRUST_STD::numeric_limits<_THRUST_STD::ptrdiff_t>::digits),
+                                    Number,
+                                    _THRUST_STD::ptrdiff_t>>>;
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct make_counting_iterator_base
@@ -118,19 +106,9 @@ struct make_counting_iterator_base
   using system =
     typename eval_if<_THRUST_STD::is_same<System, use_default>::value, identity_<any_system_tag>, identity_<System>>::type;
 
-  using traversal = replace_if_use_default<
-    Traversal,
-    eval_if<is_numeric<Incrementable>::value, identity_<random_access_traversal_tag>, iterator_traversal<Incrementable>>>;
-
-  // unlike Boost, we explicitly use std::ptrdiff_t as the difference type
-  // for floating point counting_iterators
+  using traversal = replace_if_use_default<Traversal, ::internal::type_identity<random_access_traversal_tag>>;
   using difference =
-    replace_if_use_default<Difference,
-                           eval_if<is_numeric<Incrementable>::value,
-                                   eval_if<::internal::is_integral<Incrementable>::value,
-                                           numeric_difference<Incrementable>,
-                                           identity_<_THRUST_STD::ptrdiff_t>>,
-                                   lazy_trait<it_difference_t, Incrementable>>>;
+    typename replace_if_use_default<Difference, ::internal::type_identity<counting_iterator_difference_type<Incrementable>>>::type;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference
@@ -144,50 +122,7 @@ struct make_counting_iterator_base
                      traversal,
                      Incrementable,
                      difference>;
-}; // end counting_iterator_base
-
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct iterator_distance
-{
-  THRUST_HOST_DEVICE static Difference distance(Incrementable1 x, Incrementable2 y)
-  {
-    return y - x;
-  }
 };
-
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct number_distance
-{
-  THRUST_HOST_DEVICE static Difference distance(Incrementable1 x, Incrementable2 y)
-  {
-    return static_cast<Difference>(numeric_distance(x, y));
-  }
-};
-
-template <typename Difference, typename Incrementable1, typename Incrementable2, typename Enable = void>
-struct counting_iterator_equal
-{
-  THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
-  {
-    return x == y;
-  }
-};
-
-// specialization for floating point equality
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct counting_iterator_equal<Difference,
-                               Incrementable1,
-                               Incrementable2,
-                               _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<Incrementable1>::value
-                                                        || _THRUST_STD::is_floating_point<Incrementable2>::value>>
-{
-  THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
-  {
-    using d = number_distance<Difference, Incrementable1, Incrementable2>;
-    return d::distance(x, y) == 0;
-  }
-};
-
 } // namespace detail
 
 //! \addtogroup iterators
@@ -318,24 +253,36 @@ private:
   }
 
   // note that we implement equal specially for floating point counting_iterator
-  template <typename OtherIncrementable, typename OtherSystem, typename OtherTraversal, typename OtherDifference>
+  template <typename OtherSystem, typename OtherTraversal, typename OtherDifference>
   THRUST_HOST_DEVICE bool
-  equal(counting_iterator<OtherIncrementable, OtherSystem, OtherTraversal, OtherDifference> const& y) const
+  equal(counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference> const& y) const
   {
-    using e = detail::counting_iterator_equal<difference_type, Incrementable, OtherIncrementable>;
-    return e::equal(this->base(), y.base());
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+    if constexpr (_THRUST_LIBCXX::is_floating_point_v<Incrementable>)
+#else
+    if constexpr (::rocprim::is_floating_point<Incrementable>::value)
+#endif
+    {
+      return distance_to(y) == 0;
+    }
+    else
+    {
+      return this->base() == y.base();
+    }
   }
 
-  template <class OtherIncrementable>
+  template <typename OtherSystem, typename OtherTraversal, typename OtherDifference>
   THRUST_HOST_DEVICE difference_type
-  distance_to(counting_iterator<OtherIncrementable, System, Traversal, Difference> const& y) const
+  distance_to(counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference> const& y) const
   {
-    using d = typename detail::eval_if<
-      detail::is_numeric<Incrementable>::value,
-      detail::identity_<detail::number_distance<difference_type, Incrementable, OtherIncrementable>>,
-      detail::identity_<detail::iterator_distance<difference_type, Incrementable, OtherIncrementable>>>::type;
-
-    return d::distance(this->base(), y.base());
+    if constexpr (::internal::is_integral<Incrementable>::value)
+    {
+      return static_cast<difference_type>(y.base()) - static_cast<difference_type>(this->base());
+    }
+    else
+    {
+      return y.base() - this->base();
+    }
   }
 
   //! \endcond
