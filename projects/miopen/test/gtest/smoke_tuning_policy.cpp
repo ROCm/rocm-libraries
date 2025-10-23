@@ -12,7 +12,7 @@ class CPU_TuningPolicy_NONE : public ::testing::Test
 {
     void testSetInvalidValue(const miopenTuningPolicy_t original_policy, int invalid)
     {
-        auto&& handle = get_handle();
+        auto&& handle                           = get_handle();
         miopenTuningPolicy_t test_tuning_policy = miopenTuningPolicy_t::miopenTuningPolicyNone;
         miopenTuningPolicy_t prev_tuning_policy;
 
@@ -21,7 +21,7 @@ class CPU_TuningPolicy_NONE : public ::testing::Test
         EXPECT_EQ(original_policy, prev_tuning_policy);
 
         EXPECT_EQ(miopenSetTuningPolicy(&handle, static_cast<miopenTuningPolicy_t>(invalid)),
-                miopenStatusBadParm);
+                  miopenStatusBadParm);
         EXPECT_EQ(miopenGetTuningPolicy(&handle, &test_tuning_policy), miopenStatusSuccess);
         EXPECT_EQ(prev_tuning_policy, test_tuning_policy);
     }
