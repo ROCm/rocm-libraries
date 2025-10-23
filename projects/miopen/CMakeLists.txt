@@ -661,12 +661,9 @@ function(install_kdb FILE_NAME COMPONENT_NAME)
     set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
 endfunction()
 
-function(add_gpu_target gfx_target)
+function(install_gpu_databases gfx_target)
     message(STATUS "Adding support for installing ${gfx_target} database artifacts")
-    if(NOT ${gfx_target} IN_LIST VALID_AMDGPU_TARGETS)
-        message(FATAL_ERROR "AMDGPU target ${gfx_target} is not supported.")
-    endif()
-    get_property(_targets GLOBAL PROPERTY MIOPEN_AMDGPU_TARGETS)
+    get_property(_targets GLOBAL PROPERTY MIOPEN_INSTALL_GPU_DATABASES)
     if("${gfx_target}" IN_LIST _targets)
         message(FATAL_ERROR "AMDGPU target ${gfx_target} already defined")
     endif()
@@ -691,16 +688,16 @@ function(add_gpu_target gfx_target)
 endfunction()
 
 # The default behaviour when no list of AMDGPU targets is supplied should be to
-# install for all targets; this was the behaviour before MIOPEN_AMDGPU_TARGETS
+# install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(VALID_AMDGPU_TARGETS gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1010 gfx1011 gfx1012 gfx1030 gfx1032 gfx1035 gfx1036 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151)
-set(MIOPEN_AMDGPU_TARGETS "${VALID_AMDGPU_TARGETS}" CACHE LIST "List of targets for which to install databases")
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
 
-foreach(_gfx_target ${MIOPEN_AMDGPU_TARGETS})
-    add_gpu_target(${_gfx_target})
+foreach(_gfx_target ${MIOPEN_INSTALL_GPU_DATABASES})
+    install_gpu_databases(${_gfx_target})
 endforeach()
 
 if(DVC_MISSING_FILES)
