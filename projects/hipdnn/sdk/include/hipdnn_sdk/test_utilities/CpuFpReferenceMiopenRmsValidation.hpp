@@ -78,16 +78,18 @@ public:
 
             // Track maximum magnitudes
             double currentMaxRef = maxRefMagnitude.load(std::memory_order_relaxed);
-            while(std::fabs(refValue) > currentMaxRef
+            double absRefValue = std::fabs(refValue);
+            while(absRefValue > currentMaxRef
                   && !maxRefMagnitude.compare_exchange_weak(
-                      currentMaxRef, std::fabs(refValue), std::memory_order_relaxed))
+                      currentMaxRef, absRefValue, std::memory_order_relaxed))
             {
             }
 
             double currentMaxImpl = maxImplMagnitude.load(std::memory_order_relaxed);
-            while(std::fabs(implValue) > currentMaxImpl
+            double absImplValue = std::fabs(implValue);
+            while(absImplValue > currentMaxImpl
                   && !maxImplMagnitude.compare_exchange_weak(
-                      currentMaxImpl, std::fabs(implValue), std::memory_order_relaxed))
+                      currentMaxImpl, absImplValue, std::memory_order_relaxed))
             {
             }
         };

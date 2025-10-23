@@ -22,6 +22,41 @@ TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)
                  std::invalid_argument);
 }
 
+// Test MIOpen-specific RMS calculation behavior
+TEST(TestCpuFpReferenceMiopenRmsValidation, MiopenRmsCalculation)
+{
+    // Test that RMS error is calculated correctly
+    CpuFpReferenceMiopenRmsValidation<double> refValidation(0.1);
+
+    Tensor<double> tensor1({4});
+    Tensor<double> tensor2({4});
+
+    // Set up test data
+    tensor1.setHostValue(1.0, 0);
+    tensor1.setHostValue(2.0, 1);
+    tensor1.setHostValue(3.0, 2);
+    tensor1.setHostValue(4.0, 3);
+
+    tensor2.setHostValue(1.1, 0);
+    tensor2.setHostValue(2.1, 1);
+    tensor2.setHostValue(3.1, 2);
+    tensor2.setHostValue(4.1, 3);
+
+    // Expected RMS calculation:
+    // Square differences: 0.01, 0.01, 0.01, 0.01
+    // Sum of square differences: 0.04
+    // sqrt(0.04) = 0.2
+    // Max magnitude in either buffer: 4.1
+    // Element count: 4
+    // Relative RMS error = 0.2 / (sqrt(4) * 4.1) = 0.2 / (2 * 4.1) = 0.0244
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2)); // 0.0244 < 0.1
+
+    // Now with tighter tolerance it should fail
+    CpuFpReferenceMiopenRmsValidation<double> refValidationTight(0.02);
+    EXPECT_FALSE(refValidationTight.allClose(tensor1, tensor2)); // 0.0244 > 0.02
+}
+
 // ============================================================================
 // ITensor allClose Tests - Basic Usage
 // ============================================================================
