@@ -54,7 +54,7 @@ THRUST_HOST_DEVICE void* malloc(execution_policy<DerivedPolicy>&, std::size_t n)
     (hipError_t status = hipMalloc(&result, n);
 
      if (status != hipSuccess) {
-       THRUST_UNUSED_VAR(hipGetLastError()); // Clear global HIP error state.
+       (void) hipGetLastError(); // Clear global HIP error state.
        throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
      }),
     ( // NV_IS_DEVICE

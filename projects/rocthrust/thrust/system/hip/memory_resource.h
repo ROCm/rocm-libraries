@@ -65,7 +65,7 @@ public:
 
     if (status != hipSuccess)
     {
-      THRUST_UNUSED_VAR(hipGetLastError()); // Clear the HIP global error state.
+      (void) hipGetLastError(); // Clear the HIP global error state.
       throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
     }
 

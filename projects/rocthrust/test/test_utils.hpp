@@ -821,7 +821,7 @@ __host__ void test_future_value_retrieval(Future&& f, decltype(f.extract())& ret
   auto const r2 = f.extract();
 
   ASSERT_THROW(auto x = f.extract(); // cppcheck-suppress unknownMacro
-               THRUST_UNUSED_VAR(x), thrust::event_error);
+               (void) x, thrust::event_error);
 
   ASSERT_EQ(false, f.ready());
   ASSERT_EQ(false, f.valid_stream());
