@@ -66,15 +66,16 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int hw_i     = tidx;
     unsigned int c_offset = c_i * MIO_BN_HW;
 
-    // load the mean, variance, scale, and bias that is broadcast across the block
+    // load the mean, variance, scale, and bias
     const FLOAT_ACCUM pmean       = estimatedMean[c_i];
     const FLOAT_ACCUM pvar        = estimatedVariance[c_i];
     const FLOAT_ACCUM pscale      = scale[c_i];
     const FLOAT_ACCUM pbias       = bias[c_i];
     const FLOAT_ACCUM invVariance = rsqrt(pvar + static_cast<FLOAT_ACCUM>(epsilon));
 
-    // load the input data (this is done in a vectorized manner)
     FLOAT data[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
 #pragma unroll 2
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
@@ -86,8 +87,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + index));
 
         // perform batch norm and activation
-        FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
-        FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
@@ -142,6 +141,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM pvar[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pscale[MIOPEN_READ_UNIT];
     FLOAT_ACCUM pbias[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
     *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pmean)) =
         *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + chw_i));
     *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pvar)) =
@@ -151,14 +151,15 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
         *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + chw_i));
 
-    FLOAT data[MIOPEN_READ_UNIT];
-    FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
-
 #pragma unroll
     for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
     {
         invVariance[i] = rsqrt(pvar[i] + static_cast<FLOAT_ACCUM>(epsilon));
     }
+
+    FLOAT data[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
 #pragma unroll 2
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
@@ -170,8 +171,6 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + index));
 
         // perform batch norm and activation
-        FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
-        FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
