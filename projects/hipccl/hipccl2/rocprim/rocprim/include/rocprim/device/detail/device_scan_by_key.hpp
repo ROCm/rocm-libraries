@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_BY_KEY_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_BY_KEY_HPP_
 
+#include "device_config_helper.hpp"
 #include "device_scan_common.hpp"
 #include "lookback_scan_state.hpp"
 
@@ -32,7 +33,7 @@
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../types/tuple.hpp"
-#include "device_config_helper.hpp"
+#include "../detail/ordered_block_id.hpp"
 
 #include <type_traits>
 
@@ -261,7 +262,8 @@ struct unwrap_store
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         device_scan_by_key_kernel_impl(KeyInputIterator,
                                        InputIterator,
@@ -275,7 +277,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        const size_t,
                                        const rocprim::tuple<ResultType, bool>* const,
                                        bool,
-                                       const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__)
+                                       const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__,
+                                       WrappedBlockId)
             -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
     {
         // No need to build the kernel with sleep on a device that does not require it
@@ -290,7 +293,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
@@ -304,7 +308,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         const size_t                                  number_of_blocks,
         const rocprim::tuple<ResultType, bool>* const previous_last_value,
         bool use_last_keys,
-        const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys)
+        const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
+        WrappedBlockId ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
     {
         using result_type = ResultType;
@@ -338,13 +343,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 
         ROCPRIM_SHARED_MEMORY union
         {
+            typename WrappedBlockId::storage_type  ordered_bid;
             typename load_flagged::storage_type    load;
             typename block_scan_type::storage_type scan;
             typename store_unwrap::storage_type    store;
         } storage;
 
         const auto flat_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto flat_block_id  = ::rocprim::detail::block_id<0>();
+        const auto flat_block_id
+            = ordered_bid.get(flat_thread_id,
+                              storage.ordered_bid); // ::rocprim::detail::block_id<0>();
+
+        ::rocprim::syncthreads();
 
         // Load input
         wrapped_type wrapped_values[items_per_thread];

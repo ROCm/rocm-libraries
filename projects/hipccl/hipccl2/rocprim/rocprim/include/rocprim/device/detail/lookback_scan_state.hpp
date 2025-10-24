@@ -1035,7 +1035,7 @@ hipError_t is_sleep_scan_state_used(const hipStream_t stream, bool& use_sleep)
     {
         return error;
     }
-    else if(const hipError_t error = hipGetDeviceProperties(&prop, device_id))
+    if(const hipError_t error = hipGetDeviceProperties(&prop, device_id))
     {
         return error;
     }
