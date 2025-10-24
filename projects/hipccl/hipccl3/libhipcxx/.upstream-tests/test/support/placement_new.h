@@ -27,7 +27,7 @@
 #define PLACEMENT_NEW_HPP
 
 // CUDA always defines placement new/delete for device code.
-#if !defined(__CUDACC__) || defined(__HIPCC__))
+#if !(defined(__CUDACC__) || defined(__HIPCC__))
 
 #  include "test_macros.h"
 #  include <stddef.h> // Avoid depending on the C++ standard library.

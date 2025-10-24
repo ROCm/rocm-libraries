@@ -33,7 +33,7 @@
 #ifndef _CONCURRENT_AGENTS_H
 #define _CONCURRENT_AGENTS_H
 
-#ifndef __CUDA_ARCH__ && !defined(__HIPCC_RTC__)
+#if !defined(__CUDA_ARCH__) && !defined(__HIPCC_RTC__)
 #  include <thread>
 #endif
 

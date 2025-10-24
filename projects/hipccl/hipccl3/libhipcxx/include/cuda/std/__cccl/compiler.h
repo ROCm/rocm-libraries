@@ -154,7 +154,7 @@
 #  define _CCCL_HAS_CUDA_COMPILER() 0
 #endif // ^^^ no cuda compiler ^^^
 
-#if defined(__CUDACC__) || _CCCL_CUDA_COMPILER(NVHPC)
+#if defined(__CUDACC__) || _CCCL_CUDA_COMPILER(NVHPC) || defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC)
 #  define _CCCL_CUDA_COMPILATION() 1
 #else // ^^^ compiling .cu file ^^^ / vvv not compiling .cu file vvv
 #  define _CCCL_CUDA_COMPILATION() 0
@@ -168,7 +168,7 @@
 #  define _CCCL_HOST_COMPILATION() 0
 #endif // ^^^ not compiling host code ^^^
 
-#if (_CCCL_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || _CCCL_CUDA_COMPILER(NVHPC)
+#if (_CCCL_CUDA_COMPILATION() && (defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__))) || _CCCL_CUDA_COMPILER(NVHPC)
 #  define _CCCL_DEVICE_COMPILATION() 1
 #else // ^^^ compiling device code ^^^ / vvv not compiling device code vvv
 #  define _CCCL_DEVICE_COMPILATION() 0
