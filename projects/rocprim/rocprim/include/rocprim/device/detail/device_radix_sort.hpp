@@ -1268,16 +1268,11 @@ struct onesweep_iteration_helper
         {
             if constexpr(NKey != ItemsPerThread)
             {
-                ::rocprim::syncthreads();
-
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     int offset = ranks[i] - x;
-                    offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NKey)
-                                     ? offset
-                                     : BlockSize * NKey;
-
+                    offset     = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
                     storage.ordered_block_keys[offset] = keys[i];
                 }
             }
@@ -1301,6 +1296,11 @@ struct onesweep_iteration_helper
                         digits[n + j * NKey] = digit;
                     }
                 }
+            }
+
+            if constexpr(NKey != ItemsPerThread)
+            {
+                ::rocprim::syncthreads();
             }
         }
 
@@ -1337,13 +1337,16 @@ struct onesweep_iteration_helper
                 }
             }
 
+            if constexpr(NKey == ItemsPerThread)
+            {
+                ::rocprim::syncthreads();
+            }
+
             // And scatter the values to global memory.
             ROCPRIM_NO_UNROLL
             for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NValue);
                 ++j, x += (BlockSize * NValue))
             {
-                ::rocprim::syncthreads();
-
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
@@ -1368,6 +1371,11 @@ struct onesweep_iteration_helper
                             = storage.global_digit_offsets[digits[n + j * NValue]];
                         values_output[rank + global_offset] = value;
                     }
+                }
+
+                if constexpr(NValue != ItemsPerThread)
+                {
+                    ::rocprim::syncthreads();
                 }
             }
         }
