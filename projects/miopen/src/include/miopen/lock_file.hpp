@@ -126,10 +126,9 @@ public:
     {
         MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
         auto last_refresh = std::chrono::system_clock::now();
+        auto age = std::chrono::milliseconds(1);
         while(lock_held)
         {
-            auto now = std::chrono::system_clock::now();
-            auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
             if(age >= std::chrono::milliseconds(1))
             {
                 std::error_code ec;
@@ -138,16 +137,18 @@ public:
                     fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()),
                     ec);
                 if(ec.value() != 0)
+                {
                     MIOPEN_LOG_I2("File <" << unique_handle << "> "
-                                           << " time update failed. "
-                                              "Error code: "
-                                           << ec.value()
-                                           << ". "
-                                              "Description: '"
-                                           << ec.message() << "'");
-                last_refresh = now;
+                                           << " time update failed. Terminating refresh."
+                                           << "Error code: " << ec.value() << ". "
+                                           << "Description: '" << ec.message() << "'");
+                    return;
+                }
+                last_refresh = std::chrono::system_clock::now();
             }
             std::this_thread::sleep_for(std::chrono::microseconds(10));
+            auto now = std::chrono::system_clock::now();
+            age = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
     }
@@ -188,6 +189,11 @@ public:
         fs::remove(lockfile_path);
         fs::remove(unique_handle);
         refresh_thread.join();
+    }
+
+    fs::path get_unique_handle()
+    {
+        return unique_handle;
     }
 
 private:
