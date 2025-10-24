@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -45,7 +46,7 @@ TEST_F(TestConvolutionFwdPlan, ExecutePlan)
     std::vector<int64_t> dilation = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     ConvolutionFwdTensorBundle<float> planTensorBundle(
         xDims, wDims, yDims, seed, TensorLayout::NHWC);
     ConvolutionFwdTensorBundle<float> directTensorBundle(
@@ -79,8 +80,8 @@ TEST_F(TestConvolutionFwdPlan, ExecutePlan)
     CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceFwd<float>(),
                                                            conv::getToleranceFwd<float>());
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.yTensor.memory(),
-                                                planTensorBundle.yTensor.memory()));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
 }
 
 TEST(TestConvolutionFwdPlanBuilder, PlanConstruction)

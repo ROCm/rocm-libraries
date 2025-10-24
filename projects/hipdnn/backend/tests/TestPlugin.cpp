@@ -12,8 +12,8 @@
 #include <utility>
 
 #include "plugin/PluginCore.hpp"
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 using namespace hipdnn_backend;
@@ -123,7 +123,7 @@ TEST(TestPluginManager, LoadPluginsFromDirectory)
 {
     std::filesystem::path tempPluginDir
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory() /= "temp_plugin_dir";
-    TempDirectory tempDir(tempPluginDir);
+    ScopedDirectory tempDir(tempPluginDir);
 
     std::filesystem::copy_file(
         FULL_PLUGIN_PATH1, tempDir.path() / std::filesystem::path(FULL_PLUGIN_PATH1).filename());
@@ -203,7 +203,7 @@ TEST(TestPluginManager, LoadPluginsAdditiveWithDefault)
 {
     std::filesystem::path tempPluginDir
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory() /= "test_plugins_dir";
-    TempDirectory defaultDir(tempPluginDir);
+    ScopedDirectory defaultDir(tempPluginDir);
 
     // Place a plugin in the default directory
     std::filesystem::copy_file(
@@ -231,7 +231,7 @@ TEST(TestPluginManager, LoadPluginsCombinedFileAndDirectory)
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
         /= "temp_plugin_dir_combined";
 
-    TempDirectory tempDir(tempPluginDir);
+    ScopedDirectory tempDir(tempPluginDir);
 
     std::filesystem::copy_file(
         FULL_PLUGIN_PATH1, tempDir.path() / std::filesystem::path(FULL_PLUGIN_PATH1).filename());

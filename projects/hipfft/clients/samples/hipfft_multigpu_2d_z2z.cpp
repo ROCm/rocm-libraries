@@ -24,14 +24,13 @@
 #include <vector>
 
 #include <hipfft/hipfft.h>
+#include <hipfft/hipfftXt.h>
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
-
-#include "../hipfft_params.h"
 
 int main()
 {
@@ -73,12 +72,12 @@ int main()
     }
 
     // Define list of GPUs to use
-    std::array<int, 2> gpus = {0, 1};
+    std::vector<int> gpus = {0, 1};
 
     // Create the multi-gpu plan
     hipLibXtDesc* desc; // input descriptor
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
@@ -101,7 +100,7 @@ int main()
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
     hipfft_rt                  = hipfftXtMalloc(plan, &desc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMalloc failed.");

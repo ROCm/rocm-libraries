@@ -163,9 +163,11 @@ namespace rocRollerTest
             rocRoller::Operations::ScaleMode m_aMode;
             rocRoller::Operations::ScaleMode m_bMode;
 
-            int  m_macM, m_macN, m_macK;
-            int  m_waveM, m_waveN, m_waveK, m_waveB;
-            bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
+            int                      m_macM, m_macN, m_macK;
+            int                      m_waveM, m_waveN, m_waveK, m_waveB;
+            SolutionParams::LoadPath m_loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            SolutionParams::LoadPath m_loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+            bool                     m_useLDSD   = false;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagD;
             rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
@@ -220,10 +222,6 @@ namespace rocRollerTest
             DataType m_ta, m_tb, m_tc, m_td;
 
             GEMMProblem m_problem;
-
-            // int  m_macM, m_macN, m_macK;
-            // int  m_waveM, m_waveN, m_waveK, m_waveB;
-            // bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
             rocRoller::Operations::OperationTag m_tagNumWGs;

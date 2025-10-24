@@ -11,7 +11,8 @@ endif()
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(hipdnn_frontend_tests 
+add_executable(
+    hipdnn_frontend_tests
     main.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
@@ -24,6 +25,8 @@ add_executable(hipdnn_frontend_tests
     TestConvolutionFwdAttributes.cpp
     TestConvolutionDgradNode.cpp
     TestConvolutionNode.cpp
+    TestConvolutionWgradAttributes.cpp
+    TestConvolutionWgradNode.cpp
     TestError.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
@@ -40,12 +43,13 @@ add_executable(hipdnn_frontend_tests
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
-target_link_libraries(hipdnn_frontend_tests 
-    GTest::gtest 
+target_link_libraries(
+    hipdnn_frontend_tests
+    GTest::gtest
     GTest::gmock
     hip::host
-    Threads::Threads 
-    hipdnn_sdk 
+    Threads::Threads
+    hipdnn_sdk
     hipdnn_frontend
 )
 clang_tidy_check(hipdnn_frontend_tests)
