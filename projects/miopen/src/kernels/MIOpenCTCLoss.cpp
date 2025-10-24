@@ -23,64 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
+#endif
 #include "float_types.h"
 
-#ifndef NEGATIVE_CUTOFF_VAL
-#define NEGATIVE_CUTOFF_VAL (FLOAT)(-1e20)
-#endif
-
-#ifndef SOFTMAX_LEN
-#define SOFTMAX_LEN 1
-#endif
-
-#ifndef SOFTMAX_APPLIED
-#define SOFTMAX_APPLIED 1
-#endif
-
-#ifndef PROBS_STRIDE0
-#define PROBS_STRIDE0 (BATCH_SZ * CLASS_SZ)
-#endif
-#ifndef PROBS_STRIDE1
-#define PROBS_STRIDE1 CLASS_SZ
-#endif
-
-#if SOFTMAX_APPLIED == 1
-#define USE_PROBS_STRIDE0 (BATCH_SZ * CLASS_SZ)
-#define USE_PROBS_STRIDE1 CLASS_SZ
-#else
-#define USE_PROBS_STRIDE0 PROBS_STRIDE0
-#define USE_PROBS_STRIDE1 PROBS_STRIDE1
-#endif
-
-#ifndef GRADS_STRIDE0
-#define GRADS_STRIDE0 (BATCH_SZ * CLASS_SZ)
-#endif
-#ifndef GRADS_STRIDE1
-#define GRADS_STRIDE1 CLASS_SZ
-#endif
-
-#ifndef BLANK_LB_ID
-#define BLANK_LB 0
-#elif BLANK_LB_ID < 0
-#define BLANK_LB 0
-#elif BLANK_LB_ID >= CLASS_SZ
-#define BLANK_LB (CLASS_SZ - 1)
-#else
-#define BLANK_LB BLANK_LB_ID
-#endif
-
-#ifdef OPT_LCL_MEM_LB
-#define ADDRSPACE_LB __shared__
-#else
-#define ADDRSPACE_LB
-#endif
-
-#ifdef OPT_LCL_MEM_BETA
-#define ADDRSPACE_BETA __shared__
-#else
-#define ADDRSPACE_BETA
-#endif
+constexpr static FLOAT negative_cutoff_val = -1e20;
 
 inline __device__ FLOAT LogAddExp(const FLOAT* x, const FLOAT* y)
 {
@@ -88,54 +36,113 @@ inline __device__ FLOAT LogAddExp(const FLOAT* x, const FLOAT* y)
     FLOAT b = min(*x, *y);
     FLOAT c = b - a;
 
-    return c <= NEGATIVE_CUTOFF_VAL ? max(a, NEGATIVE_CUTOFF_VAL)
-                                    : max(a + log1pf(expf(b - a)), NEGATIVE_CUTOFF_VAL);
+    return c <= negative_cutoff_val ? max(a, negative_cutoff_val)
+                                    : max(a + log1pf(expf(b - a)), negative_cutoff_val);
 }
 
-#ifdef OPT_ATOMIC_LOGADDEXP
 template <class T>
-struct TypeTraits
+inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
+                                          const int& label_length,
+                                          const int* label_prime,
+                                          const int& j1,
+                                          const unsigned int& batch_id,
+                                          const int& j,
+                                          T* beta_buff0,
+                                          T* beta_buff1,
+                                          const unsigned int& label_prime_len,
+                                          T* alpha_log,
+                                          T* gradients)
 {
-};
+    __syncthreads();
+
+    if(lid == 0 || lid == 1)
+    {
+        for(int k = 0; k < label_length; k++)
+        {
+            int klid       = 2 * k + lid;
+            int lb_cur     = lid == 0 ? BLANK_LB : *(label_prime + klid);
+            size_t gidx    = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
+            T beta_temp    = j % 2 == 0 ? *(beta_buff0 + klid) : *(beta_buff1 + klid);
+            size_t bidx_ts = j1 * label_prime_len + klid;
+
+            beta_temp += *(alpha_log + bidx_ts);
+            T grad_temp = gradients[gidx];
+
+            gradients[gidx] = LogAddExp(&grad_temp, &beta_temp);
+        }
+    }
+    if(lid == 0)
+    {
+        int k = 2 * label_length;
+
+        size_t gidx    = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + BLANK_LB;
+        T beta_temp    = j % 2 == 0 ? *(beta_buff0 + k) : *(beta_buff1 + k);
+        size_t bidx_ts = j1 * label_prime_len + k;
+
+        beta_temp += *(alpha_log + bidx_ts);
+        T grad_temp = gradients[gidx];
+
+        gradients[gidx] = LogAddExp(&grad_temp, &beta_temp);
+    }
+}
+
+template <class T>
+inline __device__ void AtomicLogAddExp(const int& j1,
+                                       const unsigned int& batch_id,
+                                       const unsigned int& lb_cur,
+                                       const unsigned int& label_prime_len,
+                                       const int& k1,
+                                       const T* alpha_log,
+                                       T* gradients,
+                                       T& beta_temp)
+{
+    static_assert(false && "Method only implemented for FP32");
+}
 
 template <>
-struct TypeTraits<float>
+inline __device__ void AtomicLogAddExp(const int& j1,
+                                       const unsigned int& batch_id,
+                                       const unsigned int& lb_cur,
+                                       const unsigned int& label_prime_len,
+                                       const int& k1,
+                                       const float* alpha_log,
+                                       float* gradients,
+                                       float& beta_temp)
 {
-    using UnsignedIntType = unsigned int;
-};
+    size_t gidx    = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
+    size_t bidx_ts = j1 * label_prime_len + k1;
+    beta_temp += *(alpha_log + bidx_ts);
 
-inline __device__ void AtomicLogAddExp(FLOAT* addr, const float operand)
-{
-    using UINT = TypeTraits<FLOAT>::UnsignedIntType;
-    UINT prev_val_int, cur_val_int;
+    float* addr = gradients + gidx;
+
+    unsigned int prev_val_int, cur_val_int;
     memcpy(&cur_val_int, addr, sizeof(cur_val_int));
 
     do
     {
         prev_val_int = cur_val_int;
-        FLOAT prev_val;
+        float prev_val;
         memcpy(&prev_val, &prev_val_int, sizeof(prev_val));
 
-        FLOAT a       = max(prev_val, operand);
-        FLOAT b       = min(prev_val, operand);
-        FLOAT c       = b - a;
-        FLOAT new_val = c <= NEGATIVE_CUTOFF_VAL
-                            ? max(a, NEGATIVE_CUTOFF_VAL)
-                            : max(a + log1pf(expf(b - a)), NEGATIVE_CUTOFF_VAL);
+        float a       = max(prev_val, beta_temp);
+        float b       = min(prev_val, beta_temp);
+        float c       = b - a;
+        float new_val = c <= negative_cutoff_val
+                            ? max(a, negative_cutoff_val)
+                            : max(a + log1pf(expf(b - a)), negative_cutoff_val);
 
-        UINT new_val_int;
+        unsigned int new_val_int;
         memcpy(&new_val_int, &new_val, sizeof(new_val));
 
         // We want atomicCAS operates on global memory, so use a reinterpret cast rather
         // then using memcpy to a threads private storage.
         // cppcheck-suppress invalidPointerCast
-        cur_val_int = atomicCAS(reinterpret_cast<UINT*>(addr), prev_val_int, new_val_int);
+        cur_val_int = atomicCAS(reinterpret_cast<unsigned int*>(addr), prev_val_int, new_val_int);
     } while(cur_val_int != prev_val_int);
 }
-#endif
 
 inline __device__ void CTCAlpha(const FLOAT* probs_logits,
-                                const ADDRSPACE_LB int* label_prime,
+                                const int* label_prime,
                                 const unsigned int label_length,
                                 const unsigned int input_length,
                                 const unsigned int batch_id,
@@ -151,7 +158,7 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
     for(unsigned int i = aidx0 + lid; i <= aidx1; i += WORK_PER_GRP)
     {
         unsigned int lb_cur = i % 2 == 0 ? BLANK_LB : *(label_prime + i);
-        unsigned int pidx   = batch_id * USE_PROBS_STRIDE1 + lb_cur;
+        unsigned int pidx   = batch_id * PROBS_STRIDE1 + lb_cur;
         *(alpha + i)        = *(probs_logits + pidx);
     }
     __syncthreads();
@@ -163,7 +170,7 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
         {
             unsigned int lb_cur = i % 2 == 0 ? BLANK_LB : *(label_prime + i);
             unsigned int lb_pre = i % 2 == 0 ? BLANK_LB : *(label_prime + i - 2);
-            size_t pidx         = j * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + lb_cur;
+            size_t pidx         = j * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
             size_t aidx_ts      = j * label_prime_len + i;
             size_t aidx_t1s     = (j - 1) * label_prime_len + i;
 
@@ -181,7 +188,7 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
             }
 
             alpha_ts += *(probs_logits + pidx);
-            *(alpha + aidx_ts) = max(alpha_ts, NEGATIVE_CUTOFF_VAL);
+            *(alpha + aidx_ts) = max(alpha_ts, negative_cutoff_val);
         }
         __syncthreads();
     }
@@ -196,14 +203,14 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
 }
 
 inline __device__ void CTCGradient(const FLOAT* probs_logits,
-                                   const ADDRSPACE_LB int* label_prime,
+                                   const int* label_prime,
                                    const unsigned int label_length,
                                    const unsigned int input_length,
                                    const unsigned int batch_id,
                                    const unsigned int label_repeat,
                                    FLOAT* alpha_log,
-                                   ADDRSPACE_BETA FLOAT* beta_buff0,
-                                   ADDRSPACE_BETA FLOAT* beta_buff1,
+                                   FLOAT* beta_buff0,
+                                   FLOAT* beta_buff1,
                                    const FLOAT* loss,
                                    FLOAT* gradients)
 {
@@ -220,7 +227,7 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
     {
         for(unsigned int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
         {
-            *(gradients + j * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i) = NEGATIVE_CUTOFF_VAL;
+            *(gradients + j * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i) = negative_cutoff_val;
         }
     }
     __syncthreads();
@@ -229,8 +236,7 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
     {
         unsigned int k1     = label_prime_len - 1 - k;
         unsigned int lb_cur = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1);
-        unsigned int pidx =
-            (input_length - 1) * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + lb_cur;
+        unsigned int pidx = (input_length - 1) * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
         unsigned int gidx = (input_length - 1) * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
         unsigned int bidx_ts = (input_length - 1) * label_prime_len + k1;
 
@@ -239,7 +245,7 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 
         FLOAT alpha_temp = *(alpha_log + bidx_ts);
         alpha_temp += probs_logits_pidx;
-        FLOAT grad_temp = NEGATIVE_CUTOFF_VAL;
+        FLOAT grad_temp = negative_cutoff_val;
 
         gradients[gidx] = LogAddExp(&grad_temp, &alpha_temp);
     }
@@ -247,24 +253,29 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 
     for(int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
     {
-        unsigned int pidx =
-            (input_length - 1) * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + i;
+        unsigned int pidx       = (input_length - 1) * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + i;
         unsigned int gidx       = (input_length - 1) * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i;
         FLOAT probs_logits_pidx = *(probs_logits + pidx);
         FLOAT grad_temp         = gradients[gidx];
-        grad_temp -= probs_logits_pidx
-#if SOFTMAX_APPLIED == 0
-                     * 2
-#endif
-            ;
+        if constexpr(SOFTMAX_APPLIED == 0)
+        {
+            grad_temp -= probs_logits_pidx * 2;
+        }
+        else
+        {
+            grad_temp -= probs_logits_pidx;
+        }
         grad_temp -= prob_lx_log;
-        grad_temp = grad_temp <= NEGATIVE_CUTOFF_VAL ? 0 : expf(grad_temp);
+        grad_temp = grad_temp <= negative_cutoff_val ? 0 : expf(grad_temp);
 
-        *(gradients + gidx) =
-#if SOFTMAX_APPLIED == 1
-            expf(probs_logits_pidx)
-#endif
-            - grad_temp;
+        if constexpr(SOFTMAX_APPLIED == 1)
+        {
+            *(gradients + gidx) = expf(probs_logits_pidx) - grad_temp;
+        }
+        else
+        {
+            *(gradients + gidx) = -grad_temp;
+        }
     }
     __syncthreads();
 
@@ -278,7 +289,7 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
             int lb_cur = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1);
             int lb_pre = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1 + 2);
 
-            size_t pidx = j1 * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + lb_cur;
+            size_t pidx = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
 
             FLOAT beta_temp = j % 2 == 0 ? *(beta_buff1 + k1) : *(beta_buff0 + k1);
 
@@ -297,7 +308,7 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
             }
 
             beta_temp += *(probs_logits + pidx);
-            beta_temp = max(beta_temp, NEGATIVE_CUTOFF_VAL);
+            beta_temp = max(beta_temp, negative_cutoff_val);
             if(j % 2 == 0)
             {
                 *(beta_buff0 + k1) = beta_temp;
@@ -307,91 +318,146 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
                 *(beta_buff1 + k1) = beta_temp;
             }
 
-#ifdef OPT_ATOMIC_LOGADDEXP
-            size_t gidx    = j1 * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + lb_cur;
-            size_t bidx_ts = j1 * label_prime_len + k1;
-            beta_temp += *(alpha_log + bidx_ts);
-
-            AtomicLogAddExp(gradients + gidx, beta_temp);
-#else
-        }
-        __syncthreads();
-
-        if(lid == 0 || lid == 1)
-        {
-            for(int k = 0; k < label_length; k++)
+            if constexpr(OPT_ATOMIC_LOGADDEXP == 1)
             {
-                int klid        = 2 * k + lid;
-                int lb_cur      = lid == 0 ? BLANK_LB : *(label_prime + klid);
-                size_t gidx     = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
-                FLOAT beta_temp = j % 2 == 0 ? *(beta_buff0 + klid) : *(beta_buff1 + klid);
-                size_t bidx_ts  = j1 * label_prime_len + klid;
-
-                beta_temp += *(alpha_log + bidx_ts);
-                FLOAT grad_temp = gradients[gidx];
-
-                gradients[gidx] = LogAddExp(&grad_temp, &beta_temp);
+                AtomicLogAddExp(
+                    j1, batch_id, lb_cur, label_prime_len, k1, alpha_log, gradients, beta_temp);
             }
         }
-        if(lid == 0)
+
+        if constexpr(OPT_ATOMIC_LOGADDEXP == 0)
         {
-            int k = 2 * label_length;
-
-            size_t gidx     = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + BLANK_LB;
-            FLOAT beta_temp = j % 2 == 0 ? *(beta_buff0 + k) : *(beta_buff1 + k);
-            size_t bidx_ts  = j1 * label_prime_len + k;
-
-            beta_temp += *(alpha_log + bidx_ts);
-            FLOAT grad_temp = gradients[gidx];
-
-            gradients[gidx] = LogAddExp(&grad_temp, &beta_temp);
-#endif
+            NonAtomicLogAddExp(lid,
+                               label_length,
+                               label_prime,
+                               j1,
+                               batch_id,
+                               j,
+                               beta_buff0,
+                               beta_buff1,
+                               label_prime_len,
+                               alpha_log,
+                               gradients);
         }
+
         __syncthreads();
 
         for(int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
         {
-            size_t pidx = j1 * USE_PROBS_STRIDE0 + batch_id * USE_PROBS_STRIDE1 + i;
+            size_t pidx = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + i;
             size_t gidx = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i;
 
             FLOAT probs_logits_pidx = *(probs_logits + pidx);
 
             FLOAT grad_temp = gradients[gidx];
 
-            grad_temp -= probs_logits_pidx
-#if SOFTMAX_APPLIED == 0
-                         * 2
-#endif
-                ;
-            grad_temp -= prob_lx_log;
-            grad_temp = grad_temp <= NEGATIVE_CUTOFF_VAL ? 0 : expf(grad_temp);
+            if constexpr(SOFTMAX_APPLIED == 0)
+            {
+                grad_temp -= probs_logits_pidx * 2;
+            }
+            else
+            {
+                grad_temp -= probs_logits_pidx;
+            }
 
-            *(gradients + gidx) =
-#if SOFTMAX_APPLIED == 1
-                expf(probs_logits_pidx)
-#endif
-                - grad_temp;
+            grad_temp -= prob_lx_log;
+            grad_temp = grad_temp <= negative_cutoff_val ? 0 : expf(grad_temp);
+
+            if constexpr(SOFTMAX_APPLIED == 1)
+            {
+                *(gradients + gidx) = expf(probs_logits_pidx) - grad_temp;
+            }
+            else
+            {
+                *(gradients + gidx) = -grad_temp;
+            }
         }
         __syncthreads();
     }
 }
 
-extern "C" __global__ void
-CTCLossGPU(const FLOAT* probs, FLOAT* workSpace, int* dim_data, FLOAT* losses, FLOAT* gradients)
+template <bool OptLclMemBeta, bool OptLclMemLb>
+__forceinline__ __device__ void CTCLoss(const unsigned int lid,
+                                        const unsigned int gid,
+                                        const unsigned int grp_id,
+                                        const FLOAT* probs_logits,
+                                        FLOAT* workSpace,
+                                        int* dim_data,
+                                        FLOAT* losses,
+                                        FLOAT* gradients);
+
+template <>
+__forceinline__ __device__ void CTCLoss<false, false>(const unsigned int lid,
+                                                      const unsigned int gid,
+                                                      const unsigned int grp_id,
+                                                      const FLOAT* probs_logits,
+                                                      FLOAT* workSpace,
+                                                      int* dim_data,
+                                                      FLOAT* losses,
+                                                      FLOAT* gradients)
 {
-    const unsigned int lid = threadIdx.x;
-    const unsigned int gid = blockIdx.x * blockDim.x + lid;
+    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
+    {
+        unsigned int input_len     = *(dim_data + bid);
+        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
+        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
+        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
 
-    unsigned int grp_id = gid / WORK_PER_GRP;
+        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+        {
+            dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
+                dim_data[4 * BATCH_SZ + label_offsets + i];
+        }
 
-#ifdef OPT_LCL_MEM_BETA
+        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        __syncthreads();
+
+        CTCAlpha(probs_logits,
+                 &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
+                 label_len,
+                 input_len,
+                 bid,
+                 label_repeat,
+                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &losses[bid]);
+
+        __syncthreads();
+
+        CTCGradient(probs_logits,
+                    &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
+                    label_len,
+                    input_len,
+                    bid,
+                    label_repeat,
+                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN],
+                    &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN],
+                    &losses[bid],
+                    gradients);
+    }
+}
+
+template <>
+__forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
+                                                     const unsigned int gid,
+                                                     const unsigned int grp_id,
+                                                     const FLOAT* probs_logits,
+                                                     FLOAT* workSpace,
+                                                     int* dim_data,
+                                                     FLOAT* losses,
+                                                     FLOAT* gradients)
+{
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
-#endif
-
-#ifdef OPT_LCL_MEM_LB
-    __shared__ int lb_prime[MAX_S_LEN];
-#endif
 
     for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
     {
@@ -402,87 +468,193 @@ CTCLossGPU(const FLOAT* probs, FLOAT* workSpace, int* dim_data, FLOAT* losses, F
 
         for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
         {
-#ifdef OPT_LCL_MEM_LB
-            lb_prime[
-#else
-            dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN +
-#endif
-                2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
+            dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
+                dim_data[4 * BATCH_SZ + label_offsets + i];
         }
 
         for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
         {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = NEGATIVE_CUTOFF_VAL;
+            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
         }
-
-#ifndef OPT_LCL_MEM_BETA
-        for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = NEGATIVE_CUTOFF_VAL;
-        }
-#endif
 
         __syncthreads();
 
-        CTCAlpha(
-#if SOFTMAX_APPLIED == 1
-            &workSpace[PROBLOG_OFFSET]
-#else
-            probs
-#endif
-            ,
-#ifdef OPT_LCL_MEM_LB
-            &lb_prime[0]
-#else
-            &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN]
-#endif
-            ,
-            label_len,
-            input_len,
-            bid,
-            label_repeat,
-            &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-            &losses[bid]);
+        CTCAlpha(probs_logits,
+                 &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
+                 label_len,
+                 input_len,
+                 bid,
+                 label_repeat,
+                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &losses[bid]);
 
-#ifdef OPT_LCL_MEM_BETA
         for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
         {
-            *(beta0 + i) = NEGATIVE_CUTOFF_VAL;
-            *(beta1 + i) = NEGATIVE_CUTOFF_VAL;
+            *(beta0 + i) = negative_cutoff_val;
+            *(beta1 + i) = negative_cutoff_val;
         }
-#endif
 
         __syncthreads();
 
-        CTCGradient(
-#if SOFTMAX_APPLIED == 1
-            &workSpace[PROBLOG_OFFSET]
-#else
-            probs
-#endif
-            ,
-#ifdef OPT_LCL_MEM_LB
-            &lb_prime[0]
-#else
-            &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN]
-#endif
-            ,
-            label_len,
-            input_len,
-            bid,
-            label_repeat,
-            &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-#ifdef OPT_LCL_MEM_BETA
-            &beta0[0],
-            &beta1[0]
-#else
-            &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN],
-            &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN]
-#endif
-            ,
-            &losses[bid],
-            gradients);
+        CTCGradient(probs_logits,
+                    &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
+                    label_len,
+                    input_len,
+                    bid,
+                    label_repeat,
+                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    &beta0[0],
+                    &beta1[0],
+                    &losses[bid],
+                    gradients);
+    }
+}
+
+template <>
+__forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
+                                                     const unsigned int gid,
+                                                     const unsigned int grp_id,
+                                                     const FLOAT* probs_logits,
+                                                     FLOAT* workSpace,
+                                                     int* dim_data,
+                                                     FLOAT* losses,
+                                                     FLOAT* gradients)
+{
+    __shared__ int lb_prime[MAX_S_LEN];
+
+    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
+    {
+        unsigned int input_len     = *(dim_data + bid);
+        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
+        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
+        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
+
+        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+        {
+            lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
+        }
+
+        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        __syncthreads();
+
+        CTCAlpha(probs_logits,
+                 &lb_prime[0],
+                 label_len,
+                 input_len,
+                 bid,
+                 label_repeat,
+                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &losses[bid]);
+
+        __syncthreads();
+
+        CTCGradient(probs_logits,
+                    &lb_prime[0],
+                    label_len,
+                    input_len,
+                    bid,
+                    label_repeat,
+                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN],
+                    &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN],
+                    &losses[bid],
+                    gradients);
+    }
+}
+
+template <>
+__forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
+                                                    const unsigned int gid,
+                                                    const unsigned int grp_id,
+                                                    const FLOAT* probs_logits,
+                                                    FLOAT* workSpace,
+                                                    int* dim_data,
+                                                    FLOAT* losses,
+                                                    FLOAT* gradients)
+{
+    __shared__ FLOAT beta0[MAX_S_LEN];
+    __shared__ FLOAT beta1[MAX_S_LEN];
+    __shared__ int lb_prime[MAX_S_LEN];
+
+    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
+    {
+        unsigned int input_len     = *(dim_data + bid);
+        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
+        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
+        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
+
+        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+        {
+            lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
+        }
+
+        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        __syncthreads();
+
+        CTCAlpha(probs_logits,
+                 &lb_prime[0],
+                 label_len,
+                 input_len,
+                 bid,
+                 label_repeat,
+                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &losses[bid]);
+
+        for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(beta0 + i) = negative_cutoff_val;
+            *(beta1 + i) = negative_cutoff_val;
+        }
+
+        __syncthreads();
+
+        CTCGradient(probs_logits,
+                    &lb_prime[0],
+                    label_len,
+                    input_len,
+                    bid,
+                    label_repeat,
+                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    &beta0[0],
+                    &beta1[0],
+                    &losses[bid],
+                    gradients);
+    }
+}
+
+extern "C" __global__ void CTCLossGPU([[maybe_unused]] const FLOAT* probs,
+                                      FLOAT* workSpace,
+                                      int* dim_data,
+                                      FLOAT* losses,
+                                      FLOAT* gradients)
+{
+    const unsigned int lid    = threadIdx.x;
+    const unsigned int gid    = blockIdx.x * blockDim.x + lid;
+    const unsigned int grp_id = gid / WORK_PER_GRP;
+
+    const FLOAT* probs_logits;
+    if constexpr(SOFTMAX_APPLIED == 1)
+    {
+        probs_logits = &workSpace[PROBLOG_OFFSET];
+    }
+    else
+    {
+        probs_logits = probs;
     }
 
-    (void)probs;
+    CTCLoss<OPT_LCL_MEM_BETA, OPT_LCL_MEM_LB>(
+        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients);
 }

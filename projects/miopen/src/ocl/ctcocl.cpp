@@ -201,6 +201,20 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
 
         size_t lcl_mem_per_grp = MAX_LOCAL_MEM / 2 / (512 / work_per_grp);
 
+        int blank_label;
+        if(blank_label_id < 0)
+        {
+            blank_label = 0;
+        }
+        else if(blank_label_id >= class_sz)
+        {
+            blank_label = class_sz - 1;
+        }
+        else
+        {
+            blank_label = blank_label_id;
+        }
+
         params += " -DCLASS_SZ=" + std::to_string(class_sz) +
                   " -DBATCH_SZ=" + std::to_string(batch_size) +
                   " -DMAX_TSTEP=" + std::to_string(max_time_step) +
@@ -213,9 +227,16 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                   " -DBETA_OFFSET=" + std::to_string(beta_offset) +
                   " -DWORK_PER_GRP=" + std::to_string(work_per_grp) +
                   " -DGRP_NUM=" + std::to_string(grp_num) +
-                  " -DBLANK_LB_ID=" + std::to_string(blank_label_id);
+                  " -DBLANK_LB=" + std::to_string(blank_label) +
+                  " -DSOFTMAX_APPLIED=" + std::to_string(static_cast<int>(apply_softmax_layer)) +
+                  " -DUSE_HIP_BACKEND=1";
 
-        if(!probsDesc.IsPacked())
+        if(apply_softmax_layer || probsDesc.IsPacked())
+        {
+            params += " -DPROBS_STRIDE0=" + std::to_string(class_sz * batch_size) +
+                      " -DPROBS_STRIDE1=" + std::to_string(class_sz);
+        }
+        else
         {
             params += " -DPROBS_STRIDE0=" + std::to_string(probsDesc.GetStrides()[0]) +
                       " -DPROBS_STRIDE1=" + std::to_string(probsDesc.GetStrides()[1]);
@@ -226,26 +247,22 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
             params += " -DGRADS_STRIDE0=" + std::to_string(gradientsDesc.GetStrides()[0]) +
                       " -DGRADS_STRIDE1=" + std::to_string(gradientsDesc.GetStrides()[1]);
         }
-
-        params += " -DSOFTMAX_APPLIED=" + std::to_string(static_cast<int>(apply_softmax_layer)) +
-                  " -DSOFTMAX_LEN=" + std::to_string(class_sz);
-
-        if(static_cast<size_t>(max_S_len) * 2 <= lcl_mem_per_grp)
+        else
         {
-            params += " -DOPT_LCL_MEM_BETA";
+            params += " -DGRADS_STRIDE0=" + std::to_string(class_sz * batch_size) +
+                      " -DGRADS_STRIDE1=" + std::to_string(class_sz);
         }
 
-        if(static_cast<size_t>(max_S_len) * 3 <= lcl_mem_per_grp)
-        {
-            params += " -DOPT_LCL_MEM_LB";
-        }
+        bool opt_lcl_mem_beta = static_cast<size_t>(max_S_len) * 2 <= lcl_mem_per_grp;
+        params += " -DOPT_LCL_MEM_BETA=" + std::to_string(static_cast<int>(opt_lcl_mem_beta));
+
+        bool opt_lcl_mem_lb = static_cast<size_t>(max_S_len) * 3 <= lcl_mem_per_grp;
+        params += " -DOPT_LCL_MEM_LB=" + std::to_string(static_cast<int>(opt_lcl_mem_lb));
 
         if(probsDesc.GetType() == miopenHalf)
-            params += " -DMIOPEN_USE_FP16=1";
+            params += " -DMIOPEN_USE_FP16=1 -DOPT_ATOMIC_LOGADDEXP=0";
         else
-            params += " -DMIOPEN_USE_FP32=1 -DOPT_ATOMIC_LOGADDEXP";
-
-        params += " -DUSE_HIP_BACKEND=1";
+            params += " -DMIOPEN_USE_FP32=1 -DOPT_ATOMIC_LOGADDEXP=1";
 
         const std::vector<size_t> vld{work_per_grp, 1, 1};
         const std::vector<size_t> vgd{glb_sz, 1, 1};
