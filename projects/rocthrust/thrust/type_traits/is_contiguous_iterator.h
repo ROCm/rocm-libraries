@@ -33,7 +33,7 @@
 #endif // no system header
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 
-#include _THRUST_STD_INCLUDE(iterator) // Needed for __gnu_cxx::__normal_iterator
+#include _THRUST_STD_INCLUDE(iterator)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -166,7 +166,11 @@ template <typename Iterator>
 struct is_contiguous_iterator_impl
     : integral_constant<
         bool,
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT > 2020
+        _THRUST_STD::contiguous_iterator<Iterator> || is_thrust_pointer<Iterator>::value
+#else
         _THRUST_STD::is_pointer<Iterator>::value || is_thrust_pointer<Iterator>::value
+#endif
           || is_libcxx_wrap_iter<Iterator>::value || is_libstdcxx_normal_iterator<Iterator>::value
           || is_msvc_contiguous_iterator<Iterator>::value || proclaim_contiguous_iterator<Iterator>::value>
 {};
