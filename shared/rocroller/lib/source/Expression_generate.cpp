@@ -1065,7 +1065,7 @@ namespace rocRoller
                     auto const& operand           = expr.operands[i];
                     auto const& operandResultType = operandResultTypes[i];
                     auto        length
-                        = DataTypeInfo::Get(operandResultType.varType.dataType).registerCount;
+                        = DataTypeInfo::Get(operandResultType.varType).registerCount;
 
                     auto operandDest
                         = dest->subset(iota<int>(offset, offset + length).to<std::vector>());
