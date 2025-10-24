@@ -7,6 +7,11 @@ subtrees:
   - file: installation/installlinux
     title: Installation guide
 
+- caption: Conceptual
+  entries:
+  - file: conceptual/intro-rocsolver
+    title: Introduction to rocSOLVER
+
 - caption: How to
   entries:
   - file: howto/using
@@ -17,8 +22,6 @@ subtrees:
     title: Use multi-level logging
   - file: howto/clients
     title: Run rocSOLVER clients
-  - file: howto/intro-solvers
-    title: Introduction to rocSOLVER solvers
   - file: howto/contribute
     title: Contribute to rocSOLVER
 
@@ -34,7 +37,7 @@ subtrees:
     subtrees:
     - entries:
       - file: reference/intro.rst
-        title: rocSOLVER API introduction
+        title: rocSOLVER API summary
       - file: reference/types.rst
         title: rocSOLVER types
       - file: reference/precision.rst

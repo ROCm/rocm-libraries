@@ -1,11 +1,11 @@
 .. meta::
-  :description: introduction to rocSOLVER solvers guide
-  :keywords: rocSOLVER, ROCm, documentation, solvers, BLAS
+  :description: introduction to rocSOLVER and LAPACK guide
+  :keywords: rocSOLVER, ROCm, documentation, solvers, BLAS, LAPACK
 
 .. _intro-to-solvers:
 
 *********************************
-Introduction to rocSOLVER solvers
+Introduction to rocSOLVER
 *********************************
 
 rocSOLVER is an implementation of the `LAPACK routines <https://www.netlib.org/lapack/index.html>`_.
@@ -45,7 +45,7 @@ especially Level 3 BLAS routines for matrix multiplication, rather than a LAPACK
 The rocSOLVER implementation is integrated with rocBLAS for this purpose.
 For information about the BLAS routines, see the :doc:`BLAS operations introduction <rocblas:conceptual/blas-operations-intro>`.
 
-LAPACK naming conventions
+Naming conventions
 ==========================
 
 The name of each routine encodes several key pieces of information about the routine, as follows:
@@ -59,7 +59,7 @@ The three components are combined using the format *XYYZZZ*, where X indicates t
 and ZZZ the operation. For example, ``SGEBRD`` is a single-precision (``S``) routine that operates on a 
 general (``GE``) matrix to perform a bidiagonal reduction (``BRD``) operation.
 
-LAPACK data types
+Data types
 ------------------------------
 
 The first letter (X) maps to one of the following data types:
@@ -69,48 +69,41 @@ The first letter (X) maps to one of the following data types:
 *  ``C``: Complex
 *  ``Z``: Double complex (Complex*16)
 
-LAPACK matrix types
+.. note::
+
+   For more detailed information on the numerical precision types supported by the rocSOLVER library,
+   see :doc:`rocSOLVER precision support <../reference/precision>`.
+
+Matrix types
 ------------------------------
 
 The next two letters (YY) indicate the type of matrix (or of the most significant matrix).
-Here are the common matrix types.
+Here are some common LAPACK matrix types that rocSOLVER supports.
 
 *  ``BD``:	Bidiagonal
 *  ``DI``:	Diagonal
-*  ``GB``:	General band
 *  ``GE``:	General (for instance, unsymmetric, or, in some cases, rectangular)
 *  ``GG``:	General matrices, generalized problem (pair of general matrices)
 *  ``GT``:	General tridiagonal
-*  ``HB``:	(complex) Hermitian band
 *  ``HE``:	(complex) Hermitian
 *  ``HG``:	Upper Hessenberg matrix, generalized problem (for instance, a Hessenberg and a triangular matrix)
-*  ``HP``:	(complex) Hermitian, packed storage
 *  ``HS``:	Upper Hessenberg
-*  ``OP``:	(real) Orthogonal, packed storage
 *  ``OR``:	(real) Orthogonal
-*  ``PB``:	Symmetric or Hermitian positive definite band
 *  ``PO``:	Symmetric or Hermitian positive definite
-*  ``PP``:	Symmetric or Hermitian positive definite, packed storage
 *  ``PT``:	Symmetric or Hermitian positive definite tridiagonal
-*  ``SB``:	(real) Symmetric band
-*  ``SP``:	Symmetric, packed storage
 *  ``ST``:	(real) Symmetric tridiagonal
 *  ``SY``:	Symmetric
-*  ``TB``:	Triangular band
 *  ``TG``:	Triangular matrices, generalized problem (a pair of triangular matrices)
-*  ``TP``:	Triangular, packed storage
 *  ``TR``:	Triangular (or, in some cases, quasi-triangular)
 *  ``TZ``:	Trapezoidal
 *  ``UN``:	(complex) Unitary
-*  ``UP``:	(complex) Unitary, packed storage
 
-
-LAPACK operation types
+Operation types
 ------------------------------
 
 The last three letters, (ZZZ) indicate the computation performed.
 
-Here are the main driver routines supported by LAPACK:
+Here are the main LAPACK driver routines that rocSOLVER supports:
 
 *  ``SV``: Linear equation: simple variant (Solves :math:`AX = B`)
 *  ``SVX``: Linear equation: expert variant (Solves more advanced variations, including :math:`A^{T}X = B` or :math:`A^{H}X = B`,
@@ -118,13 +111,10 @@ Here are the main driver routines supported by LAPACK:
 *  ``LS``, ``LSY``, ``LSS``, and ``LSD``: Linear least squares (LLS) problems
 *  ``LSE`` and ``GLM``: Generalized linear least squares problems
 *  ``EVx``: Symmetric eigenproblems (SEP)
-*  ``ESx`` and ``EVx``: Nonsymmetric eigenproblems (NEP)
 *  ``SVD`` and ``SDD``: Singular value decomposition (SVD)
 *  ``GV``: Generalized symmetric definite eigenproblems (GSEP)
-*  ``ES``: Generalized nonsymmetric eigenproblems (GNEP)
-*  ``SVD``: Generalized singular value decomposition (GSVD)
 
-Here's a list of some common computational routines:
+Here's a list of some of the common LAPACK computational routines that rocSOLVER supports:
 
 *  ``TRF``: Linear equations: factorize
 *  ``TRS``: Linear equations: use the factorization to solve by forward or backward substitution
