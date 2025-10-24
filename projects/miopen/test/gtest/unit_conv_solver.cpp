@@ -382,14 +382,7 @@ double GetThreshold(miopenConvAlgorithm_t algo,
                     const Tolerances& tolerances)
 {
     double tolerance = tolerances.Get(GetDevGpuType(), miopen_type<T>{});
-    double epsilon_  = std::numeric_limits<T>::epsilon();
-    if constexpr(std::is_same_v<T, float>)
-    {
-        // float use tf32 compute which share same mantissa bits
-        epsilon_  = std::numeric_limits<half>::epsilon();
-        tolerance = std::max<double>(tolerance, 2.f); // default 1.0 is too small
-    }
-    double threshold = epsilon_ * tolerance;
+    double threshold = std::numeric_limits<T>::epsilon() * tolerance;
     return threshold;
 }
 

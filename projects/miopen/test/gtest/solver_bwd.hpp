@@ -148,14 +148,8 @@ private:
         ASSERT_EQ(miopen::range_distance(ref_in), miopen::range_distance(input));
 
         const double tolerance = 80;
-        double epsilon_        = std::numeric_limits<T>::epsilon();
-        if constexpr(std::is_same_v<T, float>)
-        {
-            // float use tf32 compute which share same mantissa bits
-            epsilon_ = std::numeric_limits<half>::epsilon();
-        }
-        double threshold = epsilon_ * tolerance;
-        auto error       = miopen::rms_range(ref_in, input);
+        double threshold       = std::numeric_limits<T>::epsilon() * tolerance;
+        auto error             = miopen::rms_range(ref_in, input);
 
         ASSERT_LT(miopen::find_idx(ref_in, miopen::not_finite), 0)
             << "Non finite number found in the CPU data";
