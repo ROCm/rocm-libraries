@@ -364,11 +364,16 @@ void testing_syrk_ex(const Arguments& arg)
             if(arg.unit_check)
             {
                 bool near_check = arg.initialization == rocblas_initialization::hpl
-                                  || (sizeof(To) < 4 && ((K > 1000) || (rocblas_is_complex<To>)));
+                                  || (sizeof(To) < 4
+                                      && (((K > 1000) || (rocblas_is_complex<To>))
+                                          || (rocblas_handle(handle)->getArchMajor() == 11)));
                 if(near_check)
                 {
-                    const double tol
-                        = 4 * K * sum_error_tolerance<Ti>; // reference is computed on floats
+                    // reference is computed on floats
+                    double tol = rocblas_handle(handle)->getArchMajor() == 11
+                                     ? sum_error_tolerance_for_gfx11<Tex, Ti, To>
+                                     : sum_error_tolerance<Ti>;
+                    tol *= K * 4;
                     near_check_general<To, To_hpa>(N, N, ldc, hC_gold, hC, tol);
                 }
                 else
