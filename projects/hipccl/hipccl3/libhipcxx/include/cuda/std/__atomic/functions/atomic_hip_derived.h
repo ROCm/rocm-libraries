@@ -59,6 +59,13 @@ bool __device__ __atomic_compare_exchange_cuda(_Type volatile *__ptr, _Type *__e
     return false;
 }
 
+template<class _Type, class _Scope>
+_Type __device__ __atomic_load_n_cuda(const _Type volatile *__ptr, int __memorder, _Scope __s) {
+    _Type __ret;
+    __atomic_load_cuda(__ptr, __ret, __memorder, __s);
+    return __ret;
+}
+
 template<class _Type, class _Scope, typename _CUDA_VSTD::enable_if<sizeof(_Type)<=2, int>::type = 0>
 void __device__ __atomic_exchange_cuda(_Type* __ptr, _Type& __old, _Type __new, int __memorder, _Scope __s) {
 
@@ -141,13 +148,6 @@ _Type __device__ __atomic_fetch_or_cuda(_Type volatile *__ptr, _Delta __val, int
     while(!__atomic_compare_exchange_cuda(__ptr, &__expected, __desired, true, __memorder, __memorder, __s))
         __desired = __expected | __val;
     return __expected;
-}
-
-template<class _Type, class _Scope>
-_Type __device__ __atomic_load_n_cuda(const _Type volatile *__ptr, int __memorder, _Scope __s) {
-    _Type __ret;
-    __atomic_load_cuda(__ptr, __ret, __memorder, __s);
-    return __ret;
 }
 
 template<class _Type, class _Scope>
