@@ -15,15 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
-#endif
-
-// need to suppress deprecation warnings for execute_with_allocator_and_dependencies here and inside type traits
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
 #include <thrust/system/hip/detail/par.h>
@@ -33,7 +24,9 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
+#else
 #  include <type_traits>
 #endif
 
@@ -145,5 +138,3 @@ TYPED_TEST(AllocatorAwarePoliciesTests, TestAllocatorAttachment)
   TestAllocatorAttachment<T> test;
   test();
 }
-
-THRUST_SUPPRESS_DEPRECATED_POP
