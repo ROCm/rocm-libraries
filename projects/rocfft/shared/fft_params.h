@@ -2009,8 +2009,10 @@ public:
     // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
     bool is_using_default_layout() const
     {
-        return std::count(ioffset.begin(), ioffset.end(), 0) == ioffset.size()
-               && std::count(ooffset.begin(), ooffset.end(), 0) == ioffset.size()
+        static_assert(std::is_same_v<decltype(ioffset), decltype(ooffset)>);
+        auto is_zero = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        return std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+               && std::all_of(ooffset.begin(), ooffset.end(), is_zero)
                && istride == default_strides(transform_type, placement, fft_io::fft_io_in, length)
                && ostride == default_strides(transform_type, placement, fft_io::fft_io_out, length)
                && idist

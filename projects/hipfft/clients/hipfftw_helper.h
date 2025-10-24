@@ -584,7 +584,7 @@ static bool
     if(!rank_is_valid_for_hipfftw(intended_rank))
         return false; // impossible to validate values for an invalid intended_rank
     // check that vals are all in [min_valid_val, max_valid_val]
-    return vals.size() == intended_rank
+    return vals.size() == static_cast<size_t>(intended_rank)
            && std::all_of(vals.begin(), vals.end(), [&](const ptrdiff_t& val) {
                   return val >= min_valid_val && val <= max_valid_val;
               });
@@ -1115,7 +1115,7 @@ public:
         {
             for(const auto& vec : {lengths_to_set, istrides_to_set, ostrides_to_set})
             {
-                if(!vec.empty() && vec.size() != rank_to_set)
+                if(!vec.empty() && vec.size() != static_cast<size_t>(rank_to_set))
                 {
                     throw std::invalid_argument(
                         "Inconsistent size for non-empty lengths, istrides, or ostrides given to "
@@ -1127,7 +1127,7 @@ public:
         {
             for(const auto& vec : {batches_to_set, idist_to_set, odist_to_set})
             {
-                if(!vec.empty() && vec.size() != batch_rank_to_set)
+                if(!vec.empty() && vec.size() != static_cast<size_t>(batch_rank_to_set))
                 {
                     throw std::invalid_argument("Inconsistent size for non-empty batches, idist, "
                                                 "or odist given to hipfftw::set_creation_args.");
@@ -1211,7 +1211,7 @@ public:
         if(io != fft_io::fft_io_in && io != fft_io::fft_io_out)
             throw std::invalid_argument("invalid io passed to hipfftw_helper::get_distance");
         const auto& distances = io == fft_io::fft_io_in ? idist : odist;
-        if(batch_rank != 1 || distances.size() != batch_rank)
+        if(batch_rank != 1 || batch_rank < 0 || distances.size() != static_cast<size_t>(batch_rank))
             throw std::runtime_error("hipfftw_helper::get_distance: a single distance value cannot "
                                      "be queried for this configuration");
         const auto tmp = convert_vector_to<size_t>(distances);
@@ -1219,7 +1219,7 @@ public:
     }
     size_t get_nbatch() const
     {
-        if(batch_rank != 1 || batches.size() != batch_rank)
+        if(batch_rank != 1 || batch_rank < 0 || batches.size() != static_cast<size_t>(batch_rank))
             throw std::runtime_error("hipfftw_helper::get_nbatch: a single batch size cannot be "
                                      "queried for this configuration");
         const auto tmp = convert_vector_to<size_t>(batches);
