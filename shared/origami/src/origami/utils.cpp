@@ -107,7 +107,7 @@ size_t select_best_grid_size(size_t M, size_t N, size_t K, size_t batch, bool tr
                              size_t MI_M, size_t MI_N, size_t MI_K, size_t element_size_A,
                              size_t element_size_B, size_t element_size_out,
                              data_type_t mi_datatype, size_t mx_block_size, double H_L2, size_t WGM,
-                             size_t biggest_allowable_split) {
+                             size_t biggest_allowable_split, size_t max_cus) {
     // compute how many 32×32 tiles are needed in each dim,
     // then multiply to get total grid size:
     size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
@@ -126,13 +126,16 @@ size_t select_best_grid_size(size_t M, size_t N, size_t K, size_t batch, bool tr
                                   element_size_A,    // ElementSizeA
                                   element_size_B,    // ElementSizeB
                                   element_size_out,  // ElementSizeout
-                                  mi_datatype, mx_block_size, WGM, 0, 0, 0, split);
+                                  mi_datatype, mx_block_size, WGM, 0, 0, 0, split, max_cus);
 
         if (latency < best_latency) {
             best_latency = latency;
             best_split = split;
         }
+        best_latency = latency;
+        best_split = split;
     }
+
     size_t best_grid = best_split * grid;
 
     // you now have both `grid` and `best_split`—
@@ -148,7 +151,8 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
                                                       size_t element_size_B,    // In bits
                                                       size_t element_size_out,  // In bits
                                                       data_type_t mi_datatype, size_t mx_block_size,
-                                                      double H_L2, bool print, size_t defaultWGM) {
+                                                      double H_L2, bool print, size_t defaultWGM,
+                                                      size_t max_cus) {
     std::vector<result_tuple> valid_results;
     valid_results.reserve(MT_list.size());
 
@@ -176,7 +180,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
             double Total_latency = compute_total_latency(
                 hardware, M, N, K, batch, transA, transB, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K,
                 element_size_A, element_size_B, element_size_out, mi_datatype, mx_block_size, WGM,
-                non_temporal_a, non_temporal_b, occupancy, 0);
+                non_temporal_a, non_temporal_b, occupancy, 0, max_cus);
 
             valid_results.emplace_back(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy,
                                        WGM, non_temporal_a, non_temporal_b);
@@ -417,7 +421,8 @@ rank_macro_tile_sizes(
     const std::vector<tile_tuple>& MT_list, size_t element_size, data_type_t mi_datatype,
     double H_L2, bool print, size_t WGM,
     std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
-        tie_breaker_fn) {
+        tie_breaker_fn,
+    size_t max_cus) {
     std::vector<std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t>> results;
 
     typedef std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> result_tuple;
@@ -445,7 +450,7 @@ rank_macro_tile_sizes(
                                       element_size * 8,  // Element Size A
                                       element_size * 8,  // Element Size B
                                       element_size * 8,  // Element Size out
-                                      mi_datatype, mx_block_size, WGM, 0, 0, 0, split);
+                                      mi_datatype, mx_block_size, WGM, 0, 0, 0, split, max_cus);
 
             results.push_back(std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));
         } else if (hardware_t::is_debug_enabled()) {

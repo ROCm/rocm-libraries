@@ -3259,7 +3259,8 @@ namespace TensileLite
                                                    sizeMapping.CUOccupancy,
                                                    *(hipAMDGPU->analyticalHardware),
                                                    pAMDGPU->skDynamicGrid,
-                                                   reductionStrat);
+                                                   reductionStrat,
+                                                   pAMDGPU->skMaxCUs);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
