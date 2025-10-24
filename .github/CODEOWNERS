@@ -17,6 +17,7 @@
 
 # Project-specific ownership
 /projects/composablekernel/                         @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
+/projects/fusilli-plugin                            @ROCm/fusilli-plugin-reviewers
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers

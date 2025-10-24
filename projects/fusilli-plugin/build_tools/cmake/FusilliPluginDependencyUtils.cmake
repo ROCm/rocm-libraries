@@ -185,33 +185,44 @@ endmacro()
 
 # Fusilli
 #
-# USE_LOCAL
-#   If set, uses local source from ../sharkfuser directory. Without USE_LOCAL,
-#   requires system installation via find_package.
+# FUSILLI_HASH
+#   Git commit hash or tag to fetch from https://github.com/nod-ai/shark-ai
+# LOCAL_PATH
+#   If set, uses local source directory instead of fetching from GitHub
 macro(_fetch_Fusilli)
     cmake_parse_arguments(
-        ARG          # prefix for parsed variables
-        ""           # options (flags)
-        "USE_LOCAL"  # single-value arguments
-        ""           # multi-value arguments
+        ARG                           # prefix for parsed variables
+        ""                            # options (flags)
+        "FUSILLI_HASH;LOCAL_PATH"     # single-value arguments
+        ""                            # multi-value arguments
         ${ARGN}
     )
 
-    if(NOT DEFINED ARG_USE_LOCAL)
-        message(FATAL_ERROR "USE_LOCAL argument is required")
+    if(NOT DEFINED ARG_LOCAL_PATH AND NOT DEFINED ARG_FUSILLI_HASH)
+        message(FATAL_ERROR "Required argument: one of LOCAL_PATH or FUSILLI_HASH")
     endif()
 
-    if(NOT ARG_USE_LOCAL)
-        # For the time being we're keeping fusilli-plugin setup as in sync as
-        # possible with fusilli.
-        message(FATAL_ERROR "Only LOCAL builds are supported currently")
+    if(DEFINED ARG_LOCAL_PATH AND DEFINED ARG_FUSILLI_HASH)
+        message(FATAL_ERROR "Argument error: passing both LOCAL_PATH and FUSILLI_HASH is ambiguous.")
     endif()
 
-    message(STATUS "Using local Fusilli build from ../sharkfuser")
-    FetchContent_Declare(
-        Fusilli
-        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../sharkfuser
-    )
+    if(DEFINED ARG_FUSILLI_HASH)
+        FetchContent_Declare(
+            Fusilli
+            GIT_REPOSITORY https://github.com/nod-ai/shark-ai.git
+            GIT_TAG ${ARG_FUSILLI_HASH}
+            # Location of fusilli's CMakeLists.txt in shark-ai
+            SOURCE_SUBDIR sharkfuser
+            # Preferentially use `find_package` based install if available.
+            FIND_PACKAGE_ARGS NAMES Fusilli
+        )
+    else()
+        FetchContent_Declare(
+            Fusilli
+            SOURCE_DIR ${ARG_LOCAL_PATH}
+        )
+    endif()
+
     set(FUSILLI_BUILD_TESTS OFF)
     set(FUSILLI_BUILD_BENCHMARKS OFF)
     set(FUSILLI_SYSTEMS_AMDGPU ON)

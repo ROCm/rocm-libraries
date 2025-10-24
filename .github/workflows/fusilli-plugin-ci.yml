@@ -1,0 +1,107 @@
+# Copyright 2025 Advanced Micro Devices, Inc.
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: fusilli-plugin CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/fusilli-plugin-ci.yml'
+      - 'projects/fusilli-plugin/**'
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR number if a pull request and otherwise the commit hash. This cancels
+  # queued and in-progress runs for the same PR (presubmit) or commit
+  # (postsubmit). The workflow name is prepended to avoid conflicts between
+  # different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  FUSILLI_PLUGIN_DIR: ${{ github.workspace }}/projects/fusilli-plugin
+
+jobs:
+  build-and-test:
+    name: "Build & Test :: ${{ matrix.name }}"
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        # --noprofile skips loading ~/.bash_profile
+        # --norc      skips loading ~/.bashrc
+        # -exo pipefail:
+        #   -e exit immediately if any command fails
+        #   -x print each command before executing
+        #   -o pipefail ensure pipeline fails if any command in it fails
+        # {0} github actions placeholder for the command to run
+        shell: bash --noprofile --norc -exo pipefail {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ["gfx942_clang20_debug"]
+        include:
+          - name: gfx942_clang20_debug
+            runs-on: linux-mi325-1gpu-ossci-rocm
+            fusilli-plugin-cmake-options:
+              -DCMAKE_C_COMPILER=clang-20
+              -DCMAKE_CXX_COMPILER=clang++-20
+              -DCMAKE_BUILD_TYPE=Debug
+              -DIREERuntime_DIR=/workspace/.cache/docker/iree/build/lib/cmake/IREE
+
+    steps:
+    - name: checkout fusilli-plugin
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        sparse-checkout: |
+          projects/fusilli-plugin
+          projects/hipdnn
+        sparse-checkout-cone-mode: true
+
+    - name: build fusilli-plugin
+      # The docker container mounts the working directory as a volume, so we
+      # must run from github.workspace to ensure fusilli-plugin can reach into
+      # ../sharkfuser for its fusilli dependency.
+      working-directory: ${{ github.workspace }}
+      run: |
+        ${{ env.FUSILLI_PLUGIN_DIR }}/build_tools/docker/exec_docker_ci.sh \
+        bash -c "cd projects/fusilli-plugin && \
+                 cmake -GNinja -S. -Bbuild \
+                   ${{ matrix.fusilli-plugin-cmake-options }} && \
+                 cmake --build build --target all"
+
+    - name: Test fusilli-plugin
+      working-directory: ${{ github.workspace }}
+      run: |
+        ${{ env.FUSILLI_PLUGIN_DIR }}/build_tools/docker/exec_docker_ci.sh \
+        bash -c "cd projects/fusilli-plugin && \
+                 ctest --test-dir build --output-on-failure --extra-verbose --timeout 120 -j \$(nproc)"
+
+  # Depends on all other jobs to provide an aggregate job status.
+  ci_fusilli_plugin_summary:
+    if: always()
+    runs-on: ubuntu-24.04
+    needs:
+      - build-and-test
+    steps:
+      - name: Getting failed jobs
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi

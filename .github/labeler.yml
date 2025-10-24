@@ -2,6 +2,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/composablekernel/**/*'
 
+"project: fusilli-plugin":
+- changed-files:
+  - any-glob-to-any-file: 'projects/fusilli-plugin/**/*'
+
 "project: hipblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblas/**/*'
