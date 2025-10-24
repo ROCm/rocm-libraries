@@ -123,11 +123,11 @@ struct PerfHelper
         if(miopen::fs::file_size(filename) == 0)
         {
             file << ((kernelTestStats.size() == 1)
-                         ? "KernelAndTestInfo,min_exec_time,max_exec_time,mean_exec_time,median_"
-                           "exec_time,SD_exec_time\n"
+                         ? "KernelAndTestInfo,min_exec_time (ms),max_exec_time (ms),mean_exec_time "
+                           "(ms),median_"
+                           "exec_time (ms),SD_exec_time (ms)\n"
                          : "KernelAndTestInfo,min_exec_time_ratio,max_exec_time_ratio,mean_exec_"
-                           "time_"
-                           "ratio,median_exec_time_ratio,SD_reference,SD_actual\n");
+                           "time_ratio,median_exec_time_ratio,SD_reference (ms),SD_actual (ms)\n");
         }
 
         // if the number of entries in the kernelTestStats vector is not 1 and not even, throw an
