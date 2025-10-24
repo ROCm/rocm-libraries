@@ -1,26 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cmath>
-#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <memory>
-#include <random>
-#include <vector>
 
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include "IntegrationTestUtils.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -70,367 +59,205 @@ struct Batchnorm3dTestCase
     }
 };
 
-template <typename InputType, typename IntermediateType, typename TestCaseType>
-class BatchnormBackward : public ::testing::TestWithParam<TestCaseType>
+// NOLINTBEGIN (portability-template-virtual-member-function)
+template <typename DataType, typename TestCase>
+class BatchnormBackwardActivation : public GraphVerifierTest<DataType, TestCase>
 {
-
-    struct TensorBundle
-    {
-        TensorBundle(const std::vector<int64_t>& dims,
-                     unsigned int seed = 1,
-                     const TensorLayout& layout = TensorLayout::NCHW)
-            : derivedDims(getDerivedShape(dims))
-            , xTensor(dims, layout)
-            , dyTensor(dims, layout)
-            , dReluTensor(dims, layout)
-            , dxTensor(dims, layout)
-            , scaleTensor(derivedDims)
-            , dscaleTensor(derivedDims)
-            , dbiasTensor(derivedDims)
-            , meanTensor(derivedDims)
-            , invVarianceTensor(derivedDims)
-        {
-            xTensor.fillWithRandomValues(
-                static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f), seed);
-
-            dyTensor.fillWithRandomValues(
-                static_cast<InputType>(-0.1f), static_cast<InputType>(0.1f), seed);
-            scaleTensor.fillWithRandomValues(
-                static_cast<IntermediateType>(-0.1f), static_cast<IntermediateType>(0.1f), seed);
-
-            meanTensor.fillWithRandomValues(
-                static_cast<IntermediateType>(-0.1f), static_cast<IntermediateType>(0.1f), seed);
-
-            invVarianceTensor.fillWithRandomValues(
-                static_cast<IntermediateType>(1.9f), static_cast<IntermediateType>(2.0f), seed);
-        }
-
-        std::vector<int64_t> derivedDims;
-        PinnedTensor<InputType> xTensor;
-        PinnedTensor<InputType> dyTensor;
-        PinnedTensor<InputType> dReluTensor;
-        PinnedTensor<InputType> dxTensor;
-        PinnedTensor<IntermediateType> scaleTensor;
-        PinnedTensor<IntermediateType> dscaleTensor;
-        PinnedTensor<IntermediateType> dbiasTensor;
-        PinnedTensor<IntermediateType> meanTensor;
-        PinnedTensor<IntermediateType> invVarianceTensor;
-    };
-
 protected:
-    void SetUp() override
+    void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
     {
-        SKIP_IF_NO_DEVICES();
+        namespace fe = hipdnn_frontend;
 
-        // Uncomment if you want debug logging info.
-        // setenv("HIPDNN_LOG_LEVEL", "info", 1);
+        const TestCase& testCase = this->GetParam();
+        auto dims = testCase.getDims();
 
-        // Initialize HIP
-        ASSERT_EQ(hipInit(0), hipSuccess);
-        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
-
-        // Note: The plugin paths has to be set before we create the hipdnn handle.
-        auto pluginPath
-            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
-        const std::string pluginPathStr = pluginPath.string();
-        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        // Create handle and stream
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
-        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
+        std::vector<int64_t> channelDims;
+        if(dims.size() == 4)
         {
-            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+            channelDims = {1, dims[1], 1, 1};
         }
-        if(_stream != nullptr)
+        else
         {
-            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            channelDims = {1, dims[1], 1, 1, 1};
         }
+
+        auto graphObj = std::make_shared<graph::Graph>();
+        graphObj->set_name("BatchnormBackwardActivationTest");
+        graphObj->set_compute_data_type(fe::DataType::FLOAT);
+
+        int64_t uid = 1;
+        auto nextUid = [&]() { return uid++; };
+
+        auto dataType = getDataTypeEnumFromType<DataType>();
+        auto intermediateDataType = fe::DataType::FLOAT;
+
+        auto xAttr = graph::makeTensorAttributes(
+            "x", dataType, dims, generateStrides(dims, layout.strideOrder));
+        xAttr.set_uid(nextUid());
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+
+        auto scaleAttr
+            = graph::makeTensorAttributes("scale",
+                                          intermediateDataType,
+                                          channelDims,
+                                          generateStrides(channelDims, layout.strideOrder));
+        scaleAttr.set_uid(nextUid());
+        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+
+        auto biasAttr
+            = graph::makeTensorAttributes("bias",
+                                          intermediateDataType,
+                                          channelDims,
+                                          generateStrides(channelDims, layout.strideOrder));
+        biasAttr.set_uid(nextUid());
+        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+
+        auto meanAttr
+            = graph::makeTensorAttributes("mean",
+                                          intermediateDataType,
+                                          channelDims,
+                                          generateStrides(channelDims, layout.strideOrder));
+        meanAttr.set_uid(nextUid());
+        auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+
+        auto invVarAttr
+            = graph::makeTensorAttributes("inv_variance",
+                                          intermediateDataType,
+                                          channelDims,
+                                          generateStrides(channelDims, layout.strideOrder));
+        invVarAttr.set_uid(nextUid());
+        auto invVarianceTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
+
+        // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
+        graph::BatchnormInferenceAttributes bnInfAttrs;
+        bnInfAttrs.set_name("batchnorm_inference");
+
+        auto bnY = graphObj->batchnorm_inference(xTensorAttr,
+                                                 meanTensorAttr,
+                                                 invVarianceTensorAttr,
+                                                 scaleTensorAttr,
+                                                 biasTensorAttr,
+                                                 bnInfAttrs);
+
+        bnY->set_name("BN_Y");
+        bnY->set_data_type(dataType);
+        bnY->set_dim(dims);
+        bnY->set_stride(generateStrides(dims, layout.strideOrder));
+        bnY->set_is_virtual(true);
+        if(!bnY->has_uid())
+        {
+            bnY->set_uid(nextUid());
+        }
+
+        auto dyAttr = graph::makeTensorAttributes(
+            "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
+        dyAttr.set_uid(nextUid());
+        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+
+        // DX_drelu = pointwise(DY, BN_Y, RELU_BWD)
+        graph::PointwiseAttributes reluBwdAttrs;
+        reluBwdAttrs.set_name("relu_bwd");
+        reluBwdAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
+
+        auto dxDrelu = graphObj->pointwise(dyTensorAttr, bnY, reluBwdAttrs);
+        dxDrelu->set_name("DX_drelu");
+        dxDrelu->set_data_type(dataType);
+        dxDrelu->set_dim(dims);
+        dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
+        dxDrelu->set_is_virtual(true);
+        if(!dxDrelu->has_uid())
+        {
+            dxDrelu->set_uid(nextUid());
+        }
+
+        graph::BatchnormBackwardAttributes bnBwdAttrs;
+        bnBwdAttrs.set_name("batchnorm_backward");
+        bnBwdAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
+
+        // [DX, dscale, dbias] = batchnorm_backward(DX_drelu, X, scale, saved_mean_inv_var)
+        auto bnBwdOuts
+            = graphObj->batchnorm_backward(dxDrelu, xTensorAttr, scaleTensorAttr, bnBwdAttrs);
+
+        auto& dxOut = bnBwdOuts[0];
+        dxOut->set_name("dx");
+        dxOut->set_data_type(dataType);
+        dxOut->set_dim(dims);
+        dxOut->set_stride(generateStrides(dims, layout.strideOrder));
+        dxOut->set_is_virtual(false);
+        dxOut->set_output(true);
+        if(!dxOut->has_uid())
+        {
+            dxOut->set_uid(nextUid());
+        }
+
+        auto& dscaleOut = bnBwdOuts[1];
+        dscaleOut->set_name("dscale");
+        dscaleOut->set_data_type(intermediateDataType);
+        dscaleOut->set_dim(channelDims);
+        dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
+        dscaleOut->set_is_virtual(false);
+        dscaleOut->set_output(true);
+        if(!dscaleOut->has_uid())
+        {
+            dscaleOut->set_uid(nextUid());
+        }
+
+        auto& dbiasOut = bnBwdOuts[2];
+        dbiasOut->set_name("dbias");
+        dbiasOut->set_data_type(intermediateDataType);
+        dbiasOut->set_dim(channelDims);
+        dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
+        dbiasOut->set_is_virtual(false);
+        dbiasOut->set_output(true);
+        if(!dbiasOut->has_uid())
+        {
+            dbiasOut->set_uid(nextUid());
+        }
+
+        auto result = graphObj->validate();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        // todo: add registry
     }
-
-    std::unordered_map<int64_t, void*>
-        createVariantPack(const graph::TensorAttributes& xTensorAttr,
-                          const graph::TensorAttributes& dyTensorAttr,
-                          const graph::TensorAttributes& dReluTensorAttr,
-                          const graph::TensorAttributes& dxTensorAttr,
-                          const graph::TensorAttributes& scaleTensorAttr,
-                          const graph::TensorAttributes& dscaleTensorAttr,
-                          const graph::TensorAttributes& dbiasTensorAttr,
-                          const graph::TensorAttributes& meanTensorAttr,
-                          const graph::TensorAttributes& invVarianceTensorAttr,
-                          TensorBundle& tensorBundle)
-    {
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr.get_uid()] = tensorBundle.xTensor.memory().deviceData();
-        variantPack[dyTensorAttr.get_uid()] = tensorBundle.dyTensor.memory().deviceData();
-        variantPack[dReluTensorAttr.get_uid()] = tensorBundle.dReluTensor.memory().deviceData();
-        variantPack[dxTensorAttr.get_uid()] = tensorBundle.dxTensor.memory().deviceData();
-        variantPack[scaleTensorAttr.get_uid()] = tensorBundle.scaleTensor.memory().deviceData();
-        variantPack[dscaleTensorAttr.get_uid()] = tensorBundle.dscaleTensor.memory().deviceData();
-        variantPack[dbiasTensorAttr.get_uid()] = tensorBundle.dbiasTensor.memory().deviceData();
-        variantPack[meanTensorAttr.get_uid()] = tensorBundle.meanTensor.memory().deviceData();
-        variantPack[invVarianceTensorAttr.get_uid()]
-            = tensorBundle.invVarianceTensor.memory().deviceData();
-
-        return variantPack;
-    }
-
-void runMiopenBatchnormBwd(TensorBundle& graphTensorBundle,
-                           hipdnn_frontend::DataType inputDataType,
-                           hipdnn_frontend::DataType intermediateDataType)
-{
-    namespace fe = hipdnn_frontend;
-
-    auto graphObj = std::make_shared<graph::Graph>();
-    graphObj->set_name("BatchnormBackwardTest");
-
-    int64_t uid = 1;
-    auto nextUid = [&]() { return uid++; };
-
-    // inputs
-    auto xAttr = graph::makeTensorAttributes("x", inputDataType, graphTensorBundle.xTensor);
-    xAttr.set_uid(nextUid());
-    auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-
-    auto dyAttr = graph::makeTensorAttributes("dy", inputDataType, graphTensorBundle.dyTensor);
-    dyAttr.set_uid(nextUid());
-    auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-
-    auto scaleAttr = graph::makeTensorAttributes("scale", intermediateDataType, graphTensorBundle.scaleTensor);
-    scaleAttr.set_uid(nextUid());
-    auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-
-    auto meanAttr = graph::makeTensorAttributes("mean", intermediateDataType, graphTensorBundle.meanTensor);
-    meanAttr.set_uid(nextUid());
-    auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-
-    auto invVarAttr = graph::makeTensorAttributes("inv_variance", intermediateDataType, graphTensorBundle.invVarianceTensor);
-    invVarAttr.set_uid(nextUid());
-    auto invVarianceTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
-
-    auto yAttr = graph::makeTensorAttributes("y", inputDataType, graphTensorBundle.dyTensor);
-    yAttr.set_uid(nextUid());
-    auto yTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(yAttr));
-
-    graph::PointwiseAttributes reluBwdAttrs;
-    reluBwdAttrs.set_name("relu_bwd");
-    reluBwdAttrs.set_mode(PointwiseMode::RELU_FWD); // equivalent to fwd in MIOpen
-
-    // apply pointwise first, we do this on the input tensor
-    // fwd computes y
-    // backward computes dL/dx given dL/dy
-    // derivate of ReLU(y) is dy * Relu'(y)
-    // where Relu'(y) = 1 if y > 0 else 0 
-    // so for bwd, we need to apply activ on y (and dy, because it needs to be multiplied. tbd)
-    auto dRelu = graphObj->pointwise(dyTensorAttr, reluBwdAttrs);
-    dRelu->set_name("dRelu");
-    dRelu->set_is_virtual(true);
-    dRelu->set_data_type(inputDataType);
-    dRelu->set_dim(graphTensorBundle.dyTensor.dims());
-    dRelu->set_stride(graphTensorBundle.dyTensor.strides());
-    if(!dRelu->has_uid())
-    {
-        dRelu->set_uid(nextUid());
-    }
-    
-    // therefore, dy is input to the graph, and dRelu is intermediate and hidden
-
-    graph::BatchnormBackwardAttributes bnAttrs;
-    bnAttrs.set_name("batchnorm_backward");
-    bnAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
-
-    // dRelu is inplace of dy after activation
-    auto bnOuts = graphObj->batchnorm_backward(dRelu, xTensorAttr, scaleTensorAttr, bnAttrs);
-
-    auto& dxOut = bnOuts[0];
-    dxOut->set_name("dx");
-    dxOut->set_data_type(inputDataType);
-    dxOut->set_dim(graphTensorBundle.dxTensor.dims());
-    dxOut->set_stride(graphTensorBundle.dxTensor.strides());
-    dxOut->set_is_virtual(false);
-    dxOut->set_output(true);
-    if(!dxOut->has_uid())
-    {
-        dxOut->set_uid(nextUid());
-    }
-
-    auto& dscaleOut = bnOuts[1];
-    dscaleOut->set_name("dscale");
-    dscaleOut->set_data_type(intermediateDataType);
-    dscaleOut->set_dim(graphTensorBundle.dscaleTensor.dims());
-    dscaleOut->set_stride(graphTensorBundle.dscaleTensor.strides());
-    dscaleOut->set_is_virtual(false);
-    dscaleOut->set_output(true);
-    if(!dscaleOut->has_uid())
-    {
-        dscaleOut->set_uid(nextUid());
-    }
-
-    auto& dbiasOut = bnOuts[2];
-    dbiasOut->set_name("dbias");
-    dbiasOut->set_data_type(intermediateDataType);
-    dbiasOut->set_dim(graphTensorBundle.dbiasTensor.dims());
-    dbiasOut->set_stride(graphTensorBundle.dbiasTensor.strides());
-    dbiasOut->set_is_virtual(false);
-    dbiasOut->set_output(true);
-    if(!dbiasOut->has_uid())
-    {
-        dbiasOut->set_uid(nextUid());
-    }
-
-    auto result = graphObj->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graphObj->build_operation_graph(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graphObj->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graphObj->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graphObj->build_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto variantPack = createVariantPack(*xTensorAttr,
-                                         *dyTensorAttr,
-                                         *dRelu,
-                                         *dxOut,
-                                         *scaleTensorAttr,
-                                         *dscaleOut,
-                                         *dbiasOut,
-                                         *meanTensorAttr,
-                                         *invVarianceTensorAttr,
-                                         graphTensorBundle);
-
-    result = graphObj->execute(_handle, variantPack, nullptr);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-}
-
-    void runCpuBatchnormBwd(TensorBundle& cpuTensorBundle)
-    {
-        CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
-            cpuTensorBundle.dyTensor,
-            cpuTensorBundle.xTensor,
-            cpuTensorBundle.meanTensor,
-            cpuTensorBundle.invVarianceTensor,
-            cpuTensorBundle.scaleTensor,
-            cpuTensorBundle.dxTensor,
-            cpuTensorBundle.dscaleTensor,
-            cpuTensorBundle.dbiasTensor);
-    }
-
-    void runBatchnormTest(InputType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
-    {
-        (void)tolerance;
-        TestCaseType testCase = this->GetParam();
-
-        auto inputDataType = getDataTypeEnumFromType<InputType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
-
-        // unsigned int seed = std::random_device{}(); // Temporarily disabled random seed.
-        // MIOpen fixes its seed, and BWDs has a tight tolerance range.
-        // Therefore, we fix the seed too for now.
-        unsigned int seed = 1;
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", seed);
-
-        TensorBundle graphTensorBundle(testCase.getDims(), seed, layout);
-
-        TensorBundle cpuTensorBundle(testCase.getDims(), seed, layout);
-
-        runMiopenBatchnormBwd(graphTensorBundle, inputDataType, intermediateDataType);
-        graphTensorBundle.dxTensor.memory().markDeviceModified();
-        graphTensorBundle.dscaleTensor.memory().markDeviceModified();
-        graphTensorBundle.dbiasTensor.memory().markDeviceModified();
-
-        // runCpuBatchnormBwd(cpuTensorBundle);
-
-        // CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
-        // EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
-        //                                       graphTensorBundle.dxTensor.memory()));
-
-        // CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(
-        //     static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
-        // EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dscaleTensor.memory(),
-        //                                                   graphTensorBundle.dscaleTensor.memory()));
-        // EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dbiasTensor.memory(),
-        //                                                   graphTensorBundle.dbiasTensor.memory()));
-    }
-
-private:
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-    int _deviceId = 0;
 };
+// NOLINTEND (portability-template-virtual-member-function)
 
-class IntegrationGpuBatchnormBackwardActivationNchwFp32
-    : public BatchnormBackward<float, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNchwFp32
+    = BatchnormBackwardActivation<float, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNchwBfp16
-    : public BatchnormBackward<hip_bfloat16, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNchwBfp16
+    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNchwFp16
-    : public BatchnormBackward<half, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNchwFp16
+    = BatchnormBackwardActivation<half, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNhwcFp32
-    : public BatchnormBackward<float, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNhwcFp32
+    = BatchnormBackwardActivation<float, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNhwcBfp16
-    : public BatchnormBackward<hip_bfloat16, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNhwcBfp16
+    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNhwcFp16
-    : public BatchnormBackward<half, float, Batchnorm2dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNhwcFp16
+    = BatchnormBackwardActivation<half, Batchnorm2dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNcdhwFp32
-    : public BatchnormBackward<float, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp32
+    = BatchnormBackwardActivation<float, Batchnorm3dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNcdhwBfp16
-    : public BatchnormBackward<hip_bfloat16, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16
+    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm3dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNcdhwFp16
-    : public BatchnormBackward<half, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp16
+    = BatchnormBackwardActivation<half, Batchnorm3dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNdhwcFp32
-    : public BatchnormBackward<float, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp32
+    = BatchnormBackwardActivation<float, Batchnorm3dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNdhwcBfp16
-    : public BatchnormBackward<hip_bfloat16, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16
+    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm3dTestCase>;
 
-class IntegrationGpuBatchnormBackwardActivationNdhwcFp16
-    : public BatchnormBackward<half, float, Batchnorm3dTestCase>
-{
-};
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp16
+    = BatchnormBackwardActivation<half, Batchnorm3dTestCase>;
 
 std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 {
@@ -464,7 +291,7 @@ std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -473,7 +300,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -482,7 +309,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCHW);
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -491,7 +318,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -502,7 +329,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // https://github.com/ROCm/rocm-libraries/pull/1197}
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, DISABLED_Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -513,7 +340,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // https://github.com/ROCm/rocm-libraries/pull/1197
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, DISABLED_Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -522,7 +349,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -531,7 +358,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -540,7 +367,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCDHW);
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -549,7 +376,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -559,7 +386,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, DISABLED_Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -569,7 +396,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, DISABLED_Correctness)
 {
-    runBatchnormTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
+    runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
