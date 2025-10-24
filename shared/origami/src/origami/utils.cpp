@@ -133,7 +133,8 @@ namespace origami
                                  size_t            mx_block_size,
                                  double            H_L2,
                                  size_t            WGM,
-                                 size_t            biggest_allowable_split)
+                                 size_t            biggest_allowable_split,
+                                 size_t            max_cus)
     {
         // compute how many 32×32 tiles are needed in each dim,
         // then multiply to get total grid size:
@@ -169,7 +170,8 @@ namespace origami
                                                    0,
                                                    0,
                                                    0,
-                                                   split);
+                                                   split,
+                                                   max_cus);
 
             if(latency < best_latency)
             {
@@ -199,7 +201,8 @@ namespace origami
                                                           size_t      mx_block_size,
                                                           double      H_L2,
                                                           bool        print,
-                                                          size_t      defaultWGM)
+                                                          size_t      defaultWGM,
+                                                          size_t      max_cus)
     {
         std::vector<result_tuple> valid_results;
         valid_results.reserve(MT_list.size());
@@ -250,7 +253,8 @@ namespace origami
                                                              non_temporal_a,
                                                              non_temporal_b,
                                                              occupancy,
-                                                             0);
+                                                             0,
+                                                             max_cus);
 
                 valid_results.emplace_back(Total_latency,
                                            MT_M,
@@ -333,59 +337,63 @@ namespace origami
     }
 
     /*!
+         * \brief Selects the best WGMXCC (maximizing L2 hit rate) given fixed macro tile sizes.
+         *
+         * \param[in] hardware          - Hardware
+         * \param[in] M, N, K, batch    - Problem
+         * \param[in] MT_M, MT_N, MT_K  - Solution
+         * \param[in] print             - whether to print the final best result
+         *
+         * \return best WGMXCC.
+         */
+    size_t select_best_wgmxcc(const hardware_t& hardware,
+                              size_t            M,
+                              size_t            N,
+                              size_t            K,
+                              size_t            batch,
+                              size_t            MT_M,
+                              size_t            MT_N,
+                              size_t            MT_K,
+                              bool              print)
+    {
+        // Return the number of XCDs
+        return hardware.NUM_XCD;
+    }
+
+    /*!
          * \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
          *
-         * \param[in] M, N, K    - your overall problem sizes
-         * \param[in] hardware   - a struct describing your hardware capabilities
-         * \param[in] MT_M,MT_N,MT_K,MI_M,MI_N,MI_K - chosen macro/MI tile sizes
-         * \param[in] WGM_list   - candidate WGM values to try
-         * \param[in] element_size
-         * \param[in] H_L2       - some hardware-related constant or factor (no longer used here,
-         *                         but kept if your signature or other usage requires it)
-         * \param[in] print      - whether to print the final best result
+         * \param[in] hardware          - Hardware
+         * \param[in] M, N, K, batch    - Problem
+         * \param[in] MT_M, MT_N, MT_K  - Solution
+         * \param[in] print             - whether to print the final best result
          *
-         * \return A pair: (best_l2_hit_rate, best_WGM).
+         * \return best WGM.
          */
-    std::pair<double, size_t> select_best_wgm(
-        size_t                     M,
-        size_t                     N,
-        size_t                     K,
-        size_t                     batch,
-        const hardware_t&          hardware,
-        size_t                     MT_M,
-        size_t                     MT_N,
-        size_t                     MT_K,
-        size_t                     MI_M,
-        size_t                     MI_N,
-        size_t                     MI_K,
-        const std::vector<size_t>& WGM_list,
-        size_t                     element_size,
-        double H_L2, // not needed for L2 hit rate but retained if your code expects it
-        bool   print)
+    int32_t select_best_wgm(const hardware_t& hardware,
+                            size_t            M,
+                            size_t            N,
+                            size_t            K,
+                            size_t            batch,
+                            size_t            MT_M,
+                            size_t            MT_N,
+                            size_t            MT_K,
+                            bool              print)
     {
+        constexpr size_t element_size = 32; // L2 scales linearly with element size so it doesn't matter
+        
+        std::vector<size_t> wgmList = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+        
         using WGMResult = std::pair<double, size_t>; // (l2_hit_rate, WGM)
-
         std::vector<WGMResult> valid_results;
-        valid_results.reserve(WGM_list.size());
+        valid_results.reserve(wgmList.size());
 
         // Iterate over all candidate WGM values
-        for(const auto& candidate_wgm : WGM_list)
+        for(const auto& candidate_wgm : wgmList)
         {
             if(hardware_t::is_debug_enabled())
             {
                 std::cout << "Evaluating WGM=" << candidate_wgm << "\n";
-            }
-
-            // Optionally ensure we do not exceed LDS capacity
-            // (If you want to factor in WGM, add it to your check_lds_capacity signature.)
-            // For now, let's just check the tile itself:
-            if(!check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size))
-            {
-                if(hardware_t::is_debug_enabled())
-                {
-                    std::cout << "Skipping WGM=" << candidate_wgm << " due to LDS capacity.\n";
-                }
-                continue;
             }
 
             // Compute L2 hit rate for this WGM
@@ -416,12 +424,9 @@ namespace origami
             valid_results.begin(), valid_results.end(), [](const WGMResult& a, const WGMResult& b) {
                 return a.first < b.first; // "less" => a has smaller hit rate than b
             });
-
-        double best_l2_hit = best_it->first;
-        size_t best_wgm    = best_it->second;
-
-        // Return (l2_hit_rate, WGM)
-        return std::make_pair(best_l2_hit, best_wgm);
+        
+        // Return best WGM
+        return best_it->second;
     }
 
     // Logic to decide between two MT that are "tied"
@@ -469,7 +474,8 @@ namespace origami
             bool                           print,
             size_t                         WGM,
             std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
-                tie_breaker_fn)
+                tie_breaker_fn,
+            size_t                         max_cus)
     {
         std::vector<std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t>> results;
 
@@ -516,7 +522,8 @@ namespace origami
                                                              0,
                                                              0,
                                                              0,
-                                                             split);
+                                                             split,
+                                                             max_cus);
 
                 results.push_back(
                     std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));

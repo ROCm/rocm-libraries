@@ -4,6 +4,13 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(rocm-libraries LANGUAGES C CXX Fortran ASM)
 
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 include(CMakeDependentOption)
@@ -22,8 +29,10 @@ set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
+    origami
     # projects
     hipblas-common
+    hipblaslt
     rocprim
     rocrand
 )
@@ -34,7 +43,6 @@ set(UNSUPPORTED_COMPONENTS
     # projects
     composablekernel
     hipblas
-    hipblaslt
     hipcub
     hipfft
     hiprand
@@ -93,12 +101,30 @@ if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # required deps: pip install pytest-cmake
+    # pip packages:
+    #   pip install pytest-cmake
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
         COMPONENT rocroller
         PREFIX_PATH shared
         EXPECT_TARGET roc::rocroller
+    )
+endif()
+
+if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT origami
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(HIPBLASLT_ENABLE_BLIS OFF)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::hipblaslt
     )
 endif()
 
@@ -155,10 +181,6 @@ endif()
 
 if("hiprand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
-endif()
-
-if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "hipblaslt is not yet supported in the superbuild")
 endif()
 
 if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)

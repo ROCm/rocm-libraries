@@ -16,6 +16,7 @@ add_executable(miopen_legacy_plugin_tests
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
+    TestMiopenActivationDescriptor.cpp
     TestMiopenBatchnormFwdInferenceOperations.cpp
     TestMiopenBatchnormBwdOperations.cpp
     TestMiopenConvFwdOperations.cpp

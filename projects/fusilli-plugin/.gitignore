@@ -1,0 +1,8 @@
+# CMake build
+build/
+
+# clangd intellisense cache
+.cache/
+
+# CMake presets
+CMakePresets.json

@@ -111,7 +111,8 @@ namespace origami
                                                             size_t workspace_size_per_elem_c,
                                                             int    occupancy,
                                                             int    dynamic_grid_version,
-                                                            size_t split)
+                                                            size_t split,
+                                                            size_t max_cus = 0)
     {
         // Number of output MTs
         size_t numMT_M = safe_ceil_div(M, MT_M);
@@ -135,14 +136,14 @@ namespace origami
         }
         else // as what StreamK predicts
         {
-            streamk::reduction_type rt = streamk::select_reduction(M, 
-                                                                   N, 
-                                                                   K, 
-                                                                   batch, 
-                                                                   MT_M, 
-                                                                   MT_N, 
-                                                                   MT_K, 
-                                                                   hardware, 
+            streamk::reduction_type rt = streamk::select_reduction(M,
+                                                                   N,
+                                                                   K,
+                                                                   batch,
+                                                                   MT_M,
+                                                                   MT_N,
+                                                                   MT_K,
+                                                                   hardware,
                                                                    dynamic_grid_version);
             numWGs = streamk::select_grid(M,
                                           N,
@@ -166,7 +167,8 @@ namespace origami
                                           occupancy,
                                           hardware,
                                           dynamic_grid_version,
-                                          rt);
+                                          rt,
+                                          max_cus);
 
             // output variables
             numActiveCUs = numWGs < hardware.N_CU ? numWGs : hardware.N_CU;
@@ -193,6 +195,7 @@ namespace origami
             hardware.log_debug("numActiveCUs", numActiveCUs);
             hardware.log_debug("numWaves", numWaves);
             hardware.log_debug("splitFactor", splitFactor);
+            hardware.log_debug("max_cus", max_cus);
         }
 
         return std::make_tuple(numActiveCUs, numWaves, splitFactor);
@@ -1199,7 +1202,8 @@ namespace origami
                                  size_t            non_temporal_a,
                                  size_t            non_temporal_b,
                                  size_t            occupancy,
-                                 size_t            split)
+                                 size_t            split,
+                                 size_t            max_cus)
     {
         if(hardware_t::is_debug_enabled())
         {
@@ -1264,7 +1268,8 @@ namespace origami
                                    std::numeric_limits<size_t>::max(), // workspace per c
                                    0, // occupancy
                                    6, // dynamic_grid
-                                   0);
+                                   0,
+                                   max_cus);
 
         // 2) Compute latency of a wave
         // Compute latency of a wave
@@ -1397,7 +1402,8 @@ namespace origami
                                size_t            element_size_B,
                                size_t            element_size_out,
                                data_type_t       mi_datatype,
-                               int               WGM)
+                               int               WGM,
+                               size_t            max_cus)
     {
         // Compute total FLOPs
         double total_FLOPs = 2.0 * M * N * K; // For GEMM, each multiply-add is 2 FLOPs
@@ -1406,27 +1412,29 @@ namespace origami
             = hardware.compute_clock_ghz * 1e9; // 1 GHz = 1e9 cycles per second
         size_t mx_block_size      = 0;
         double latency_cycles     = compute_total_latency(hardware,
-                                                      M,
-                                                      N,
-                                                      K,
-                                                      batch,
-                                                      transA,
-                                                      transB,
-                                                      MT_M,
-                                                      MT_N,
-                                                      MT_K,
-                                                      MI_M,
-                                                      MI_N,
-                                                      MI_K,
-                                                      element_size_A,
-                                                      element_size_B,
-                                                      element_size_out,
-                                                      mi_datatype,
-                                                      mx_block_size,
-                                                      WGM,
-                                                      0,
-                                                      0,
-                                                      1);
+                                                          M,
+                                                          N,
+                                                          K,
+                                                          batch,
+                                                          transA,
+                                                          transB,
+                                                          MT_M,
+                                                          MT_N,
+                                                          MT_K,
+                                                          MI_M,
+                                                          MI_N,
+                                                          MI_K,
+                                                          element_size_A,
+                                                          element_size_B,
+                                                          element_size_out,
+                                                          mi_datatype,
+                                                          mx_block_size,
+                                                          WGM,
+                                                          0,
+                                                          0,
+                                                          1,
+                                                          0,
+                                                          max_cus);
         double total_time_seconds = latency_cycles / cycles_per_second;
         // Compute performance in FLOPS
         double FLOPS = total_FLOPs / total_time_seconds;
