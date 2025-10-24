@@ -191,6 +191,18 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         CHECK_THAT(simplify(bfc(v2, v, 16, 8, 0)), IdenticalTo(v));
         CHECK_THAT(simplify(bfc(v2, v, 0, 0, 32)), IdenticalTo(v2));
         CHECK_THAT(simplify(bfc(v3, v, 16, 0, 32)), IdenticalTo(bfe(DataType::Int32, v3, 16, 32)));
+
+        auto expr  = bfc(v2, zero, 0, 0, 16);
+        auto expr2 = bfc(v, expr, 0, 0, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(bfc(v, zero, 0, 0, 16)));
+
+        expr  = bfc(v2, zero, 0, 8, 16);
+        expr2 = bfc(v, expr, 0, 0, 32);
+        CHECK_THAT(simplify(expr2), IdenticalTo(v));
+
+        expr  = bfc(v2, zero, 0, 8, 16);
+        expr2 = bfc(v, expr, 0, 9, 32);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr2));
     }
 
     SECTION("concatenate")

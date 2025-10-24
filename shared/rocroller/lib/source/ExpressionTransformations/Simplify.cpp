@@ -483,6 +483,7 @@ namespace rocRoller
                 , m_srcOffset(srcOffset)
                 , m_dstOffset(dstOffset)
                 , m_width(width)
+                , m_sunk(false)
             {
             }
 
@@ -492,16 +493,18 @@ namespace rocRoller
                 uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
                 uint32_t startBit        = m_dstOffset;
                 uint32_t endBit          = m_dstOffset + m_width - 1;
+
+                // If expr BitfieldCombine is fully contained the the sinking BitfieldCombine, remove it
+                if(startBit <= combineStartBit && combineEndBit <= endBit)
+                    return call(expr.rhs);
+
                 // Give up if BitfieldCombines overlap
                 if(combineStartBit <= endBit && combineEndBit >= startBit)
-                    return {};
+                    return std::make_shared<Expression>(expr);
 
-                // Recusively sink into nested BitfieldCombines
                 BitfieldCombine cpy = expr;
-                cpy.rhs             = call(expr.rhs);
-
-                if(!cpy.rhs)
-                    return {};
+                // Recusively sink into nested BitfieldCombines
+                cpy.rhs = call(expr.rhs);
 
                 return std::make_shared<Expression>(cpy);
             }
@@ -512,15 +515,16 @@ namespace rocRoller
                     = tryEvaluate(bfc(m_src, literal(expr), m_srcOffset, m_dstOffset, m_width));
 
                 if(!sunkBitfieldCombine.has_value())
-                    return {};
+                    return std::make_shared<Expression>(expr);
 
+                m_sunk = true;
                 return literal(sunkBitfieldCombine.value());
             }
 
             template <typename Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return {};
+                return std::make_shared<Expression>(expr);
             }
 
             ExpressionPtr call(ExpressionPtr expr) const
@@ -531,29 +535,37 @@ namespace rocRoller
                 return std::visit(*this, *expr);
             }
 
+            bool sunk() const
+            {
+                return m_sunk;
+            }
+
         private:
-            ExpressionPtr    m_src;
-            uint32_t         m_srcOffset;
-            mutable uint32_t m_dstOffset;
-            uint32_t         m_width;
+            ExpressionPtr m_src;
+            uint32_t      m_srcOffset;
+            uint32_t      m_dstOffset;
+            uint32_t      m_width;
+            mutable bool  m_sunk;
         };
 
         /**
          * Tries to sink a BitfieldCombine into its destination if its source is a literal.
          * Only done in nested BitfieldCombines where the destination is another BitfieldCombine.
+         * Also removes BitfieldCombines that are fully overridden by BitfieldCombine argument
          */
         ExpressionPtr sinkBitfieldCombine(BitfieldCombine const& expr)
         {
             BitfieldCombine cpy = expr;
 
-            auto lhsEval = tryEvaluate(cpy.lhs);
-            if(!lhsEval.has_value())
-                return {};
-
             auto const visitor
                 = BitfieldCombineSinkVisitor{cpy.lhs, cpy.srcOffset, cpy.dstOffset, cpy.width};
 
-            return visitor.call(expr.rhs);
+            auto result = visitor.call(cpy.rhs);
+            // BitfieldCombine was folded away
+            if(visitor.sunk())
+                return result;
+
+            return bfc(cpy.lhs, result, cpy.srcOffset, cpy.dstOffset, cpy.width);
         }
 
         struct SimplifyExpressionVisitor
