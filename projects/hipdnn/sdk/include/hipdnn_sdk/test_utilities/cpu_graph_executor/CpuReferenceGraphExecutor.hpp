@@ -27,8 +27,8 @@ public:
     {
         auto graphWrap = hipdnn_plugin::GraphWrapper(graphBuffer, size);
 
-        nlohmann::json graphJson = graphWrap.getGraph();
-        HIPDNN_LOG_INFO("Executing graph:\n{}", graphJson.dump(4));
+        // HIPDNN_LOG_INFO("Executing graph:\n{}",
+        //                 static_cast<nlohmann::json>(graphWrap.getGraph()).dump(4));
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
