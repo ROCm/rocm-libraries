@@ -366,8 +366,11 @@ namespace origami
         constexpr size_t workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
         constexpr int occupancy = 0;
 
+        // default WGM
+        size_t defaultWGM = ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD));
+
         // What SK does
-        auto [numActiveCUs, numWaves, splittingFactor]
+        auto [skGrid, numActiveCUs, numWaves, splittingFactor]
             = compute_CU_occupancy(hardware,
                                    M,
                                    N,
@@ -385,7 +388,7 @@ namespace origami
                                    element_size_B,
                                    element_size_out,
                                    mi_datatype,
-                                   ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)), // wgm
+                                   defaultWGM,
                                    workspace_size_per_elem_c,
                                    workspace_size_per_elem_c,
                                    occupancy,
@@ -420,6 +423,16 @@ namespace origami
 
         // Small GEMMs
         if(numMTs <= hardware.NUM_XCD)
+            return 1;
+
+        // For sizes that we have more than 2 waves of computations, we skip xcc mapping as MALL is
+        // more important -- matrix should not be skinny
+        bool MallIsImportant = (splittingFactor == 1 
+            && batch == 1 
+            && numMTs > 2 * hardware.N_CU
+            && numMT_M > 4
+            && numMT_N > 4);
+        if(MallIsImportant)
             return 1;
 
         // Return the number of XCDs
@@ -589,20 +602,14 @@ namespace origami
         // Number of output MTs per split and batch
         size_t numMT_M = (M + MT_M - 1) / MT_M;
         size_t numMT_N = (N + MT_N - 1) / MT_N;
-
-        // shortcut:
-        // 1. if we have decided to not remap xcc, there is no reason to use wgm
-        // 2. GEMMs that only have one tile in one dimension don't need wgm
-        // 3. Batched GEMMs don't need wgm (emprically -> batch count is often large!)
-        if(wgmxcc == 1 || numMT_M == 1 || numMT_N == 1 || batch > 1)
-            return 0;
+        size_t numMTs  = numMT_M * numMT_N;
 
         // Default is the closest we can get to a square
         size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
-        size_t wgm = ceil(std::sqrt(max_CU_XCD));
+        size_t defaultWGM = ceil(std::sqrt(max_CU_XCD));
 
         // What SK does
-        auto [numActiveCUs, numWaves, splittingFactor]
+        auto [skGrid, numActiveCUs, numWaves, splittingFactor]
             = compute_CU_occupancy(hardware,
                                    M,
                                    N,
@@ -620,12 +627,34 @@ namespace origami
                                    element_size_B,
                                    element_size_out,
                                    mi_datatype,
-                                   wgm,
+                                   defaultWGM,
                                    workspace_size_per_elem_c,
                                    workspace_size_per_elem_c,
                                    occupancy,
                                    dynamic_grid_version,
                                    print);
+        
+        // shortcut:
+        // For sizes that we have more than 2 waves of computations, MALL is more important
+        // Note that the matrix should not be skinny
+        bool MallIsImportant = (splittingFactor == 1 
+            && batch == 1 
+            && numMTs > 2 * hardware.N_CU
+            && numMT_M > 4
+            && numMT_N > 4);
+        // 1. if we have decided to not remap xcc, there is no reason to use wgm
+        // 2. GEMMs that only have one tile in one dimension don't need wgm
+        // 3. Batched GEMMs don't need wgm (emprically -> batch count is often large!)
+        if((wgmxcc == 1 && !MallIsImportant) || numMT_M == 1 || numMT_N == 1 || batch > 1)
+            return 0;
+
+        // There are cases where StreamK combines output tiles and work on them in one WG
+        // Note: These cases emprically have shown to be sizes where one dimension is way larger than the other.
+        // As the time complexity scales with O(N/WGM), this shortcut also helps the selection time
+        if(MallIsImportant)
+        {
+            return max_CU_XCD;
+        }
 
         // Range of "output tiles" that each xcd takes.
         // Note the "output tiles" -- The returned range is an ID of the output tiles that each XCD works on
@@ -633,7 +662,7 @@ namespace origami
         // Note that batched GEMMs have been ruled out
         std::vector<std::pair<uint32_t, uint32_t>> XCD_ranges;
         XCD_ranges.reserve(numWaves * hardware.NUM_XCD);
-        size_t numWGs = numMT_M * numMT_N * splittingFactor;
+        size_t numWGs = numMTs * splittingFactor;
         size_t q = numWGs / hardware.NUM_XCD;
         size_t r = numWGs % hardware.NUM_XCD;
         size_t offset = 0;
@@ -653,7 +682,9 @@ namespace origami
 
         // Loop over some candidate WGM values
         using WGMResult = std::pair<size_t, size_t>; // (unique_L2_loads, WGM)
-        std::vector<size_t> wgmList = {1, 2, 3, 4, 5, 6, 7, 8, 12, 16};
+        std::vector<size_t> wgmList = {1, 2, 4, 6, 8, 16};
+        if(numMT_N < max_CU_XCD / 2 && numMT_N % 2 != 0)
+            wgmList.push_back(numMT_N);
         std::vector<WGMResult> valid_results;
         valid_results.reserve(wgmList.size());
 
