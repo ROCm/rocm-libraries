@@ -77,7 +77,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
     FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
-#pragma unroll 2
+#pragma nounroll
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
     {
         const unsigned int index = n_i * MIO_BN_CHW + c_offset + hw_i * MIOPEN_READ_UNIT;
@@ -90,28 +90,19 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-            bnRes[i] =
-                fma(pscale, (static_cast<FLOAT_ACCUM>(data[i]) - pmean) * invVariance, pbias);
+            bnRes[i] = fma(pscale, (CVT_FLOAT2ACCUM(data[i]) - pmean) * invVariance, pbias);
         }
         ActivationFunction(
             actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
+#pragma unroll
+        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+        {
+            data[i] = CVT_ACCUM2FLOAT(actRes[i]);
+        }
 
         // write the output data
-        if constexpr(MIOPEN_USE_FP16)
-        { // In this situation, FLOAT_ACCUM is FP32 whereas FLOAT is FP16
-          // So, we cannot perform a vectorized store
-#pragma unroll
-            for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
-            {
-                out[index + i] = static_cast<FLOAT>(actRes[i]);
-            }
-        }
-        else
-        {
-            // perform a vectorized store of the output data as FLOAT and FLOAT_ACCUM are same
-            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
-                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(actRes));
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(data));
     }
 }
 
@@ -161,7 +152,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
     FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
-#pragma unroll 2
+#pragma nounroll
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
     {
         const unsigned int index = n_i * MIO_BN_CHW + chw_i;
@@ -174,28 +165,19 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-            bnRes[i] = fma(pscale[i],
-                           (static_cast<FLOAT_ACCUM>(data[i]) - pmean[i]) * invVariance[i],
-                           pbias[i]);
+            bnRes[i] =
+                fma(pscale[i], (CVT_FLOAT2ACCUM(data[i]) - pmean[i]) * invVariance[i], pbias[i]);
         }
         ActivationFunction(
             actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
+#pragma unroll
+        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+        {
+            data[i] = CVT_ACCUM2FLOAT(actRes[i]);
+        }
 
         // write the output data
-        if constexpr(MIOPEN_USE_FP16)
-        { // In this situation, FLOAT_ACCUM is FP32 whereas FLOAT is FP16
-          // So, we cannot perform a vectorized store
-#pragma unroll
-            for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
-            {
-                out[index + i] = static_cast<FLOAT>(actRes[i]);
-            }
-        }
-        else
-        {
-            // perform a vectorized store of the output data as FLOAT and FLOAT_ACCUM are same
-            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
-                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(actRes));
-        }
+        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + index)) =
+            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(data));
     }
 }
