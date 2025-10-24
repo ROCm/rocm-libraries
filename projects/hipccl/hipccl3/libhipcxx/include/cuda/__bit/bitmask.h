@@ -43,9 +43,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cuda/__ptx/instructions/bmsk.h>
-#include <cuda/__ptx/instructions/shl.h>
-#include <cuda/__ptx/instructions/shr.h>
+//#include <cuda/__ptx/instructions/bmsk.h>
+//#include <cuda/__ptx/instructions/shl.h>
+//#include <cuda/__ptx/instructions/shr.h>
 #include <cuda/std/__type_traits/conditional.h>
 #include <cuda/std/__type_traits/is_constant_evaluated.h>
 #include <cuda/std/__type_traits/is_unsigned_integer.h>
