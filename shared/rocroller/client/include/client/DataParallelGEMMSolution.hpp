@@ -379,15 +379,26 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
-                    if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
-                        AssertFatal(solutionParams.swizzleTileSize.m > 0
-                                        && solutionParams.swizzleTileSize.k > 0,
-                                    "Invalid SwizzleTileSize for A.");
+                    if(solutionParams.swizzleScale)
+                    {
+                        if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.m > 0
+                                            && solutionParams.swizzleTileSize.k > 0,
+                                        "Invalid SwizzleTileSize for A.",
+                                        ShowValue(solutionParams.swizzleTileSize.m),
+                                        ShowValue(solutionParams.swizzleTileSize.k));
+                        }
 
-                    if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
-                        AssertFatal(solutionParams.swizzleTileSize.n > 0
-                                        && solutionParams.swizzleTileSize.l > 0,
-                                    "Invalid SwizzleTileSize for B.");
+                        if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.n > 0
+                                            && solutionParams.swizzleTileSize.l > 0,
+                                        "Invalid SwizzleTileSize for B.",
+                                        ShowValue(solutionParams.swizzleTileSize.n),
+                                        ShowValue(solutionParams.swizzleTileSize.l));
+                        }
+                    }
 
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
