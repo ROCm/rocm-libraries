@@ -917,7 +917,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
-                        runDbSyncJob(utils)
+                        runDbSyncJob()
                     }
                     post {
                         always {
