@@ -93,9 +93,10 @@ _CCCL_HOST_DEVICE inline int __atomic_memcmp(void const* __lhs, void const* __rh
 {
   NV_DISPATCH_TARGET(
     NV_IS_DEVICE_LIBHIPCXX,
-    (unsigned char const* __lhs_c; unsigned char const* __rhs_c;
-     // NVCC recommended laundering through inline asm to compare padding bytes.
-     asm("mov.b64 %0, %2;\n mov.b64 %1, %3;" : "=l"(__lhs_c), "=l"(__rhs_c) : "l"(__lhs), "l"(__rhs));
+    // TODO(HIP/AMD): this is a temporal revert of an asm change made by Nvidia (possibly introducing UB that was fixed by the asm command)
+    (auto __lhs_c = reinterpret_cast<unsigned char const*>(__lhs);
+     auto __rhs_c = reinterpret_cast<unsigned char const*>(__rhs);
+
      while (__count--) {
        auto const __lhs_v = *__lhs_c++;
        auto const __rhs_v = *__rhs_c++;
