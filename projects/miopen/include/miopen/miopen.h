@@ -122,8 +122,10 @@ typedef enum
 
 typedef enum
 {
-    miopenMathDefault  = 0, /*!< Default MathType, use TF32 if possible */
-    miopenMathPedantic = 1, /*!< Strict IEEE compliance. Don't allow datatype down conversion. */
+    // TODO:(LYM) temporary use Pedantic as default until TF32 is fully supported
+    miopenMathDefault = 0, /*!< Use TF32 if possible */
+    miopenMathPedantic =
+        1, /*!< Default MathType. Strict IEEE compliance. Don't allow datatype down conversion. */
 } miopenMathType_t;
 
 #ifdef MIOPEN_BETA_API
@@ -645,8 +647,9 @@ typedef enum
 #else
 // miopenReserved1 = 2,
 #endif
+    // TODO:(LYM) temporarily use Pedantic as default until TF32 is fully supported
     MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE =
-        3, /*!< refer to miopenMathType_t,default is miopenMathDefault >*/
+        3, /*!< refer to miopenMathType_t,default is miopenMathPedantic >*/
 } miopenConvolutionAttrib_t;
 
 /*! @ingroup convolutions

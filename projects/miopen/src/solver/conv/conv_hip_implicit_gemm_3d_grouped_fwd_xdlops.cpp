@@ -376,10 +376,10 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
     const miopen::conv::ProblemDescription& problem)
 {
     valid_kernels = FillValidKernelsByAlphaBeta<DataType, ComputeType>(problem);
-    index         = 0;
-    kernel_id     = valid_kernels[index];
-    if(kernel_id.empty())
+    if(valid_kernels.empty())
         return false;
+    index     = 0;
+    kernel_id = valid_kernels[index];
     return true;
 }
 

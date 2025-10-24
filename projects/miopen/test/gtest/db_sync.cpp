@@ -177,43 +177,11 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     if(opt.size() >= 2)
     {
         key = opt[0];
-
-        // Use the lambda function to parse key/value pairs
-        // Parse additional key/value pairs from opt[1:]
-        auto keyValueMap = [&opt]() -> std::unordered_map<std::string, std::string> {
-            std::unordered_map<std::string, std::string> mapping;
-            const std::unordered_set<std::string> validKeys{"g", "ci", "cw", "co", "cx"};
-            for(size_t i = 1; i < opt.size(); ++i)
-            {
-                const std::string& opt_current = opt[i];
-                // Find the key by checking which valid key the option starts with
-                for(const auto& validKey : validKeys)
-                {
-                    if(StartsWith(opt_current, validKey))
-                    {
-                        std::string value = RemovePrefix(opt_current, validKey);
-                        mapping[validKey] = value;
-                        break;
-                    }
-                }
-            }
-
-            return mapping;
-        }();
-
-        if(keyValueMap.find("g") != keyValueMap.end())
-        {
-            group_cnt = std::stoi(keyValueMap["g"]);
-        }
-        if(keyValueMap.find("cx") != keyValueMap.end())
-        {
-            // if another compute datatype is added in future, this part needs to be extended
-            if(keyValueMap["cx"] == "TF32")
-                use_tf32 = true;
-        }
+        ASSERT_TRUE(StartsWith(opt[1], "g"));
+        group_cnt = std::stoi(RemovePrefix(opt[1], "g"));
     }
     else
-        ASSERT_TRUE(opt.size() == 1);
+        ASSERT_TRUE(opt.size() == 1); // either there is one optional args or there is none
     // 2d or 3d ?
     const auto is_3d = [&]() {
         const auto pat_3d = std::regex{"[0-9]x[0-9]x[0-9]"};

@@ -818,13 +818,6 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
         SetTensorNd(weightTensor_vect4, wei_len_vect4, data_type);
     }
     SetConvDescriptorFromCmdLineArgs();
-    auto math_type_ = inflags.GetValueInt("math_type");
-    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
-    {
-        std::cout << "Invalid math_type value: " << math_type_ << std::endl;
-        return 1;
-    }
-    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     std::vector<int> out_len = GetOutputTensorLengths();
     if(miopen::deref(inputTensor).GetLayoutEnum() == miopenTensorNCHWc4 ||
@@ -875,7 +868,7 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
             static_cast<int>(miopenConvolutionFindModeNormal)); // Repeat via hidden API.
         miopenSetConvolutionGroupCount(warmupConvDesc, group_count);
         miopenSetConvolutionAttribute(
-            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
+            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, inflags.GetValueInt("math_type"));
 
         int warmup_out_len_size = miopen::deref(warmupInputTensor).GetNumDims();
         std::vector<int> warmup_out_len(warmup_out_len_size);
@@ -1230,6 +1223,14 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
     {
         miopenSetTransposeConvNdOutputPadding(convDesc, spatial_dim, trans_output_pads.data());
     }
+
+    auto math_type_ = inflags.GetValueInt("math_type");
+    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
+    {
+        std::cout << "Invalid math_type value: " << math_type_ << std::endl;
+        exit(0); // NOLINT (concurrency-mt-unsafe)
+    }
+    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     return miopenStatusSuccess;
 }
