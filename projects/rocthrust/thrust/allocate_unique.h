@@ -19,6 +19,7 @@
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_deduction.h>
+#include <thrust/detail/type_traits.h>
 
 #include _THRUST_STD_INCLUDE(utility)
 
@@ -27,40 +28,6 @@ THRUST_NAMESPACE_BEGIN
 // wg21.link/p0316r0
 
 ///////////////////////////////////////////////////////////////////////////////
-
-namespace detail
-{
-
-template <typename Allocator, typename Pointer>
-void allocator_delete_impl(Allocator const& alloc, Pointer p, std::false_type)
-{
-  using traits =
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>;
-
-  typename traits::allocator_type alloc_T(alloc);
-
-  if (nullptr != pointer_traits<Pointer>::get(p))
-  {
-    traits::destroy(alloc_T, thrust::raw_pointer_cast(p));
-    traits::deallocate(alloc_T, p, 1);
-  }
-}
-
-template <typename Allocator, typename Pointer>
-void allocator_delete_impl(Allocator const& alloc, Pointer p, std::true_type)
-{
-  using traits =
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>;
-
-  typename traits::allocator_type alloc_T(alloc);
-
-  if (nullptr != pointer_traits<Pointer>::get(p))
-  {
-    traits::deallocate(alloc_T, p, 1);
-  }
-}
-
-} // namespace detail
 
 template <typename T, typename Allocator, bool Uninitialized = false>
 struct allocator_delete final
@@ -98,9 +65,17 @@ struct allocator_delete final
 
   void operator()(pointer p)
   {
-    std::integral_constant<bool, Uninitialized> ic;
+    using traits = detail::allocator_traits<::internal::remove_cvref_t<Allocator>>;
+    typename traits::allocator_type alloc_T(alloc_);
 
-    detail::allocator_delete_impl(get_allocator(), p, ic);
+    if (nullptr != detail::pointer_traits<pointer>::get(p))
+    {
+      if constexpr (!Uninitialized)
+      {
+        traits::destroy(alloc_T, thrust::raw_pointer_cast(p));
+      }
+      traits::deallocate(alloc_T, p, 1);
+    }
   }
 
   allocator_type& get_allocator() noexcept
@@ -124,40 +99,6 @@ private:
 
 template <typename T, typename Allocator>
 using uninitialized_allocator_delete = allocator_delete<T, Allocator, true>;
-
-namespace detail
-{
-
-template <typename Allocator, typename Pointer, typename Size>
-void array_allocator_delete_impl(Allocator const& alloc, Pointer p, Size count, std::false_type)
-{
-  using traits =
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>;
-
-  typename traits::allocator_type alloc_T(alloc);
-
-  if (nullptr != pointer_traits<Pointer>::get(p))
-  {
-    destroy_n(alloc_T, p, count);
-    traits::deallocate(alloc_T, p, count);
-  }
-}
-
-template <typename Allocator, typename Pointer, typename Size>
-void array_allocator_delete_impl(Allocator const& alloc, Pointer p, Size count, std::true_type)
-{
-  using traits =
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>;
-
-  typename traits::allocator_type alloc_T(alloc);
-
-  if (nullptr != pointer_traits<Pointer>::get(p))
-  {
-    traits::deallocate(alloc_T, p, count);
-  }
-}
-
-} // namespace detail
 
 template <typename T, typename Allocator, bool Uninitialized = false>
 struct array_allocator_delete final
@@ -200,9 +141,16 @@ struct array_allocator_delete final
 
   void operator()(pointer p)
   {
-    std::integral_constant<bool, Uninitialized> ic;
-
-    detail::array_allocator_delete_impl(get_allocator(), p, count_, ic);
+    using traits = detail::allocator_traits<::internal::remove_cvref_t<Allocator>>;
+    typename traits::allocator_type alloc_T(get_allocator());
+    if (nullptr != detail::pointer_traits<pointer>::get(p))
+    {
+      if constexpr (!Uninitialized)
+      {
+        destroy_n(alloc_T, p, count_);
+      }
+      traits::deallocate(alloc_T, p, count_);
+    }
   }
 
   allocator_type& get_allocator() noexcept
@@ -249,16 +197,17 @@ THRUST_HOST_DEVICE tagged_deleter<Pointer, Lambda> make_tagged_deleter(Lambda&& 
 
 ///////////////////////////////////////////////////////////////////////////////
 
+//! Creates a \p std::unique_ptr holding a new object of type \p T, constructed with \p args, using \p alloc as the
+//! allocator.
 template <typename T, typename Allocator, typename... Args>
 THRUST_HOST std::unique_ptr<
   T,
-  allocator_delete<T,
-                   typename detail::allocator_traits<typename std::remove_cv<
-                     typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>::allocator_type>>
+  allocator_delete<
+    T,
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 allocate_unique(Allocator const& alloc, Args&&... args)
 {
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -273,17 +222,17 @@ allocate_unique(Allocator const& alloc, Args&&... args)
   return std::unique_ptr<T, decltype(deleter)>(hold.release(), std::move(deleter));
 }
 
+//! Creates a \p std::unique_ptr holding storage for a new object of type \p T without constructing it, using \p alloc
+//! as the allocator.
 template <typename T, typename Allocator>
 THRUST_HOST std::unique_ptr<
   T,
   uninitialized_allocator_delete<
     T,
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::
-      template rebind_traits<T>::allocator_type>>
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 uninitialized_allocate_unique(Allocator const& alloc)
 {
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -297,6 +246,8 @@ uninitialized_allocate_unique(Allocator const& alloc)
   return std::unique_ptr<T, decltype(deleter)>(hold.release(), std::move(deleter));
 }
 
+//! Creates a \p std::unique_ptr holding an array of objects of type \p T, each one constructed with \p args, using \p
+//! alloc as the allocator.
 template <typename T, typename Allocator, typename Size, typename... Args>
 THRUST_HOST std::unique_ptr<
   T[],
@@ -305,8 +256,7 @@ THRUST_HOST std::unique_ptr<
                            Allocator>::type>::type>::template rebind_traits<T>::allocator_type>>
 allocate_unique_n(Allocator const& alloc, Size n, Args&&... args)
 {
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -321,17 +271,17 @@ allocate_unique_n(Allocator const& alloc, Size n, Args&&... args)
   return std::unique_ptr<T[], decltype(deleter)>(hold.release(), std::move(deleter));
 }
 
+//! Creates a \p std::unique_ptr holding storage for an array of objects of type \p T without constructing them, using
+//! \p alloc as the allocator.
 template <typename T, typename Allocator, typename Size>
 THRUST_HOST std::unique_ptr<
   T[],
   uninitialized_array_allocator_delete<
     T,
-    typename detail::allocator_traits<typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::
-      template rebind_traits<T>::allocator_type>>
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::allocator_type>>
 uninitialized_allocate_unique_n(Allocator const& alloc, Size n)
 {
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
