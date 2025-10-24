@@ -47,7 +47,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             = (node2.attributes_type()
                == hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes);
 
-        bool isCorrectOrder = isBatchnormInferenceFirst && isActivationSecond && isBatchnormBwdThird;
+        bool isCorrectOrder
+            = isBatchnormInferenceFirst && isActivationSecond && isBatchnormBwdThird;
         if(isCorrectOrder)
         {
             HIPDNN_LOG_INFO("Batchnorm plan builder applicable for batchnorm inference + "
@@ -61,7 +62,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
 
     HIPDNN_LOG_INFO(
-        "Batchnorm plan builder is applicable only for 1, 2, or 3 node graphs. Graph has {} nodes",
+        "Batchnorm plan builder is applicable only for 1 or 3 node graphs. Graph has {} nodes",
         opGraph.nodeCount());
     return false;
 }
@@ -120,10 +121,9 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanFusedBackwardsActivation(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                       const hipdnn_plugin::IGraph& opGraph,
+                                       HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& node0 = opGraph.getNode(0);
     const auto& node1 = opGraph.getNode(1);
@@ -154,7 +154,7 @@ void buildPlanFusedBackwardsActivation(
             "Failed to convert attributes to BatchnormBackwardAttributes for node: "
                 + getNodeName(node2));
     }
-    
+
     BatchnormBwdParams params(*bnAttr, *actAttr, *inferenceAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
     executionContext.setPlan(std::move(plan));
@@ -172,13 +172,6 @@ void MiopenBatchnormPlanBuilder::buildPlan(
         HIPDNN_LOG_INFO(
             "Building batchnorm inference + activation + batchnorm backward fusion plan");
         buildPlanFusedBackwardsActivation(handle, opGraph, executionContext);
-        return;
-    }
-
-    if(opGraph.nodeCount() == 2)
-    {
-        HIPDNN_LOG_INFO("Building batchnorm backward + activation fusion plan");
-        buildPlanBwdWithActivation(handle, opGraph, executionContext);
         return;
     }
 

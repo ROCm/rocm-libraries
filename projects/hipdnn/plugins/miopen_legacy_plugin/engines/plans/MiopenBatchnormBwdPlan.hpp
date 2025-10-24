@@ -6,9 +6,9 @@
 #include <optional>
 
 #include <hipdnn_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-
 
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
@@ -25,11 +25,12 @@ public:
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormBwdParams::BatchnormBwdParams(
+    BatchnormBwdParams(
         const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
         const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
 
     BatchnormBwdParams(const BatchnormBwdParams&) = delete;
     BatchnormBwdParams& operator=(const BatchnormBwdParams&) = delete;

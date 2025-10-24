@@ -45,19 +45,22 @@ BatchnormBwdParams::BatchnormBwdParams(
     , _dy(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dy_tensor_uid()))
     , _dx(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
-    , _dscale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dscale_tensor_uid()))
+    , _dscale(
+          miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dscale_tensor_uid()))
     , _dbias(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dbias_tensor_uid()))
-    , _optActivation(activationAttributes)
-    , _optBias(miopen_utils::createTensor(tensorMap, batchnormInferenceAttributes.bias_tensor_uid()))
+    , _optActivation(pointwiseAttributes)
+    , _optBias(
+          miopen_utils::createTensor(tensorMap, batchnormInferenceAttributes.bias_tensor_uid()))
 {
-    if(attributes.mean_tensor_uid().has_value())
+    if(batchnormBackwardAttributes.mean_tensor_uid().has_value())
     {
-        _optMean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
+        _optMean = miopen_utils::createTensor(
+            tensorMap, batchnormBackwardAttributes.mean_tensor_uid().value());
     }
-    if(attributes.inv_variance_tensor_uid().has_value())
+    if(batchnormBackwardAttributes.inv_variance_tensor_uid().has_value())
     {
-        _optInvVariance
-            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+        _optInvVariance = miopen_utils::createTensor(
+            tensorMap, batchnormBackwardAttributes.inv_variance_tensor_uid().value());
     }
 }
 
