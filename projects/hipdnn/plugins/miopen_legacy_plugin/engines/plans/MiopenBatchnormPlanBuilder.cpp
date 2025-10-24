@@ -30,32 +30,38 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         return true;
     }
 
-    if(opGraph.nodeCount() == 2)
+    if(opGraph.nodeCount() == 3)
     {
         const auto& node0 = opGraph.getNode(0);
         const auto& node1 = opGraph.getNode(1);
+        const auto& node2 = opGraph.getNode(2);
 
-        // activation -> batchnorm backward
-        bool isActivationFirst = (node0.attributes_type()
-                                  == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes);
-        bool isBatchnormBwdSecond
+        // batchnorm inference -> activation -> batchnorm backward
+        bool isBatchnormInferenceFirst
+            = (node0.attributes_type()
+               == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
+        bool isActivationSecond
             = (node1.attributes_type()
+               == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes);
+        bool isBatchnormBwdThird
+            = (node2.attributes_type()
                == hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes);
 
-        if(isActivationFirst && isBatchnormBwdSecond)
+        bool isCorrectOrder = isBatchnormInferenceFirst && isActivationSecond && isBatchnormBwdThird;
+        if(isCorrectOrder)
         {
-            HIPDNN_LOG_INFO(
-                "Batchnorm plan builder applicable for activation + batchnorm backward fusion");
+            HIPDNN_LOG_INFO("Batchnorm plan builder applicable for batchnorm inference + "
+                            "activation + batchnorm backward fusion");
             return true;
         }
 
-        HIPDNN_LOG_INFO("Batchnorm plan builder requires activation first, batchnorm backward "
-                        "second. Current order not supported");
+        HIPDNN_LOG_INFO("Batchnorm plan builder requires batchnorm inference, activation, "
+                        "batchnorm backward order. Current order not supported");
         return false;
     }
 
     HIPDNN_LOG_INFO(
-        "Batchnorm plan builder is applicable only for 1 or 2 node graphs. Graph has {} nodes",
+        "Batchnorm plan builder is applicable only for 1, 2, or 3 node graphs. Graph has {} nodes",
         opGraph.nodeCount());
     return false;
 }
@@ -114,31 +120,42 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanBwdWithActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                const hipdnn_plugin::IGraph& opGraph,
-                                HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanFusedBackwardsActivation(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_plugin::IGraph& opGraph,
+    HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& node0 = opGraph.getNode(0);
     const auto& node1 = opGraph.getNode(1);
+    const auto& node2 = opGraph.getNode(2);
 
-    const auto* actAttr = node0.attributes_as_PointwiseAttributes();
+    const auto* inferenceAttr = node0.attributes_as_BatchnormInferenceAttributes();
+    if(inferenceAttr == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Failed to convert attributes to BatchnormInferenceAttributes for node: "
+                + getNodeName(node0));
+    }
+
+    const auto* actAttr = node1.attributes_as_PointwiseAttributes();
     if(actAttr == nullptr)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Failed to convert attributes to PointwiseAttributes for node: " + getNodeName(node0));
+            "Failed to convert attributes to PointwiseAttributes for node: " + getNodeName(node1));
     }
 
-    const auto* bnAttr = node1.attributes_as_BatchnormBackwardAttributes();
+    const auto* bnAttr = node2.attributes_as_BatchnormBackwardAttributes();
     if(bnAttr == nullptr)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Failed to convert attributes to BatchnormBackwardAttributes for node: "
-                + getNodeName(node1));
+                + getNodeName(node2));
     }
-
-    BatchnormBwdParams params(*bnAttr, *actAttr, opGraph.getTensorMap());
+    
+    BatchnormBwdParams params(*bnAttr, *actAttr, *inferenceAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
     executionContext.setPlan(std::move(plan));
 }
@@ -150,7 +167,14 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     const hipdnn_plugin::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    // TODO: generalize to any 2 node graph
+    if(opGraph.nodeCount() == 3)
+    {
+        HIPDNN_LOG_INFO(
+            "Building batchnorm inference + activation + batchnorm backward fusion plan");
+        buildPlanFusedBackwardsActivation(handle, opGraph, executionContext);
+        return;
+    }
+
     if(opGraph.nodeCount() == 2)
     {
         HIPDNN_LOG_INFO("Building batchnorm backward + activation fusion plan");

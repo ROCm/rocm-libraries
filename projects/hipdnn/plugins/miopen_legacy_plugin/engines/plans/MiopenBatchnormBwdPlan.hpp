@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 
+
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
@@ -24,11 +25,11 @@ public:
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormBwdParams(
-        const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& attributes,
-        const hipdnn_sdk::data_objects::PointwiseAttributes& activationAttributes,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+    BatchnormBwdParams::BatchnormBwdParams(
+        const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& batchnormBackwardAttributes,
+        const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 
     BatchnormBwdParams(const BatchnormBwdParams&) = delete;
     BatchnormBwdParams& operator=(const BatchnormBwdParams&) = delete;
@@ -46,6 +47,7 @@ public:
     const std::optional<MiopenTensor>& optMean() const;
     const std::optional<MiopenTensor>& optInvVariance() const;
     const std::optional<MiopenActivationDescriptor>& optActivation() const;
+    const std::optional<MiopenTensor>& optBias() const;
 
 private:
     MiopenTensor _x;
@@ -58,6 +60,7 @@ private:
     std::optional<MiopenTensor> _optMean;
     std::optional<MiopenTensor> _optInvVariance;
     std::optional<MiopenActivationDescriptor> _optActivation;
+    std::optional<MiopenTensor> _optBias;
 };
 
 class BatchnormBwdPlan : public IPlan
