@@ -3,31 +3,31 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
 
-TEST(TestTempDirectory, CreatesAndDestroys)
+TEST(TestScopedDirectory, CreatesAndDestroys)
 {
     std::filesystem::path folderPath = "OIJIR44E";
     ASSERT_FALSE(std::filesystem::exists(folderPath));
 
     {
-        TempDirectory temp(folderPath);
+        ScopedDirectory temp(folderPath);
         ASSERT_TRUE(std::filesystem::exists(folderPath));
     }
 
     ASSERT_FALSE(std::filesystem::exists(folderPath));
 }
 
-TEST(TestTempDirectory, ExistingPath)
+TEST(TestScopedDirectory, ExistingPath)
 {
     std::filesystem::path folderPath = "REPOIEHJv28";
     ASSERT_FALSE(std::filesystem::exists(folderPath));
     std::filesystem::create_directory(folderPath);
     ASSERT_TRUE(std::filesystem::exists(folderPath));
 
-    EXPECT_THROW(TempDirectory{folderPath}, std::runtime_error);
+    EXPECT_THROW(ScopedDirectory{folderPath}, std::runtime_error);
 
     ASSERT_TRUE(std::filesystem::exists(folderPath));
 

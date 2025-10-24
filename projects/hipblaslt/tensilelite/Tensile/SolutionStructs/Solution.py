@@ -1191,8 +1191,13 @@ class Solution(collections.abc.Mapping):
     state["LocalWriteUseSgprB"] = False
     state["StoreSwapAddr"] = False
 
-    state["WorkGroupMappingXCC"] = abs(state["WorkGroupMappingXCC"])
-
+    if state["WorkGroupMappingXCC"] == -1:
+      if state["StreamK"] == 0:
+        reject(state, printRejectionReason, "Can only use auto WGMXCC with StreamK.")
+        return False
+      if state["StreamKXCCMapping"] != 0:
+        reject(state, printRejectionReason, "Cannot use auto WGMXCC with SKXCC.")
+        return False
 
     problemType = state["ProblemType"]
 
@@ -1425,6 +1430,37 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+
+    #################################################################
+    # ForceUnrollSubIter requirements
+    # - Needs PGR > 0, double buffer
+    # - MIWaveTile must be even and larger than 2
+    # - TLU{A,B} cases only supported if using LdsTR or if VPerm not needed (size{A,B} >= 4)
+    #
+    # - Not supported for mixed precision cases currently
+    sizeDataTypeA = state["ProblemType"]["DataTypeA"].numBytes()
+    sizeDataTypeB = state["ProblemType"]["DataTypeB"].numBytes()
+    sizeDataType = state["ProblemType"]["DataType"].numBytes()
+    TLUA = state["ProblemType"]["TLUA"]
+    TLUB = state["ProblemType"]["TLUB"]
+    if (
+      state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
+      state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
+      and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
+      and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
+      and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
+      and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
+    ):
+      state["ForceUnrollSubIter"] = True
+      state["numSubTiles"] = 2
+      state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+    else:
+      state["ForceUnrollSubIter"] = False
+      state["numSubTiles"] = 1
+
+    # Check if CMS is available for this solution
+    hasCMS,_ = hasCustomSchedule(state)
+    state["UseCustomMainLoopSchedule"] = hasCMS
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -3306,11 +3342,6 @@ class Solution(collections.abc.Mapping):
           not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
-
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
-
-    state["InternalSupportParams"]["UseSFC"] = (len(state["SpaceFillingAlgo"]) > 0)
 
   ########################################
   @ staticmethod

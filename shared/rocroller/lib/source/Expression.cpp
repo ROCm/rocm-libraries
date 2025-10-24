@@ -116,6 +116,30 @@ namespace rocRoller
                 return a == b;
             }
 
+            bool operator()(BitfieldCombine const& a, BitfieldCombine const& b)
+            {
+                bool lhs = false;
+                bool rhs = false;
+
+                bool srcOffset = (a.srcOffset == b.srcOffset);
+                bool dstOffset = (a.dstOffset == b.dstOffset);
+                bool width     = (a.width == b.width);
+                bool srcIsZero = (a.srcIsZero == b.srcIsZero);
+                bool dstIsZero = (a.dstIsZero == b.dstIsZero);
+
+                lhs = call(a.lhs, b.lhs);
+                rhs = call(a.rhs, b.rhs);
+                return lhs && rhs && srcOffset && dstOffset && width && srcIsZero && dstIsZero;
+            }
+
+            bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
+            {
+                bool offset = (a.offset == b.offset);
+                bool width  = (a.width == b.width);
+
+                return offset && width && call(a.arg, b.arg);
+            }
+
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
             {
                 // Need to be careful not to invoke the overloaded operators, we want to compare
@@ -288,6 +312,30 @@ namespace rocRoller
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
             {
                 return (*a) == (*b);
+            }
+
+            bool operator()(BitfieldCombine const& a, BitfieldCombine const& b)
+            {
+                bool lhs = false;
+                bool rhs = false;
+
+                bool srcOffset = (a.srcOffset == b.srcOffset);
+                bool dstOffset = (a.dstOffset == b.dstOffset);
+                bool width     = (a.width == b.width);
+                bool srcIsZero = (a.srcIsZero == b.srcIsZero);
+                bool dstIsZero = (a.dstIsZero == b.dstIsZero);
+
+                lhs = call(a.lhs, b.lhs);
+                rhs = call(a.rhs, b.rhs);
+                return lhs && rhs && srcOffset && dstOffset && width && srcIsZero && dstIsZero;
+            }
+
+            bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
+            {
+                bool offset = (a.offset == b.offset);
+                bool width  = (a.width == b.width);
+
+                return call(a.arg, b.arg) && offset && width;
             }
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)

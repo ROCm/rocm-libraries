@@ -9,7 +9,8 @@ namespace hipdnn_sdk::data_objects
 {
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& tensorAttrJson, data_objects::TensorAttributes const& tensorAttr)
+inline void to_json(nlohmann::json& tensorAttrJson,
+                    const data_objects::TensorAttributes& tensorAttr)
 {
     tensorAttrJson["uid"] = tensorAttr.uid();
     tensorAttrJson["data_type"] = tensorAttr.data_type();
@@ -24,8 +25,8 @@ void to_json(nlohmann::json& tensorAttrJson, data_objects::TensorAttributes cons
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                        const nlohmann::json& entry)
+inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                               const nlohmann::json& entry)
 {
     auto uid = entry.at("uid").get<int64_t>();
     auto name = entry.at("name").get<std::string>();

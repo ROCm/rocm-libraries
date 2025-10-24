@@ -203,7 +203,7 @@ void jump_ahead_mt19937(dim3 block_idx,
                 unsigned int tm = temp[wrap_n(ptr + mt19937_constants::m)];
                 unsigned int y
                     = (t0 & mt19937_constants::upper_mask) | (t1 & mt19937_constants::lower_mask);
-                temp[ptr] = tm ^ (y >> 1) ^ ((y & 0x1U) ? mt19937_constants::matrix_a : 0);
+                temp[ptr] = tm ^ (y >> 1) ^ (((y & 1) ? -1 : 0) & mt19937_constants::matrix_a);
             }
             system::syncthreads<isDevice>{}();
             ptr = wrap_n(ptr + 1);
