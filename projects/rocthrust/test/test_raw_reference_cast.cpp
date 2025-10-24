@@ -17,7 +17,10 @@
 
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/device_vector.h>
+#include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
+
+#include <vector>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -27,6 +30,10 @@
 #endif
 
 TESTS_DEFINE(RawReferenceCastTests, FullTestsParams);
+
+template <>
+struct thrust::detail::is_proxy_reference<std::vector<bool>::reference> : true_type
+{};
 
 TEST(RawReferenceCastTests, TestRawReferenceCast)
 {
@@ -69,5 +76,11 @@ TEST(RawReferenceCastTests, TestRawReferenceCast)
       is_same_v<decltype(thrust::raw_reference_cast(*zip2)),
                 thrust::detail::tuple_of_iterator_references<thrust::detail::tuple_of_iterator_references<int&, int&>,
                                                              thrust::detail::tuple_of_iterator_references<int&, int&>>>);
+  }
+
+  // proxy references
+  {
+    [[maybe_unused]] std::vector<bool> vb;
+    static_assert(is_same_v<decltype(thrust::raw_reference_cast(vb[0])), std::vector<bool>::reference>);
   }
 }
