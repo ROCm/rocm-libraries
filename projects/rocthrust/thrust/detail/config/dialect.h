@@ -55,11 +55,9 @@
 
 #  define THRUST_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
 
-#  define THRUST_CONSTEXPR_GLOBAL constexpr
-
 // We need to treat host and device separately
 #  if defined(__CUDA_ARCH__)
-#    define THRUST_GLOBAL_CONSTANT THRUST_DEVICE THRUST_CONSTEXPR_GLOBAL
+#    define THRUST_GLOBAL_CONSTANT THRUST_DEVICE constexpr
 #  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv
 #    define THRUST_GLOBAL_CONSTANT inline constexpr
 #  endif // __CUDA_ARCH__

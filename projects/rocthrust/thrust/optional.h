@@ -710,7 +710,7 @@ struct THRUST_DEPRECATED nullopt_t
 /// foo(thrust::nullopt); //pass an empty optional
 /// ```
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-__device__ static THRUST_CONSTEXPR_GLOBAL
+__device__ static constexpr
 #else
 static constexpr
 #endif // __CUDA_ARCH__
