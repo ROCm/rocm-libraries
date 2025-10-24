@@ -668,14 +668,14 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDSViaVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"] == False
+    assert not post["storeLDS_D"]
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
     )
     assert post["load_A"] == "BufferToVGPR"
     assert post["load_B"] == "BufferToLDSViaVGPR"
-    assert post["storeLDS_D"] == True
+    assert post["storeLDS_D"]
 
     # setting d2l options
     post = run_and_load_example_yaml(
@@ -694,14 +694,14 @@ def test_gemm_options(tmp_path):
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
     )
-    assert post["loadLDSScale_A"] == True
-    assert post["loadLDSScale_B"] == True
+    assert post["loadLDSScale_A"]
+    assert post["loadLDSScale_B"]
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=B"]
     )
-    assert post["loadLDSScale_A"] == False
-    assert post["loadLDSScale_B"] == True
+    assert not post["loadLDSScale_A"]
+    assert post["loadLDSScale_B"]
 
     # setting swizzle tile size
     post = run_and_load_example_yaml(
