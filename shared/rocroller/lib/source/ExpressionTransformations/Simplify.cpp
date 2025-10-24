@@ -448,7 +448,6 @@ namespace rocRoller
         /**
          * Merges consecutive Concatenate operands where possible.
          * Checks if a pair of operands are two 32-bit BitFieldExtracts from the same 64-bit source
-         * or two constant 32-bit literals that can be combined into a 64-bit literal.
          */
         Concatenate concatenatePartialSimplify(Concatenate const& expr)
         {
