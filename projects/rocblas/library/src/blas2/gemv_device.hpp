@@ -1214,10 +1214,10 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_kernel_calc(rocblas_int m,
     rocblas_int m_full = (m / NB_X) * NB_X;
 
     for(rocblas_int i = 0; i < m_full; i += NB_X)
-        res += (CONJ ? conj(A[i]) : A[i]) * x[(tx + i) * int64_t(incx)];
+        res += Tex((CONJ ? conj(A[i]) : A[i])) * Tex(x[(tx + i) * int64_t(incx)]);
 
     if(tx + m_full < m)
-        res += (CONJ ? conj(A[m_full]) : A[m_full]) * x[(tx + m_full) * int64_t(incx)];
+        res += Tex((CONJ ? conj(A[m_full]) : A[m_full])) * Tex(x[(tx + m_full) * int64_t(incx)]);
 
     sdata[tx] = res;
 
@@ -1283,10 +1283,10 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_reduce_kernel_calc(rocblas_int m,
     //Each column of Matrix A is multiplied with vector x and the resultant value is stored in res.
     //If m > NB_X, then the threads are reused and the multiplied values will be accumalated.
     for(rocblas_int i = 0; tx + i < m_full; i += NB_X)
-        res += (CONJ ? conj(A[i]) : A[i]) * x[(tx + i) * (incx)];
+        res += Tex((CONJ ? conj(A[i]) : A[i])) * Tex(x[(tx + i) * (incx)]);
 
     if(tx + m_full < m)
-        res += (CONJ ? conj(A[m_full]) : A[m_full]) * x[(tx + m_full) * (incx)];
+        res += Tex((CONJ ? conj(A[m_full]) : A[m_full])) * Tex(x[(tx + m_full) * (incx)]);
 
     static_assert(NB_X > WARP_32);
 

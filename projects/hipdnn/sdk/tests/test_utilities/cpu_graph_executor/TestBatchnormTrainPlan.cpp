@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
@@ -40,7 +41,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     double epsilon = BATCHNORM_DEFAULT_EPSILON;
     double momentum = 0.1;
     std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
     BatchnormTrainTensorBundle<float, float, float> planTensorBundle(
         dims, seed, TensorLayout::NHWC);
     BatchnormTrainTensorBundle<float, float, float> directTensorBundle(
@@ -86,12 +87,12 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(epsilon),
                                                            static_cast<float>(epsilon));
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.yTensor.memory(),
-                                                planTensorBundle.yTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.meanTensor.memory(),
-                                                planTensorBundle.meanTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.invVarianceTensor.memory(),
-                                                planTensorBundle.invVarianceTensor.memory()));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.meanTensor,
+                                                planTensorBundle.meanTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.invVarianceTensor,
+                                                planTensorBundle.invVarianceTensor));
 }
 
 TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
