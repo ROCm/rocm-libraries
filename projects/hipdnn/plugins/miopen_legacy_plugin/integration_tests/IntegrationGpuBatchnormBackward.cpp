@@ -130,8 +130,6 @@ protected:
             dscaleTensorAttr->set_uid(uid++);
         }
         dscaleTensorAttr->set_data_type(intermediateDataType);
-        dscaleTensorAttr->set_dim(derivedDims);
-        dscaleTensorAttr->set_stride(generateStrides(derivedDims));
         dscaleTensorAttr->set_output(true);
 
         auto& dbiasTensorAttr = outputTensorsAttr[2];
@@ -140,8 +138,6 @@ protected:
             dbiasTensorAttr->set_uid(uid++);
         }
         dbiasTensorAttr->set_data_type(intermediateDataType);
-        dbiasTensorAttr->set_dim(derivedDims);
-        dbiasTensorAttr->set_stride(generateStrides(derivedDims));
         dbiasTensorAttr->set_output(true);
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<IntermediateType>();

@@ -61,26 +61,16 @@ protected:
 protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
-
         GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
-        generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
-
-        verifyGraph(graph, seed, cpuBundle, gpuBundle, outputTensorIds);
-    }
-
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph,
-                     unsigned int seed,
-                     GraphTensorBundle& cpuBundle,
-                     GraphTensorBundle& gpuBundle,
-                     std::vector<int64_t>& outputTensorIds)
-    {
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
-
         auto result = graph.validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
+
+        initializeBundle(graph, gpuBundle, seed);
+        initializeBundle(graph, cpuBundle, seed);
 
         executeGpuGraph(_handle, graph, gpuBundle);
         executeCpuGraph(graph, cpuBundle);
