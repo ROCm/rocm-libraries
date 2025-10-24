@@ -28,6 +28,7 @@
 // Required test headers
 #include "bounds_checking_iterator.hpp"
 #include "identity_iterator.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_custom_test_types.hpp"
@@ -425,6 +426,12 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                          number_of_blocks,
                                                          stream));
 
+            // Create ordered block id.
+            using block_id_type = rocprim::detail::block_id_wrapper<unsigned int>;
+            common::device_ptr<void> ordered_bid_storage(sizeof(block_id_type::id_type));
+            auto ordered_bid = block_id_type::create(ordered_bid_storage.get());
+            HIP_CHECK(ordered_bid.reset_from_host(stream));
+
             // Call the provided function with either scan_state or scan_state_with_sleep based on
             // the value of use_sleep
             bool use_sleep;
@@ -449,7 +456,8 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                                        dim3(block_size),
                                                                        0,
                                                                        stream>>>(scan_state,
-                                                                                 number_of_blocks);
+                                                                                 number_of_blocks,
+                                                                                 ordered_bid);
                 });
 
             HIP_CHECK(hipGetLastError());
@@ -489,7 +497,8 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                        previous_last_element,
                                        new_last_element,
                                        false,
-                                       false);
+                                       false,
+                                       ordered_bid);
                 });
 
             ASSERT_EQ(hipSuccess, launch_err);
@@ -652,6 +661,11 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                                      number_of_blocks,
                                                      stream));
 
+        // Create ordered block id.
+        common::device_ptr<unsigned int> ordered_bid_storage(1);
+        auto                             ordered_bid
+            = rocprim::detail::ordered_block_id<unsigned int>::create(ordered_bid_storage.get());
+
         // Call the provided function with either scan_state or scan_state_with_sleep based on
         // the value of use_sleep
         bool use_sleep;
@@ -676,7 +690,8 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                                                    dim3(block_size),
                                                                    0,
                                                                    stream>>>(scan_state,
-                                                                             number_of_blocks);
+                                                                             number_of_blocks,
+                                                                             ordered_bid);
             });
 
         HIP_CHECK(hipGetLastError());
@@ -715,7 +730,8 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                    previous_last_element,
                                    new_last_element,
                                    false,
-                                   false);
+                                   false,
+                                   ordered_bid);
             });
 
         ASSERT_EQ(hipSuccess, launch_err);

@@ -87,12 +87,12 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(epsilon),
                                                            static_cast<float>(epsilon));
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.yTensor.memory(),
-                                                planTensorBundle.yTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.meanTensor.memory(),
-                                                planTensorBundle.meanTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.invVarianceTensor.memory(),
-                                                planTensorBundle.invVarianceTensor.memory()));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.yTensor, planTensorBundle.yTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.meanTensor,
+                                                planTensorBundle.meanTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.invVarianceTensor,
+                                                planTensorBundle.invVarianceTensor));
 }
 
 TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)

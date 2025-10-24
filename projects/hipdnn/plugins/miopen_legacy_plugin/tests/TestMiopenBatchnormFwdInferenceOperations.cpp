@@ -235,7 +235,7 @@ protected:
             BATCHNORM_DEFAULT_EPSILON);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu.memory(), yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu, yTensor));
     }
 
     hipdnnEnginePluginHandle_t _handle = nullptr;
