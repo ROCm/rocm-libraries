@@ -40,17 +40,6 @@
 #include <vector>
 #include <unordered_map>
 
-// Debug macro - can be disabled by commenting out the define
-#define COMGR_DEBUG_ENABLED
-
-#ifdef COMGR_DEBUG_ENABLED
-    #define COMGR_DEBUG(msg) std::cout << msg << std::endl
-    #define COMGR_DEBUG_NOLN(msg) std::cout << msg
-#else
-    #define COMGR_DEBUG(msg) ((void)0)
-    #define COMGR_DEBUG_NOLN(msg) ((void)0)
-#endif
-
 namespace rocRoller
 {
     namespace Serialization
@@ -222,7 +211,6 @@ namespace rocRoller
         template <>
         inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, bool& val)
         {
-            // First try to get it as an integer
             amd_comgr_metadata_kind_t kind;
             amd_comgr_get_metadata_kind(n, &kind);
             
@@ -230,7 +218,6 @@ namespace rocRoller
             {
                 std::string str;
                 comgrNodeInputHelper(n, str);
-                // Handle string representations of boolean
                 if(str == "true" || str == "1")
                     val = true;
                 else if(str == "false" || str == "0")
@@ -266,8 +253,6 @@ namespace rocRoller
         {
             std::string str;
             comgrNodeInputHelper(n, str);
-            // Assuming FP8 has a constructor or assignment from string
-            // You may need to adjust this based on FP8's actual interface
             val.data = static_cast<uint8_t>(std::strtoul(str.c_str(), nullptr, 10));
         }
 
