@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <regex>
+
 #include "client/GEMMParameters.hpp"
 
 namespace rocRoller
@@ -154,12 +156,23 @@ namespace rocRoller
                 return s;
             }
 
-            std::string toString(MNKTuple mnk)
+            std::string toString(MNKTuple x)
             {
-                return fmt::format("{}x{}x{}", mnk.m, mnk.n, mnk.k);
+                return fmt::format("{}x{}x{}", x.m, x.n, x.k);
             }
 
             std::ostream& operator<<(std::ostream& s, MNKTuple const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
+            std::string toString(MNKBTuple x)
+            {
+                return fmt::format("{}x{}x{}x{}", x.m, x.n, x.k, x.b);
+            }
+
+            std::ostream& operator<<(std::ostream& s, MNKBTuple const& x)
             {
                 s << toString(x);
                 return s;
@@ -248,5 +261,88 @@ namespace rocRoller
             }
 
         }
+    }
+}
+
+namespace rocRoller::Client::GEMMClient::CLI
+{
+    bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        x.b = 1;
+
+        std::regex  pattern(R"((\d+)x(\d+)x(\d+)(x(\d+))?)");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.m = std::stoi(match[1]);
+            x.n = std::stoi(match[2]);
+            x.k = std::stoi(match[3]);
+            if(match[5].matched)
+                x.b = std::stoi(match[5]);
+        }
+
+        if(not matched or (x.m < 0) or (x.k < 0) or (x.n < 0) or (x.b < 0))
+        {
+            std::cerr << "Invalid format for MxNxKxB tuple.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
+    bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"((\d+)x(\d+)x(\d+))");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.m = std::stoi(match[1]);
+            x.n = std::stoi(match[2]);
+            x.k = std::stoi(match[3]);
+        }
+
+        if(not matched or (x.m < 0) or (x.k < 0) or (x.n < 0))
+        {
+            std::cerr << "Invalid format for MxNxK tuple.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
+    bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"((\d+)x(\d+)/(\d+)x(\d+))");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.m = std::stoi(match[1]);
+            x.k = std::stoi(match[2]);
+            x.n = std::stoi(match[3]);
+            x.l = std::stoi(match[4]);
+        }
+
+        if(not matched or (x.m < 0) or (x.k < 0) or (x.n < 0) or (x.l < 0))
+        {
+            std::cerr << "Invalid format for MxK/NxL tuple.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
     }
 }

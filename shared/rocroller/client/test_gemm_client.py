@@ -645,6 +645,23 @@ def test_gemm_options(tmp_path):
     assert post["mac_n"] == 2048
     assert post["mac_k"] == 4096
 
+    # setting mi via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mi=2x4x8"]
+    )
+    assert post["wave_m"] == 2
+    assert post["wave_n"] == 4
+    assert post["wave_k"] == 8
+    assert post["wave_b"] == 1
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mi=4x8x16x2"]
+    )
+    assert post["wave_m"] == 4
+    assert post["wave_n"] == 8
+    assert post["wave_k"] == 16
+    assert post["wave_b"] == 2
+
     # setting lds options
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--lds=AB"]

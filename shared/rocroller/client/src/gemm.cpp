@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <filesystem>
-#include <span>
+#include <string>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -1045,151 +1045,6 @@ namespace rocRoller::Client::GEMMClient
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
-
-    constexpr bool PARSE_SUCCESS = true;
-    constexpr bool PARSE_FAILURE = false;
-
-    static bool ParseMI(const std::string&                                 arg,
-                        rocRoller::Client::GEMMClient::SolutionParameters& solution)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        solution.waveB = 1;
-
-        bool fail = false;
-        bool isB  = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveM = std::stoi(token);
-            std::getline(iss, token, 'x');
-            solution.waveN = std::stoi(token);
-
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveK = std::stoi(token);
-
-            isB = true;
-            std::getline(iss, token, 'x');
-            solution.waveB = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            if(!isB)
-                fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            if(!isB)
-                fail = true;
-        }
-
-        fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-                || (solution.waveB < 1);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for Matrix Instruction." << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "The MI argument should be formatted like:" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "    --mi=MxNxKxB" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "For example: --mi=32x32x2x1" << std::endl;
-
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
-    static bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& mnk)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        bool fail = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.m = std::stoi(token);
-            std::getline(iss, token, 'x');
-            mnk.n = std::stoi(token);
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.k = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            fail = true;
-        }
-
-        fail |= (mnk.m < 0) || (mnk.n < 0) || (mnk.k < 0);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for M/N/K tuple." << std::endl;
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
-    static bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        bool fail = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            x.m = std::stoi(token);
-            std::getline(iss, token, '/');
-            x.k = std::stoi(token);
-            std::getline(iss, token, 'x');
-            x.n = std::stoi(token);
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            x.l = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            fail = true;
-        }
-
-        fail |= (x.m < 0) || (x.k < 0) || (x.n < 0) || (x.l < 0);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for MxK/NxL tuple." << std::endl;
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
     constexpr auto SolutionParameterArguments = std::make_tuple(
         std::make_pair("--arch", &SolutionParameters::architecture),
         std::make_pair("--mac_m", &SolutionParameters::macM),
@@ -1260,23 +1115,10 @@ namespace rocRoller::Client::GEMMClient::CLI
         };
 
         auto update = [&](const std::string& optionName, auto& value) -> bool {
-            if constexpr(std::is_same_v<std::decay_t<decltype(value)>, MKNLTuple>)
+            if(app.get_option(optionName)->count())
             {
-                if(app.get_option(optionName)->count())
-                {
-                    auto status = ParseMKNL(app.get_option(optionName)->as<std::string>(), value);
-                    AssertFatal(status == PARSE_SUCCESS,
-                                "Unable to parse MxK/NxL tuple for " + optionName);
-                    return true;
-                }
-            }
-            else
-            {
-                if(app.get_option(optionName)->count())
-                {
-                    value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
-                    return true;
-                }
+                value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                return true;
             }
             return false;
         };
@@ -1317,8 +1159,13 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         if(app.get_option("--mi")->count())
         {
-            if(!ParseMI(app.get_option("--mi")->as<std::string>(), solution))
+            auto x = rocRoller::Client::GEMMClient::MNKBTuple{0, 0, 0, 1};
+            if(!ParseMNKB(app.get_option("--mi")->as<std::string>(), x))
                 Throw<FatalError>("Failed to parse MI argument.");
+            solution.waveM = x.m;
+            solution.waveN = x.n;
+            solution.waveK = x.k;
+            solution.waveB = x.b;
         }
 
         update(SN(&SP::waveM), solution.waveM);
