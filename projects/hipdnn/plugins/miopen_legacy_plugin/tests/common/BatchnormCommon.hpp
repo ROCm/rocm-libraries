@@ -75,8 +75,16 @@ inline std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
         {32, 1, 14, 14, seed},
         {32, 3, 1, 14, seed},
         {32, 3, 14, 1, seed},
-        // {64, 64, 112, 112, seed},
-        // {64, 512, 14, 14, seed},
+    };
+}
+
+inline std::vector<Batchnorm2dTestCase> getBnFwdInferenceFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {64, 64, 112, 112, seed},
+        {64, 512, 14, 14, seed},
     };
 }
 
@@ -103,8 +111,16 @@ inline std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
         {32, 1, 14, 14, seed},
         {32, 3, 1, 14, seed},
         {32, 3, 14, 1, seed},
-        // {64, 64, 112, 112, seed},
-        // {64, 512, 14, 14, seed},
+    };
+}
+
+inline std::vector<Batchnorm2dTestCase> getBnBwdFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return std::vector<Batchnorm2dTestCase>{
+        {64, 64, 112, 112, seed},
+        {64, 512, 14, 14, seed},
     };
 }
 

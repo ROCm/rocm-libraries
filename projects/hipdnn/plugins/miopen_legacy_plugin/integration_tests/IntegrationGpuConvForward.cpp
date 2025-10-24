@@ -154,30 +154,50 @@ TEST_P(IntegrationGpuConvFwdNdhwcFp16, Correctness)
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwFp32, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwFp32,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwBfp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwBfp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwFp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwFp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcFp32, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcFp32,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcBfp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcBfp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcFp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcFp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNcdhwFp32, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNcdhwFp32,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdNcdhwBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNcdhwFp16, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNcdhwFp16,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNdhwcFp32, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNdhwcFp32,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdNdhwcBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNdhwcFp16, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNdhwcFp16,
+                         testing::ValuesIn(getConvTestCases5D()));
