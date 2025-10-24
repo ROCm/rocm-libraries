@@ -92,10 +92,10 @@ public:
         return std::uniform_int_distribution<T>{}(t_rocblas_rng);
     }
 
-    // Random signed char
-    explicit operator signed char()
+    // Random int8_t
+    explicit operator int8_t()
     {
-        return static_cast<signed char>(std::uniform_int_distribution<int>{}(t_rocblas_rng));
+        return static_cast<int8_t>(std::uniform_int_distribution<int>{}(t_rocblas_rng));
     }
 
     // Random NaN double

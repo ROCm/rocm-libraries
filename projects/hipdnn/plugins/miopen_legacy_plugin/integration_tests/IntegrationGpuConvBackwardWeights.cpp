@@ -185,8 +185,8 @@ protected:
         runCpuConvWrwData(testCase, cpuTensorBundle);
 
         CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dwTensor.memory(),
-                                              graphTensorBundle.dwTensor.memory()));
+        EXPECT_TRUE(
+            cpuRefValidation.allClose(cpuTensorBundle.dwTensor, graphTensorBundle.dwTensor));
     }
 
 private:
