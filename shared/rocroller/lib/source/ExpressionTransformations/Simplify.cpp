@@ -400,6 +400,26 @@ namespace rocRoller
 
         struct ConcatenatePartialSimplifyVisitor
         {
+            // TODO: support 32 bit literal merging into 64 bit literal, codegen (copier) has problems
+            // ExpressionPtr operator()(CommandArgumentValue const& expr1,
+            //                          CommandArgumentValue const& expr2) const
+            // {
+            //     return std::visit(
+            //         [](auto const& val1, auto const& val2) -> ExpressionPtr {
+            //             using T1 = std::decay_t<decltype(val1)>;
+            //             using T2 = std::decay_t<decltype(val2)>;
+            //             if constexpr(std::is_same_v<T1, uint32_t> && std::is_same_v<T2, uint32_t>)
+            //             {
+            //                 uint64_t result
+            //                     = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
+            //                 return literal(result);
+            //             }
+            //             return {};
+            //         },
+            //         expr1,
+            //         expr2);
+            // }
+
             ExpressionPtr operator()(BitFieldExtract const& expr1,
                                      BitFieldExtract const& expr2) const
             {
