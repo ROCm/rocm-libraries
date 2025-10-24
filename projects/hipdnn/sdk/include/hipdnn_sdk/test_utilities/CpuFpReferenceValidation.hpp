@@ -70,7 +70,7 @@ public:
                                  _relativeTolerance);
                 result.store(false, std::memory_order_relaxed);
             }
-            return result.load();
+            return result.load(std::memory_order_relaxed);
         };
 
         // Create and execute parallel functor
