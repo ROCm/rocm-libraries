@@ -69,6 +69,7 @@ public:
     using iterator = TensorViewIterator<T, IsConst>;
     using const_iterator = TensorViewIterator<T, true>;
     using tensor_reference = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+    using value_reference = std::conditional_t<IsConst, const T&, T&>;
 
     explicit TensorView(tensor_reference tensor)
         : _tensor(tensor)
@@ -109,12 +110,12 @@ public:
         return const_iterator(_tensor.cend());
     }
 
-    T getHostValue(const std::vector<int64_t>& indices)
+    value_reference getHostValue(const std::vector<int64_t>& indices)
     {
         return *static_cast<T*>(_tensor.hostDataOffsetFromIndex(_tensor.getIndex(indices)));
     }
 
-    T getHostValue(const std::vector<int64_t>& indices) const
+    const T& getHostValue(const std::vector<int64_t>& indices) const
     {
         return *static_cast<const T*>(_tensor.hostDataOffsetFromIndex(_tensor.getIndex(indices)));
     }
