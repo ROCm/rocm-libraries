@@ -273,7 +273,7 @@ namespace rocRoller
             std::optional<bool> dstIsZero = std::nullopt;
 
             constexpr static inline auto                Type = Category::Arithmetic;
-            constexpr static inline EvaluationTimes     EvalTimes{};
+            constexpr static inline EvaluationTimes     EvalTimes{EvaluationTime::Translate};
             constexpr static inline AlgebraicProperties Properties{};
             constexpr static inline int                 Complexity = 4;
         };
@@ -591,7 +591,7 @@ namespace rocRoller
         struct Concatenate : Nary
         {
             constexpr static inline auto            Type       = Category::Value;
-            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
+            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes{};
             constexpr static inline int             Complexity = 1;
 
             VariableType destinationType;
@@ -678,6 +678,14 @@ namespace rocRoller
 
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
+
+        ExpressionPtr bfc(ExpressionPtr src,
+                          ExpressionPtr dst,
+                          unsigned      srcOffset,
+                          unsigned      dstOffset,
+                          unsigned      width);
+
+        ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v);
 
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
