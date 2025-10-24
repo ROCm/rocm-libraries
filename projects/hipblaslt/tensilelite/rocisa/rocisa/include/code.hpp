@@ -43,25 +43,31 @@ namespace rocisa
     {
         std::variant<std::string, int> label;
         std::string                    comment;
+        int                            alignment;
 
-        Label(int label, const std::string& comment)
+        Label(int label, const std::string& comment, int alignment = 1)
             : Item("")
             , label(label)
             , comment(comment)
+            , alignment(alignment)
         {
         }
 
-        Label(const std::string& label, const std::string& comment)
+        Label(const std::string& label, const std::string& comment, int alignment = 1)
             : Item("")
             , label(label)
             , comment(comment)
+            , alignment(alignment)
         {
         }
 
-        Label(const std::variant<std::string, int>& label, const std::string& comment)
+        Label(const std::variant<std::string, int>& label,
+              const std::string&                    comment,
+              int                                   alignment = 1)
             : Item("")
             , label(label)
             , comment(comment)
+            , alignment(alignment)
         {
         }
 
@@ -69,6 +75,7 @@ namespace rocisa
             : Item(other)
             , label(other.label)
             , comment(other.comment)
+            , alignment(other.alignment)
         {
         }
 
@@ -103,6 +110,10 @@ namespace rocisa
         std::string toString() const override
         {
             std::string t = getLabelName() + ":";
+            if(alignment > 1)
+            {
+                t = ".align " + std::to_string(alignment) + "\n" + t;
+            }
             if(!comment.empty() && !rocIsa::getInstance().getOutputOptions().outputNoComment)
             {
                 t += "  /// " + comment;
