@@ -1,0 +1,12 @@
+name: TheRock CI Nightly
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+
+permissions:
+  contents: read
+
+jobs:
+  therock_ci_nightly:
+    uses: './.github/workflows/therock-ci.yml'
