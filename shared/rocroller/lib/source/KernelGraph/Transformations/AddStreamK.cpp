@@ -670,6 +670,8 @@ namespace rocRoller
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
             auto postWaitZeroTag = graph.control.addElement(WaitZero());
 
+            graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
+
             graph.control.addElement(Body(), {receiveTileTag}, {forReceiveTileLoopOp});
             graph.control.addElement(Body(), {forReceiveTileLoopOp}, {boundsCheckTag});
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
@@ -1197,9 +1199,6 @@ namespace rocRoller
                     forReceiveTileLoopCoord,
                     params,
                     context);
-
-                graph.control.addElement(
-                    Sequence(), {receiveInfo.preWaitZero}, {receiveInfo.receiveCond});
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});

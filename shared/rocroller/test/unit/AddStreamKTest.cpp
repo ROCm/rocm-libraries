@@ -209,7 +209,7 @@ namespace AddStreamKTest
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
-        auto [forKCoord, forKOp]
+        auto [forKCoord, forKOp, rangeK]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto user = kgraph.coordinates.addElement(User({}, "result"));
@@ -405,7 +405,7 @@ namespace AddStreamKTest
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
-        auto [forKCoord, forKOp]
+        auto [forKCoord, forKOp, rangeK]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto in  = kgraph.coordinates.addElement(User({}, "in"));

@@ -485,7 +485,7 @@ namespace rocRoller
 
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.userA);
 
-            auto [K, forK] = rangeFor(graph, accumulationCoordSize, rocRoller::KLOOP);
+            auto [K, forK, rangeK] = rangeFor(graph, accumulationCoordSize, rocRoller::KLOOP);
 
             // A row block is x-workgroup, column block is for loop index
             // B row block is for loop index, column block is y-workgroup
@@ -700,9 +700,9 @@ namespace rocRoller
             auto wavetilesPerWavefront = params->getWaveTilesPerWavefront();
             AssertFatal(wavetilesPerWavefront.size() > 1);
 
-            auto [WaveTilesX, forWaveTilesX]
+            auto [WaveTilesX, forWaveTilesX, rangeX]
                 = rangeFor(graph, literal(wavetilesPerWavefront[0]), rocRoller::XLOOP);
-            auto [WaveTilesY, forWaveTilesY]
+            auto [WaveTilesY, forWaveTilesY, rangeY]
                 = rangeFor(graph, literal(wavetilesPerWavefront[1]), rocRoller::YLOOP);
 
             auto forWaveTilesEpilogueX = *only(

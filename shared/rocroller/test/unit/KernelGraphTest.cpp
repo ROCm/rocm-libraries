@@ -3269,7 +3269,7 @@ namespace KernelGraphTest
         uint numWGs   = 128;
 
         auto kernel = kgraph.control.addElement(Kernel());
-        auto [forKCoord, forKOp]
+        auto [forKCoord, forKOp, rangeK]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto user = kgraph.coordinates.addElement(User({}, "result"));

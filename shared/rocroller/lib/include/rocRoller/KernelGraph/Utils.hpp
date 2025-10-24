@@ -94,13 +94,13 @@ namespace rocRoller
         /**
          * @brief Create a range-based for loop.
          *
-         * returns {dimension, operation}
+         * returns {forLoopDimension, forLoopOperation, forLoopLinearCoordinate}
          */
-        std::pair<int, int> rangeFor(KernelGraph&              graph,
-                                     Expression::ExpressionPtr size,
-                                     const std::string&        name,
-                                     VariableType              vtype        = DataType::None,
-                                     int                       forLoopCoord = -1);
+        std::tuple<int, int, int> rangeFor(KernelGraph&              graph,
+                                           Expression::ExpressionPtr size,
+                                           const std::string&        name,
+                                           VariableType              vtype        = DataType::None,
+                                           int                       forLoopCoord = -1);
 
         /**
          * @brief Remove a range-based for loop created by rangeFor.
