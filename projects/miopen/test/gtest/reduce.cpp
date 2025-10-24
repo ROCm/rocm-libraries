@@ -31,16 +31,16 @@
 #include "workspace.hpp"
 
 // Recently added FP16, BFP16 and I8 reduce custom test cases fail compiler staging tests
-#define WORKAROUND_ISSUE_3757 1
+#define WORKAROUND_ISSUE_895 1
 
-#if WORKAROUND_ISSUE_3757
-#define HalfTestName DISABLED_HalfTest_reduce_custom_fp16
-#define BHalfTestName DISABLED_BHalfTest_reduce_custom_bfp16
-#define IntTestName DISABLED_IntTest_reduce_custom_i8
+#if WORKAROUND_ISSUE_895
+#define CAN_BE_DISABLED_HalfTest_reduce_custom_fp16 DISABLED_HalfTest_reduce_custom_fp16
+#define CAN_BE_DISABLED_BHalfTest_reduce_custom_fp16 DISABLED_BHalfTest_reduce_custom_bfp16
+#define CAN_BE_DISABLED_IntTest_reduce_custom_fp16 DISABLED_IntTest_reduce_custom_i8
 #else
-#define HalfTestName HalfTest_reduce_custom_fp16
-#define BHalfTestName BHalfTest_reduce_custom_bfp16
-#define IntTestName IntTest_reduce_custom_i8
+#define CAN_BE_DISABLED_HalfTest_reduce_custom_fp16 HalfTest_reduce_custom_fp16
+#define CAN_BE_DISABLED_BHalfTest_reduce_custom_fp16 BHalfTest_reduce_custom_bfp16
+#define CAN_BE_DISABLED_IntTest_reduce_custom_fp16 IntTest_reduce_custom_i8
 #endif
 
 namespace {
@@ -74,8 +74,7 @@ auto GetCpuImplResult(miopenDataType_t compTypeVal, const TVerifier& verifier)
     else if(compTypeVal == miopenDouble)
         return verifier.template cpuImpl<double>();
 
-    // We should never reach here! Put this line to avoid warning
-    return verifier.template cpuImpl<float>();
+    throw std::runtime_error("Type is not supported!");
 }
 
 template <class T, bool toVerifyData>
@@ -1214,13 +1213,13 @@ class GPU_reduce_custom_fp32_I8 : public ReduceCustomCommon<int8_t>
 TEST_P(GPU_reduce_custom_fp32_FP32, FloatTest_reduce_custom_fp32) { this->Run(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP32, GetCasesReduceCustomTestSet1());
 
-TEST_P(GPU_reduce_custom_fp32_FP16, HalfTestName) { this->Run(); };
+TEST_P(GPU_reduce_custom_fp32_FP16, CAN_BE_DISABLED_HalfTest_reduce_custom_fp16) { this->Run(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP16, GetCasesReduceCustomTestSet1());
 
-TEST_P(GPU_reduce_custom_fp32_BFP16, BHalfTestName) { this->Run(); };
+TEST_P(GPU_reduce_custom_fp32_BFP16, CAN_BE_DISABLED_BHalfTest_reduce_custom_fp16) { this->Run(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_BFP16, GetCasesReduceCustomTestSet1());
 
-TEST_P(GPU_reduce_custom_fp32_I8, IntTestName) { this->Run(); };
+TEST_P(GPU_reduce_custom_fp32_I8, CAN_BE_DISABLED_IntTest_reduce_custom_fp16) { this->Run(); };
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_I8, GetCasesReduceCustomTestSet1());
 
 // original file reduce_custom_fp32_fp16.cpp
