@@ -10,6 +10,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
+#include <hipdnn_sdk/utilities/json/Graph.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -25,6 +26,9 @@ public:
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
         auto graphWrap = hipdnn_plugin::GraphWrapper(graphBuffer, size);
+
+        nlohmann::json graphJson = graphWrap.getGraph();
+        HIPDNN_LOG_INFO("Executing graph:\n{}", graphJson.dump(4));
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
