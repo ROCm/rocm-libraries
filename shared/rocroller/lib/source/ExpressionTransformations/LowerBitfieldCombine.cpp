@@ -87,7 +87,7 @@ namespace rocRoller
                     AssertFatal(resultVariableType(lhs).getElementSize() <= 4u,
                                 "Currently BitfieldCombine only supports: src size <= 1 dword");
                     AssertFatal(resultVariableType(lhs).getElementSize() * 8u
-                                    > expr.srcOffset + expr.width,
+                                    >= expr.srcOffset + expr.width,
                                 "Bitfield exceeds the number of bits of source, source size "
                                 "(bytes), offset, width = ",
                                 ShowValue(resultVariableType(lhs).getElementSize()),
@@ -102,7 +102,7 @@ namespace rocRoller
                     AssertFatal(resultVariableType(rhs).getElementSize() == 4u,
                                 "Currently BitfieldCombine only supports: dst size = 1 dword");
                     AssertFatal(resultVariableType(rhs).getElementSize() * 8u
-                                    > expr.dstOffset + expr.width,
+                                    >= expr.dstOffset + expr.width,
                                 "Bitfield exceeds the number of bits of destination, destination "
                                 "size (bytes), offset, width = ",
                                 ShowValue(resultVariableType(rhs).getElementSize()),
@@ -113,14 +113,16 @@ namespace rocRoller
                 auto const srcIsZero = expr.srcIsZero && expr.srcIsZero.value();
                 if(not srcIsZero)
                 {
-                    rocRoller::Raw32 srcMask(((1u << expr.width) - 1u) << expr.srcOffset);
+                    rocRoller::Raw32 srcMask((static_cast<uint32_t>(1ul << expr.width) - 1ul)
+                                             << expr.srcOffset);
                     lhs = (literal(srcMask) & lhs); // Extract bits
                 }
 
                 auto const dstIsZero = expr.dstIsZero && expr.dstIsZero.value();
                 if(not dstIsZero)
                 {
-                    rocRoller::Raw32 dstMask(~(((1u << expr.width) - 1u) << expr.dstOffset));
+                    rocRoller::Raw32 dstMask(
+                        ~((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.dstOffset));
                     rhs = (literal(dstMask) & rhs); // Clear bits
                 }
 
