@@ -265,4 +265,5 @@ TEST(TestBatchnormNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(epsilonTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
     EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 7);
 }

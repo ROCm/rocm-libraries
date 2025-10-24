@@ -435,7 +435,7 @@ TEST(TestConvolutionWgradNode, PackNode)
     EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
+TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
 {
     ConvWgradAttributes convAttributes;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -460,6 +460,11 @@ TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
+
+    EXPECT_TRUE(allTensors.find(dwTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3);
 }
 
 TEST(TestConvolutionWgradNode, StrideInferenceNchwLayoutSuccess)

@@ -150,6 +150,7 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
 
     EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
     EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 10);
 }
 
 TEST(TestBatchnormBackwardNode, PackNode)
