@@ -1191,8 +1191,13 @@ class Solution(collections.abc.Mapping):
     state["LocalWriteUseSgprB"] = False
     state["StoreSwapAddr"] = False
 
-    state["WorkGroupMappingXCC"] = abs(state["WorkGroupMappingXCC"])
-
+    if state["WorkGroupMappingXCC"] == -1:
+      if state["StreamK"] == 0:
+        reject(state, printRejectionReason, "Can only use auto WGMXCC with StreamK.")
+        return False
+      if state["StreamKXCCMapping"] != 0:
+        reject(state, printRejectionReason, "Cannot use auto WGMXCC with SKXCC.")
+        return False
 
     problemType = state["ProblemType"]
 

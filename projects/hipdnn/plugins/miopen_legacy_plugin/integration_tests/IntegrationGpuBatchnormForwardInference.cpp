@@ -22,7 +22,7 @@
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -287,8 +287,7 @@ protected:
         runCpuBatchnormFwd(cpuTensorBundle);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor.memory(),
-                                              graphTensorBundle.yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.yTensor, graphTensorBundle.yTensor));
     }
 
 private:

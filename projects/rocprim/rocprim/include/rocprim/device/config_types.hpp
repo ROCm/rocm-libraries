@@ -168,6 +168,7 @@ enum class target_arch : unsigned int
     gfx908  = 908,
     gfx90a  = 910,
     gfx942  = 942,
+    gfx950  = 950,
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
@@ -208,6 +209,7 @@ constexpr const char* target_names[] = {"gfx803",
                                         "gfx908",
                                         "gfx90a",
                                         "gfx942",
+                                        "gfx950",
                                         "gfx1030",
                                         "gfx1100",
                                         "gfx1102",
@@ -221,6 +223,7 @@ constexpr target_arch target_architectures[] = {
     target_arch::gfx908,
     target_arch::gfx90a,
     target_arch::gfx942,
+    target_arch::gfx950,
     target_arch::gfx1030,
     target_arch::gfx1100,
     target_arch::gfx1102,
@@ -269,6 +272,7 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
         case target_arch::gfx908: return arch::wavefront::target::size64;
         case target_arch::gfx90a: return arch::wavefront::target::size64;
         case target_arch::gfx942: return arch::wavefront::target::size64;
+        case target_arch::gfx950: return arch::wavefront::target::size64;
         case target_arch::gfx1030: return arch::wavefront::target::size32;
         case target_arch::gfx1100: return arch::wavefront::target::size32;
         case target_arch::gfx1102: return arch::wavefront::target::size32;
@@ -505,6 +509,8 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
                 return Config::template architecture_config<target_arch::gfx90a>::params;
             case target_arch::gfx942:
                 return Config::template architecture_config<target_arch::gfx942>::params;
+            case target_arch::gfx950:
+                return Config::template architecture_config<target_arch::gfx950>::params;
             case target_arch::gfx1030:
                 return Config::template architecture_config<target_arch::gfx1030>::params;
             case target_arch::gfx1100:

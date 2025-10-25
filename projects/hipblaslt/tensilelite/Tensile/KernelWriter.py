@@ -256,7 +256,7 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
-  freeSgprVarPool                        = set()
+  freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
@@ -317,6 +317,7 @@ class StateValues:
 
     self.preloadGuard = []
     self.tmpvgpr = {}
+    self.freeSgprVarPool = set()
 
 @dataclass
 class StateVgprs:

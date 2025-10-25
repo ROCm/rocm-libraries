@@ -8,7 +8,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/BinaryOperationFunctors.hpp>
@@ -188,5 +188,5 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // Validate results
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor.memory(), yTensor.memory()));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
 }

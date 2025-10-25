@@ -181,6 +181,7 @@ public:
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
+    virtual size_t elementSize() const = 0;
     virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
@@ -188,6 +189,7 @@ public:
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
     int64_t getIndex(Args... indices) const
@@ -346,6 +348,11 @@ public:
         memory().markDeviceModified();
     }
 
+    size_t elementSize() const override
+    {
+        return sizeof(T);
+    }
+
 protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,
                          const std::vector<int64_t>& strides) const
@@ -445,8 +452,17 @@ public:
         return _memory;
     }
 
+    size_t fillWithData(const void* data, size_t maxBytesCopied) override
+    {
+        size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        _memory.markHostModified();
+        std::memcpy(_memory.hostData(), data, bytesCopied);
+        return bytesCopied;
+    }
+
     void fillWithValue(T value) override
     {
+        _memory.markHostModified();
         iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
             this->setHostValue(value, indices);
         });
@@ -454,10 +470,12 @@ public:
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
+
         std::mt19937 generator(seed);
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
 
+        _memory.markHostModified();
         iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
             this->setHostValue(static_cast<T>(distribution(generator)), indices);
         });
