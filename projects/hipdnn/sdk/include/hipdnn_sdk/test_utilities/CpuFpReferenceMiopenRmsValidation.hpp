@@ -10,6 +10,7 @@
 #endif
 
 #include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 
@@ -53,73 +54,50 @@ public:
             return true;
         }
 
-        double squareDifference = 0.0;
-        double maxRefMagnitude = 0.0;
-        double maxImplMagnitude = 0.0;
+        std::atomic<double> squareDifference(0.0);
+        std::atomic<double> maxRefMagnitude(0.0);
+        std::atomic<double> maxImplMagnitude(0.0);
 
         TensorView<T> refView(reference);
         TensorView<T> implView(implementation);
 
-        auto refItr = refView.begin();
-        auto implItr = implView.begin();
-
-        while(refItr != refView.end() && implItr != implView.end())
-        {
-            T refValueT = *refItr++;
-            T implValueT = *implItr++;
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValueT = refView.getHostValue(indices);
+            T implValueT = implView.getHostValue(indices);
 
             auto refValue = static_cast<double>(refValueT);
             auto implValue = static_cast<double>(implValueT);
 
             auto diff = refValue - implValue;
-            squareDifference += diff * diff;
+            double diffSquared = diff * diff;
+            double currentSum = squareDifference.load(std::memory_order_relaxed);
+            while(!squareDifference.compare_exchange_weak(
+                currentSum, currentSum + diffSquared, std::memory_order_relaxed))
+            {
+            }
 
             // Track maximum magnitudes
-            maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
-            maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-        }
+            double currentMaxRef = maxRefMagnitude.load(std::memory_order_relaxed);
+            double absRefValue = std::fabs(refValue);
+            while(absRefValue > currentMaxRef
+                  && !maxRefMagnitude.compare_exchange_weak(
+                      currentMaxRef, absRefValue, std::memory_order_relaxed))
+            {
+            }
+
+            double currentMaxImpl = maxImplMagnitude.load(std::memory_order_relaxed);
+            double absImplValue = std::fabs(implValue);
+            while(absImplValue > currentMaxImpl
+                  && !maxImplMagnitude.compare_exchange_weak(
+                      currentMaxImpl, absImplValue, std::memory_order_relaxed))
+            {
+            }
+        };
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
 
         return checkRmsError(
             squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
-    }
-
-    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
-    {
-        if(reference.count() != implementation.count())
-        {
-            return false;
-        }
-
-        size_t elementCount = reference.count();
-
-        if(elementCount == 0)
-        {
-            return true;
-        }
-
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
-
-        double squareDifference = 0.0;
-        double maxRefMagnitude = 0.0;
-        double maxImplMagnitude = 0.0;
-
-        // Iterate through all elements to calculate square differences and find max magnitudes
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            auto refValue = static_cast<double>(refData[i]);
-            auto implValue = static_cast<double>(implData[i]);
-
-            // Accumulate square differences
-            auto diff = refValue - implValue;
-            squareDifference += diff * diff;
-
-            // Track maximum magnitudes
-            maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
-            maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-        }
-
-        return checkRmsError(squareDifference, maxRefMagnitude, maxImplMagnitude, elementCount);
     }
 
 private:

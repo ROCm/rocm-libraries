@@ -3,13 +3,13 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TestSeeds.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <unordered_set>
 
 using namespace hipdnn_sdk::test_utilities;
 
-class TestTestSeeds : public ::testing::Test
+class TestSeeds : public ::testing::Test
 {
 protected:
     std::unique_ptr<ScopedEnvironmentVariableSetter> _seedGuard;
@@ -25,7 +25,7 @@ protected:
     }
 };
 
-TEST_F(TestTestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
+TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
 {
     hipdnn_sdk::utilities::unsetEnv("HIPDNN_GLOBAL_TEST_SEED");
 
@@ -34,7 +34,7 @@ TEST_F(TestTestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
     EXPECT_EQ(seed, 1u) << "Expected default seed of 1 when environment variable is not set";
 }
 
-TEST_F(TestTestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
+TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "");
 
@@ -43,7 +43,7 @@ TEST_F(TestTestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
     EXPECT_EQ(seed, 1u) << "Expected default seed of 1 when environment variable is empty";
 }
 
-TEST_F(TestTestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
+TEST_F(TestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "42");
 
@@ -52,7 +52,7 @@ TEST_F(TestTestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
     EXPECT_EQ(seed, 42u) << "Expected seed to match numeric value from environment variable";
 }
 
-TEST_F(TestTestSeeds, HandlesLargeNumericValues)
+TEST_F(TestSeeds, HandlesLargeNumericValues)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "4294967295"); // Max uint32
 
@@ -61,7 +61,7 @@ TEST_F(TestTestSeeds, HandlesLargeNumericValues)
     EXPECT_EQ(seed, 4294967295u) << "Expected seed to handle maximum unsigned int value";
 }
 
-TEST_F(TestTestSeeds, ReturnsRandomSeedWhenRandomSpecified)
+TEST_F(TestSeeds, ReturnsRandomSeedWhenRandomSpecified)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "RANDOM");
 
@@ -78,7 +78,7 @@ TEST_F(TestTestSeeds, ReturnsRandomSeedWhenRandomSpecified)
         << ITERATIONS << " times";
 }
 
-TEST_F(TestTestSeeds, RandomIsCaseInsensitive)
+TEST_F(TestSeeds, RandomIsCaseInsensitive)
 {
     std::vector<std::string> randomVariants = {"RANDOM", "random", "Random", "RaNdOm"};
 
@@ -100,7 +100,7 @@ TEST_F(TestTestSeeds, RandomIsCaseInsensitive)
     }
 }
 
-TEST_F(TestTestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
+TEST_F(TestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "not_a_number");
 
@@ -110,7 +110,7 @@ TEST_F(TestTestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
         << "Expected default seed of 1 when environment variable contains invalid numeric value";
 }
 
-TEST_F(TestTestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
+TEST_F(TestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
 {
     // Value larger than unsigned long can hold
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "99999999999999999999999999");
@@ -121,7 +121,7 @@ TEST_F(TestTestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
         << "Expected default seed of 1 when environment variable exceeds valid range";
 }
 
-TEST_F(TestTestSeeds, ConsistentSeedProducesSameValue)
+TEST_F(TestSeeds, ConsistentSeedProducesSameValue)
 {
     hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "12345");
 

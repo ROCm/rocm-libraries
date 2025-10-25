@@ -88,10 +88,10 @@ namespace hipdnn_sdk::json
 {
 
 template <class T>
-auto to(flatbuffers::FlatBufferBuilder& builder, nlohmann::json const& entry);
+inline auto to(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry);
 
 template <class T>
-auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
 {
     if(!entry.is_array())
     {
