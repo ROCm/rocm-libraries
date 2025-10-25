@@ -184,6 +184,18 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
         CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
                    IdenticalTo(convert(DataType::UInt32, v)));
+
+        auto expr  = bfe(DataType::Int32, v, 16, 16);
+        auto expr2 = bfe(DataType::Int32, expr, 0, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr));
+
+        expr  = bfe(DataType::Int32, v, 8, 16);
+        expr2 = bfe(DataType::Int32, expr, 0, 4);
+        CHECK_THAT(simplify(expr2), IdenticalTo(bfe(DataType::Int32, v, 8, 4)));
+
+        expr  = bfe(DataType::Int32, v, 8, 16);
+        expr2 = bfe(DataType::Int32, expr, 8, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr2));
     }
 
     SECTION("bitFieldCombine")

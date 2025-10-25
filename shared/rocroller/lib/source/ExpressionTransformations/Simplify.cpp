@@ -568,6 +568,102 @@ namespace rocRoller
             return bfc(cpy.lhs, result, cpy.srcOffset, cpy.dstOffset, cpy.width);
         }
 
+        struct DeepBitfieldExtractVisitor
+        {
+            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width)
+                : m_offset(offset)
+                , m_width(width)
+            {
+            }
+
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
+            {
+                uint32_t combineStartBit = expr.dstOffset;
+                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
+                uint32_t endBit          = m_offset + m_width - 1;
+                // No overlap with this dword
+                if(combineStartBit > endBit || combineEndBit < m_offset)
+                {
+                    return call(expr.rhs);
+                }
+                return std::make_shared<Expression>(expr);
+            }
+
+            ExpressionPtr operator()(Concatenate const& expr) const
+            {
+                uint32_t operandStartBit = 0;
+                uint32_t operandEndBit   = 0;
+                uint32_t endBit          = m_offset + m_width - 1;
+                for(int i = 0; i < expr.operands.size(); ++i)
+                {
+                    operandStartBit = operandEndBit;
+                    operandEndBit += resultVariableType(expr.operands[i]).getElementSize() * 8;
+                    // bitField is fully contained within this operand
+                    if(operandStartBit <= m_offset && endBit <= operandEndBit)
+                    {
+                        this->m_offset -= operandStartBit;
+                        return call(expr.operands[i]);
+                    }
+                }
+
+                return std::make_shared<Expression>(expr);
+            }
+
+            ExpressionPtr operator()(BitFieldExtract const& expr) const
+            {
+                uint32_t endBit     = m_offset + m_width - 1;
+                uint32_t exprEndBit = expr.width - 1;
+
+                // Bitfield is fully contained within this BitFieldExtract
+                if(endBit <= exprEndBit)
+                {
+                    m_offset += expr.offset;
+                    return call(expr.arg);
+                }
+
+                return std::make_shared<Expression>(expr);
+            }
+
+            template <typename Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                return std::make_shared<Expression>(expr);
+            }
+
+            ExpressionPtr call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return expr;
+
+                return std::visit(*this, *expr);
+            }
+
+            uint32_t get_offset() const
+            {
+                return m_offset;
+            }
+
+        private:
+            mutable uint32_t m_offset;
+            uint32_t         m_width;
+        };
+
+        /**
+         * Returns a BitFieldExtract expression that extracts the specified bitfield from the given expression.
+         * Looks through Concatenate expressions to find the corresponding operand to extract.
+         * Looks through BitfieldCombine expressions to extract from its destination operand if the BitfieldCombine and BitFieldExtract do not overlap.
+         * Looks through nested BitFieldExtract expressions, if the extraction is fully contained within the inner BitFieldExtract.
+         */
+        BitFieldExtract deepBitFieldExtract(BitFieldExtract expr)
+        {
+            auto visitor   = DeepBitfieldExtractVisitor(expr.offset, expr.width);
+            auto extracted = visitor.call(expr.arg);
+            int  offset    = visitor.get_offset();
+
+            // return bfe(expr.outputDataType, extracted, offset, expr.width);
+            return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
+        }
+
         struct SimplifyExpressionVisitor
         {
             template <CUnary Expr>
@@ -654,24 +750,25 @@ namespace rocRoller
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
 
-                auto sunkBitfieldCombine = sinkBitfieldCombine(cpy);
-                if(sunkBitfieldCombine)
-                    return sunkBitfieldCombine;
-
-                return std::make_shared<Expression>(cpy);
+                return sinkBitfieldCombine(cpy);
             }
 
             ExpressionPtr operator()(BitFieldExtract const& expr) const
             {
-                auto cpy = expr;
+                AssertFatal(expr.width > 0, "BitfieldExtract with width 0");
 
-                AssertFatal(cpy.width > 0, "BitfieldExtract with width 0");
+                BitFieldExtract cpy = deepBitFieldExtract(expr);
+
+                // Evaluation might be possitble after deep extraction due to Concatenate expressions
+                auto result = tryEvaluate(cpy);
+                if(result.has_value())
+                    return literal(result.value());
 
                 // Extracting the entire arg with no offset
                 if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
                     return call(convert(cpy.outputDataType, cpy.arg));
 
-                cpy.arg = call(expr.arg);
+                cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
