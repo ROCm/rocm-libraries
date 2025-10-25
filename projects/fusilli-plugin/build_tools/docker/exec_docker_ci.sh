@@ -4,7 +4,7 @@
 #
 # This script is copied from fusilli:
 # https://github.com/nod-ai/shark-ai/blob/52e12fe6bd76b8fad83687d48be1ca067120c310/sharkfuser/build_tools/docker/exec_docker_ci.sh
-# It's used to run fusilli-plugin CI in a docker container: https://github.com/sjain-stanford/docker/tree/main
+# It's used to run fusilli-plugin CI in a docker container: https://github.com/sjain-stanford/docker/pkgs/container/compiler-dev-ubuntu-24.04
 #
 # Once fusilli-plugin has been moved to TheRock CI this script (and the
 # standalone github actions based CI) should be removed.
