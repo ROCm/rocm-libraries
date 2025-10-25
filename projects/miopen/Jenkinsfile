@@ -56,7 +56,7 @@ def runDbSyncJob(def utils, def nodeLabel = null)
             def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"    
 
             if (env.DBSYNC_CLEAN_DB == "true") {
-                execute_cmd = "MIOPEN_SYSTEM_DB_PATH=${DB_DIR} MIOPEN_DBSYNC_CLEAN=1 " + execute_cmd;
+                execute_cmd = "MIOPEN_SYSTEM_DB_PATH=${db_dir} MIOPEN_DBSYNC_CLEAN=1 " + execute_cmd;
             }
 
             utils.buildHipClangJob(dvc_pull: true,
