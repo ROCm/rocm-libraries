@@ -188,6 +188,8 @@ def cmake_build(Map conf=[:]){
         echo "Command failed: ${e.getMessage()}"
         if (execute_cmd.contains("test_db_sync") && env.DBSYNC_CLEAN_DB == "true") {
             echo "DB SYNC test failed, saving the cleaned DB"
+
+            def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"  
             
             def filePatterns = [
                 "gfx908": "gfx90878",
@@ -199,7 +201,7 @@ def cmake_build(Map conf=[:]){
             if (filePatterns.containsKey(node_label)) {
                 def patterns = filePatterns[node_label]
                 sh """
-                cd ${env.DB_DIR}
+                cd ${db_dir}
                 
                 FILES_TO_TAR=""
                 for pattern in ${patterns}; do
