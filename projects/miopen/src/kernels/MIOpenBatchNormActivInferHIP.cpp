@@ -77,7 +77,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
     FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
-#pragma nounroll
+#pragma unroll 2
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
     {
         const unsigned int index = n_i * MIO_BN_CHW + c_offset + hw_i * MIOPEN_READ_UNIT;
@@ -152,7 +152,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
     FLOAT_ACCUM actRes[MIOPEN_READ_UNIT];
 
-#pragma nounroll
+#pragma unroll 2
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
     {
         const unsigned int index = n_i * MIO_BN_CHW + chw_i;
