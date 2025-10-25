@@ -182,48 +182,45 @@ def cmake_build(Map conf=[:]){
     """
 
     echo cmd
-    try {
-        sh cmd  
-    } catch (Exception e) {
-        echo "Command failed: ${e.getMessage()}"
-        if (execute_cmd.contains("test_db_sync") && env.DBSYNC_CLEAN_DB == "true") {
-            echo "DB SYNC test failed, saving the cleaned DB"
+    sh cmd
 
-            def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"  
+    if (execute_cmd.contains("test_db_sync") && env.DBSYNC_CLEAN_DB == "true") {
+        
+        echo "Adding the cleaned DB files to the artifacts"
+
+        def db_dir = "${env.WORKSPACE}/${env.REPO_DIR}/build/share/miopen/db"  
+        
+        def filePatterns = [
+            "gfx908": "gfx90878",
+            "gfx90a": "gfx90a68 gfx90a6e", 
+            "gfx942": "gfx942130",
+            "gfx950": "gfx942e4"  
+        ]
+        
+        if (filePatterns.containsKey(node_label)) {
+            def patterns = filePatterns[node_label]
+            sh """
+            cd ${db_dir}
             
-            def filePatterns = [
-                "gfx908": "gfx90878",
-                "gfx90a": "gfx90a68 gfx90a6e", 
-                "gfx942": "gfx942130",
-                "gfx950": "gfx942e4"  
-            ]
-            
-            if (filePatterns.containsKey(node_label)) {
-                def patterns = filePatterns[node_label]
-                sh """
-                cd ${db_dir}
-                
-                FILES_TO_TAR=""
-                for pattern in ${patterns}; do
-                    if ls \${pattern}.HIP.fdb.txt \${pattern}.db.txt 1> /dev/null 2>&1; then
-                        FILES_TO_TAR="\$FILES_TO_TAR \${pattern}.HIP.fdb.txt \${pattern}.db.txt"
-                    fi
-                done
-                
-                if [ -n "\$FILES_TO_TAR" ]; then
-                    tar -czf dbsync-${node_label}-\$(date +%Y%m%d-%H%M%S).tar.gz \$FILES_TO_TAR
-                    mv dbsync-*.tar.gz ${env.WORKSPACE}/${env.REPO_DIR}/build/
-                    echo "Archived: \$FILES_TO_TAR"
-                else
-                    echo "No DB files found for ${node_label}"
+            FILES_TO_TAR=""
+            for pattern in ${patterns}; do
+                if ls \${pattern}.HIP.fdb.txt \${pattern}.db.txt 1> /dev/null 2>&1; then
+                    FILES_TO_TAR="\$FILES_TO_TAR \${pattern}.HIP.fdb.txt \${pattern}.db.txt"
                 fi
-                """
-            } else {
-                echo "Node label '${node_label}' not configured, not saving the DB"
-            }
-            archiveArtifacts artifacts: "build/dbsync-*.tar.gz", allowEmptyArchive: true, fingerprint: true
+            done
+            
+            if [ -n "\$FILES_TO_TAR" ]; then
+                tar -czf dbsync-${node_label}-\$(date +%Y%m%d-%H%M%S).tar.gz \$FILES_TO_TAR
+                mv dbsync-*.tar.gz ${env.WORKSPACE}/${env.REPO_DIR}/build/
+                echo "Archived: \$FILES_TO_TAR"
+            else
+                echo "No DB files found for ${node_label}"
+            fi
+            """
+        } else {
+            echo "Node label '${node_label}' not configured, not saving the DB"
         }
-        throw e
+        archiveArtifacts artifacts: "build/dbsync-*.tar.gz", allowEmptyArchive: true, fingerprint: true
     }
 
     // Only archive from master or develop
