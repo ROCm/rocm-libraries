@@ -94,11 +94,11 @@ def cmake_build(Map conf=[:]){
         setup_args = " -DMIOPEN_TEST_DISCRETE=OFF " + setup_args
     }
 
-    if(conf.get("build_install",false) == true)
+    if (conf.get("build_install",false) == true)
     {
         make_targets = 'install ' + make_targets
         setup_args = " -DBUILD_DEV=Off -DCMAKE_INSTALL_PREFIX=${miopen_install_path}" + setup_args
-    } else if(package_build == true) {
+    } else if (package_build == true) {
         setup_args = ' -DBUILD_DEV=Off' + setup_args
     } else {
         setup_args = ' -DBUILD_DEV=On' + setup_args
@@ -107,37 +107,34 @@ def cmake_build(Map conf=[:]){
     // test_flags = ctest -> MIopen flags
     def test_flags = conf.get("test_flags","")
 
-    if (conf.get("vcache_enable","") == "true"){
+    if (conf.get("vcache_enable","") == "true") {
         //grab root of node workspace. not guaranteed to be /var/jenkins
         String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
         def vcache = conf.get(vcache_path,"${remote_root}/.cache/miopen/vcache")
         build_envs = " MIOPEN_VERIFY_CACHE_PATH='${vcache}' " + build_envs
-    } else{
+    } else {
         test_flags = " --disable-verification-cache " + test_flags
     }
 
-    if(build_type_debug){
+    if (build_type_debug) {
         setup_args = " -DCMAKE_BUILD_TYPE=debug -DCMAKE_CXX_FLAGS_DEBUG='${debug_flags}'" + setup_args
-    }else{
+    } else {
         setup_args = " -DCMAKE_BUILD_TYPE=release" + setup_args
     }
 
-    if(test_flags != ""){
+    if (test_flags != "") {
        setup_args = "-DMIOPEN_TEST_FLAGS='${test_flags}'" + setup_args
     }
 
-    if(conf.containsKey("find_mode"))
-    {
+    if (conf.containsKey("find_mode")) {
         def fmode = conf.get("find_mode", "")
         setup_args = " -DMIOPEN_DEFAULT_FIND_MODE=${fmode} " + setup_args
     }
-    if(env.CCACHE_HOST)
-    {
+    if (env.CCACHE_HOST) {
         setup_args = " -DCMAKE_CXX_COMPILER_LAUNCHER='ccache' -DCMAKE_C_COMPILER_LAUNCHER='ccache' " + setup_args
     }
 
-    if ( build_fin == "ON" )
-    {
+    if (build_fin == "ON") {
         setup_args = " -DMIOPEN_INSTALL_CXX_HEADERS=On " + setup_args
     }
 

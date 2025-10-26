@@ -212,7 +212,6 @@ if( MIOPEN_TEST_DISCRETE )
     get_filename_component(BASE_NAME ${TEST} NAME_WE)
     add_gtest(test_${BASE_NAME} ${BASE_NAME}.cpp)
   endforeach()
-
 else()
   foreach(TEST ${TESTS})
     get_filename_component(BASE_NAME ${TEST} NAME)
@@ -222,7 +221,7 @@ else()
   add_gtest(miopen_gtest "${TESTS_CPP}")
 
   if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
+    if(MIOPEN_BUILD_CK)
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
         target_include_directories(miopen_gtest SYSTEM PRIVATE
