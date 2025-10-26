@@ -131,7 +131,7 @@ protected:
 
         CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
-        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu.memory(), yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu, yTensor));
     }
 
     hipdnnEnginePluginHandle_t _handle = nullptr;

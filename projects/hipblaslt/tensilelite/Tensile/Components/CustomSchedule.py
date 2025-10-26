@@ -20,7 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
+from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
+                        StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
@@ -156,16 +157,15 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     InstStreams = convOptToStream(opt1)
 
-
-    module.add(TextBlock(".macro MAINLOOP ID useGR=1 usePLR=1 useGRInc=1 useLoop=1\n"))
+    macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
     #module.add(SBarrier(comment="debug"))
 
     lastIter = numLoopIter - 1
 
     for miIndex in range(-1, len(mfmaCode)):
         if miIndex >= 0:
-            module.addComment0("mfmaIndex:%u"%(miIndex))
-            module.add(mfmaCode[miIndex])
+            macro.addComment0("mfmaIndex:%u"%(miIndex))
+            macro.add(mfmaCode[miIndex])
 
         def scheduleInst(indexList, instructionList):
             ret = [None]*len(indexList)
@@ -197,55 +197,54 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             if len(instList) == 1:
                 if instList[0] != None:
                     if macroGuard != "":
-                        module.add(TextBlock(macroGuard))
-                    module.add(instList[0])
+                        macro.add(ValueIf(macroGuard))
+                    macro.add(instList[0])
                     if macroGuard != "":
-                        module.add(TextBlock(".endif\n"))
-
+                        macro.add(ValueEndif())
         for k,ts in ToSched.items():
             if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                scheduleInst1(ts, ".if     \\useGRInc == 1\n")
+                scheduleInst1(ts, "\\useGRInc == 1")
             elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                scheduleInst1(ts, ".if     \\useGR == 1\n")
+                scheduleInst1(ts, "\\useGR == 1")
             elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                scheduleInst1(ts, ".if     \\usePLR == 1\n")
+                scheduleInst1(ts, "\\usePLR == 1")
             elif k in ['LCC']: # check for next prefetch
-                scheduleInst1(ts, ".if     \\useLoop == 1\n")
+                scheduleInst1(ts, "\\useLoop == 1")
             else:
                 scheduleInst1(ts)
 
         if needIfMacro:
             for codepath in range(numCodePath):
                 if codepath == 0:
-                    module.add(TextBlock(".if     \\ID == %u\n"%codepath))
+                    macro.add(ValueIf("\\ID == %u"%codepath))
                 else:
-                    module.add(TextBlock(".elseif \\ID == %u\n"%codepath))
+                    macro.add(ValueElseIf("\\ID == %u\n"%codepath))
 
                 def scheduleInst2(instList, macroGuard=""):
                     if len(instList) == numCodePath:
                         if instList[codepath] != None:
                             if macroGuard != "":
-                                module.add(TextBlock(macroGuard))
-                            module.add(instList[codepath])
+                                macro.add(ValueIf(macroGuard))
+                            macro.add(instList[codepath])
                             if macroGuard != "":
-                                module.add(TextBlock(".endif\n"))
+                                macro.add(ValueEndif())
 
                 for k,ts in ToSched.items():
                     if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                        scheduleInst2(ts, ".if     \\useGRInc == 1\n")
+                        scheduleInst2(ts, "\\useGRInc == 1\n")
                     elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                        scheduleInst2(ts, ".if     \\useGR == 1\n")
+                        scheduleInst2(ts, "\\useGR == 1\n")
                     elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                        scheduleInst2(ts, ".if     \\usePLR == 1\n")
+                        scheduleInst2(ts, "\\usePLR == 1\n")
                     elif k in ['LCC']: # check for next prefetch
-                        scheduleInst2(ts, ".if     \\useLoop == 1\n")
+                        scheduleInst2(ts, "\\useLoop == 1\n")
                     else:
                         scheduleInst2(ts)
 
                 if codepath == numCodePath - 1:
-                    module.add(TextBlock(".endif\n"))
+                    macro.add(ValueEndif())
 
-    module.add(TextBlock(".endm\n"))
+    module.add(macro)
     return module, numCodePath
 
 
