@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
@@ -29,7 +30,7 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
 {
     std::vector<int64_t> inputDims = {1, 3, 4, 4};
     std::vector<int64_t> outputDims = {1, 3, 4, 4};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
 
     // Build graph using new GraphTensorBundle pattern
     auto [graph, tensorBundle, variantPack]
@@ -57,7 +58,7 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
     std::vector<int64_t> input1Dims = {1, 3, 2, 2};
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
 
     // Build graph using new GraphTensorBundle pattern
     auto [graph, tensorBundle, variantPack]
@@ -86,7 +87,7 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
     std::vector<int64_t> dyDims = {1, 3, 2, 2};
     std::vector<int64_t> xDims = {1, 3, 2, 2};
     std::vector<int64_t> dxDims = {1, 3, 2, 2};
-    unsigned int seed = 1;
+    unsigned int seed = getGlobalTestSeed();
 
     // Build graph using new GraphTensorBundle pattern
     auto [graph, tensorBundle, variantPack]

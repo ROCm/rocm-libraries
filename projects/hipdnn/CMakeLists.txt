@@ -54,6 +54,11 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Build directory for test plugins")
 set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
 
+set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data" CACHE INTERNAL "Directory for test reference data")
+set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}" CACHE INTERNAL "Install directory for test reference data")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_reference_data/" DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}) # Copies only on calls to cmake
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data" DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR})
+
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
@@ -96,12 +101,12 @@ include(cmake/Tests.cmake)
 set(EXTRA_COMPILE_OPTIONS)
 set(EXTRA_LINK_OPTIONS)
 if(CODE_COVERAGE)
-    list(PREPEND EXTRA_COMPILE_OPTIONS 
+    list(PREPEND EXTRA_COMPILE_OPTIONS
         -fprofile-instr-generate
         -fcoverage-mapping
     )
-    list(PREPEND EXTRA_LINK_OPTIONS 
-        -fprofile-instr-generate 
+    list(PREPEND EXTRA_LINK_OPTIONS
+        -fprofile-instr-generate
         -fcoverage-mapping)
 endif()
 
@@ -162,12 +167,12 @@ endif()
 
 if(CODE_COVERAGE)
     findAndCheckLlvmTools()
-    
+
     if(HIP_DNN_BUILD_PLUGINS)
         set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests)
     endif()
 
-    set(CODE_COVERAGE_IGNORE_REGEX "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/test_utilities.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)")
+    set(CODE_COVERAGE_IGNORE_REGEX "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)")
     set(CODE_COVERAGE_OBJECTS -object ./${CMAKE_INSTALL_LIBDIR}/libhipdnn_backend.so -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests -object ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT})
 
     add_custom_target(

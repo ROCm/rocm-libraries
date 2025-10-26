@@ -16,7 +16,7 @@ namespace utilities
 {
 
 template <class T>
-class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
+class ShallowHostOnlyMigratableMemory : public MigratableMemoryBase<T>
 {
 public:
     explicit ShallowHostOnlyMigratableMemory(void* shallowMemory = nullptr, size_t count = 0)

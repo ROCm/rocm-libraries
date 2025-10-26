@@ -2,10 +2,9 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## (Unreleased) MIOpen <upcoming_release_number> for ROCm <upcoming_release_number>
-### Changed
-
-* `MIOPEN_FIND_ENFORCE` no longer forces Normal for `MIOPEN_FIND_MODE` when using non-database update operations.
+## (Unreleased) MIOpen 3.5.1 for ROCm 7.2.0
+### Optimized
+* [Conv] Improve Composable Kernel (CK) kernel selection during tuning.
 
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added
@@ -13,6 +12,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Added a new trust verify find mode.
 * Ported Op4dTensorLite kernel from OpenCL to HIP.
 * Implemented a generic HIP kernel for backwards layer normalization.
+* [BatchNorm] Enabled tuning using `miopenSetTuningPolicy`.
 
 ### Changed
 
@@ -21,7 +21,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Optimized
 
 * [Conv] Enabled Composable Kernel (CK) implicit gemms on gfx950.
-* [Conv] Improve Composable Kernel (CK) kernel selection during tuning
 
 ### Resolved issues
 

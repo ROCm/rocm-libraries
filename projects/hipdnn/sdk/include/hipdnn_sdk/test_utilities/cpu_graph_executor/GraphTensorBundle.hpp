@@ -16,6 +16,8 @@ namespace hipdnn_sdk::test_utilities
 
 struct GraphTensorBundle
 {
+    GraphTensorBundle() = default;
+
     GraphTensorBundle(
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap)
@@ -42,12 +44,22 @@ struct GraphTensorBundle
         it->second->fillTensorWithRandomValues(min, max, seed);
     }
 
-    std::unordered_map<int64_t, void*> toVariantPack()
+    std::unordered_map<int64_t, void*> toHostVariantPack()
     {
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [id, tensorPtr] : tensors)
         {
             variantPack[id] = tensorPtr->rawHostData();
+        }
+        return variantPack;
+    }
+
+    std::unordered_map<int64_t, void*> toDeviceVariantPack()
+    {
+        std::unordered_map<int64_t, void*> variantPack;
+        for(auto& [id, tensorPtr] : tensors)
+        {
+            variantPack[id] = tensorPtr->rawDeviceData();
         }
         return variantPack;
     }
