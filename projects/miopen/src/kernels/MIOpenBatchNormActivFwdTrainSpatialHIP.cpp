@@ -46,7 +46,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl
 // Without the macro guards the compiler fails on the constant expressions. Somehow these
 // definitions spill over to versions defined later in the source file causing weird errors.
 // TODO: Find a way to remove them.
-#if (MIO_BN_VARIANT == 0)
+#if(MIO_BN_VARIANT == 0)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
@@ -185,7 +185,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
     }
 };
 
-#elif (MIO_BN_VARIANT == 1)
+#elif(MIO_BN_VARIANT == 1)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
@@ -433,7 +433,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
     }
 };
 
-#elif (MIO_BN_VARIANT == 3)
+#elif(MIO_BN_VARIANT == 3)
 
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
@@ -569,19 +569,19 @@ extern "C" __global__ void __launch_bounds__(
         const typename mio_bn_config::fp_type beta,
         const typename mio_bn_config::fp_type gamma,
         double epsilon,
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
         double expAvgFactor,
 #endif
         const typename mio_bn_config::fp_type* __restrict in,
         typename mio_bn_config::fp_type* __restrict out,
         const typename mio_bn_config::fp_prec_type* __restrict bias,
         const typename mio_bn_config::fp_prec_type* __restrict scale
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict runningMean,
         typename mio_bn_config::fp_prec_type* __restrict runningVariance
 #endif
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict savedInvVariance,
         typename mio_bn_config::fp_prec_type* __restrict savedMean
@@ -609,7 +609,7 @@ extern "C" __global__ void __launch_bounds__(
 
     if(lid == 0)
     {
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
         StashUpdater updater(miopen::batchnorm::cast<fp_accum_c_type>(mean),
                              miopen::batchnorm::cast<fp_accum_c_type>(variance),
@@ -618,7 +618,7 @@ extern "C" __global__ void __launch_bounds__(
         miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
             runningMean, runningVariance, updater, grpid);
 #endif
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
         miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
             savedMean, savedInvVariance, mean, invVariance, grpid);
 #endif

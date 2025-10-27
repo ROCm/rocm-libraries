@@ -203,10 +203,10 @@ struct proto_config
 
     static constexpr auto input_type_strategy = MiopenConfig::input_type_strategy;
     using fp_type                             = typename std::conditional<
-        input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
-        _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
-            type>::type;
+                                    input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
+                                    _Float16,
+                                    typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
+                                        type>::type;
     using fp_prec_type  = float;
     using fp_accum_type = float;
     static constexpr double epsilon =

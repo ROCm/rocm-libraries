@@ -266,26 +266,28 @@ struct StashUpdater
     FpAccumType const variance;
     FpAccumType const expAvgFactor;
 
-    __device__ StashUpdater(FpAccumType m, FpAccumType v, FpAccumType e) :
-        mean(m), variance(v), expAvgFactor(e)
+    __device__ StashUpdater(FpAccumType m, FpAccumType v, FpAccumType e)
+        : mean(m), variance(v), expAvgFactor(e)
     {
         static_assert(miopen::batchnorm::config::variant != 4,
-                    "running_stash is only compiled when MIO_BN_VARIANT != 4.");
+                      "running_stash is only compiled when MIO_BN_VARIANT != 4.");
     }
 
-    __forceinline__ __device__ void operator()(FpAccumType &runningMean, FpAccumType &runningVariance) const
+    __forceinline__ __device__ void operator()(FpAccumType& runningMean,
+                                               FpAccumType& runningVariance) const
     {
         const FpAccumType newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
-        runningMean = fma(mean, expAvgFactor, newRunningMean);
+        runningMean                      = fma(mean, expAvgFactor, newRunningMean);
 
         const FpAccumType adjust = static_cast<FpAccumType>(
             (miopen::batchnorm::config::nhw == 1)
                 ? variance
-                : variance *
-                    (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) /
-                    (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) - FpAccumType{1.0})));
+                : variance * (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) /
+                              (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) -
+                               FpAccumType{1.0})));
 
-        runningVariance = fma(FpAccumType(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
+        runningVariance =
+            fma(FpAccumType(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
     }
 };
 
@@ -296,26 +298,28 @@ struct StashUpdaterPA
     FpAccumType const variance;
     FpAccumType const expAvgFactor;
 
-    __device__ StashUpdaterPA(FpAccumType m, FpAccumType v, FpAccumType e) :
-        mean(m), variance(v), expAvgFactor(e)
+    __device__ StashUpdaterPA(FpAccumType m, FpAccumType v, FpAccumType e)
+        : mean(m), variance(v), expAvgFactor(e)
     {
         static_assert(miopen::batchnorm::config::variant != 4,
-                    "running_stash is only compiled when MIO_BN_VARIANT != 4.");
+                      "running_stash is only compiled when MIO_BN_VARIANT != 4.");
     }
 
-    __forceinline__ __device__ void operator()(FpAccumType &runningMean, FpAccumType &runningVariance) const
+    __forceinline__ __device__ void operator()(FpAccumType& runningMean,
+                                               FpAccumType& runningVariance) const
     {
         const FpAccumType newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
-        runningMean = fma(mean, expAvgFactor, newRunningMean);
+        runningMean                      = fma(mean, expAvgFactor, newRunningMean);
 
         const FpAccumType adjust = static_cast<FpAccumType>(
             (miopen::batchnorm::config::n == 1)
                 ? variance
-                : variance *
-                    (static_cast<FpAccumType>(miopen::batchnorm::config::n) /
-                    (static_cast<FpAccumType>(miopen::batchnorm::config::n) - FpAccumType{1.0})));
+                : variance * (static_cast<FpAccumType>(miopen::batchnorm::config::n) /
+                              (static_cast<FpAccumType>(miopen::batchnorm::config::n) -
+                               FpAccumType{1.0})));
 
-        runningVariance = fma(FpAccumType{1.0} - expAvgFactor, runningVariance, expAvgFactor * adjust);
+        runningVariance =
+            fma(FpAccumType{1.0} - expAvgFactor, runningVariance, expAvgFactor * adjust);
     }
 };
 

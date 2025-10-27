@@ -40,20 +40,20 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
     const mio_bn_config::fp_type beta,
     const mio_bn_config::fp_type gamma,
     double epsilon, /* input fuzz param > 0 */
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
     double expAvgFactor,
 #endif
     const typename mio_bn_config::fp_type* __restrict in,        /* x input */
     typename mio_bn_config::fp_type* __restrict out,             /* y output */
     const typename mio_bn_config::fp_prec_type* __restrict bias, /* beta 1xCxHxW */
     const typename mio_bn_config::fp_prec_type* __restrict scale /* gamma 1xCxHxW */
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
     ,
     typename mio_bn_config::fp_prec_type* __restrict runningMean,    /*input and output, same
                                                                         descriptor as bias*/
     typename mio_bn_config::fp_prec_type* __restrict runningVariance /*input and output*/
 #endif
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
     ,
     typename mio_bn_config::fp_prec_type* __restrict savedInvVariance, /*output only*/
     typename mio_bn_config::fp_prec_type* __restrict savedMean         /*output only*/
@@ -81,13 +81,13 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
             continue;
         }
 
-        fp_prec_type mean     = 0;
-        fp_prec_type variance = 0;
-        unsigned int adjIndex = Cidx + inImgIndex; // gamma and beta tensor index
+        fp_prec_type mean      = 0;
+        fp_prec_type variance  = 0;
+        unsigned int adjIndex  = Cidx + inImgIndex; // gamma and beta tensor index
         fp_prec_type pvt_scale = scale[adjIndex];
         fp_prec_type pvt_bias  = bias[adjIndex];
 
-        for (unsigned int n = 0; n < mio_bn_config::n; ++n)
+        for(unsigned int n = 0; n < mio_bn_config::n; ++n)
         {
             unsigned int index = mio_bn_config::chw * n + adjIndex;
             fp_prec_type xin   = miopen::batchnorm::cast<fp_prec_type>(in[index]);
@@ -100,7 +100,7 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
         fp_prec_type invVariance = rsqrt(variance + epsilon);
 
         fp_prec_type bn_out, act_out;
-        for (unsigned int n = 0; n < mio_bn_config::n; ++n)
+        for(unsigned int n = 0; n < mio_bn_config::n; ++n)
         {
             // per (x-dims) channel load a block of data unsigned into LDS
             unsigned int index = mio_bn_config::chw * n + adjIndex;
@@ -114,8 +114,8 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
                                                 miopen::batchnorm::cast<fp_prec_type>(alpha));
             out[index] = miopen::batchnorm::cast<fp_prec_type>(act_out);
         }
-    
-#if (MIO_RUNNING_RESULT == 1)
+
+#if(MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdaterPA<fp_accum_c_type>;
         StashUpdater updater(static_cast<fp_accum_c_type>(mean),
                              static_cast<fp_accum_c_type>(variance),
@@ -125,7 +125,7 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
             runningMean, runningVariance, updater, adjIndex);
 #endif
 
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
         miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
             savedMean, savedInvVariance, mean, invVariance, adjIndex);
 #endif
