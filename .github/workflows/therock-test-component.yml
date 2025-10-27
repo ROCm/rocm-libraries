@@ -54,6 +54,7 @@ jobs:
           repository: "ROCm/TheRock"
           sparse-checkout: build_tools
           path: "prejob"
+          ref: c2921b151b8285a1d29942aceb33cfe0fea77ac9 # 10-15-2025 commit  
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
