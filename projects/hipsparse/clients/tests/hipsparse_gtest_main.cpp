@@ -28,6 +28,8 @@
 #include <hip/hip_runtime_api.h>
 #include <stdexcept>
 
+#include "hipsparse_parse_data.hpp"
+
 using namespace testing;
 
 class ConfigurableEventListener : public TestEventListener
@@ -173,7 +175,7 @@ bool display_timing_info_is_stdout_disabled()
 int main(int argc, char** argv)
 {
     // Print version
-    char version[256];
+    char version[512];
     query_version(version);
 
     // Get device id from command line
@@ -232,6 +234,14 @@ int main(int argc, char** argv)
     }
 
     printf("hipSPARSE version: %s\n", version);
+
+    std::string datapath = hipsparse_datapath();
+
+    // Print test data path being used
+    std::cout << "hipSPARSE data path: " << datapath << std::endl;
+
+    // Set data file path
+    hipsparse_parse_data(argc, argv, datapath + "hipsparse_test.data");
 
     // Initialize google test
     InitGoogleTest(&argc, argv);

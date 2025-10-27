@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include "data_types_generated.h"
 #include <flatbuffers/flatbuffer_builder.h>
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
@@ -88,10 +88,10 @@ namespace hipdnn_sdk::json
 {
 
 template <class T>
-auto to(flatbuffers::FlatBufferBuilder& builder, nlohmann::json const& entry);
+inline auto to(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry);
 
 template <class T>
-auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
 {
     if(!entry.is_array())
     {

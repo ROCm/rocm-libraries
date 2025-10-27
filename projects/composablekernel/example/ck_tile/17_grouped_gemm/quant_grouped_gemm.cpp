@@ -28,7 +28,8 @@ template <typename GemmConfig,
           typename BDataType,
           typename BQDataType,
           typename AccDataType,
-          typename CDataType>
+          typename CDataType,
+          ck_tile::QuantType QuantMode>
 float grouped_gemm_tileloop(const ck_tile::stream_config& s,
                             const ck_tile::index_t num_groups,
                             void* kargs_ptr)
@@ -44,19 +45,20 @@ float grouped_gemm_tileloop(const ck_tile::stream_config& s,
     using TilePartitioner = ck_tile::
         GemmSpatiallyLocalTilePartitioner<GemmShape, TileParitionerGroupNum, TileParitionerM01>;
 
-    constexpr ck_tile::QuantType QuantMode = ck_tile::QuantType::RowColQuant;
-    using GemmUniversalTraits              = ck_tile::TileGemmQuantTraits<GemmConfig::kPadM,
-                                                                          GemmConfig::kPadN,
-                                                                          GemmConfig::kPadK,
-                                                                          false,
-                                                                          ALayout,
-                                                                          BLayout,
-                                                                          CLayout,
-                                                                          QuantMode,
-                                                                          AQLayout,
-                                                                          BQLayout,
-                                                                          GemmConfig::DoubleSmemBuffer,
-                                                                          true>;
+    using GemmUniversalTraits = ck_tile::TileGemmQuantTraits<GemmConfig::kPadM,
+                                                             GemmConfig::kPadN,
+                                                             GemmConfig::kPadK,
+                                                             false,
+                                                             false,
+                                                             ALayout,
+                                                             BLayout,
+                                                             CLayout,
+                                                             QuantMode,
+                                                             AQLayout,
+                                                             BQLayout,
+                                                             GemmConfig::TransposeC,
+                                                             GemmConfig::DoubleSmemBuffer,
+                                                             true>;
 
     float ave_time{0};
 
@@ -109,23 +111,19 @@ float grouped_gemm_tileloop(const ck_tile::stream_config& s,
                       << blocks.x << ", " << blocks.y << ", " << blocks.z << "}" << std::endl;
         }
 
-        ave_time =
-            ck_tile::launch_kernel(s,
-                                   ck_tile::make_kernel<GemmConfig::kBlockPerCu>(
-                                       Kernel{},
-                                       grids,
-                                       blocks,
-                                       0,
-                                       ck_tile::cast_pointer_to_constant_address_space(kargs_ptr),
-                                       num_groups));
-
-        return ave_time;
+        return ave_time = ck_tile::launch_kernel(
+                   s,
+                   ck_tile::make_kernel<GemmConfig::kBlockPerCu>(
+                       Kernel{},
+                       grids,
+                       blocks,
+                       0,
+                       ck_tile::cast_pointer_to_constant_address_space(kargs_ptr),
+                       num_groups));
     };
 
-    Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
-                                   ck_tile::memory_operation_enum::set>{});
-
-    return ave_time;
+    return ave_time = Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
+                                                     ck_tile::memory_operation_enum::set>{});
 }
 
 #include "quant_run_grouped_gemm_example.inc"

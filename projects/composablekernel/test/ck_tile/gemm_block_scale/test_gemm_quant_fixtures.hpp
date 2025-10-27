@@ -5,6 +5,7 @@
 
 #include "test_gemm_quant_base.hpp"
 #include "ck_tile/host/permute_pk_int4.hpp"
+#include "ck_tile/host/shuffle_utils.hpp"
 
 struct GemmConfigBase
 {
@@ -26,6 +27,7 @@ struct GemmConfigBase
     static constexpr bool PreshuffleQuant           = false;
     static constexpr bool PreshuffleB               = false;
     static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr bool TiledMMAPermuteN          = false;
 
     // Default GEMM tile sizes for tests
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -41,26 +43,26 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t K_Warp_Tile = 32;
 };
 
-struct GemmConfigPreshuffleB
+struct GemmConfigPreshuffleQuant : public GemmConfigBase
 {
-    static constexpr bool kPadM = false;
-    static constexpr bool kPadN = false;
-    static constexpr bool kPadK = false;
+    static constexpr bool PreshuffleQuant = true;
+};
 
-    static constexpr bool PermuteA = false;
-    static constexpr bool PermuteB = false;
+struct GemmConfigTransposeC : public GemmConfigBase
+{
+    static constexpr bool TransposeC = true;
+};
 
-    static constexpr bool TransposeC            = false;
-    static constexpr bool UseStructuredSparsity = false;
+struct GemmConfigPreshuffleQuantTransposeC : public GemmConfigBase
+{
+    static constexpr bool PreshuffleQuant = true;
+    static constexpr bool TransposeC      = true;
+};
 
-    static constexpr int kBlockPerCu                         = 1;
-    static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
-    static constexpr ck_tile::index_t TileParitionerM01      = 4;
-    static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Intrawave;
-    static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr bool PreshuffleQuant           = false;
-    static constexpr bool PreshuffleB               = true;
-    static constexpr bool DoubleSmemBuffer          = true;
+struct GemmConfigPreshuffleBDecode : public GemmConfigBase
+{
+    static constexpr bool PreshuffleB      = true;
+    static constexpr bool DoubleSmemBuffer = true;
 
     // Default GEMM tile sizes for tests
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -74,6 +76,31 @@ struct GemmConfigPreshuffleB
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = 64;
+};
+
+struct GemmConfigPreshuffleBPrefill : public GemmConfigBase
+{
+    static constexpr bool PreshuffleB      = true;
+    static constexpr bool DoubleSmemBuffer = true;
+
+    // Default GEMM tile sizes for tests
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 128;
+
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 4;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile = 64;
+};
+
+struct GemmConfigPreshuffleBPrefillTiledPermuteN : public GemmConfigPreshuffleBPrefill
+{
+    static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
+    static constexpr bool TiledMMAPermuteN = N_Repeat % 2 == 0;
 };
 
 template <typename Tuple>
@@ -150,7 +177,17 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         {
             a_m_k_dev_buf.ToDevice(a_m_k.data());
         }
-        aq_m_aqk_dev_buf.ToDevice(aq_m_aqk.data());
+        // aq_m_aqk_dev_buf.ToDevice(aq_m_aqk.data());
+        if constexpr(Base::GemmConfig::PreshuffleQuant)
+        {
+            ck_tile::HostTensor<QDataType> aq_shuffle_host =
+                ck_tile::shuffle_aq(&aq_m_aqk, Base::GemmConfig::K_Tile / QuantGroupSize);
+            aq_m_aqk_dev_buf.ToDevice(aq_shuffle_host.data());
+        }
+        else
+        {
+            aq_m_aqk_dev_buf.ToDevice(aq_m_aqk.data());
+        }
         b_k_n_dev_buf.ToDevice(b_k_n.data());
 
         // Create args for kernel execution
@@ -245,7 +282,7 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v  = tail_number_.value;
-            constexpr bool transpose_c    = false;
+            constexpr bool transpose_c    = CodegenGemmTraits::TransposeC;
 
             using PipelineProblem =
                 ck_tile::GemmAQuantPipelineProblem<ADataType,
@@ -320,11 +357,13 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
     using typename Base::CDataType;
     using typename Base::CLayout;
     using typename Base::ComputeDataType;
+    using typename Base::GemmConfig;
     using typename Base::QDataType;
 
     static constexpr auto QuantType          = Base::QuantType;
     static constexpr uint32_t QuantGroupSize = Base::QuantGroupSize;
     static constexpr auto PreshuffleB        = Base::PreshuffleB;
+    static constexpr auto TiledMMAPermuteN   = Base::TiledMMAPermuteN;
 
     protected:
     void SetUpQuantTypeSpecific() {}
@@ -362,24 +401,35 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         // Copy to device
         a_m_k_dev_buf.ToDevice(a_m_k.data());
         ck_tile::HostTensor<BDataType> b_k_n_dev = b_k_n;
+        if constexpr(PreshuffleB)
+        {
+            if constexpr(TiledMMAPermuteN)
+            {
+                printf("PreshuffleB with TiledMMAPermuteN\n");
+                b_k_n_dev = ck_tile::shuffle_b_permuteN<GemmConfig>(b_k_n);
+            }
+            else
+            {
+                printf("PreshuffleB without TiledMMAPermuteN\n");
+                b_k_n_dev = ck_tile::shuffle_b<GemmConfig>(b_k_n);
+            }
+        }
         if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
-            if constexpr(PreshuffleB)
-            {
-                b_k_n_dev = this->shuffle_b(b_k_n);
-            }
             ck_tile::permute_vectors_i4x4_b(b_k_n_dev);
-            b_k_n_dev_buf.ToDevice(b_k_n_dev.data());
+        }
+
+        b_k_n_dev_buf.ToDevice(b_k_n_dev.data());
+
+        if constexpr(PreshuffleB && TiledMMAPermuteN)
+        {
+            printf("Preshuffle BQ with TiledMMAPermuteN \n");
+            ck_tile::HostTensor<QDataType> bq_shuffle_host =
+                ck_tile::shuffle_bq_permuteN<GemmConfig>(bq_bqk_n);
+            bq_bqk_n_dev_buf.ToDevice(bq_shuffle_host.data());
         }
         else
-        {
-            if constexpr(PreshuffleB)
-            {
-                b_k_n_dev = this->shuffle_b(b_k_n);
-            }
-            b_k_n_dev_buf.ToDevice(b_k_n_dev.data());
-        }
-        bq_bqk_n_dev_buf.ToDevice(bq_bqk_n.data());
+            bq_bqk_n_dev_buf.ToDevice(bq_bqk_n.data());
 
         // Create args for kernel execution
         ck_tile::QuantGemmHostArgs args{
@@ -512,7 +562,11 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                  Base::N_Warp_Tile,
                                                  Base::K_Warp_Tile,
                                                  false, // transpose_c
-                                                 ck_tile::memory_operation_enum::set>>;
+                                                 ck_tile::memory_operation_enum::set,
+                                                 1,
+                                                 false,
+                                                 1,
+                                                 TiledMMAPermuteN>>;
 
             using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
                                                     GemmPipeline,
@@ -701,7 +755,7 @@ class TestCkTileGemmRowColQuant
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v  = tail_number_.value;
-            constexpr bool transpose_c    = false;
+            constexpr bool transpose_c    = CodegenGemmTraits::TransposeC;
 
             using PipelineProblem = ck_tile::GemmRowColTensorQuantPipelineProblem<
                 ADataType,
@@ -916,7 +970,7 @@ class TestCkTileGemmTensorQuant
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v  = tail_number_.value;
-            constexpr bool transpose_c    = false;
+            constexpr bool transpose_c    = CodegenGemmTraits::TransposeC;
 
             using PipelineProblem = ck_tile::GemmRowColTensorQuantPipelineProblem<
                 ADataType,

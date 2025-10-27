@@ -27,15 +27,6 @@ using ::testing::Return;
 class TestExecutionPlanDescriptor : public ::testing::Test
 {
 public:
-    std::unique_ptr<HipdnnBackendDescriptor> _planWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigBadTypeWrapper = nullptr;
-    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
-    std::unique_ptr<MockHandle> _mockHandle = nullptr;
-    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
-
     std::shared_ptr<ExecutionPlanDescriptor> getExecutionPlanDescriptor() const
     {
         return _planWrapper->asDescriptor<ExecutionPlanDescriptor>();
@@ -75,6 +66,8 @@ public:
         EXPECT_CALL(*_mockEnginePluginResourceManager, createExecutionContext(_, _, _))
             .WillOnce(Return(getExecutionContext()));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _))
+            .WillOnce(Return(1024));
 
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
@@ -108,6 +101,15 @@ public:
     }
 
 protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _planWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockGraphWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockEngineConfigBadTypeWrapper = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _mockWrongTypeWrapper = nullptr;
+    std::unique_ptr<MockHandle> _mockHandle = nullptr;
+    std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
+
     void SetUp() override
     {
         _planWrapper = createDescriptor<ExecutionPlanDescriptor>();
@@ -268,7 +270,6 @@ TEST_F(TestExecutionPlanDescriptor, GetWorkspaceSize)
     int64_t workspaceSize = 0;
 
     makeExecutionPlanFinalized();
-    EXPECT_CALL(*mockEngineConfig, getAttribute(_, _, _, _, _)).WillOnce(SetArg4ToInt64(1024));
     plan->getAttribute(
         HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspaceSize);
     ASSERT_EQ(workspaceSize, 1024);

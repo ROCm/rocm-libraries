@@ -132,6 +132,8 @@ This section lists all the enumerations that are used.
 
 .. doxygenenum:: rocfft_transform_type
 
+.. _rocfft-supported-data-types:
+
 .. doxygenenum:: rocfft_precision
 
 .. doxygenenum:: rocfft_result_placement
