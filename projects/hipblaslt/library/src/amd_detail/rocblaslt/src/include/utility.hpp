@@ -339,7 +339,8 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
-    case ROCBLASLT_EPILOGUE_SIGMOID:
+    case ROCBLASLT_EPILOGUE_SIGMOID_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID_BIAS_EXT:
     // backward pass:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
@@ -364,6 +365,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID_BIAS_EXT:
         return true;
     default:
         return false;
@@ -390,6 +392,8 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID_BIAS_EXT:
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:
