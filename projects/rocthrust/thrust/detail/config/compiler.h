@@ -86,6 +86,8 @@
 
 #  define THRUST_PRAGMA _CCCL_PRAGMA
 
+#  define THRUST_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL_FULL()
+
 #else // TODO(libhipcxx): remove this path once libhipcxx gets ready
 
 // Macros to suppress deprecation compiler warnings, from "deprecated.h"
@@ -212,14 +214,23 @@
 #  endif
 
 // Convert parameter to string
-#  define THRUST_TO_STRING2(_STR) #_STR
-#  define THRUST_TO_STRING(_STR)  THRUST_TO_STRING2(_STR)
+#  define THRUST_TO_STRING2(STR) #STR
+#  define THRUST_TO_STRING(STR)  THRUST_TO_STRING2(STR)
 
 // Define the pragma for the host compiler
 #  if THRUST_COMPILER(MSVC)
-#    define THRUST_PRAGMA(x) __pragma(x)
+#    define THRUST_PRAGMA(ARG) __pragma(ARG)
 #  else
-#    define THRUST_PRAGMA(x) _Pragma(THRUST_TO_STRING(x))
+#    define THRUST_PRAGMA(ARG) _Pragma(THRUST_TO_STRING(ARG))
 #  endif // THRUST_COMPILER(MSVC)
+
+#if (THRUST_COMPILER(NVCC) && defined(__CUDA_ARCH__)) || THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) \
+  || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
+#elif THRUST_COMPILER(GCC, >=, 8)
+#  define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(diag_suppress 1675) THRUST_PRAGMA(GCC unroll 65534)
+#else // ^^^ has pragma unroll support ^^^ / vvv no pragma unroll support vvv
+#  define THRUST_PRAGMA_UNROLL_FULL()
+#endif // ^^^ no pragma unroll support ^^^
 
 #endif

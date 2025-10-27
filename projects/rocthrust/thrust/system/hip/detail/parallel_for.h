@@ -72,7 +72,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
 
   if (items_in_tile == items_per_block)
   {
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
@@ -81,7 +81,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
   }
   else
   {
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
