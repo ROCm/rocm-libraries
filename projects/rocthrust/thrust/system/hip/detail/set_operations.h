@@ -250,7 +250,7 @@ struct SetOpAgent
     const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
     if (IS_FULL_TILE)
     {
-#  pragma unroll
+      THRUST_PRAGMA_UNROLL_FULL()
       for (int ITEM = 0; ITEM < ITEMS_PER_THREAD - 1; ++ITEM)
       {
         int idx      = BLOCK_THREADS * ITEM + thread_id;
@@ -268,7 +268,7 @@ struct SetOpAgent
     }
     else
     {
-#  pragma unroll
+      THRUST_PRAGMA_UNROLL_FULL()
       for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
       {
         int idx = BLOCK_THREADS * ITEM + thread_id;
@@ -285,7 +285,7 @@ struct SetOpAgent
   reg_to_shared(rocprim::uninitialized_array<T, OutputSize>& output, T (&input)[ITEMS_PER_THREAD])
   {
     const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
     {
       int idx = BLOCK_THREADS * ITEM + thread_id;
@@ -304,7 +304,8 @@ struct SetOpAgent
     int tile_output_count)
   {
     int local_scatter_idx = thread_output_prefix - tile_output_prefix;
-#  pragma unroll
+
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
     {
       if (active_mask & (1 << ITEM))
@@ -514,7 +515,7 @@ struct SetOpAgent
 
       // gather items from shared mem
       //
-#  pragma unroll
+      THRUST_PRAGMA_UNROLL_FULL()
       for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
       {
         if (active_mask & (1 << ITEM))
@@ -572,7 +573,7 @@ struct serial_set_intersection
     T aKey = keys[aBegin];
     T bKey = keys[bBegin];
 
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < ITEMS_PER_THREAD; ++i)
     {
       bool pA = compare_op(aKey, bKey);
@@ -628,7 +629,7 @@ struct serial_set_symmetric_difference
     T aKey = keys[aBegin];
     T bKey = keys[bBegin];
 
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < ITEMS_PER_THREAD; ++i)
     {
       bool pB = aBegin >= aEnd;
@@ -690,7 +691,7 @@ struct serial_set_difference
     T aKey = keys[aBegin];
     T bKey = keys[bBegin];
 
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < ITEMS_PER_THREAD; ++i)
     {
       bool pB = aBegin >= aEnd;
@@ -752,7 +753,7 @@ struct serial_set_union
     T aKey = keys[aBegin];
     T bKey = keys[bBegin];
 
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < ITEMS_PER_THREAD; ++i)
     {
       bool pB = aBegin >= aEnd;
