@@ -1244,7 +1244,7 @@ bool generate_coo_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1259,12 +1259,14 @@ bool generate_coo_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
             if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
+                   full_filename_path.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
                == 0)
             {
                 coo_row_ind.resize(nnz);
@@ -1285,7 +1287,7 @@ bool generate_coo_matrix(const std::string    filename,
         else if(extension == "mtx")
         {
             int64_t nnz_count;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
