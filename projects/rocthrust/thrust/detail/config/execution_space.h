@@ -16,8 +16,7 @@
 
 #include <thrust/detail/config/compiler.h>
 
-// We need to ensure that we not only compile with a cuda or hip compiler but also compile cuda or hip source files
-#if (THRUST_HAS_CUDA_COMPILER() && (defined(__CUDACC__) || defined(_NVHPC_CUDA))) || THRUST_COMPILER(HIP)
+#if THRUST_CUDA_COMPILATION() || THRUST_COMPILER(HIP)
 #  define THRUST_HOST        __host__
 #  define THRUST_DEVICE      __device__
 #  define THRUST_HOST_DEVICE __host__ __device__

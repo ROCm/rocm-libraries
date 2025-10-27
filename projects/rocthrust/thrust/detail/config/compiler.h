@@ -58,9 +58,37 @@
 #    define _CCCL_COMPILER_HIP() _CCCL_VERSION_INVALID()
 #  endif
 
-#  define THRUST_CUDA_COMPILER        _CCCL_CUDA_COMPILER
-#  define THRUST_HAS_CUDA_COMPILER()  _CCCL_HAS_CUDA_COMPILER()
-#  define THRUST_PRAGMA               _CCCL_PRAGMA
+#  define THRUST_CUDA_COMPILER       _CCCL_CUDA_COMPILER
+#  define THRUST_HAS_CUDA_COMPILER() _CCCL_HAS_CUDA_COMPILER()
+#  define THRUST_CUDA_COMPILATION()  _CCCL_CUDA_COMPILATION()
+
+#  undef _CCCL_HOST_COMPILATION
+#  if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+#    define _CCCL_HOST_COMPILATION() 1
+#  else // ^^^ compiling host code ^^^ / vvv not compiling host code vvv
+#    define _CCCL_HOST_COMPILATION() 0
+#  endif // ^^^ not compiling host code ^^^
+
+#  undef _CCCL_DEVICE_COMPILATION
+#  if (_CCCL_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || _CCCL_CUDA_COMPILER(NVHPC) \
+    || (_CCCL_COMPILER(HIP) && defined(__HIP_DEVICE_COMPILE__))
+#    define _CCCL_DEVICE_COMPILATION() 1
+#  else // ^^^ compiling device code ^^^ / vvv not compiling device code vvv
+#    define _CCCL_DEVICE_COMPILATION() 0
+#  endif // ^^^ not compiling device code ^^^
+
+#  define THRUST_PRAGMA _CCCL_PRAGMA
+
+#  undef _CCCL_PRAGMA_UNROLL_FULL
+#  if _CCCL_DEVICE_COMPILATION()
+#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA(unroll)
+#  elif _CCCL_COMPILER(NVHPC) || _CCCL_COMPILER(NVRTC) || _CCCL_COMPILER(CLANG) || _CCCL_COMPILER(HIP)
+#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA(unroll)
+#  elif _CCCL_COMPILER(GCC, >=, 8)
+#    define _CCCL_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL(65534)
+#  else // ^^^ has pragma unroll support ^^^ / vvv no pragma unroll support vvv
+#    define _CCCL_PRAGMA_UNROLL_FULL()
+#  endif // ^^^ no pragma unroll support ^^^
 #  define THRUST_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL_FULL()
 
 #else // TODO(libhipcxx): remove this path once libhipcxx gets ready
@@ -207,7 +235,27 @@
 #  elif THRUST_COMPILER(NVRTC)
 #    undef THRUST_CUDA_COMPILER_NVRTC
 #    define THRUST_CUDA_COMPILER_NVRTC() THRUST_COMPILER_NVRTC()
-#  endif
+#  endif // ^^^ THRUST_COMPILER(NVRTC) ^^^
+
+#  if THRUST_CUDA_COMPILER(NVCC) || THRUST_CUDA_COMPILER(CLANG) || THRUST_CUDA_COMPILER(NVHPC) \
+    || THRUST_CUDA_COMPILER(NVRTC)
+#    define THRUST_HAS_CUDA_COMPILER() 1
+#  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
+#    define THRUST_HAS_CUDA_COMPILER() 0
+#  endif // ^^^ no cuda compiler ^^^
+
+#  if defined(__CUDACC__) || THRUST_CUDA_COMPILER(NVHPC)
+#    define THRUST_CUDA_COMPILATION() 1
+#  else // ^^^ compiling .cu file ^^^ / vvv not compiling .cu file vvv
+#    define THRUST_CUDA_COMPILATION() 0
+#  endif // ^^^ not compiling .cu file ^^^
+
+#  if (THRUST_CUDA_COMPILATION() && defined(__CUDA_ARCH__)) || THRUST_CUDA_COMPILER(NVHPC) \
+    || (THRUST_COMPILER(HIP) && defined(__HIP_DEVICE_COMPILE__))
+#    define THRUST_DEVICE_COMPILATION() 1
+#  else // ^^^ compiling device code ^^^ / vvv not compiling device code vvv
+#    define THRUST_DEVICE_COMPILATION() 0
+#  endif // ^^^ not compiling device code ^^^
 
 #  define THRUST_CUDACC_MAKE_VERSION(_MAJOR, _MINOR) ((_MAJOR) * 1000 + (_MINOR) * 10)
 
@@ -217,19 +265,17 @@
 #    define THRUST_CUDACC() (__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
 #  elif THRUST_CUDA_COMPILER(CLANG)
 #    define THRUST_CUDACC() (CUDA_VERSION / 1000, (CUDA_VERSION % 1000) / 10)
-#  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
-#    define THRUST_CUDACC() THRUST_VERSION_INVALID()
-#  endif // ^^^ no cuda compiler ^^^
+#  endif // ^^^ has cuda compiler ^^^
 
+#  if !defined(THRUST_CUDACC) || !THRUST_CUDA_COMPILATION()
+#    undef THRUST_CUDACC
+#    define THRUST_CUDACC() THRUST_VERSION_INVALID()
+#  endif // !THRUST_CUDACC || !THRUST_CUDA_COMPILATION()
+
+#  define THRUST_CUDACC_EQUAL(...) THRUST_VERSION_COMPARE(THRUST_CUDACC_, THRUST_CUDACC, ==, __VA_ARGS__)
 #  define THRUST_CUDACC_BELOW(...) THRUST_VERSION_COMPARE(THRUST_CUDACC_, THRUST_CUDACC, <, __VA_ARGS__)
 
-#  if THRUST_VERSION_IS_INVALID(THRUST_CUDACC())
-#    define THRUST_HAS_CUDA_COMPILER() 0
-#  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
-#    define THRUST_HAS_CUDA_COMPILER() 1
-#  endif
-
-#  if THRUST_HAS_CUDA_COMPILER() && THRUST_CUDACC_BELOW(12) && !defined(THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12)
+#  if THRUST_CUDA_COMPILATION() && THRUST_CUDACC_BELOW(12) && !defined(THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12)
 #    error "CUDA versions below 12 are not supported." \
 "Define THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12 to suppress this message."
 #  endif
@@ -241,8 +287,9 @@
 #    define THRUST_PRAGMA(ARG) _Pragma(THRUST_TO_STRING(ARG))
 #  endif // THRUST_COMPILER(MSVC)
 
-#  if (THRUST_CUDA_COMPILER(NVCC) && defined(__CUDA_ARCH__)) || THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) \
-    || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#  if THRUST_DEVICE_COMPILATION()
+#    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
+#  elif THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
 #    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
 #  elif THRUST_COMPILER(GCC, >=, 8)
 #    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(diag_suppress 1675) THRUST_PRAGMA(GCC unroll 65534)
