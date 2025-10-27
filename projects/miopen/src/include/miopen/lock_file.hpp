@@ -108,14 +108,14 @@ public:
 
     bool clear_stale_lock()
     {
-        constexpr const auto timeout = std::chrono::milliseconds(5);
+        constexpr const auto timeout = std::chrono::milliseconds(20);
         auto last_write_time         = fs::last_write_time(lockfile_path);
-        auto chrono_last_write       = std::chrono::file_clock::to_sys(last_write_time);
-        auto now                     = std::chrono::system_clock::now();
-        auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - chrono_last_write);
+        auto now                     = fs::file_time_type::clock::now();
+        auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_write_time);
         if(age > timeout)
         {
-            MIOPEN_LOG_I2("Removing Stale Lock < " << lockfile_path.string());
+            MIOPEN_LOG_I2("Removing Stale Lock < " << lockfile_path.string()
+                                                   << ", Age(ms): " << age);
             fs::remove(lockfile_path);
             return true;
         }
@@ -124,18 +124,16 @@ public:
 
     void refresh_lock()
     {
+        constexpr const auto update_freq = std::chrono::milliseconds(4);
         MIOPEN_LOG_I2("Lock Refresh Active < " << unique_handle.string());
-        auto last_refresh = std::chrono::system_clock::now();
-        auto age = std::chrono::milliseconds(1);
+        auto last_refresh = fs::file_time_type::clock::now();
+        auto age          = update_freq;
         while(lock_held)
         {
-            if(age >= std::chrono::milliseconds(1))
+            if(age >= update_freq)
             {
                 std::error_code ec;
-                fs::last_write_time(
-                    unique_handle,
-                    fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()),
-                    ec);
+                fs::last_write_time(unique_handle, fs::file_time_type::clock::now(), ec);
                 if(ec.value() != 0)
                 {
                     MIOPEN_LOG_I2("File <" << unique_handle << "> "
@@ -144,11 +142,11 @@ public:
                                            << "Description: '" << ec.message() << "'");
                     return;
                 }
-                last_refresh = std::chrono::system_clock::now();
+                last_refresh = fs::file_time_type::clock::now();
             }
             std::this_thread::sleep_for(std::chrono::microseconds(10));
-            auto now = std::chrono::system_clock::now();
-            age = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
+            auto now = fs::file_time_type::clock::now();
+            age      = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
         }
         MIOPEN_LOG_I2("Lock Refresh Exit < " << unique_handle.string());
     }
@@ -191,10 +189,7 @@ public:
         refresh_thread.join();
     }
 
-    fs::path get_unique_handle()
-    {
-        return unique_handle;
-    }
+    fs::path get_unique_handle() { return unique_handle; }
 
 private:
     bool lock_held;
