@@ -390,7 +390,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
-    const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+    [[maybe_unused]] const miopen::ExecutionContext& ctx,
+    const ::miopen::conv::ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "None";
