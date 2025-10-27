@@ -110,6 +110,7 @@ namespace rocRoller
                 rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
 
                 rv << "_SwizzleScale" << swizzleScale << prefetchScale;
+                rv << "_SwizzleTileSize" << swizzleTileSize;
 
                 if(prefetch)
                 {
@@ -180,7 +181,7 @@ namespace rocRoller
 
             std::string toString(MKNLTuple x)
             {
-                return fmt::format("{}x{}/{}x{}", x.m, x.k, x.n, x.l);
+                return fmt::format("{}x{}X{}x{}", x.m, x.k, x.n, x.l);
             }
 
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x)
@@ -325,7 +326,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         if(arg.empty())
             return PARSE_FAILURE;
 
-        std::regex  pattern(R"((\d+)x(\d+)/(\d+)x(\d+))");
+        std::regex  pattern(R"((\d+)x(\d+)[/X](\d+)x(\d+))");
         std::smatch match;
 
         bool matched = std::regex_match(arg, match, pattern);

@@ -712,6 +712,15 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
 
+    # can also use a big X
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--sts=5x7X11x13"]
+    )
+    assert post["swizzleTileSize"]["m"] == 5
+    assert post["swizzleTileSize"]["k"] == 7
+    assert post["swizzleTileSize"]["n"] == 11
+    assert post["swizzleTileSize"]["l"] == 13
+
 
 def test_gemm_config(tmp_path):
     """GEMM load from config file."""
