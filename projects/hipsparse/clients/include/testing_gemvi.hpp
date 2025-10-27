@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename T>
 void testing_gemvi_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int m   = 100;
     int n   = 100;
     int nnz = 100;
@@ -62,10 +62,10 @@ void testing_gemvi_bad_arg(const Arguments& argus)
     auto xInd_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
     auto y_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
 
-    T* A    = (T*)A_managed.get();
-    T* x    = (T*)x_managed.get();
-    int*   xInd = (int*)xInd_managed.get();
-    T* y    = (T*)y_managed.get();
+    T*   A    = (T*)A_managed.get();
+    T*   x    = (T*)x_managed.get();
+    int* xInd = (int*)xInd_managed.get();
+    T*   y    = (T*)y_managed.get();
 
     // gemvi
     void* buffer;
@@ -77,14 +77,36 @@ void testing_gemvi_bad_arg(const Arguments& argus)
         hipsparseXgemvi(
             handle, opType, m, n, (T*)nullptr, A, lda, nnz, x, xInd, &beta, y, idxBase, buffer),
         "Error: alpha is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseXgemvi(
-            handle, opType, m, n, &alpha, (T*)nullptr, lda, nnz, x, xInd, &beta, y, idxBase, buffer),
-        "Error: alpha is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseXgemvi(
-            handle, opType, m, n, &alpha, A, lda, nnz, (T*)nullptr, xInd, &beta, y, idxBase, buffer),
-        "Error: x is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseXgemvi(handle,
+                                                            opType,
+                                                            m,
+                                                            n,
+                                                            &alpha,
+                                                            (T*)nullptr,
+                                                            lda,
+                                                            nnz,
+                                                            x,
+                                                            xInd,
+                                                            &beta,
+                                                            y,
+                                                            idxBase,
+                                                            buffer),
+                                            "Error: alpha is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseXgemvi(handle,
+                                                            opType,
+                                                            m,
+                                                            n,
+                                                            &alpha,
+                                                            A,
+                                                            lda,
+                                                            nnz,
+                                                            (T*)nullptr,
+                                                            xInd,
+                                                            &beta,
+                                                            y,
+                                                            idxBase,
+                                                            buffer),
+                                            "Error: x is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseXgemvi(
             handle, opType, m, n, &alpha, A, lda, nnz, x, nullptr, &beta, y, idxBase, buffer),
@@ -93,10 +115,21 @@ void testing_gemvi_bad_arg(const Arguments& argus)
         hipsparseXgemvi(
             handle, opType, m, n, &alpha, A, lda, nnz, x, xInd, (T*)nullptr, y, idxBase, buffer),
         "Error: beta is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseXgemvi(
-            handle, opType, m, n, &alpha, A, lda, nnz, x, xInd, &beta, (T*)nullptr, idxBase, buffer),
-        "Error: y is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseXgemvi(handle,
+                                                            opType,
+                                                            m,
+                                                            n,
+                                                            &alpha,
+                                                            A,
+                                                            lda,
+                                                            nnz,
+                                                            x,
+                                                            xInd,
+                                                            &beta,
+                                                            (T*)nullptr,
+                                                            idxBase,
+                                                            buffer),
+                                            "Error: y is nullptr");
 
     verify_hipsparse_status_invalid_size(
         hipsparseXgemvi(
@@ -126,7 +159,7 @@ void testing_gemvi_bad_arg(const Arguments& argus)
 template <typename T>
 hipsparseStatus_t testing_gemvi(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  m        = argus.M;
     int                  n        = argus.N;
     int                  nnz      = argus.nnz;

@@ -24,7 +24,7 @@
 #include "test.hpp"
 #include "testing_bsrsv2.hpp"
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST_ROUTINE(bsrsv2,
              level2,
              arg.M,
@@ -38,10 +38,6 @@ TEST_ROUTINE(bsrsv2,
              arg.dirA,
              arg.baseA);
 #endif
-
-
-
-
 
 // #include "testing_bsrsv2.hpp"
 // #include "utility.hpp"

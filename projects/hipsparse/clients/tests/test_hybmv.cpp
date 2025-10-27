@@ -24,20 +24,10 @@
 #include "test.hpp"
 #include "testing_hybmv.hpp"
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
-TEST_ROUTINE(hybmv,
-             level2,
-             arg.M,
-             arg.N,
-             arg.alpha,
-             arg.alphai,
-             arg.beta,
-             arg.betai,
-             arg.part,
-             arg.baseA);
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+TEST_ROUTINE(
+    hybmv, level2, arg.M, arg.N, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.part, arg.baseA);
 #endif
-
-
 
 // #include "testing_hybmv.hpp"
 // #include "utility.hpp"
