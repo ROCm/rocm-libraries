@@ -525,6 +525,20 @@ Tests:
   bias_vector: [0, 1]
   unit_check: 1
 
+- name: matmul_bias_sigmoid
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: sigmoid
+  bias_vector: [0, 1]
+  unit_check: 1
+
 - name: matmul_bias_relu_streamk
   category: pre_checkin
   function:
