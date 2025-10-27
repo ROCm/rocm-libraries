@@ -25,7 +25,12 @@
  *******************************************************************************/
 #include "utility.hpp"
 #include <sys/types.h>
+
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 std::string prefix(const char* layer, const char* caller)
 {

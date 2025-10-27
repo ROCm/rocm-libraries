@@ -28,7 +28,35 @@
 
 #include <hipsparselt/hipsparselt.h>
 #include <regex>
+#include <string>
+
+// Handle string_view availability across different compilers and C++ standards
+// Priority order:
+// 1. Check if string_view header exists and try to use it
+// 2. For MSVC, check compiler version and C++17 flag
+// 3. Fallback to string for older compilers
+#if __has_include(<string_view>)
 #include <string_view>
+// MSVC requires /Zc:__cplusplus to report correct __cplusplus value
+// So we also check _MSVC_LANG which always reports the correct value
+#if(defined(__cpp_lib_string_view) && __cpp_lib_string_view >= 201606L) \
+    || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L)
+// string_view is available in std namespace
+#else
+// Header exists but string_view might not be in std namespace
+// This shouldn't happen in practice, but provide fallback just in case
+namespace std
+{
+    using string_view = string;
+}
+#endif
+#else
+// No string_view header at all - use string fallback
+namespace std
+{
+    using string_view = string;
+}
+#endif
 
 HIPSPARSELT_EXPORT
 constexpr const char* hipsparse_status_to_string(hipsparseStatus_t status)
@@ -256,17 +284,27 @@ __host__ __device__ inline bool hipsparselt_iszero(T arg)
 }
 
 /*! \brief device matches pattern */
-inline
-bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
+inline bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
 {
-    if(!pattern.length())
+    if(pattern.empty())
     {
         return true;
     }
 
-    constexpr char    prefix[]   = "gfx";
-    const std::size_t prefix_len = std::string_view(prefix).length();
-    gpu_arch.remove_prefix(prefix_len);
-    std::regex arch_regex(pattern.data());
-    return std::regex_search(gpu_arch.data(), arch_regex);
+    // Convert to string for consistent behavior across all compilers
+    // This avoids complex preprocessor logic and string_view API differences
+    std::string gpu_arch_str(gpu_arch);
+    std::string pattern_str(pattern);
+
+    // Remove "gfx" prefix if present
+    constexpr char   prefix[]   = "gfx";
+    constexpr size_t prefix_len = sizeof(prefix) - 1;
+    if(gpu_arch_str.size() >= prefix_len && gpu_arch_str.compare(0, prefix_len, prefix) == 0)
+    {
+        gpu_arch_str.erase(0, prefix_len);
+    }
+
+    // Create regex and search
+    std::regex arch_regex(pattern_str);
+    return std::regex_search(gpu_arch_str, arch_regex);
 }

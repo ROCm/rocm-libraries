@@ -32,7 +32,12 @@
 #include <fstream>
 #include <string>
 #include <sys/types.h>
+
+#ifndef _WIN32
 #include <unistd.h>
+#else
+#include <process.h>
+#endif
 
 /**
  *  @brief Logging function
@@ -81,7 +86,11 @@ inline void open_log_stream(std::ostream** log_os,
         {
             size_t pos = logfile_pathname.find("%i");
             if(pos != std::string::npos)
+#ifdef _WIN32
+                logfile_pathname.replace(pos, 2, std::to_string(_getpid()));
+#else
                 logfile_pathname.replace(pos, 2, std::to_string(getpid()));
+#endif
             log_ofs->open(logfile_pathname);
 
             // if log_ofs is open, then stream to log_ofs, else log_os is already

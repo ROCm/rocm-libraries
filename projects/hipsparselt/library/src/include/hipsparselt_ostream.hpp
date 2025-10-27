@@ -26,9 +26,12 @@
 #include <thread>
 #include <utility>
 #ifdef WIN32
+#include <fcntl.h>
 #include <io.h>
+#include <io.h> // For _open, _close on Windows
 #include <iostream>
 #include <sstream>
+#include <stdio.h> // For _fileno on Windows
 #include <sys/stat.h>
 #include <sys/types.h>
 #define STDOUT_FILENO _fileno(stdout)
@@ -37,10 +40,11 @@
 #define OPEN(A) _open(A, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_APPEND, _S_IREAD | _S_IWRITE);
 #define CLOSE(A) _close(A)
 #else
+#include <fcntl.h>
+#include <unistd.h>
 #define FDOPEN(A, B) fdopen(A, B)
 #define OPEN(A) open(A, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644);
 #define CLOSE(A) close(A)
-#include <unistd.h>
 #endif
 
 extern "C" HIPSPARSELT_EXPORT void hipsparselt_abort() __attribute__((__noreturn__));

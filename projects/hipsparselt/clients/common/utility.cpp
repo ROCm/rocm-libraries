@@ -24,40 +24,128 @@
  *
  *******************************************************************************/
 
-#include "utility.hpp"
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#endif
+
 #include "d_vector.hpp"
+#include "utility.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
 
-#include <fcntl.h>
-
+// Filesystem support with fallback
+#if __has_include(<filesystem>)
+#include <filesystem>
+namespace fs = std::filesystem;
+#define HAS_FILESYSTEM 1
+#elif __has_include(<experimental/filesystem>)
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#define HAS_FILESYSTEM 1
+#else
+#define HAS_FILESYSTEM 0
+#endif
 
 /* ============================================================================================ */
-// Return path of this executable
-std::string hipsparselt_exepath()
+// Helper function to get full path of current executable
+static std::string get_self_path()
 {
-    std::string pathstr;
-    char*       path = realpath("/proc/self/exe", 0);
+#ifdef _WIN32
+    // Dynamic buffer approach to handle long paths on Windows
+    std::string result(MAX_PATH + 1, '\0');
+    DWORD       length = 0;
+    for(;;)
+    {
+        length = GetModuleFileNameA(nullptr, &result[0], static_cast<DWORD>(result.size()));
+        if(length == 0)
+        {
+            // Error occurred
+            return std::string();
+        }
+        if(length < result.size() - 1)
+        {
+            // Success - resize to actual length and return
+            result.resize(length);
+            return result;
+        }
+        // Buffer too small, double it and try again
+        result.resize(result.size() * 2);
+    }
+#else
+    // Linux/Unix implementation
+    char* path = realpath("/proc/self/exe", nullptr);
     if(path)
     {
-        char* p = strrchr(path, '/');
-        if(p)
-        {
-            p[1]    = 0;
-            pathstr = path;
-        }
+        std::string result(path);
         free(path);
+        return result;
     }
-    return pathstr;
+    return std::string();
+#endif
+}
+
+// Return directory containing this executable
+std::string hipsparselt_exepath()
+{
+#if HAS_FILESYSTEM
+    // Modern implementation using filesystem
+    fs::path exepath(get_self_path());
+    exepath.remove_filename();
+    std::string result = exepath.string();
+    if(!result.empty() && result.back() != '/' && result.back() != '\\')
+        result.append("/");
+    return result;
+#else
+    // Fallback implementation without filesystem
+    std::string fullpath = get_self_path();
+    if(fullpath.empty())
+        return std::string();
+
+        // Find last directory separator
+#ifdef _WIN32
+    size_t pos = fullpath.find_last_of("\\\\/");
+#else
+    size_t pos = fullpath.rfind('/');
+#endif
+
+    if(pos != std::string::npos)
+    {
+        // Include the trailing separator
+        return fullpath.substr(0, pos + 1);
+    }
+    return std::string();
+#endif
 }
 
 /* ============================================================================================ */
 // Temp directory rooted random path
 std::string hipsparselt_tempname()
 {
+#ifdef _WIN32
+    char temp_path[MAX_PATH];
+    char temp_name[MAX_PATH];
+
+    if(!GetTempPathA(MAX_PATH, temp_path))
+    {
+        fprintf(stderr, "Cannot get temporary path\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(!GetTempFileNameA(temp_path, "hipsparselt", 0, temp_name))
+    {
+        fprintf(stderr, "Cannot create temporary file\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return std::string(temp_name);
+#else
     char tmp[] = "/tmp/hipsparselt-XXXXXX";
     int  fd    = mkostemp(tmp, O_CLOEXEC);
     if(fd == -1)
@@ -67,6 +155,7 @@ std::string hipsparselt_tempname()
     }
 
     return std::string(tmp);
+#endif
 }
 
 /* ============================================================================================ */

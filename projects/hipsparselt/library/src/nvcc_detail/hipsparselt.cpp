@@ -517,18 +517,30 @@ hipsparseStatus_t hipsparseLtInit(hipsparseLtHandle_t* handle)
     char* log_env;
     if((log_env = getenv("HIPSPARSELT_LOG_LEVEL")) != NULL)
     {
+#ifdef _WIN32
+        _putenv_s("CUSPARSELT_LOG_LEVEL", log_env);
+#else
         setenv("CUSPARSELT_LOG_LEVEL", log_env, 0);
+#endif
     }
     if((log_env = getenv("HIPSPARSELT_LOG_MASK")) != NULL)
     {
-        int mask = strtol(log_env, nullptr, 0);
+        int  mask = strtol(log_env, nullptr, 0);
         char mask_str[11];
-        snprintf(mask_str, 11, "%d",mask);
+        snprintf(mask_str, 11, "%d", mask);
+#ifdef _WIN32
+        _putenv_s("CUSPARSELT_LOG_MASK", mask_str);
+#else
         setenv("CUSPARSELT_LOG_MASK", mask_str, 0);
+#endif
     }
     if((log_env = getenv("HIPSPARSELT_LOG_FILE")) != NULL)
     {
+#ifdef _WIN32
+        _putenv_s("CUSPARSELT_LOG_FILE", log_env);
+#else
         setenv("CUSPARSELT_LOG_FILE", log_env, 0);
+#endif
     }
 
     return hipCUSPARSEStatusToHIPStatus(cusparseLtInit((cusparseLtHandle_t*)handle));

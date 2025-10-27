@@ -49,7 +49,6 @@ namespace fs = std::experimental::filesystem;
 #error no fs found
 #endif
 
-
 // Class used to read Arguments data into the tests
 class HipSparseLt_TestData
 {
@@ -108,7 +107,15 @@ public:
         filename() = std::move(name);
         if(remove_atexit)
         {
-            auto cleanup = [] { fs::remove(filename().c_str()); };
+            auto cleanup = [] {
+                // Always use C remove() for maximum portability
+                // This works regardless of filesystem implementation details
+                // and avoids issues with experimental::filesystem vs std::filesystem
+                //
+                // Note: C remove() returns 0 on success, -1 on failure
+                // We ignore the return value as cleanup errors are non-critical
+                ::remove(filename().c_str());
+            };
             atexit(cleanup);
             at_quick_exit(cleanup);
         }
