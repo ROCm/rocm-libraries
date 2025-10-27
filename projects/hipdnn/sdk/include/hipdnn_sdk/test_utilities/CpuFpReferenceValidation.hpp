@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -41,77 +42,42 @@ public:
         {
             return false;
         }
-        bool result = true;
 
         TensorView<T> refView(reference);
         TensorView<T> implView(implementation);
 
-        auto refItr = refView.begin();
-        auto implItr = implView.begin();
+        std::atomic<bool> result(true);
 
-        while(refItr != refView.end() && implItr != implView.end())
-        {
-            T refValue = *refItr++;
-            T implValue = *implItr++;
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValue = refView.getHostValue(indices);
+            T implValue = implView.getHostValue(indices);
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
 
             if(absDiff > threshold)
             {
-                HIPDNN_LOG_ERROR("Validation failed: reference value = {}, "
+                // Log error and mark as failed
+                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
+                                 indices,
                                  refValue,
                                  implValue,
                                  absDiff,
                                  threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
-                result = false;
-                break;
+                result.store(false, std::memory_order_relaxed);
             }
-        }
-        return result;
-    }
+            return result.load(std::memory_order_relaxed);
+        };
 
-    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
-    {
-        if(reference.count() != implementation.count())
-        {
-            return false;
-        }
+        // Create and execute parallel functor
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
 
-        size_t elementCount = reference.count();
-
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
-
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            T refValue = refData[i];
-            T implValue = implData[i];
-
-            T absDiff = std::fabs(implValue - refValue);
-            T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
-
-            if(absDiff > threshold)
-            {
-                HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {} (atol={}, rtol={})",
-                                 i,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
-                return false;
-            }
-        }
-
-        return true;
+        return result.load();
     }
 
 private:
