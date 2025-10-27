@@ -110,7 +110,7 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
                 auto tmp2 = BATCH_SIZE * bn_dy[0] * pvt_scale - tmp;
-                auto tmp3 = inv_var / BATCH_SIZE;
+                auto tmp3 = inv_var * static_cast<FLOAT_ACCUM>(1.0f / BATCH_SIZE);
                 dx[index] = CVT_ACCUM2FLOAT(tmp2 * tmp3);
             }
 
