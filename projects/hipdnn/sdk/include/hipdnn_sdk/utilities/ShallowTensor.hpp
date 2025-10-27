@@ -86,6 +86,13 @@ public:
         throwNotSupported();
     }
 
+    size_t fillWithData([[maybe_unused]] const void* data,
+                        [[maybe_unused]] size_t maxBytesCopied) override
+    {
+        throwNotSupported();
+        return 0;
+    }
+
 private:
     static void throwNotSupported()
     {

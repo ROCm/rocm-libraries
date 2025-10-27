@@ -116,7 +116,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(yRefTensor.memory(), yTensor.memory());
+        bool yValid = yValidator.allClose(yRefTensor, yTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";

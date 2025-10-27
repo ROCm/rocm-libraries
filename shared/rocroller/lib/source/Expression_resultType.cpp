@@ -73,6 +73,11 @@ namespace rocRoller
                 {
                     varType = lhsVal.varType;
                 }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
+                }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
                 {

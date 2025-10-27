@@ -11,8 +11,8 @@
 #include <hipdnn_backend.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApi.h>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginEngineIdMap.hpp>
@@ -98,7 +98,7 @@ void createHeuristicDescriptor(hipdnnBackendDescriptor_t* heuristicDescriptor,
 
 TEST_F(IntegrationPluginLoading, EmptyPluginPath)
 {
-    hipdnn_sdk::test_utilities::TempDirectory pluginDir("empty_plugins");
+    hipdnn_sdk::test_utilities::ScopedDirectory pluginDir("empty_plugins");
     auto pluginPath = pluginDir.path().string();
     const std::array<const char*, 1> paths = {pluginPath.c_str()};
     ASSERT_EQ(
