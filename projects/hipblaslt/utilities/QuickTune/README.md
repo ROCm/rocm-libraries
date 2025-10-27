@@ -15,7 +15,7 @@ The process of hipBLASLt GEMM tuning includes the followings
 ## Quick Start
 To run GEMM tuning with hipblaslt-bench on Qwen3-32B model.
 ```bash
-nohup python gemm_tuning.py --input_file example/Qwen3-32B_ali_hipblaslt.log --output_path test_tuning --requested_solution 128 > output.log 2>&1 &
+nohup python gemm_tuning.py --input_file example/Qwen3-32B_hipblaslt.log --output_path test_tuning --requested_solution 128 > output.log 2>&1 &
 ```
 
 The tuning generates some output files located at the output path "test_tuning".
@@ -23,7 +23,7 @@ The tuning generates some output files located at the output path "test_tuning".
         |testing_tuning
         |----> baseline_reproduce_commands.log       # logs that records commands to reproduce baseline result
         |----> tuning_reproduce_commands.log         # logs that records commands to reproduce tuning result
-        |----> unique_Qwen3-32B_ali_hipblaslt.log    # hipblaslt log without duplicate lines
+        |----> unique_Qwen3-32B_hipblaslt.log        # hipblaslt log without duplicate lines
         |----> tuning.txt                            # (optional) tuning result, if HIPBLASLT_TUNING_FILE is not defined
         |----> tuning_result.csv                     # includes info of each GEMM and the summary of both baseline and tuning data.
 
@@ -53,9 +53,13 @@ Before start GEMM tuning, we need to do the following.
 
 2. Remove duplicates in hipBLASLt log
 
-    Since each hipBLASLt GEMM might be called many times when runing the model, the hipBLASLt log contains many duplicate lines. The parse_input_log() in utils.py will remove the duplicate and count the occurance of each GEMM. The hipBLASLt log will be saved under the user-defined output path with name of "unique_<input_hipblaslt_log>".
+    Since each hipBLASLt GEMM might be called many times when runing the model, the hipBLASLt log contains many duplicate lines. The parse_input_log() in remove_duplicate.py will remove the duplicate and count the occurance of each GEMM. The hipBLASLt log will be saved under the user-defined output path with name of "unique_<input_hipblaslt_log>".
 
-3. Set-up stable GPU
+    ```bash
+    python remove_duplicate.py --input_file <input_log> --output_path <output_path>
+    ```
+
+3. Set-up stable GPU (Optional)
 
     A stable GPU frequency is critical for GEMM tuning. The following commands will set-up the GPU frequency relatively stable at 1900 MHz.
     ```bash
@@ -101,6 +105,13 @@ The GEMM Tuning with hipblaslt-bench is to measure the performance of the candid
 
     Enable stablize_gpu will provide a lower performance but more consistent GPU setting.
 
+## GEMM Tuning Analysis 
+
+The overall tuning speedup can be calculated by the individual kernel speedup and the time percentage of each kernel. We offer a script to help users to analyze the tuning result and calculate the overall speedup brought by GEMM tuning. The calculated overall speedup is only for hipBLASLt GEMMs, not the entire model.
+
+```bash
+python tuning_analysis.py --input_log <input hipblaslt log> --input_csv <tuning_csv> --output_csv <analysis csv file>
+```
 
 ## Apply Tuning Result
 

@@ -3,7 +3,8 @@ import argparse
 import subprocess
 import time
 
-from utils import parse_input_log, parse_hipblaslt_output, export_csv, dynamic_iters, convert_command
+from remove_duplicate import parse_input_log
+from utils import parse_hipblaslt_output, export_csv, dynamic_iters, convert_command
 
 def run_baseline(input_file, args, tuning_info):
     # Delete Tuning File Environment Variable to avoid tuning
@@ -54,7 +55,6 @@ def main():
     parser.add_argument("--input_file", type=str, help="Path to the list of gemm ops")
     parser.add_argument("--output_path", type=str, default='./tuning_result', help="Path to output file")
     parser.add_argument("--swizzleA", action='store_true', help="Whether to enable swizzleA tuning")
-    parser.add_argument("--swizzleB", action='store_true', help="Whether to enable swizzleB tuning")
     parser.add_argument("--requested_solution", type=int, default=128, help="Searching space for gemm tuning")
     parser.add_argument("--cold_iters", type=int, default=-1, help="warm-up iteration to measure kernel performance")
     parser.add_argument("--iters", type=int, default=-1, help="iteration to measure kernel performance")
@@ -69,12 +69,7 @@ def main():
         gpu_setup(args.gpu_id)
 
     tuning_info = dict()
-    os.makedirs(args.output_path, exist_ok=True)
-
-    start_time = time.time()
     unique_log_name = parse_input_log(args, tuning_info)
-    end_time = time.time()
-    print("parsing time elapsed = {}".format(end_time - start_time))
 
     start_time = time.time()
     run_baseline(unique_log_name, args, tuning_info)

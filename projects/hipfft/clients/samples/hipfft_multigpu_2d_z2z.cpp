@@ -94,8 +94,8 @@ int main()
         throw std::runtime_error("hipfftXtSetGPUs failed.");
 
     // Make the 2D plan
-    size_t workSize[gpus.size()];
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+    std::vector<size_t> workSize(gpus.size());
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
