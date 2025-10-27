@@ -123,7 +123,6 @@ def main():
                                             ("yes", "true", "t", "1")),
                         default=False,
                         help='Do not exit until the report job has completed')
-    
 
     if args.config_file:
         for k, v in config.items("Defaults"):

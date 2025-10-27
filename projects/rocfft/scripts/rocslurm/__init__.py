@@ -22,6 +22,7 @@ import subprocess, os, sys, datetime
 
 
 class sbatchparams:
+
     def __init__(self):
         self.partition = None
         self.acct = None
@@ -36,11 +37,14 @@ class sbatchparams:
         self.timelimit = None
         self.wait = False
 
+
 class sbatchjob:
+
     def __init__(self, jobid, outfilename, errfilename):
         self.jobid = jobid
         self.outfilename = outfilename
         self.errfilename = errfilename
+
 
 def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
     sbatchcmd = []
@@ -79,8 +83,7 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
         batchscript += "#SBATCH --kill-on-invalid-dep=yes\n"
 
     batchscript += "#SBATCH --exclusive\n"
-        
-        
+
     for module in params.modules:
         batchscript += "module load " + module + "\n"
     for export in params.exports:
@@ -155,7 +158,7 @@ def reportonjobs(params, logdir, jobs, verbose=0):
         batchscript += "#SBATCH --time=0:5:00\n"
     if params.wait:
         batchscript += "#SBATCH --wait\n"
-        
+
     # TODO: copy out and err log files to the report working dir.
     # TODO: out and err files, and job name.
     if len(jobids) > 0:
@@ -167,9 +170,9 @@ def reportonjobs(params, logdir, jobs, verbose=0):
     for job in jobs:
         joblogdir = os.path.dirname(os.path.realpath(job.outfilename))
         #print(joblogdir)
-        reportcmd += "if [ -e " + joblogdir + " ]; then\n" 
+        reportcmd += "if [ -e " + joblogdir + " ]; then\n"
         reportcmd += "cp -r " + joblogdir + " " + logdir + "/$SLURM_JOB_ID\n"
-        reportcmd += "fi\n" 
+        reportcmd += "fi\n"
 
     reportcmd += "sacct -X -j " + ",".join(str(x) for x in jobids) \
         + " -o JobName,JobID,state,Elapsed,ExitCode\n"
