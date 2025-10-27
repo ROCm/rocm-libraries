@@ -22,7 +22,7 @@
 # ########################################################################
 
 find_package(GTest REQUIRED)
-find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 
 #
