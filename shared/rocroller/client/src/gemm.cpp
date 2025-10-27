@@ -1536,7 +1536,9 @@ int main(int argc, const char* argv[])
     app.add_option("--mxlds", "Use LDS for A/B scales.");
 
     app.add_flag(SN(&SP::swizzleScale), "Use Swizzle when loading A and B scale.");
-    app.add_option(SN(&SP::swizzleTileSize), "Size of swizzle tile.");
+    app.add_option(SN(&SP::swizzleTileSize),
+                   "Size of swizzle tile in MxK/NxL format.  The A scale swizzle-tile is MxK.  The "
+                   "B scale swizzle-tile is NxL.");
     app.add_flag(SN(&SP::prefetchScale), "Prefetch scale values with using Swizzled scales.");
 
     app.add_option("--workgroupMappingValue",

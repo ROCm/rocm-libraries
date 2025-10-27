@@ -496,7 +496,7 @@ def build_solution_params():
         scaleB.maybe_add_block_size(params)
 
         if scaleA.mode == "Separate" or scaleB.mode == "Separate":
-            params.extend(["--sts", "64x64x8"])
+            params.extend(["--sts", "64x4/64x4"])
 
         solution_params.append(params)
 

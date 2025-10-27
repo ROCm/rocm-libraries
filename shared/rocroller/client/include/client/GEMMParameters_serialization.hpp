@@ -71,7 +71,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "m", x.m);
             iot::mapRequired(io, "n", x.n);
             iot::mapRequired(io, "k", x.k);
-            iot::mapRequired(io, "k", x.b);
+            iot::mapRequired(io, "b", x.b);
         }
 
         static void mapping(IO& io, Client::GEMMClient::MNKBTuple& x, EmptyContext& ctx)
