@@ -5,16 +5,20 @@ include(GenerateExportHeader)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt-version.h.in"
-    "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-version.h"
-    @ONLY
+    "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-version.h" @ONLY
 )
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt.h"
-    "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt.h"
-    COPYONLY
+    "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt.h" COPYONLY
 )
 
-generate_export_header(hipsparselt
-    EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-export.h"
+generate_export_header(
+    hipsparselt EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-export.h"
+)
+
+# Also configure a small config header with defaults provided by CMake.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt-config.h.in"
+    "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-config.h" @ONLY
 )

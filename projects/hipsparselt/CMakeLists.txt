@@ -38,6 +38,18 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# Default location (fallback) for installed code objects and library data. Note: This is used only
+# as a last resort at runtime; normal discovery uses the module directory first.
+if(WIN32)
+    set(HIPSPARSELT_DEFAULT_LIBDIR "${CMAKE_INSTALL_PREFIX}/hipsparselt/bin"
+        CACHE STRING "Default hipsparselt library data directory (Windows)"
+    )
+else()
+    set(HIPSPARSELT_DEFAULT_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+        CACHE STRING "Default hipsparselt library data directory (POSIX)"
+    )
+endif()
+
 # --- Build options and validation ---
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
@@ -109,7 +121,21 @@ endif()
 # --- Dependency Setup ---
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(hip REQUIRED)
+if(WIN32)
+    # On Windows, HIP SDK provides a CMake config
+    enable_language(HIP)
+    find_package(HIP CONFIG REQUIRED)
+else()
+    find_package(hip REQUIRED)
+endif()
+
+# Normalize HIP imported target names across platforms (Windows uses HIP::*, Linux often hip::*)
+if(TARGET HIP::device AND NOT TARGET hip::device)
+    add_library(hip::device ALIAS HIP::device)
+endif()
+if(TARGET HIP::host AND NOT TARGET hip::host)
+    add_library(hip::host ALIAS HIP::host)
+endif()
 find_package(hipsparse REQUIRED)
 
 if(HIPSPARSELT_ENABLE_MARKER)
@@ -134,10 +160,7 @@ endif()
 if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
     if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(
-            FATAL_ERROR
-                "hipBLASLt required but no not found at ${HIPBLASLT_PATH}."
-        )
+        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
     endif()
 
     block(SCOPE_FOR VARIABLES)
@@ -156,14 +179,14 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
-
     if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR
+            "\${CPACK_PACKAGING_INSTALL_PREFIX}/hipsparselt/${CMAKE_INSTALL_BINDIR}"
             CACHE PATH "path to tensile library" FORCE
         )
     else()
         set(HIPBLASLT_TENSILE_LIBRARY_DIR
-            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+            "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/hipsparselt"
             CACHE PATH "path to tensile library" FORCE
         )
     endif()
@@ -188,21 +211,11 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
-    rocm_package_setup_client_component(
-        tests
-        DEPENDS
-        COMPONENT
-        clients-common
-    )
+    rocm_package_setup_client_component(tests DEPENDS COMPONENT clients-common)
 endif()
 
 if(HIPSPARSELT_ENABLE_BENCHMARKS)
-    rocm_package_setup_client_component(
-        benchmarks
-        DEPENDS
-        COMPONENT
-        clients-common
-    )
+    rocm_package_setup_client_component(benchmarks DEPENDS COMPONENT clients-common)
 endif()
 
 if(HIPSPARSELT_ENABLE_SAMPLES)
@@ -221,7 +234,10 @@ find_program(LLVM_STRIP NAMES llvm-strip PATH_SUFFIXES lib/llvm/bin llvm/bin bin
 if(LLVM_STRIP)
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
 else()
-    message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    message(
+        WARNING
+            "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging."
+    )
 endif()
 
 rocm_install(
@@ -308,11 +324,12 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce
-    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
-    # a dev package.
+    # rocm_create_package makes decisions on what type of package to produce based on
+    # BUILD_SHARED_LIBS. If we don't set this here we will only get a dev package.
     set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
-    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+        CACHE PATH "Path placed into ldconfig file"
+    )
     rocm_create_package(
         NAME hipsparselt
         DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
@@ -326,7 +343,7 @@ endif()
 
 if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Configuring code coverage target")
-    
+
     # Apply coverage flags to library target
     target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipsparselt PRIVATE -fprofile-instr-generate)

@@ -69,7 +69,7 @@
 #include <unistd.h>
 #endif
 
-#define ROCSPARSELT_LIB_PATH "/opt/rocm/hipsparselt/lib"
+#include <hipsparselt/hipsparselt-config.h>
 
 namespace
 {
@@ -627,7 +627,7 @@ namespace
             else
             {
                 // Start from default install path; may be overridden by discovered so/dll location
-                path = ROCSPARSELT_LIB_PATH;
+                path = HIPSPARSELT_DEFAULT_LIBDIR;
 
                 // Try to discover the directory of the current library and use that as a base
                 if(!staticLib)
@@ -646,7 +646,7 @@ namespace
                     catch(...)
                     {
                         // Fallback to default path on failure
-                        path = ROCSPARSELT_LIB_PATH;
+                        path = HIPSPARSELT_DEFAULT_LIBDIR;
                     }
                 }
 
@@ -685,9 +685,13 @@ namespace
                             continue;
                         const std::string filename = entry.path().filename().string();
                         const bool        has_arch = filename.find(processor) != std::string::npos;
-                        const bool        ends_co
-                            = filename.size() >= 2 && filename.substr(filename.size() - 2) == "co";
-                        if(has_arch && ends_co)
+                        const bool        ends_with_co
+                            = (filename.size() >= 3
+                               && filename.substr(filename.size() - 3) == ".co");
+                        const bool ends_with_hsaco
+                            = (filename.size() >= 6
+                               && filename.substr(filename.size() - 6) == ".hsaco");
+                        if(has_arch && (ends_with_co || ends_with_hsaco))
                         {
                             adapter.loadCodeObjectFile(entry.path().string().c_str());
                             no_match = false;

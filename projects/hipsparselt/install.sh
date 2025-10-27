@@ -24,6 +24,13 @@
 
 #set -x #echo on
 
+# POSIX-only script. On Windows, use the CMake install target.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "install.sh is not supported on Windows. Use CMake install instead." >&2
+    exit 1 ;;
+esac
+
 # #################################################
 # helper functions
 # #################################################
