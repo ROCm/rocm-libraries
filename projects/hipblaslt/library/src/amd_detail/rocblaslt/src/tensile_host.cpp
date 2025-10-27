@@ -319,6 +319,8 @@ namespace
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Clamp;
+	    case ROCBLASLT_EPILOGUE_SIGMOID:
+	        return TensileLite::ActivationType::Sigmoid;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
