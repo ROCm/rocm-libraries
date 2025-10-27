@@ -211,40 +211,6 @@ namespace TensileLite
                     if((*solution->hardwarePredicate)(hardware)
                        && (*solution->problemPredicate)(problem))
                     {
-                        if(origami::hardware_t::is_wgm_prediction_enabled())
-                        {
-                            auto wgmxcc = origami::select_best_wgmxcc(*(pAMDGPU->analyticalHardware),
-                                                                      m,
-                                                                      n,
-                                                                      k,
-                                                                      batch,
-                                                                      solution->sizeMapping.macroTile.x,
-                                                                      solution->sizeMapping.macroTile.y,
-                                                                      solution->sizeMapping.depthU,
-                                                                      false);
-                            auto wgm = origami::select_best_wgm(*(pAMDGPU->analyticalHardware),
-                                                                m,
-                                                                n,
-                                                                k,
-                                                                batch,
-                                                                solution->sizeMapping.macroTile.x,
-                                                                solution->sizeMapping.macroTile.y,
-                                                                solution->sizeMapping.depthU,
-                                                                wgmxcc,
-                                                                false);
-
-                            solution->sizeMapping.workGroupMappingXCC = wgmxcc;
-                            solution->sizeMapping.workGroupMapping = wgm;
-
-                            if(origami::hardware_t::is_debug_enabled())
-                            {
-                                std::cout << "Selected WGMXCC = " 
-                                          << wgmxcc 
-                                          << ", and WGM = "
-                                          << wgm
-                                          << "\n";
-                            }
-                        }
                         rv.emplace_back(solution);
                         if(rv.size() == numSolutions)
                         {

@@ -23,7 +23,7 @@ namespace origami
                                        bool                    print_output,
                                        size_t                  max_timesteps,
                                        size_t                  max_iters);
-    
+
     // Compute <numActiveCUs, numWaves, splitFactor>
     std::tuple<size_t, size_t, size_t, size_t> compute_CU_occupancy(const hardware_t& hardware,
                                                                     size_t            M,
@@ -47,7 +47,8 @@ namespace origami
                                                                     size_t            workspace_size_per_elem_c,
                                                                     int               occupancy,
                                                                     int               dynamic_grid_version,
-                                                                    size_t            split);
+                                                                    size_t            split,
+                                                                    size_t            max_cus = 0);
 
     /* ---------------------------------------------------------------------------------------- */
     /* Compute-related functions                                                                */

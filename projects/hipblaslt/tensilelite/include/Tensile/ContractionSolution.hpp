@@ -35,6 +35,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <Tensile/Activation.hpp>
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
@@ -182,6 +183,7 @@ namespace TensileLite
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
+        using ParamsCache  = CacheMap<std::pair<int32_t, uint32_t>, Problem>;
 
         /**
          * Indicate a solution is equally or estimatedly matched.
@@ -530,6 +532,7 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
+        mutable ParamsCache paramsCache = ParamsCache(std::make_pair(0,0));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();

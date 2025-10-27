@@ -111,7 +111,8 @@ namespace origami
                                                                     size_t workspace_size_per_elem_c,
                                                                     int    occupancy,
                                                                     int    dynamic_grid_version,
-                                                                    size_t split)
+                                                                    size_t split,
+                                                                    size_t max_cus)
     {
         // Number of output MTs
         size_t numMT_M = safe_ceil_div(M, MT_M);
