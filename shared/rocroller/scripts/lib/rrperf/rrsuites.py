@@ -32,7 +32,6 @@ from rrperf.problems import (
     GEMMRun,
     TensileRun,
     TypeParameters,
-    MNKTuple,
     MKNLTuple,
 )
 from rrperf.utils import rocm_gfx
