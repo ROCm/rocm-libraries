@@ -50,11 +50,9 @@ void gemm_cpu(const Dtype* a_ptr,
               const size_t c_cols,
               const size_t c_rows,
               const size_t c_stride,
-              double d_alpha = 1.0,
-              double d_beta  = 1.0)
+              double alpha = 1.0,
+              double beta  = 1.0)
 {
-    Dtype alpha = static_cast<Dtype>(d_alpha);
-    Dtype beta  = static_cast<Dtype>(d_beta);
     if((!a_transpose && !b_transpose &&
         ((a_cols != b_rows) || (a_rows != c_rows) || (b_cols != c_cols))) ||
        (a_transpose && b_transpose &&
@@ -73,11 +71,39 @@ void gemm_cpu(const Dtype* a_ptr,
     }
 
     size_t inner_loop_limit = a_transpose ? a_rows : a_cols;
-    auto inner_loop         = [&](int n, int k) {
-        Dtype el = static_cast<Dtype>(0.0);
-        ford(inner_loop_limit)(
-            [&](int m) { el += a_ptr[n * a_stride + m] * b_ptr[m * b_stride + k]; });
-        c_ptr[n * c_stride + k] = beta * c_ptr[n * c_stride + k] + alpha * el;
+    auto inner_loop         = [&](int m, int n) {
+        double el = 0.0;
+        if(!a_transpose && !b_transpose)
+        {
+            ford(inner_loop_limit)([&](int k) {
+                el += static_cast<double>(a_ptr[m * a_stride + k]) *
+                      static_cast<double>(b_ptr[k * b_stride + n]);
+            });
+        }
+        else if(!a_transpose && b_transpose)
+        {
+            ford(inner_loop_limit)([&](int k) {
+                el += static_cast<double>(a_ptr[m * a_stride + k]) *
+                      static_cast<double>(b_ptr[n * b_stride + k]);
+            });
+        }
+        else if(a_transpose && !b_transpose)
+        {
+            ford(inner_loop_limit)([&](int k) {
+                el += static_cast<double>(a_ptr[k * a_stride + m]) *
+                      static_cast<double>(b_ptr[k * b_stride + n]);
+            });
+        }
+        else
+        {
+            ford(inner_loop_limit)([&](int k) {
+                el += static_cast<double>(a_ptr[k * a_stride + m]) *
+                      static_cast<double>(b_ptr[n * b_stride + k]);
+            });
+        }
+
+        c_ptr[m * c_stride + n] =
+            static_cast<Dtype>(beta * static_cast<double>(c_ptr[m * c_stride + n]) + alpha * el);
     };
 
     constexpr size_t iter_margin = 1'048'576;
