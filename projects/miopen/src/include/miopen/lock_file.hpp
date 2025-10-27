@@ -144,7 +144,7 @@ public:
                 }
                 last_refresh = fs::file_time_type::clock::now();
             }
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
             auto now = fs::file_time_type::clock::now();
             age      = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh);
         }

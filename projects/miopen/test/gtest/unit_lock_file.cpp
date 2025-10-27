@@ -77,11 +77,10 @@ TEST(CPU_UnitTestLockFile_NONE, OrphanLock)
     EXPECT_TRUE(std::ofstream{fs_lock_path});
     miopen::fs::permissions(fs_lock_path, miopen::fs::perms::all);
 
-    miopen::fs::last_write_time(
-        fs_lock_path,
-        miopen::fs::file_time_type::clock::from_sys(std::chrono::system_clock::now()));
+    miopen::fs::last_write_time(fs_lock_path, miopen::fs::file_time_type::clock::now());
     EXPECT_FALSE(lockfile.try_lock());
-    EXPECT_TRUE(lockfile.timed_lock(ToPTime(std::chrono::milliseconds{6})));
+    EXPECT_TRUE(miopen::fs::exists(fs_lock_path));
+    EXPECT_TRUE(lockfile.timed_lock(ToPTime(std::chrono::milliseconds{50})));
 
     lockfile.unlock();
 }
