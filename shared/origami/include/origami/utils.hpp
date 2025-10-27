@@ -55,24 +55,26 @@ namespace origami
                                      size_t          mx_block_size,
                                      double          H_L2,
                                      size_t          WGM,
-                                     size_t          biggest_allowable_split = 8);
+                                     size_t          biggest_allowable_split = 8,
+                                     size_t          max_cus = 0);
 
         std::vector<result_tuple> select_best_macro_tile_size(size_t                        M,
-                                                             size_t                        N,
-                                                             size_t                        K,
-                                                             size_t                        batch,
-                                                             bool                          transA,
-                                                             bool                          transB,
-                                                             const hardware_t&             hardware,
-                                                             const std::vector<tile_tuple>& MT_list,
-                                                             size_t element_size_A,
-                                                             size_t element_size_B,
-                                                             size_t element_size_out,
-                                                             data_type_t mi_datatype,
-                                                             size_t mx_block_size,
-                                                             double H_L2,
-                                                             bool   print,
-                                                             size_t WGM);
+                                                              size_t                        N,
+                                                              size_t                        K,
+                                                              size_t                        batch,
+                                                              bool                          transA,
+                                                              bool                          transB,
+                                                              const hardware_t&             hardware,
+                                                              const std::vector<tile_tuple>& MT_list,
+                                                              size_t element_size_A,
+                                                              size_t element_size_B,
+                                                              size_t element_size_out,
+                                                              data_type_t mi_datatype,
+                                                              size_t mx_block_size,
+                                                              double H_L2,
+                                                              bool   print,
+                                                              size_t WGM,
+                                                              size_t max_cus = 0);
 
         std::vector<result_tuple> sweep_macro_tile_sizes(size_t    M,
                                                         size_t    N,
@@ -92,22 +94,25 @@ namespace origami
                                                         = {},
                                                         bool print = false);
 
-        std::pair<double, size_t> select_best_wgm(
-            size_t                     M,
-            size_t                     N,
-            size_t                     K,
-            size_t                     batch,
-            const hardware_t&          hardware,
-            size_t                     MT_M,
-            size_t                     MT_N,
-            size_t                     MT_K,
-            size_t                     MI_M,
-            size_t                     MI_N,
-            size_t                     MI_K,
-            const std::vector<size_t>& WGM_list,
-            size_t                     element_size,
-            double H_L2, // not needed for L2 hit rate but retained if your code expects it
-            bool   print);
+        size_t select_best_wgmxcc(const hardware_t& hardware,
+                                  size_t            M,
+                                  size_t            N,
+                                  size_t            K,
+                                  size_t            batch,
+                                  size_t            MT_M,
+                                  size_t            MT_N,
+                                  size_t            MT_K,
+                                  bool              print);
+
+        int32_t select_best_wgm(const hardware_t& hardware,
+                                size_t            M,
+                                size_t            N,
+                                size_t            K,
+                                size_t            batch,
+                                size_t            MT_M,
+                                size_t            MT_N,
+                                size_t            MT_K,
+                                bool              print);
 
         double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,

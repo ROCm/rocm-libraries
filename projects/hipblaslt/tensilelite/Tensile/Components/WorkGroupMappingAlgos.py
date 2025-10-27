@@ -96,70 +96,116 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     sgprWGM = "WGM"
     label_skipWGMXCC = Label(label="skip_WGMXCC", comment="skip WGMXCC if no enough WGs to remap")
 
-    with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
-        tmpSgpr      = tmpSgprRes.idx
-        tmpSgpr0     = tmpSgpr+1
-        tmpSgpr1     = tmpSgpr0+1
-        tmpSgpr2     = tmpSgpr1+1
-        WGMXCCSgpr   = tmpSgpr2+1
-        CU_CountSgpr = WGMXCCSgpr+1
+    if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+        """
+        Formula:
+        x, g   = divmod(old_wg, WGMXCC)
+        q, r   = divmod(WG, WGMXCC)
+        group  = q + (1 if g < r else 0)
+        offset = 0 if g < r else r
+        new    = x + offset + g * group
+        """
+        with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
+            SgprWGMXCC = tmpSgprRes.idx
+            SgprX      = tmpSgprRes.idx + 1
+            SgprG      = tmpSgprRes.idx + 2
+            SgprQ      = tmpSgprRes.idx + 3
+            SgprR      = tmpSgprRes.idx + 4
+            SgprO      = tmpSgprRes.idx + 5
+            # Reuse some sgprs
+            tmpSgpr = SgprWGMXCC
+            group   = SgprQ
+            # offset  = SgprR
+            
+            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
+            tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
-        module.add(SLShiftRightB32(dst=sgpr(WGMXCCSgpr), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
-        module.add(SFf1B32(dst=sgpr(WGMXCCSgpr), src=sgpr(WGMXCCSgpr), comment="Get log(WGMXCC)"))
-        module.add(SLShiftRightB32(dst=sgpr(CU_CountSgpr), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get CU_Count"))
+            module.add(SLShiftRightB32(dst=sgpr(SgprWGMXCC), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
+            module.add(SAndB32(dst=sgpr(SgprWGMXCC), src0=sgpr(SgprWGMXCC), src1=hex(63), comment="Get WGMXCC"))
+            module.addComment0("remap WGs if WGMXCC > 1")
+            module.add(SCmpGtU32(src0=sgpr(SgprWGMXCC), src1=1))
+            module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
+            module.addComment0("divmod(old_wg, WGMXCC)")
+            module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+            module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
+            module.addComment0("divmod(WG, WGMXCC)")
+            module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg="skGrid", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))            
+            writer.vgprPool.checkIn(tmpVgpr)
+            # Check if current group requires a remainder WG or not
+            module.add(SCmpLtU32(src0=sgpr(SgprG), src1=sgpr(SgprR)))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(1), src1=hex(0), comment="Select multiplier"))
+            module.add(SCSelectB32(dst=sgpr(SgprO), src0=hex(0), src1=sgpr(SgprR), comment="Select remainder"))
+            module.add(SAddU32(dst=sgpr(group), src0=sgpr(SgprQ), src1=sgpr(tmpSgpr), comment="Adjust multiplier"))
+            # Assemble everything
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
+            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
 
-        module.addComment0("remap WGs if WGMXCC > 1 ( log(WGMXCC) > 0 )")
-        module.add(SCmpGtI32(src0=sgpr(WGMXCCSgpr), src1=0))
-        module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
+            module.add(label_skipWGMXCC)
+    else:
+        with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
+            tmpSgpr      = tmpSgprRes.idx
+            tmpSgpr0     = tmpSgpr+1
+            tmpSgpr1     = tmpSgpr0+1
+            tmpSgpr2     = tmpSgpr1+1
+            WGMXCCSgpr   = tmpSgpr2+1
+            CU_CountSgpr = WGMXCCSgpr+1
 
-        module.addComment0("only remap WGs in the range")
-        tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
-        tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgprNumWorkGroups)))
-        module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr0)))
-        module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr0)))
-        module.add(SCBranchSCC1(label_skipWGMXCC.getLabelName()))
+            module.add(SLShiftRightB32(dst=sgpr(WGMXCCSgpr), shiftHex=hex(16), src=sgpr(sgprWGM), comment="Get WGMXCC"))
+            module.add(SFf1B32(dst=sgpr(WGMXCCSgpr), src=sgpr(WGMXCCSgpr), comment="Get log(WGMXCC)"))
+            module.add(SLShiftRightB32(dst=sgpr(CU_CountSgpr), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get CU_Count"))
 
-        label_XCCG_nonzero = Label(label="XCCG_nonzero", comment="")
-        module.add(SCmpEQU32(src0=sgpr(CU_CountSgpr), src1=0, comment="CU_Count == 0 ?"))
-        module.add(SCBranchSCC0(label_XCCG_nonzero.getLabelName()))
+            module.addComment0("remap WGs if WGMXCC > 1 ( log(WGMXCC) > 0 )")
+            module.add(SCmpGtI32(src0=sgpr(WGMXCCSgpr), src1=0))
+            module.add(SCBranchSCC0(label_skipWGMXCC.getLabelName()))
 
-        # CU_count == 0
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr("WorkGroup0")))
-        module.add(SBfmB32(dst=sgpr(tmpSgpr1), src0=sgpr(WGMXCCSgpr), src1=0))
-        module.add(SAndB32(dst=sgpr(tmpSgpr1), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr2), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgprNumWorkGroups)))
-        module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr2)))
-        module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
-        module.add(SBranch(label_skipWGMXCC.getLabelName()))
+            module.addComment0("only remap WGs in the range")
+            tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
+            tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgprNumWorkGroups)))
+            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr0)))
+            module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr0)))
+            module.add(SCBranchSCC1(label_skipWGMXCC.getLabelName()))
 
-        # CU_count > 0
-        module.add(label_XCCG_nonzero)
-        module.addComment0("temp0 = (wg//CU_Count)*CU_Count")
-        module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
-        module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(CU_CountSgpr)))
-        module.addComment0("temp1 = (wg%CU_Count)//WGMXCC")
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
-        module.addComment0("temp0 = temp0 + temp1")
-        module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
-        module.addComment0("temp1 = (wg%WGMXCC) * ((WGs - (WGs//CU_Count) * CU_Count) if (wg > (WGs//CU_Count) * CU_Count) else CU_Count)//WGMXCC")
-        module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
-        module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(CU_CountSgpr)))
-        module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgprNumWorkGroups), src1=sgpr(tmpSgpr1)))
-        module.add(SCmpGtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))
-        module.add(SCSelectB32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr2), src1=sgpr(CU_CountSgpr)))
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
-        module.add(SBfmB32(dst=sgpr(tmpSgpr2), src0=sgpr(WGMXCCSgpr), src1=0))
-        module.add(SAndB32(dst=sgpr(tmpSgpr2), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr2)))
-        writer.vgprPool.checkIn(tmpVgpr)
-        module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr2)))
-        module.addComment0("WorkGroup0 = temp0 + temp1")
-        module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
+            label_XCCG_nonzero = Label(label="XCCG_nonzero", comment="")
+            module.add(SCmpEQU32(src0=sgpr(CU_CountSgpr), src1=0, comment="CU_Count == 0 ?"))
+            module.add(SCBranchSCC0(label_XCCG_nonzero.getLabelName()))
 
-        module.add(label_skipWGMXCC)
+            # CU_count == 0
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr0), shiftHex=sgpr(WGMXCCSgpr), src=sgpr("WorkGroup0")))
+            module.add(SBfmB32(dst=sgpr(tmpSgpr1), src0=sgpr(WGMXCCSgpr), src1=0))
+            module.add(SAndB32(dst=sgpr(tmpSgpr1), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr2), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgprNumWorkGroups)))
+            module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr2)))
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
+            module.add(SBranch(label_skipWGMXCC.getLabelName()))
+
+            # CU_count > 0
+            module.add(label_XCCG_nonzero)
+            module.addComment0("temp0 = (wg//CU_Count)*CU_Count")
+            module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+            module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(CU_CountSgpr)))
+            module.addComment0("temp1 = (wg%CU_Count)//WGMXCC")
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
+            module.addComment0("temp0 = temp0 + temp1")
+            module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
+            module.addComment0("temp1 = (wg%WGMXCC) * ((WGs - (WGs//CU_Count) * CU_Count) if (wg > (WGs//CU_Count) * CU_Count) else CU_Count)//WGMXCC")
+            module.add(scalarUInt24DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False))
+            module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(CU_CountSgpr)))
+            module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgprNumWorkGroups), src1=sgpr(tmpSgpr1)))
+            module.add(SCmpGtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr2), src1=sgpr(CU_CountSgpr)))
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
+            module.add(SBfmB32(dst=sgpr(tmpSgpr2), src0=sgpr(WGMXCCSgpr), src1=0))
+            module.add(SAndB32(dst=sgpr(tmpSgpr2), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr2)))
+            writer.vgprPool.checkIn(tmpVgpr)
+            module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(tmpSgpr2)))
+            module.addComment0("WorkGroup0 = temp0 + temp1")
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
+
+            module.add(label_skipWGMXCC)
 
     return module
-
 
 def DefaultWGM(writer, kernel, sgprWGM):
     module = Module("graWGMCalc")

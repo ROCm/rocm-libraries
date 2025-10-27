@@ -45,6 +45,7 @@
 #include <common/Utilities.hpp>
 #include <common/mxDataGen.hpp>
 
+#include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
@@ -55,6 +56,8 @@
 #include <CLI/CLI.hpp>
 
 using namespace rocRoller;
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 enum ReturnCodes : int
 {
@@ -1168,11 +1171,9 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--loadLDSScale_B", &SolutionParameters::loadLDSScaleB),
         std::make_pair("--swizzleScale", &SolutionParameters::swizzleScale),
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
-        std::make_pair("--loadLDS_A", &SolutionParameters::loadLDSA),
-        std::make_pair("--loadLDS_B", &SolutionParameters::loadLDSB),
+        std::make_pair("--load_A", &SolutionParameters::loadPathA),
+        std::make_pair("--load_B", &SolutionParameters::loadPathB),
         std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
-        std::make_pair("--direct2LDS_A", &SolutionParameters::direct2LDSA),
-        std::make_pair("--direct2LDS_B", &SolutionParameters::direct2LDSB),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
@@ -1279,44 +1280,38 @@ namespace rocRoller::Client::GEMMClient::CLI
         {
             auto arg = app.get_option("--lds")->as<std::string>();
 
-            solution.loadLDSA = false;
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('A') != std::string::npos)
-                solution.loadLDSA = true;
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-            solution.loadLDSB = false;
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('B') != std::string::npos)
-                solution.loadLDSB = true;
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
             solution.storeLDSD = false;
             if(arg.find('D') != std::string::npos)
                 solution.storeLDSD = true;
         }
 
-        update(SN(&SP::loadLDSA), solution.loadLDSA);
-        update(SN(&SP::loadLDSB), solution.loadLDSB);
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
         update(SN(&SP::storeLDSD), solution.storeLDSD);
 
         if(app.get_option("--d2lds")->count())
         {
             auto arg = app.get_option("--d2lds")->as<std::string>();
 
-            solution.direct2LDSA = false;
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('A') != std::string::npos)
-            {
-                solution.loadLDSA    = true;
-                solution.direct2LDSA = true;
-            }
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDS;
 
-            solution.direct2LDSB = false;
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('B') != std::string::npos)
-            {
-                solution.loadLDSB    = true;
-                solution.direct2LDSB = true;
-            }
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDS;
         }
 
-        update(SN(&SP::direct2LDSA), solution.direct2LDSA);
-        update(SN(&SP::direct2LDSB), solution.direct2LDSB);
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
 
         if(app.get_option("--mxlds")->count())
         {
@@ -1408,12 +1403,9 @@ int main(int argc, const char* argv[])
         .swizzleScale  = false,
         .prefetchScale = false,
 
-        .loadLDSA  = true,
-        .loadLDSB  = true,
+        .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
+        .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .storeLDSD = true,
-
-        .direct2LDSA = false,
-        .direct2LDSB = false,
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -1459,8 +1451,8 @@ int main(int argc, const char* argv[])
         .numWarmUp        = 3,
         .numOuter         = 5,
         .numInner         = 2,
-        .check            = true,
         .rotatingBuffSize = 32'000'000ull,
+        .check            = true,
         .visualize        = false,
     };
 
@@ -1599,13 +1591,16 @@ int main(int argc, const char* argv[])
     app.add_option(SN(&SP::unrollX), "Unroll size in X.");
     app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
 
-    app.add_flag(SN(&SP::loadLDSA), "Use LDS when loading A.");
-    app.add_flag(SN(&SP::loadLDSB), "Use LDS when loading B.");
+    app.add_option(
+        SN(&SP::loadPathA),
+        solution.loadPathA,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
+    app.add_option(
+        SN(&SP::loadPathB),
+        solution.loadPathB,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
     app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
     app.add_option("--lds", "Use LDS for A/B/D.");
-
-    app.add_flag(SN(&SP::direct2LDSA), "Use direct-to-LDS when loading A.");
-    app.add_flag(SN(&SP::direct2LDSB), "Use direct-to-LDS when loading B.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 
     app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
@@ -2044,7 +2039,8 @@ int main(int argc, const char* argv[])
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
-        if(solution.prefetchLDSFactor == 2 && (solution.direct2LDSA || solution.direct2LDSB))
+        if(solution.prefetchLDSFactor == 2
+           && (IsBufferToLDS(solution.loadPathA) || IsBufferToLDS(solution.loadPathB)))
             solution.prefetchMixMemOps = false;
     }
 

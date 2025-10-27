@@ -1961,3 +1961,237 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
     result = graph.validate();
     EXPECT_FALSE(result.is_good()) << result.get_message();
 }
+
+TEST_F(TestGraph, CheckNoDuplicateTensorIdsPassesWithNoDuplicates)
+{
+    GraphTestUtils graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5);
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+
+    auto result = graph.checkNoDuplicateTensorIds();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithDuplicates)
+{
+    GraphTestUtils graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(2); // Duplicate UID
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(3);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3); // Duplicate UID
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+
+    auto result = graph.checkNoDuplicateTensorIds();
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(result.get_message().find("Duplicate tensor UIDs") != std::string::npos);
+    EXPECT_TRUE(result.get_message().find('2') != std::string::npos);
+    EXPECT_TRUE(result.get_message().find('3') != std::string::npos);
+}
+
+TEST_F(TestGraph, CheckNoDuplicateTensorIdsPassesWithReusedTensors)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    // These tensors will be reused across multiple batchnorm nodes
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5);
+
+    // Node 1: Uses mean, invVariance, scale, bias
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+
+    // Node 2: REUSES the same mean, invVariance, scale, bias tensors
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+
+    // Should pass - same tensor objects being reused is fine
+    auto result = graph.checkNoDuplicateTensorIds();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithReusedUidsOnDifferentTensors)
+{
+    GraphTestUtils graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    // Node 1 tensors
+    auto mean1 = std::make_shared<TensorAttributes>();
+    mean1->set_uid(2);
+    auto invVariance1 = std::make_shared<TensorAttributes>();
+    invVariance1->set_uid(3);
+    auto scale1 = std::make_shared<TensorAttributes>();
+    scale1->set_uid(4);
+    auto bias1 = std::make_shared<TensorAttributes>();
+    bias1->set_uid(5);
+
+    BatchnormInferenceAttributes attributes1;
+    attributes1.set_name("BatchnormNode1");
+    auto y1 = graph.batchnorm_inference(x, mean1, invVariance1, scale1, bias1, attributes1);
+
+    // Node 2 tensors - DIFFERENT objects but SAME UIDs
+    auto mean2 = std::make_shared<TensorAttributes>();
+    mean2->set_uid(2); // Same UID as mean1 but different object
+    auto invVariance2 = std::make_shared<TensorAttributes>();
+    invVariance2->set_uid(3); // Same UID as invVariance1 but different object
+    auto scale2 = std::make_shared<TensorAttributes>();
+    scale2->set_uid(4); // Same UID as scale1 but different object
+    auto bias2 = std::make_shared<TensorAttributes>();
+    bias2->set_uid(5); // Same UID as bias1 but different object
+
+    BatchnormInferenceAttributes attributes2;
+    attributes2.set_name("BatchnormNode2");
+    auto y2 = graph.batchnorm_inference(y1, mean2, invVariance2, scale2, bias2, attributes2);
+
+    // Should fail - different tensor objects with same UIDs
+    auto result = graph.checkNoDuplicateTensorIds();
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(result.get_message().find("Duplicate tensor UIDs") != std::string::npos);
+}
+
+TEST_F(TestGraph, BuildOperationGraphAllMissingTensorUids)
+{
+    Graph graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    auto bias = std::make_shared<TensorAttributes>();
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+
+    // Before build_operation_graph, UIDs should not be set
+    EXPECT_FALSE(x->has_uid());
+    EXPECT_FALSE(mean->has_uid());
+    EXPECT_FALSE(invVariance->has_uid());
+    EXPECT_FALSE(scale->has_uid());
+    EXPECT_FALSE(bias->has_uid());
+    EXPECT_FALSE(y->has_uid());
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    // After build_operation_graph, all UIDs should be populated
+    EXPECT_TRUE(x->has_uid());
+    EXPECT_TRUE(mean->has_uid());
+    EXPECT_TRUE(invVariance->has_uid());
+    EXPECT_TRUE(scale->has_uid());
+    EXPECT_TRUE(bias->has_uid());
+    EXPECT_TRUE(y->has_uid());
+
+    // Verify all UIDs are unique
+    std::unordered_set<int64_t> uids;
+    uids.insert(x->get_uid());
+    uids.insert(mean->get_uid());
+    uids.insert(invVariance->get_uid());
+    uids.insert(scale->get_uid());
+    uids.insert(bias->get_uid());
+    uids.insert(y->get_uid());
+
+    EXPECT_EQ(uids.size(), 6);
+}
+
+TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
+{
+    Graph graph;
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(100); // Pre-set UID
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(200); // Pre-set UID
+
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(300); // Pre-set UID
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(400); // Pre-set UID
+
+    auto bias = std::make_shared<TensorAttributes>();
+    // bias does not have a UID set
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    y->set_uid(500); // Pre-set UID
+
+    EXPECT_TRUE(x->has_uid());
+    EXPECT_EQ(x->get_uid(), 100);
+    EXPECT_TRUE(mean->has_uid());
+    EXPECT_EQ(mean->get_uid(), 200);
+    EXPECT_TRUE(invVariance->has_uid());
+    EXPECT_EQ(invVariance->get_uid(), 300);
+    EXPECT_TRUE(scale->has_uid());
+    EXPECT_EQ(scale->get_uid(), 400);
+    EXPECT_FALSE(bias->has_uid());
+    EXPECT_TRUE(y->has_uid());
+    EXPECT_EQ(y->get_uid(), 500);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    // After build_operation_graph, bias should have a UID
+    EXPECT_TRUE(bias->has_uid());
+
+    // All pre-existing UIDs should remain unchanged
+    EXPECT_EQ(x->get_uid(), 100);
+    EXPECT_EQ(mean->get_uid(), 200);
+    EXPECT_EQ(invVariance->get_uid(), 300);
+    EXPECT_EQ(scale->get_uid(), 400);
+    EXPECT_EQ(y->get_uid(), 500);
+
+    // The new UID for bias should be unique
+    int64_t biasUid = bias->get_uid();
+    EXPECT_NE(biasUid, 100);
+    EXPECT_NE(biasUid, 200);
+    EXPECT_NE(biasUid, 300);
+    EXPECT_NE(biasUid, 400);
+    EXPECT_NE(biasUid, 500);
+}

@@ -107,7 +107,7 @@ jobs:
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\") | .id")
+        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\" and .definition.name != \"rocm-libraries-superbuild\") | .id")
 
         if [ -z "$runs" ]; then
           echo "No in-progress/not-started runs found for ROCm/rocm-libraries PR #$pr_number"
