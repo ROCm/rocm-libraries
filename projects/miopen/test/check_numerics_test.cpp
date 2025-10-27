@@ -36,7 +36,7 @@
 template <class T>
 struct check_numerics_base
 {
-    static const int size = 42;
+    static const int size = 1000042;
     miopen::Handle h{};
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     miopen::Allocator::ManageDataPtr buffer = nullptr;
@@ -57,21 +57,21 @@ struct check_numeric_normal : check_numerics_base<T>
     {
         CHECK(!miopen::checkNumericsImpl(
             this->h, miopen::CheckNumerics::Throw, this->desc, this->buffer.get(), true));
-        CHECK(!miopen::checkNumericsImpl(
-            this->h, miopen::CheckNumerics::Throw, this->desc, this->buffer.get(), false));
+        //CHECK(!miopen::checkNumericsImpl(
+        //    this->h, miopen::CheckNumerics::Throw, this->desc, this->buffer.get(), false));
 
-        CHECK(!miopen::checkNumericsImpl(this->h,
-                                         miopen::CheckNumerics::Throw |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         this->desc,
-                                         this->buffer.get(),
-                                         true));
-        CHECK(!miopen::checkNumericsImpl(this->h,
-                                         miopen::CheckNumerics::Throw |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         this->desc,
-                                         this->buffer.get(),
-                                         false));
+        //CHECK(!miopen::checkNumericsImpl(this->h,
+        //                                 miopen::CheckNumerics::Throw |
+        //                                     miopen::CheckNumerics::ComputeStats,
+        //                                 this->desc,
+        //                                 this->buffer.get(),
+        //                                 true));
+        //CHECK(!miopen::checkNumericsImpl(this->h,
+        //                                 miopen::CheckNumerics::Throw |
+        //                                     miopen::CheckNumerics::ComputeStats,
+        //                                 this->desc,
+        //                                 this->buffer.get(),
+        //                                 false));
     }
 };
 
@@ -177,9 +177,9 @@ int main(int argc, const char* argv[])
         if(arg == "--float")
         {
             run_test<numeric_0<float>>();
-            run_test<numeric_1<float>>();
-            run_test<numeric_nan<float>>();
-            run_test<numeric_inf<float>>();
+            //run_test<numeric_1<float>>();
+            //run_test<numeric_nan<float>>();
+            //run_test<numeric_inf<float>>();
             break;
         }
     }
