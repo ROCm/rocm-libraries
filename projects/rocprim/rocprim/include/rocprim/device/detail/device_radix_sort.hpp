@@ -1071,6 +1071,7 @@ struct onesweep_iteration_helper
 
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
 
+    // Calculate LDS usages usable for storing keys and values
     template<class T>
     struct N
     {
@@ -1090,6 +1091,7 @@ struct onesweep_iteration_helper
     static constexpr unsigned int ValueLDSSize
         = BlockSize * NValue + (NValue == ItemsPerThread ? 0 : 1);
 
+    // Compiler had a hard type with non-trivial types.
     using v_pack = type_wrapper<Value>;
 
     union data_storage
@@ -1268,6 +1270,7 @@ struct onesweep_iteration_helper
         {
             if constexpr(NKey != ItemsPerThread)
             {
+                // Reuse the LDS memory.
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
@@ -1282,6 +1285,7 @@ struct onesweep_iteration_helper
                     }
                     else
                     {
+                        // No branching, writes to unused LDS memory space. 
                         int offset = ranks[i] - x;
                         offset = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
                         storage.ordered_block_keys[offset] = keys[i];
