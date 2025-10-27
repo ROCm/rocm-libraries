@@ -129,6 +129,11 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     THROW_ON_MIOPEN_FAILURE(
         miopenCreateOpActivationForward(fusePlanDesc, &activOp, _params.activParams().mode));
 
+    // Usage scenarios:
+    // 1. Applicability check: requires compilation only
+    // 2. Workspace size: requires workspace size retrieval only
+    // 3. Execution plan: requires both compilation and workspace size retrieval
+
     if(compile)
     {
         THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle, fusePlanDesc));
