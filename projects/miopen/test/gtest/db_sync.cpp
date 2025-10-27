@@ -790,6 +790,7 @@ void CheckFDBEntry(size_t thread_index,
                                  << kinder.first << ": solver" << val.solver_id
                                  << ", Removing entry from fdb");
                     find_db_rw.Remove(kinder.first, id.ToString());
+                    perf_db_rw.Remove(pdb_key, id.ToString()); // remove from system pdb
                     MIOPEN_LOG_W("Removal Complete fdb-key:" << kinder.first << ": solver"
                                                              << val.solver_id);
                     continue;
