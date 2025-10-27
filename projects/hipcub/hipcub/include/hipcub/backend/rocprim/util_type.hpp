@@ -196,8 +196,9 @@ using is_integral_or_enum =
 
 }
 
-// CUB deprecated this API, and suggests to use `::cuda::ceil_div` instead,
+// CUB removed this API, and suggests to use `::cuda::ceil_div` instead,
 // which is implemented in file `libcudacxx/include/cuda/__cmath/ceil_div.h`.
+// Remove when hip::ceil_div is implemented.
 template<typename NumeratorT, typename DenominatorT>
 HIPCUB_DEPRECATED_BECAUSE("Use hip::ceil_div instead from 'libhipcxx'")
 HIPCUB_HOST_DEVICE __forceinline__ constexpr NumeratorT
