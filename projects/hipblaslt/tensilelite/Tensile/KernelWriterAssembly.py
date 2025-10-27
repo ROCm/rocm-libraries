@@ -1444,7 +1444,7 @@ class KernelWriterAssembly(KernelWriter):
           % (self.states.kernelName, self.states.overflowedResources, msg, \
           self.vgprPool.size(), self.sgprPool.size()))
       mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
-      mkb.body.add(ValueIf(value=0), 1)
+      mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -5430,7 +5430,7 @@ class KernelWriterAssembly(KernelWriter):
         kernel["ProblemType"]["IndicesSummation"][loopIdx]]
     if not tailLoop and not noLabelGen:
       module.add(Label("openLoop%s"%loopChar, ""))
-    loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "" )
+    loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "", alignment=16 )
     loopLabelEnd = Label("%sLoopEnd%s"%("Tail" if tailLoop else "", loopChar), "" )
 
     if beginLabelOnly:
@@ -13879,7 +13879,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
 
     if numCodePath == 1:
-      module.add(TextBlock("MAINLOOP 0\n"))
+      module.add(MacroInstruction(name="MAINLOOP", args=[0]))
       module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
       module.add(Label("LoopEnd%s"%(loopChar), "" ))
       return module
@@ -13888,7 +13888,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment0("SIMD specialized dispatch")
 
     for l in range(numCodePath):
-      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "" ))
+      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "", alignment=16))
       loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u"%(loopChar, l), "" ))
     loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
 
@@ -13911,7 +13911,7 @@ class KernelWriterAssembly(KernelWriter):
     for l in range(numCodePath):
       module.addComment0("SIMD %u code-path"%l)
       module.add(loopLabelBegin[l])
-      module.add(TextBlock("MAINLOOP %u\n"%l))
+      module.add(MacroInstruction(name="MAINLOOP", args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
       tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2)
       sgprPC = ContinuousRegister(tmpSgpr1, 3)

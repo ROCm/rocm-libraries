@@ -26,8 +26,8 @@
 #ifndef GUARD_GEMM_HPP
 #define GUARD_GEMM_HPP
 
-#include "ford.hpp"
 #include <iostream>
+#include <miopen/ford.hpp>
 
 /*
     A and B rows and cols should be passed as default values (NxM, MxK), independently of
@@ -75,28 +75,28 @@ void gemm_cpu(const Dtype* a_ptr,
         double el = 0.0;
         if(!a_transpose && !b_transpose)
         {
-            ford(inner_loop_limit)([&](int k) {
+            miopen::ford(inner_loop_limit)([&](int k) {
                 el += static_cast<double>(a_ptr[m * a_stride + k]) *
                       static_cast<double>(b_ptr[k * b_stride + n]);
             });
         }
         else if(!a_transpose && b_transpose)
         {
-            ford(inner_loop_limit)([&](int k) {
+            miopen::ford(inner_loop_limit)([&](int k) {
                 el += static_cast<double>(a_ptr[m * a_stride + k]) *
                       static_cast<double>(b_ptr[n * b_stride + k]);
             });
         }
         else if(a_transpose && !b_transpose)
         {
-            ford(inner_loop_limit)([&](int k) {
+            miopen::ford(inner_loop_limit)([&](int k) {
                 el += static_cast<double>(a_ptr[k * a_stride + m]) *
                       static_cast<double>(b_ptr[k * b_stride + n]);
             });
         }
         else
         {
-            ford(inner_loop_limit)([&](int k) {
+            miopen::ford(inner_loop_limit)([&](int k) {
                 el += static_cast<double>(a_ptr[k * a_stride + m]) *
                       static_cast<double>(b_ptr[n * b_stride + k]);
             });
@@ -109,11 +109,11 @@ void gemm_cpu(const Dtype* a_ptr,
     constexpr size_t iter_margin = 1'048'576;
     if(c_rows * c_cols * inner_loop_limit > iter_margin)
     {
-        par_ford(c_rows, c_cols)(inner_loop);
+        miopen::par_ford(c_rows, c_cols)(inner_loop);
     }
     else
     {
-        ford(c_rows, c_cols)(inner_loop);
+        miopen::ford(c_rows, c_cols)(inner_loop);
     }
 }
 

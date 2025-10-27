@@ -221,7 +221,7 @@ TEST(TestBatchnormNode, PackNode)
     EXPECT_EQ(packedAttributes->epsilon_tensor_uid(), epsilonTensor->get_uid());
 }
 
-TEST(TestBatchnormNode, GatherHipdnnTensorIds)
+TEST(TestBatchnormNode, GatherHipdnnTensors)
 {
     BatchnormAttributes batchnormAttributes;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -255,117 +255,15 @@ TEST(TestBatchnormNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(4) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(5) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
-    EXPECT_TRUE(duplicateIds.empty());
-}
-
-TEST(TestBatchnormNode, GatherHipdnnTensorsCollectsDuplicates)
-{
-    BatchnormAttributes batchnormAttributes;
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1).set_name("XTensor");
-    batchnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_uid(2).set_name("YTensor");
-    batchnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_uid(3).set_name("ScaleTensor");
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_uid(4).set_name("BiasTensor");
-    batchnormAttributes.set_bias(biasTensor);
-
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_uid(5).set_name("EpsilonTensor");
-    batchnormAttributes.set_epsilon(epsilonTensor);
-
-    auto peerStat1 = std::make_shared<TensorAttributes>();
-    peerStat1->set_uid(3).set_name("peerStat1");
-
-    auto peerStat2 = std::make_shared<TensorAttributes>();
-    peerStat2->set_uid(4).set_name("peerStat2");
-
-    batchnormAttributes.set_peer_stats({peerStat1, peerStat2});
-
-    GraphAttributes graphAttributes;
-    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
-
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
-
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(4) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(5) != usedIds.end());
-
-    // Check that duplicates are collected
-    EXPECT_TRUE(duplicateIds.find(3) != duplicateIds.end());
-    EXPECT_TRUE(duplicateIds.find(4) != duplicateIds.end());
-}
-
-TEST(TestBatchnormNode, PopulateHipdnnTensorIds)
-{
-    BatchnormAttributes batchnormAttributes;
-    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
-
-    auto peerStat1 = std::make_shared<TensorAttributes>();
-    auto peerStat2 = std::make_shared<TensorAttributes>();
-
-    batchnormAttributes.set_peer_stats({peerStat1, peerStat2});
-
-    GraphAttributes graphAttributes;
-    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, ErrorCode::OK);
-
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size()
-                    + node.attributes.peer_stats.size());
-
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    for(const auto& peerStat : node.attributes.peer_stats)
-    {
-        tensors.emplace_back(peerStat);
-    }
-
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(biasTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(epsilonTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 7);
 }
