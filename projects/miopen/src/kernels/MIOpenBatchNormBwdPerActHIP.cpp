@@ -47,6 +47,13 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // skip execution for out-of-bound threads
+    if(xgid >= MIO_BN_C || ygid >= MIO_BN_HW)
+    {
+        return;
+    }
+
     unsigned int yglb_sz = blockDim.y * gridDim.y;
     int cidx             = in_cstride * xgid;
 
@@ -114,6 +121,13 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // skip execution for out-of-bound threads
+    if(xgid >= MIO_BN_C || ygid >= MIO_BN_HW)
+    {
+        return;
+    }
+
     unsigned int yglb_sz = blockDim.y * gridDim.y;
     int cidx             = in_cstride * xgid;
 
