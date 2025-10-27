@@ -153,7 +153,7 @@ private:
 template <typename RealType>
 struct normal_distribution_base
 {
-#if THRUST_HAS_CUDA_COMPILER && !THRUST_CUDA_COMPILER(NVHPC)
+#if THRUST_HAS_CUDA_COMPILER() && !THRUST_CUDA_COMPILER(NVHPC)
   using type = normal_distribution_nvcc<RealType>;
 #else
   using type = normal_distribution_portable<RealType>;

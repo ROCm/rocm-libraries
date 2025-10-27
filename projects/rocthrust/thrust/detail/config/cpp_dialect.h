@@ -85,6 +85,8 @@ THRUST_COMPILER_DEPRECATION(MSVC 2019(19.20 / 16.0 / 14.20));
 #else // TODO(libhipcxx): remove the code in this path and replace THRUST_CPP_DIALECT with _CCCL_STD_VER in rocThrust
       // once libhipcxx gets ready
 
+#  include <thrust/detail/config/preprocessor.h>
+
 // Deprecation warnings may be silenced by defining the following macros. These
 // may be combined.
 // - THRUST_IGNORE_DEPRECATED_COMPILER

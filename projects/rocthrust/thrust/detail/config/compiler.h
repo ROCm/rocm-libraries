@@ -50,45 +50,22 @@
 
 #  define THRUST_COMPILER _CCCL_COMPILER
 
-#  if _CCCL_COMPILER(NVHPC)
-#    define THRUST_COMPILER_NVHPC _CCCL_COMPILER_NVHPC
-#  elif defined(__HIP__)
-#    define THRUST_COMPILER_HIP _CCCL_COMPILER_MAKE_VERSION(__clang_major__, __clang_minor__)
-#  elif _CCCL_COMPILER(CLANG)
-#    define THRUST_COMPILER_CLANG _CCCL_COMPILER_CLANG
-#  elif _CCCL_COMPILER(GCC)
-#    define THRUST_COMPILER_GCC _CCCL_COMPILER_GCC
-#  elif _CCCL_COMPILER(MSVC)
-#    define THRUST_COMPILER_MSVC     _CCCL_COMPILER_MSVC
-#    define THRUST_COMPILER_MSVC2019 _CCCL_COMPILER_MSVC2019
-#    define THRUST_COMPILER_MSVC2022 _CCCL_COMPILER_MSVC2022
-#  elif _CCCL_COMPILER(NVRTC)
-#    define THRUST_COMPILER_NVRTC _CCCL_COMPILER_NVRTC
+#  if defined(__HIP__)
+#    define _CCCL_COMPILER_HIP() _CCCL_COMPILER_CLANG()
+#    undef _CCCL_COMPILER_CLANG
+#    define _CCCL_COMPILER_CLANG() _CCCL_VERSION_INVALID()
+#  else
+#    define _CCCL_COMPILER_HIP() _CCCL_VERSION_INVALID()
 #  endif
 
-#  define THRUST_CUDA_COMPILER _CCCL_CUDA_COMPILER
-
-#  if _CCCL_CUDA_COMPILER(NVCC)
-#    define THRUST_CUDA_COMPILER_NVCC _CCCL_CUDA_COMPILER_NVCC
-#  elif _CCCL_CUDA_COMPILER(NVHPC)
-#    define THRUST_CUDA_COMPILER_NVHPC _CCCL_CUDA_COMPILER_NVHPC
-#  elif _CCCL_CUDA_COMPILER(CLANG)
-#    define THRUST_CUDA_COMPILER_CLANG _CCCL_CUDA_COMPILER_CLANG
-#  elif _CCCL_CUDA_COMPILER(NVRTC)
-#    define THRUST_CUDA_COMPILER_NVRTC _CCCL_CUDA_COMPILER_NVRTC
-#  endif
-
-#  if defined(_CCCL_HAS_CUDA_COMPILER)
-#    define THRUST_HAS_CUDA_COMPILER _CCCL_HAS_CUDA_COMPILER
-#  endif
-
-#  define THRUST_TO_STRING _CCCL_TO_STRING
-
-#  define THRUST_PRAGMA _CCCL_PRAGMA
-
+#  define THRUST_CUDA_COMPILER        _CCCL_CUDA_COMPILER
+#  define THRUST_HAS_CUDA_COMPILER()  _CCCL_HAS_CUDA_COMPILER()
+#  define THRUST_PRAGMA               _CCCL_PRAGMA
 #  define THRUST_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL_FULL()
 
 #else // TODO(libhipcxx): remove this path once libhipcxx gets ready
+
+#  include <thrust/detail/config/preprocessor.h>
 
 // Macros to suppress deprecation compiler warnings, from "deprecated.h"
 // Check for deprecation opt-outs
@@ -117,18 +94,32 @@
 #  endif // suppress all compiler deprecation warnings
 
 // Utility to compare version numbers. To use:
-// 1) Define a macro that makes a version number from major and minor numbers, e. g.:
+// 1) Define a macro that makes a pair of (major, minor) numbers:
 //    #define MYPRODUCT_MAKE_VERSION(_MAJOR, _MINOR) (_MAJOR * 100 + _MINOR)
-// 2) Define a macro that you will use to compare versions, e. g.:
+// 2) Define a macro that you will use to compare versions, e.g.:
 //    #define MYPRODUCT(...) THRUST_VERSION_COMPARE(MYPRODUCT, MYPRODUCT_##__VA_ARGS__)
 //    Signatures:
 //       MYPRODUCT(_PROD)                      - is the product _PROD version non-zero?
-//       MYPRODUCT(_PROD, _OP, _MAJOR)         - compare the product _PROD version to _MAJOR using operator _OP
+//       MYPRODUCT(_PROD, _OP, _MAJOR)         - compare the product _PROD major version to _MAJOR using operator _OP
 //       MYPRODUCT(_PROD, _OP, _MAJOR, _MINOR) - compare the product _PROD version to _MAJOR._MINOR using operator _OP
-#  define THRUST_VERSION_COMPARE_1(_PREFIX, _VER)              (_VER != 0)
-#  define THRUST_VERSION_COMPARE_3(_PREFIX, _VER, _OP, _MAJOR) THRUST_VERSION_COMPARE_4(_PREFIX, _VER, _OP, _MAJOR, 0)
+// 3) Define the product version macros as a function-like macro that returns the version number or
+//    THRUST_VERSION_INVALID() if the version cannot be determined, e. g.:
+//    #define MYPRODUCT_<_PROD>() (1, 2)
+//      or
+//    #define MYPRODUCT_<_PROD>() THRUST_VERSION_INVALID()
+#  define THRUST_VERSION_MAJOR_(_MAJOR, _MINOR) _MAJOR
+#  define THRUST_VERSION_MAJOR(_PAIR)           THRUST_VERSION_MAJOR_ _PAIR
+#  define THRUST_VERSION_INVALID()              (-1, -1)
+#  define THRUST_MAKE_VERSION(_PREFIX, _PAIR) \
+    (THRUST_PP_EVAL(THRUST_PP_CAT(_PREFIX, MAKE_VERSION), THRUST_PP_EXPAND _PAIR))
+#  define THRUST_VERSION_IS_INVALID(_PAIR) \
+    (THRUST_VERSION_MAJOR(_PAIR) == THRUST_VERSION_MAJOR(THRUST_VERSION_INVALID()))
+#  define THRUST_VERSION_COMPARE_1(_PREFIX, _VER) (!THRUST_VERSION_IS_INVALID(_VER()))
+#  define THRUST_VERSION_COMPARE_3(_PREFIX, _VER, _OP, _MAJOR) \
+    (!THRUST_VERSION_IS_INVALID(_VER()) && (THRUST_VERSION_MAJOR(_VER()) _OP _MAJOR))
 #  define THRUST_VERSION_COMPARE_4(_PREFIX, _VER, _OP, _MAJOR, _MINOR) \
-    (THRUST_VERSION_COMPARE_1(_PREFIX, _VER) && (_VER _OP _PREFIX##MAKE_VERSION(_MAJOR, _MINOR)))
+    (!THRUST_VERSION_IS_INVALID(_VER())                                \
+     && (THRUST_MAKE_VERSION(_PREFIX, _VER()) _OP THRUST_MAKE_VERSION(_PREFIX, (_MAJOR, _MINOR))))
 #  define THRUST_VERSION_SELECT_COUNT(_ARG1, _ARG2, _ARG3, _ARG4, _ARG5, ...) _ARG5
 #  define THRUST_VERSION_SELECT2(_ARGS)                                       THRUST_VERSION_SELECT_COUNT _ARGS
 // MSVC traditonal preprocessor requires an extra level of indirection
@@ -145,6 +136,15 @@
 #  define THRUST_COMPILER_MAKE_VERSION(_MAJOR, _MINOR) ((_MAJOR) * 100 + (_MINOR))
 #  define THRUST_COMPILER(...)                         THRUST_VERSION_COMPARE(THRUST_COMPILER_, THRUST_COMPILER_##__VA_ARGS__)
 
+#  define THRUST_COMPILER_NVHPC()    THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_HIP()      THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_CLANG()    THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_GCC()      THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_MSVC()     THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_MSVC2019() THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_MSVC2022() THRUST_VERSION_INVALID()
+#  define THRUST_COMPILER_NVRTC()    THRUST_VERSION_INVALID()
+
 // Determine the host compiler and its version
 #  if defined(__INTEL_COMPILER)
 #    ifndef THRUST_IGNORE_DEPRECATED_COMPILER
@@ -152,44 +152,61 @@
         "The Intel C++ Compiler Classic (icc/icpc) is not supported by CCCL. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message."
 #    endif // !THRUST_IGNORE_DEPRECATED_COMPILER
 #  elif defined(__NVCOMPILER)
-#    define THRUST_COMPILER_NVHPC THRUST_COMPILER_MAKE_VERSION(__NVCOMPILER_MAJOR__, __NVCOMPILER_MINOR__)
+#    undef THRUST_COMPILER_NVHPC
+#    define THRUST_COMPILER_NVHPC() (__NVCOMPILER_MAJOR__, __NVCOMPILER_MINOR__)
 #  elif defined(__HIP__)
-#    define THRUST_COMPILER_HIP THRUST_COMPILER_MAKE_VERSION(__clang_major__, __clang_minor__)
+#    undef THRUST_COMPILER_HIP
+#    define THRUST_COMPILER_HIP() (__clang_major__, __clang_minor__)
 #  elif defined(__clang__)
-#    define THRUST_COMPILER_CLANG THRUST_COMPILER_MAKE_VERSION(__clang_major__, __clang_minor__)
+#    undef THRUST_COMPILER_CLANG
+#    define THRUST_COMPILER_CLANG() (__clang_major__, __clang_minor__)
 #  elif defined(__GNUC__)
-#    define THRUST_COMPILER_GCC THRUST_COMPILER_MAKE_VERSION(__GNUC__, __GNUC_MINOR__)
+#    undef THRUST_COMPILER_GCC
+#    define THRUST_COMPILER_GCC() (__GNUC__, __GNUC_MINOR__)
 #  elif defined(_MSC_VER)
-#    define THRUST_COMPILER_MSVC THRUST_COMPILER_MAKE_VERSION(_MSC_VER / 100, _MSC_VER % 100)
-#    if (THRUST_COMPILER_MSVC < THRUST_COMPILER_MAKE_VERSION(19, 20))
+#    undef THRUST_COMPILER_MSVC
+#    define THRUST_COMPILER_MSVC() (_MSC_VER / 100, _MSC_VER % 100)
+#    if THRUST_COMPILER(MSVC, <, 19, 20)
 #      ifndef THRUST_IGNORE_DEPRECATED_COMPILER
 #        error \
           "Visual Studio 2017 (MSC_VER < 1920) and older are not supported by rocThrust. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this error."
 #      endif
-#    endif
-#    define THRUST_COMPILER_MSVC2019                                \
-      (THRUST_COMPILER_MSVC >= THRUST_COMPILER_MAKE_VERSION(19, 20) \
-       && THRUST_COMPILER_MSVC < THRUST_COMPILER_MAKE_VERSION(19, 30))
-#    define THRUST_COMPILER_MSVC2022                                \
-      (THRUST_COMPILER_MSVC >= THRUST_COMPILER_MAKE_VERSION(19, 30) \
-       && THRUST_COMPILER_MSVC < THRUST_COMPILER_MAKE_VERSION(19, 40))
+#    endif // THRUST_COMPILER(MSVC, <, 19, 20)
+#    if THRUST_COMPILER(MSVC, >=, 19, 20) && THRUST_COMPILER(MSVC, <, 19, 30)
+#      undef THRUST_COMPILER_MSVC2019
+#      define THRUST_COMPILER_MSVC2019() THRUST_COMPILER_MSVC()
+#    endif // THRUST_COMPILER(MSVC, >=, 19, 20) && THRUST_COMPILER(MSVC, <, 19, 30)
+#    if THRUST_COMPILER(MSVC, >=, 19, 30) && THRUST_COMPILER(MSVC, <, 19, 40)
+#      undef THRUST_COMPILER_MSVC2022
+#      define THRUST_COMPILER_MSVC2022() THRUST_COMPILER_MSVC()
+#    endif // THRUST_COMPILER(MSVC, >=, 19, 30) && THRUST_COMPILER(MSVC, <, 19, 40)
 #  elif defined(__CUDACC_RTC__)
-#    define THRUST_COMPILER_NVRTC THRUST_COMPILER_MAKE_VERSION(__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
+#    undef THRUST_COMPILER_NVRTC
+#    define THRUST_COMPILER_NVRTC() (__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
 #  endif
 
 // The CUDA compiler version shares the implementation with the C++ compiler
 #  define THRUST_CUDA_COMPILER_MAKE_VERSION(_MAJOR, _MINOR) THRUST_COMPILER_MAKE_VERSION(_MAJOR, _MINOR)
 #  define THRUST_CUDA_COMPILER(...)                         THRUST_VERSION_COMPARE(THRUST_CUDA_COMPILER_, THRUST_CUDA_COMPILER_##__VA_ARGS__)
 
+#  define THRUST_CUDA_COMPILER_NVCC()  THRUST_VERSION_INVALID()
+#  define THRUST_CUDA_COMPILER_NVHPC() THRUST_VERSION_INVALID()
+#  define THRUST_CUDA_COMPILER_CLANG() THRUST_VERSION_INVALID()
+#  define THRUST_CUDA_COMPILER_NVRTC() THRUST_VERSION_INVALID()
+
 // Determine the cuda compiler
 #  if defined(__NVCC__)
-#    define THRUST_CUDA_COMPILER_NVCC THRUST_CUDA_COMPILER_MAKE_VERSION(__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
+#    undef THRUST_CUDA_COMPILER_NVCC
+#    define THRUST_CUDA_COMPILER_NVCC() (__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
 #  elif defined(_NVHPC_CUDA)
-#    define THRUST_CUDA_COMPILER_NVHPC THRUST_COMPILER_NVHPC
+#    undef THRUST_CUDA_COMPILER_NVHPC
+#    define THRUST_CUDA_COMPILER_NVHPC() THRUST_COMPILER_NVHPC()
 #  elif defined(__CUDA__) && THRUST_COMPILER(CLANG)
-#    define THRUST_CUDA_COMPILER_CLANG THRUST_COMPILER_CLANG
+#    undef THRUST_CUDA_COMPILER_CLANG
+#    define THRUST_CUDA_COMPILER_CLANG() THRUST_COMPILER_CLANG()
 #  elif THRUST_COMPILER(NVRTC)
-#    define THRUST_CUDA_COMPILER_NVRTC THRUST_COMPILER_NVRTC
+#    undef THRUST_CUDA_COMPILER_NVRTC
+#    define THRUST_CUDA_COMPILER_NVRTC() THRUST_COMPILER_NVRTC()
 #  endif
 
 #  define THRUST_CUDACC_MAKE_VERSION(_MAJOR, _MINOR) ((_MAJOR) * 1000 + (_MINOR) * 10)
@@ -197,25 +214,25 @@
 // clang-cuda does not define __CUDACC_VER_MAJOR__ and friends. They are instead retrieved from the CUDA_VERSION macro
 // defined in "cuda.h". clang-cuda automatically pre-includes "__clang_cuda_runtime_wrapper.h" which includes "cuda.h"
 #  if THRUST_CUDA_COMPILER(NVCC) || THRUST_CUDA_COMPILER(NVHPC) || THRUST_CUDA_COMPILER(NVRTC)
-#    define THRUST_CUDACC THRUST_CUDACC_MAKE_VERSION(__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
+#    define THRUST_CUDACC() (__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__)
 #  elif THRUST_CUDA_COMPILER(CLANG)
-#    define THRUST_CUDACC THRUST_CUDACC_MAKE_VERSION(CUDA_VERSION / 1000, (CUDA_VERSION % 1000) / 10)
-#  endif
+#    define THRUST_CUDACC() (CUDA_VERSION / 1000, (CUDA_VERSION % 1000) / 10)
+#  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
+#    define THRUST_CUDACC() THRUST_VERSION_INVALID()
+#  endif // ^^^ no cuda compiler ^^^
 
 #  define THRUST_CUDACC_BELOW(...) THRUST_VERSION_COMPARE(THRUST_CUDACC_, THRUST_CUDACC, <, __VA_ARGS__)
 
-#  if defined(THRUST_CUDACC)
-#    define THRUST_HAS_CUDA_COMPILER 1
+#  if THRUST_VERSION_IS_INVALID(THRUST_CUDACC())
+#    define THRUST_HAS_CUDA_COMPILER() 0
+#  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
+#    define THRUST_HAS_CUDA_COMPILER() 1
 #  endif
 
-#  if defined(THRUST_HAS_CUDA_COMPILER) && THRUST_CUDACC_BELOW(12) && !defined(THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12)
+#  if THRUST_HAS_CUDA_COMPILER() && THRUST_CUDACC_BELOW(12) && !defined(THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12)
 #    error "CUDA versions below 12 are not supported." \
 "Define THRUST_IGNORE_DEPRECATED_CUDA_BELOW_12 to suppress this message."
 #  endif
-
-// Convert parameter to string
-#  define THRUST_TO_STRING2(STR) #STR
-#  define THRUST_TO_STRING(STR)  THRUST_TO_STRING2(STR)
 
 // Define the pragma for the host compiler
 #  if THRUST_COMPILER(MSVC)
@@ -224,13 +241,13 @@
 #    define THRUST_PRAGMA(ARG) _Pragma(THRUST_TO_STRING(ARG))
 #  endif // THRUST_COMPILER(MSVC)
 
-#if (THRUST_COMPILER(NVCC) && defined(__CUDA_ARCH__)) || THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) \
-  || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
-#  define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
-#elif THRUST_COMPILER(GCC, >=, 8)
-#  define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(diag_suppress 1675) THRUST_PRAGMA(GCC unroll 65534)
-#else // ^^^ has pragma unroll support ^^^ / vvv no pragma unroll support vvv
-#  define THRUST_PRAGMA_UNROLL_FULL()
-#endif // ^^^ no pragma unroll support ^^^
+#  if (THRUST_CUDA_COMPILER(NVCC) && defined(__CUDA_ARCH__)) || THRUST_COMPILER(NVHPC) || THRUST_COMPILER(NVRTC) \
+    || THRUST_COMPILER(CLANG) || THRUST_COMPILER(HIP)
+#    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(unroll)
+#  elif THRUST_COMPILER(GCC, >=, 8)
+#    define THRUST_PRAGMA_UNROLL_FULL() THRUST_PRAGMA(diag_suppress 1675) THRUST_PRAGMA(GCC unroll 65534)
+#  else // ^^^ has pragma unroll support ^^^ / vvv no pragma unroll support vvv
+#    define THRUST_PRAGMA_UNROLL_FULL()
+#  endif // ^^^ no pragma unroll support ^^^
 
 #endif
