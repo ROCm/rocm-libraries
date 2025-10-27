@@ -922,20 +922,19 @@ public:
         return !compare_err;
     }
 
-    void multi_gpu_setup_buffers(std::vector<void*>&   pibuffer,
-                                 std::vector<void*>&   pobuffer)
+    void multi_gpu_setup_buffers(std::vector<void*>& pibuffer, std::vector<void*>& pobuffer)
     {
         // Allocate buffers on multiple GPUs
-        hipLibXtDesc* xt_tmp = nullptr;
-        const bool inplace = placement == fft_placement_inplace;
+        hipLibXtDesc* xt_tmp  = nullptr;
+        const bool    inplace = placement == fft_placement_inplace;
         if(inplace)
         {
-            const auto ret = hipfftXtMalloc(plan, &xt_tmp,HIPFFT_XT_FORMAT_INPLACE);
+            const auto ret = hipfftXtMalloc(plan, &xt_tmp, HIPFFT_XT_FORMAT_INPLACE);
             if(ret != HIPFFT_SUCCESS)
                 throw std::runtime_error("hipfftXtMalloc failed");
             xt_output.reset(xt_tmp);
             xt_tmp = nullptr;
-            
+
             pibuffer.clear();
             std::copy_n(xt_output->descriptor->data,
                         xt_output->descriptor->nGPUs,
@@ -959,7 +958,7 @@ public:
             std::copy_n(xt_input->descriptor->data,
                         xt_input->descriptor->nGPUs,
                         std::back_inserter(pibuffer));
-            
+
             pobuffer.clear();
             std::copy_n(xt_output->descriptor->data,
                         xt_output->descriptor->nGPUs,
@@ -968,15 +967,17 @@ public:
     }
 
     // Copy data on the multiple GPUs
-    void multi_gpu_copy_input(const hostbuf &input_host)
+    void multi_gpu_copy_input(const hostbuf& input_host)
     {
         const bool inplace = placement == fft_placement_inplace;
-        if(hipfftXtMemcpy(plan, inplace ? xt_output.get() : xt_input.get(),
-                          input_host.data(), HIPFFT_COPY_HOST_TO_DEVICE)
+        if(hipfftXtMemcpy(plan,
+                          inplace ? xt_output.get() : xt_input.get(),
+                          input_host.data(),
+                          HIPFFT_COPY_HOST_TO_DEVICE)
            != HIPFFT_SUCCESS)
             throw std::runtime_error("hipfftXtMemcpy failed");
     }
-    
+
     // call the hipFFT APIs to allocate buffers and distribute data to multiple GPUs
     void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
                            std::vector<gpubuf>&  ibuffer,
@@ -987,7 +988,7 @@ public:
             return;
 
         multi_gpu_setup_buffers(pibuffer, pobuffer);
-        
+
         // Input data is on the device - copy it back to the host so hipfftXtMemcpy can deal with it
         hostbuf input_host;
         input_host.alloc(ibuffer.front().size());
@@ -997,9 +998,9 @@ public:
                      hipMemcpyDeviceToHost)
            != hipSuccess)
             throw std::runtime_error("copy back to host failed");
-                
+
         multi_gpu_copy_input(input_host);
-        
+
         // create bricks for this transform so we can confirm data layout
         hipLibXtDesc* compare_desc
             = placement == fft_placement_inplace ? xt_output.get() : xt_input.get();
@@ -1479,7 +1480,7 @@ private:
         {
             return HIPFFT_NOT_IMPLEMENTED;
         }
-        
+
         if(multiGPU > 1)
         {
             int deviceCount = 0;
@@ -1496,7 +1497,7 @@ private:
             if(ret != HIPFFT_SUCCESS)
                 return ret;
         }
-        
+
         if(mp_lib == fft_mp_lib_mpi)
         {
 #ifdef HIPFFT_MPI_ENABLE

@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
     non_token->add_option("--ngpus", params.multiGPU, "Number of GPUs to use")
         ->default_val(1)
         ->check(CLI::NonNegativeNumber);
-    
+
     app.add_option("--verbose", verbose, "Control output verbosity")->default_val(0);
     app.add_option("-N, --ntrial", ntrial, "Trial size for the problem")
         ->default_val(1)
@@ -216,7 +216,6 @@ int main(int argc, char* argv[])
 
     std::cout << std::flush;
 
-    
     params.validate();
 
     if(!params.valid(verbose))
@@ -234,7 +233,7 @@ int main(int argc, char* argv[])
     if(params.multiGPU == 1)
     {
         // TODO: enable for multi-GPU as well
-        
+
         // Check free and total available memory:
         size_t free  = 0;
         size_t total = 0;
@@ -267,7 +266,7 @@ int main(int argc, char* argv[])
             return EXIT_SUCCESS;
         }
     }
-    
+
     // Create plans:
     auto ret = params.create_plan();
     if(ret != fft_status_success)
@@ -296,15 +295,15 @@ int main(int argc, char* argv[])
     {
         params.multi_gpu_setup_buffers(pibuffer, pobuffer);
     }
-        
+
     // CPU-side input buffer
     std::vector<hostbuf> ibuffer_cpu;
 
     // Multi-gpu transforms do not currently support device-side input data generation.
     const auto is_device_gen = params.multiGPU == 1
-        && !(params.igen == fft_input_generator_host
-             || params.igen == fft_input_random_generator_host);
-    
+                               && !(params.igen == fft_input_generator_host
+                                    || params.igen == fft_input_random_generator_host);
+
     if(is_device_gen)
     {
 #ifdef USE_HIPRAND
@@ -352,7 +351,7 @@ int main(int argc, char* argv[])
             params.print_ibuffer(ibuffer_cpu);
         }
     }
-    
+
     // GPU output buffer:
     std::vector<gpubuf>  obuffer_data;
     std::vector<gpubuf>* obuffer = &obuffer_data;
@@ -404,7 +403,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            
+
             if(params.multiGPU == 1)
             {
                 for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
