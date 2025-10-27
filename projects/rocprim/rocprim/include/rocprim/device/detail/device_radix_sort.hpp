@@ -1102,7 +1102,7 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                Key   ordered_block_keys[KeyLDSSize];
+                Key    ordered_block_keys[KeyLDSSize];
                 v_pack ordered_block_values[ValueLDSSize];
             };
         };
@@ -1285,7 +1285,7 @@ struct onesweep_iteration_helper
                     }
                     else
                     {
-                        // No branching, writes to unused LDS memory space. 
+                        // No branching, writes to unused LDS memory space.
                         int offset = ranks[i] - x;
                         offset = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
                         storage.ordered_block_keys[offset] = keys[i];
@@ -1379,8 +1379,8 @@ struct onesweep_iteration_helper
                     {
                         int offset = ranks[i] - x;
                         offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NValue)
-                                            ? offset
-                                            : BlockSize * NValue;
+                                         ? offset
+                                         : BlockSize * NValue;
 
                         storage.ordered_block_values[offset] = v_pack::create(values[i]);
                     }
