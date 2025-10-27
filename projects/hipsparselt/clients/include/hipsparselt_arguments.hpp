@@ -108,7 +108,7 @@ struct Arguments
 
     int8_t norm_check;
     int8_t unit_check;
-    bool norm_check_assert;
+    bool   norm_check_assert;
 
     int8_t timing;
 
@@ -140,7 +140,7 @@ struct Arguments
     char orderD;
 
     bool inEqualOut;
-    int logging;
+    int  logging;
     /*************************************************************************
      *                     End Of Arguments                                  *
      *************************************************************************/
@@ -228,7 +228,7 @@ struct Arguments
     // Function to read Arguments data from stream
     friend std::istream& operator>>(std::istream& str, Arguments& arg);
 
-#ifdef WIN32
+#ifdef _WIN32
     // Clang specific code
     template <typename T>
     friend hipsparselt_internal_ostream& operator<<(hipsparselt_internal_ostream& os,

@@ -34,14 +34,14 @@
 #include "hipsparselt_arguments.hpp"
 #include "hipsparselt_fp8.hpp"
 #include "test_cleanup.hpp"
-#include <hip/hip_runtime.h>
-#include <hipsparselt/hipsparselt.h>
 #include <algorithm>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <future>
+#include <hip/hip_runtime.h>
+#include <hipsparselt/hipsparselt.h>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -156,7 +156,7 @@ bool match_test_category(const Arguments& arg, const char* category);
                           HipSparseLt_TestData::end()),                          \
         testclass::PrintToStringParamName());
 
-#if !defined(WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
+#if !defined(_WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
 #define HIPSPARSELT_ALLOW_UNINSTANTIATED_GTEST(testclass) \
     GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(testclass);
 #else
@@ -411,8 +411,8 @@ struct hipsparselt_test_invalid
         FAIL() << msg;
 #else
         hipsparselt_cerr << msg << std::endl;
-        hipsparselt_cerr << "function: " << arg.function << " types: "
-                         << " a: " << hip_datatype_to_string(arg.a_type)
+        hipsparselt_cerr << "function: " << arg.function
+                         << " types: " << " a: " << hip_datatype_to_string(arg.a_type)
                          << " b: " << hip_datatype_to_string(arg.b_type)
                          << " c: " << hip_datatype_to_string(arg.c_type)
                          << " d: " << hip_datatype_to_string(arg.d_type)

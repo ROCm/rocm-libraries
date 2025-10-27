@@ -25,7 +25,7 @@
 #include <sys/stat.h>
 #include <thread>
 #include <utility>
-#ifdef WIN32
+#ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
 #include <io.h> // For _open, _close on Windows

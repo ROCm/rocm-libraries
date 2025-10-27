@@ -53,7 +53,7 @@
 
 namespace
 {
-#ifndef WIN32
+#ifndef _WIN32
     std::string rocsparselt_so_path;
 
     int rocsparselt_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
@@ -428,7 +428,7 @@ namespace
         }
 
         // KernelLauncher is not copyable or assignable
-        KernelLauncher(const KernelLauncher&) = delete;
+        KernelLauncher(const KernelLauncher&)            = delete;
         KernelLauncher& operator=(const KernelLauncher&) = delete;
 
         // Get the number of devices
@@ -466,7 +466,7 @@ namespace
          *******************************************************/
         static bool TestPath(const std::string& path)
         {
-#ifdef WIN32
+#ifdef _WIN32
             return ((_access(path.c_str(), 4) != -1) || (_access(path.c_str(), 6) != -1));
 #else
             return access(path.c_str(), R_OK) == 0;
@@ -480,7 +480,7 @@ namespace
         void initialize(SolutionAdapter& adapter, int32_t deviceId)
         {
             std::string path;
-#ifndef WIN32
+#ifndef _WIN32
             path.reserve(PATH_MAX);
 #endif
 
@@ -688,9 +688,8 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                     if(ms < min_ms)
                     {
                         *config_id = id;
-                        min_ms = ms;
+                        min_ms     = ms;
                     }
-
                 }
                 RETURN_IF_HIP_ERROR(hipEventDestroy(startEvent));
                 RETURN_IF_HIP_ERROR(hipEventDestroy(stopEvent));

@@ -33,7 +33,7 @@
 #include <iostream>
 #include <string>
 #include <sys/types.h>
-#ifdef WIN32
+#ifdef _WIN32
 #ifdef __cpp_lib_filesystem
 #include <filesystem>
 #else
@@ -44,12 +44,12 @@ namespace std
     namespace filesystem = experimental::filesystem;
 }
 #endif
-#endif // WIN32
+#endif // _WIN32
 
 // Parse YAML data
 static std::string hipsparselt_parse_yaml(const std::string& yaml)
 {
-#ifdef WIN32
+#ifdef _WIN32
     // Explicitly run via `python.exe`, without relying on the .py file being
     // treated as an executable that should be run via the python interpreter.
     std::string python_command_launcher = "python ";
@@ -64,7 +64,7 @@ static std::string hipsparselt_parse_yaml(const std::string& yaml)
                + "hipsparselt_template.yaml -o " + tmp + " " + yaml;
     hipsparselt_cerr << cmd << std::endl;
 
-#ifdef WIN32
+#ifdef _WIN32
     int status = std::system(cmd.c_str());
     if(status == -1)
         exit(EXIT_FAILURE);
