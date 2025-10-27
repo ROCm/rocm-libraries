@@ -97,13 +97,14 @@ typedef enum {
   HIPBLASLT_EPILOGUE_DGELU_BGRAD = 208,           /**<Apply gradient GELU transform and bias gradient to the results. Requires additional aux input. */
   HIPBLASLT_EPILOGUE_BGRADA = 256,                /**<Apply bias gradient to A and output gemm result. */
   HIPBLASLT_EPILOGUE_BGRADB = 512,                /**<Apply bias gradient to B and output gemm result. */
-  HIPBLASLT_EPILOGUE_SIGMOID = 1024,              /**<Apply sigmoid activation function pointwise. */
   HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,           /**<Apply Swish point-wise transform to the results (x:=Swish(x, 1)).*/
   HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,      /**<Apply Bias and then Swish transform.*/
   HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,          /**<Apply point-wise clamp to the results (x:=max(alpha, min(x, beta))).*/
   HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,     /**<Apply Bias and then clamp.*/
   HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT = 131200,      /**<Output GEMM results before applying clamp transform.*/
   HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204, /**<Output GEMM results after applying bias but before applying clamp transform.*/
+  HIPBLASLT_EPILOGUE_SIGMOID_EXT = 262144,        /**<Apply the sigmoid transform.*/
+  HIPBLASLT_EPILOGUE_SIGMOID_BIAS_EXT = 262148,   /**<Apply the bias followed by sigmoid transform.*/
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
