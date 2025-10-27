@@ -118,6 +118,12 @@ def main():
                         type=int,
                         default=1,
                         help='Maximum number of nodes to use')
+    parser.add_argument('--reportwait',
+                        type=lambda x: bool(x.lower() in
+                                            ("yes", "true", "t", "1")),
+                        default=False,
+                        help='Do not exit until the report job has completed')
+    
 
     if args.config_file:
         for k, v in config.items("Defaults"):
@@ -272,6 +278,8 @@ def main():
     # Report on job status
     jobparams.ntaskspernode = 1
     jobparams.nnodes = 1
+    if args.reportwait == True:
+        jobparams.wait = True
     rocslurm.reportonjobs(jobparams, args.logdir, jobs, verbose=args.verbose)
 
 
