@@ -34,7 +34,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-//#include <ostream>
 
 namespace miopen {
 

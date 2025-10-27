@@ -133,8 +133,7 @@ bool PlainTextDb::Remove(const std::string& key, const std::string& id)
     return StoreRecordUnsafe(*record);
 }
 
-std::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key,
-                                                        RecordPositions* pos)
+std::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key, RecordPositions* pos)
 {
     if(pos != nullptr)
     {

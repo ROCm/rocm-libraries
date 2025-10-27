@@ -29,7 +29,6 @@
 
 #include <miopen/config.h>
 #include <miopen/db.hpp>
-//#include <miopen/db_path.hpp>
 #include <miopen/db_record.hpp>
 #include <miopen/env.hpp>
 #include <miopen/perf_field.hpp>
@@ -98,9 +97,9 @@ public:
           installed_path(debug::testing_find_db_path_override()
                              ? *debug::testing_find_db_path_override()
                              : GetInstalledPath(handle, path_suffix)),
-          db(construct_db(
-              debug::testing_find_db_enabled && !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
-              DbTimer<TDb>{DbKinds::FindDb, installed_path, path}))
+          db(construct_db(debug::testing_find_db_enabled &&
+                              !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
+                          DbTimer<TDb>{DbKinds::FindDb, installed_path, path}))
     {
         if(!db)
             return;
@@ -119,9 +118,9 @@ public:
 #if MIOPEN_DISABLE_USERDB
           db(std::optional<DbTimer<TDb>>{DbKinds::FindDb})
 #else
-          db(construct_db(
-              debug::testing_find_db_enabled && !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
-              DbTimer<TDb>{DbKinds::FindDb, path, false}))
+          db(construct_db(debug::testing_find_db_enabled &&
+                              !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
+                          DbTimer<TDb>{DbKinds::FindDb, path, false}))
 #endif
     {
         if(!db)
