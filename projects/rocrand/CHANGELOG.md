@@ -11,7 +11,7 @@ Documentation for rocRAND is available at
 
 ### Changed
 
-* Changed the `launch` method in `host_system` and `device_system`, so that kernels with all supported arches can be compiled with correct configuration during host pass. All generators are updated accordingly for support of SPIR-V, to invoke SIPR-V,  it should be built with `-DAMDGPU_TARGETS=amdgcnspirv`.
+* Changed the `launch` method in `host_system` and `device_system`, so that kernels with all supported arches can be compiled with correct configuration during host pass. All generators are updated accordingly for support of SPIR-V. To invoke SIPR-V, it should be built with `-DAMDGPU_TARGETS=amdgcnspirv`.
 
 ## rocRAND 4.1.0 for ROCm 7.1
 
