@@ -106,11 +106,11 @@ int32_t mloGroupNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
     size_t outer_size = dims[0] * num_groups;
     size_t inner_size = numel / outer_size;
 
-    par_ford(outer_size)([&](size_t o) {
+    miopen::par_ford(outer_size)([&](size_t o) {
         Tcheck pmean = 0.0f;
         Tcheck pvar  = 0.0f;
 
-        ford(inner_size)([&](size_t i) {
+        miopen::ford(inner_size)([&](size_t i) {
             Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]);
             pmean += tmp;
             pvar += tmp * tmp;
@@ -123,7 +123,7 @@ int32_t mloGroupNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
         meanhost[o] = pmean;
         rstdhost[o] = prstd;
 
-        ford(inner_size)([&](size_t i) {
+        miopen::ford(inner_size)([&](size_t i) {
             size_t idx     = o * inner_size + i;
             size_t c       = (idx / numel_per_channel) % num_channels;
             Tcheck pweight = mode ? static_cast<Tcheck>(weight[c]) : 1;

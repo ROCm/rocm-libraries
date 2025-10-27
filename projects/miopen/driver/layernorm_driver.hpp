@@ -124,11 +124,11 @@ int32_t mloLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
 
     int32_t ret = 0;
 
-    par_ford(outer_size)([&](size_t o) {
+    miopen::par_ford(outer_size)([&](size_t o) {
         Tcheck pmean = 0.0f;
         Tcheck pvar  = 0.0f;
 
-        ford(inner_size)([&](size_t i) {
+        miopen::ford(inner_size)([&](size_t i) {
             Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]);
             pmean += tmp;
             pvar += tmp * tmp;
@@ -141,7 +141,7 @@ int32_t mloLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
         meanhost[o] = pmean;
         rstdhost[o] = prstd;
 
-        ford(inner_size)([&](size_t i) {
+        miopen::ford(inner_size)([&](size_t i) {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
             Tcheck pbias = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<Tcheck>(bias[i]);
@@ -239,11 +239,11 @@ int32_t mloLayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
 
     int32_t ret = 0;
 
-    par_ford(outer_size)([&](int32_t o) {
+    miopen::par_ford(outer_size)([&](int32_t o) {
         Tcheck sum_dy_weight   = 0;
         Tcheck sum_dy_weight_x = 0;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
             Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
@@ -258,7 +258,7 @@ int32_t mloLayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
         Tcheck a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
         Tcheck b     = prstd * sum_dy_weight * scale - a * pmean;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
             Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
@@ -344,11 +344,11 @@ int32_t mloLayerNormBackwardWeightBiasRunHost_mt(miopenTensorDescriptor_t dyDesc
             inner_size *= dims[i];
     }
 
-    par_ford(inner_size)([&](int32_t i) {
+    miopen::par_ford(inner_size)([&](int32_t i) {
         Tcheck sum_dw = 0;
         Tcheck sum_db = 0;
 
-        ford(outer_size)([&](int32_t o) {
+        miopen::ford(outer_size)([&](int32_t o) {
             Tcheck prstd = static_cast<Tcheck>(rstdhost[o]);
             Tcheck pmean = static_cast<Tcheck>(meanhost[o]);
             Tcheck pdy   = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;

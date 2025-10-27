@@ -132,11 +132,11 @@ int32_t mloAddLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
 
     int32_t ret = 0;
 
-    par_ford(outer_size)([&](int32_t o) {
+    miopen::par_ford(outer_size)([&](int32_t o) {
         Tcheck pmean = 0.0f;
         Tcheck pvar  = 0.0f;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]) +
                          static_cast<Tcheck>(input2[o * inner_size + i]);
             pmean += tmp;
@@ -150,7 +150,7 @@ int32_t mloAddLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
         meanhost[o] = pmean;
         rstdhost[o] = prstd;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 1 : static_cast<Tcheck>(weight[i]);
             Tcheck pbias =

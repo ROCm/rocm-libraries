@@ -107,10 +107,10 @@ int32_t mloT5LayerNormForwardRunHost_mt(miopenTensorDescriptor_t xDesc,
 
     int32_t ret = 0;
 
-    par_ford(outer_size)([&](int32_t o) {
+    miopen::par_ford(outer_size)([&](int32_t o) {
         Tcheck pvar = static_cast<Tcheck>(0);
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck tmp = static_cast<Tcheck>(x[o * inner_size + i]);
             pvar += tmp * tmp;
         });
@@ -120,7 +120,7 @@ int32_t mloT5LayerNormForwardRunHost_mt(miopenTensorDescriptor_t xDesc,
 
         rstdhost[o] = prstd;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
                                  ? static_cast<Tcheck>(1)
                                  : static_cast<Tcheck>(weight[i]);
@@ -203,10 +203,10 @@ int32_t mloT5LayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
 
     int32_t ret = 0;
 
-    par_ford(outer_size)([&](int32_t o) {
+    miopen::par_ford(outer_size)([&](int32_t o) {
         Tcheck sum = static_cast<Tcheck>(0);
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
                                  ? static_cast<Tcheck>(1)
                                  : static_cast<Tcheck>(weight[i]);
@@ -219,7 +219,7 @@ int32_t mloT5LayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
         Tcheck prstd = rstdhost[o];
         Tcheck a     = sum * prstd * prstd * prstd * s;
 
-        ford(inner_size)([&](int32_t i) {
+        miopen::ford(inner_size)([&](int32_t i) {
             Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
                                  ? static_cast<Tcheck>(1)
                                  : static_cast<Tcheck>(weight[i]);
@@ -279,10 +279,10 @@ int32_t mloT5LayerNormBackckwardweightRunHost_mt(
 
     int32_t ret = 0;
 
-    par_ford(inner_size)([&](int32_t o) {
+    miopen::par_ford(inner_size)([&](int32_t o) {
         Tcheck sum = static_cast<Tcheck>(0);
 
-        ford(outer_size)([&](uint64_t i) {
+        miopen::ford(outer_size)([&](uint64_t i) {
             Tcheck prstd = static_cast<Tcheck>(rstdhost[i]);
             Tcheck pdy   = dy ? static_cast<Tcheck>(dy[i * inner_size + o]) : 0;
             Tcheck px    = static_cast<Tcheck>(x[i * inner_size + o]);
