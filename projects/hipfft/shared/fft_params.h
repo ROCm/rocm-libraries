@@ -2540,6 +2540,161 @@ public:
         len.insert(len.begin(), nbatch);
         distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
     }
+
+    // Apply load operations specified by this struct to the host-side
+    // input before we pass it to the reference FFT
+    void apply_host_load_ops(std::vector<hostbuf>& input) const
+    {
+        // Currently no load operations can be specified
+    }
+
+    // Apply store operations specified by this struct to the host-side
+    // output after we get it from the reference FFT
+    void apply_host_store_ops(std::vector<hostbuf>& output) const
+    {
+        // Store ops like result scaling are only supported on AMD
+        // backend, and CUDA implements some conflicting
+        // half-precision operators that prevent result scaling from
+        // compiling
+#ifdef __HIP_PLATFORM_AMD__
+        // Don't bother iterating over the data if we don't have to
+        if(scale_factor == 1.0)
+            return;
+#ifdef _OPENMP
+        auto partition_count = compute_partition_count(output.front().size());
+#endif
+
+        switch(otype)
+        {
+            // Reference FFT always works with complex-interleaved data even if
+            // params specifies planar
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<rocfft_fp16>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<float>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_complex<float>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<double>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<double>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_fp16);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_fp16*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(float);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<float*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(double);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<double*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        default:
+            // this is FFTW data which should always be interleaved (if complex)
+            abort();
+        }
+#endif
+    }
 };
 
 // Used for CLI11 parsing of multi-process library enum

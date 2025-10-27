@@ -377,6 +377,16 @@ namespace rocRoller
             return std::make_shared<Expression>(value);
         }
 
+        inline ExpressionPtr literal(Buffer value)
+        {
+            std::vector<ExpressionPtr> operands{literal(value.desc0),
+                                                literal(value.desc1),
+                                                literal(value.desc2),
+                                                literal(value.desc3)};
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
+        }
+
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value, VariableType v)
         {
