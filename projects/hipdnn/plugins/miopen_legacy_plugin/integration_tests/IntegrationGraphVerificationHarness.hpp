@@ -17,7 +17,7 @@ namespace hipdnn_sdk::test_utilities
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
-class GraphVerifierTest : public ::testing::TestWithParam<TestCaseType>
+class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
     void SetUp() override

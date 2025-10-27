@@ -12,7 +12,7 @@
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -23,7 +23,7 @@ namespace
 {
 
 template <typename DataType, typename IntermediateType, typename TestCaseType>
-class BatchnormForwardInference : public GraphVerifierTest<DataType, TestCaseType>
+class BatchnormForwardInference : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override

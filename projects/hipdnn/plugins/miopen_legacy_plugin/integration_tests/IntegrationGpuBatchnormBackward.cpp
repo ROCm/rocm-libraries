@@ -12,7 +12,7 @@
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -23,7 +23,7 @@ namespace
 {
 
 template <typename DataType, typename IntermediateType, typename TestCaseType>
-class BatchnormBackward : public GraphVerifierTest<DataType, TestCaseType>
+class BatchnormBackward : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
 {
 protected:
     std::unordered_map<graph::BatchnormBackwardAttributes::InputNames, int64_t> _inputTensorIds;

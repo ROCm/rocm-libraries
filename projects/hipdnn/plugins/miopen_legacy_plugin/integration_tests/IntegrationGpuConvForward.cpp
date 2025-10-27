@@ -11,7 +11,7 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/ConvolutionCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -22,7 +22,7 @@ namespace
 {
 
 template <typename DataType>
-class ConvForward : public GraphVerifierTest<DataType, ConvTestCase>
+class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
