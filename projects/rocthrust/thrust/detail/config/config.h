@@ -44,6 +44,7 @@
 #include <thrust/detail/config/host_system.h> // IWYU pragma: export
 
 #include <thrust/detail/config/attributes.h> // IWYU pragma: export
+#include <thrust/detail/config/cuda_toolkit.h> // IWYU pragma: export
 #include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 #include <thrust/detail/config/device_system.h> // IWYU pragma: export
 #include <thrust/detail/config/diagnostic.h> // IWYU pragma: export
