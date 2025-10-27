@@ -51,6 +51,7 @@
 #include <atomic>
 #include <complex>
 #include <exception>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <mutex>
@@ -58,35 +59,62 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
 #include <glob.h>
 #include <libgen.h>
 #include <link.h>
 #include <unistd.h>
+#endif
 
 #define ROCSPARSELT_LIB_PATH "/opt/rocm/hipsparselt/lib"
 
 namespace
 {
-#ifndef _WIN32
-    int rocsparselt_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
+#ifdef _WIN32
+    // Retrieve the path of the current loaded shared library (or dll on Windows)
+    // that contains the address of the function rocsparselt_internal_get_so_path
+    std::string rocsparselt_internal_get_so_path()
     {
-        std::pair<std::string, std::string>* typedData
-            = reinterpret_cast<std::pair<std::string, std::string>*>(data);
-        if(hdr_info->dlpi_name && strstr(hdr_info->dlpi_name, typedData->second.c_str()))
+        HMODULE hModule = NULL;
+        if(!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                              // Should be the address of code in this library.
+                              (LPCTSTR)rocsparselt_internal_get_so_path,
+                              &hModule))
         {
-            typedData->first.assign(hdr_info->dlpi_name);
-            return 1;
+            throw std::runtime_error("Cannot get module for function");
         }
-        return 0;
+
+        std::string path;
+        path.resize(256);
+        for(;;)
+        {
+            auto stored_size = GetModuleFileNameA(hModule, path.data(), path.size());
+            if(stored_size < path.size())
+            {
+                path.resize(stored_size);
+                return path;
+            }
+            path.resize(path.size() * 2);
+        }
+    }
+#else
+    std::string rocsparselt_internal_get_so_path()
+    {
+        Dl_info info;
+        if(dladdr(reinterpret_cast<void*>(&rocsparselt_internal_get_so_path), &info) == 0)
+        {
+            throw std::runtime_error("Cannot get address of module function");
+        }
+        if(!info.dli_fname)
+        {
+            throw std::runtime_error("Containing binary does not have a file system path");
+        }
+        return std::string(info.dli_fname);
     }
 #endif
-
-    std::string rocsparselt_internal_get_so_path(const std::string& keyword)
-    {
-        std::pair<std::string, std::string> result{"", keyword};
-        dl_iterate_phdr(rocsparselt_dl_iterate_phdr_callback, &result);
-        return result.first;
-    }
 
     /******************************************************
      * Map a rocsparselt type to a corresponding Tensile type *
@@ -581,10 +609,12 @@ namespace
          *********************************************************************/
         void initialize(TensileLite::hip::SolutionAdapter& adapter, int32_t deviceId)
         {
-            std::string path;
-#ifndef _WIN32
-            path.reserve(PATH_MAX);
+
+            bool staticLib = false;
+#ifdef HIPSPARSELT_STATIC_LIB
+            staticLib = true;
 #endif
+            std::filesystem::path path;
 
             // The name of the current GPU platform
             std::string processor = rocsparselt_internal_get_arch_name();
@@ -596,84 +626,85 @@ namespace
             }
             else
             {
+                // Start from default install path; may be overridden by discovered so/dll location
                 path = ROCSPARSELT_LIB_PATH;
 
-                // Find the location of librocsparselt.so
-                // Fall back on hard-coded path if static library or not found
+                // Try to discover the directory of the current library and use that as a base
+                if(!staticLib)
+                {
+                    try
+                    {
+                        auto so_path_str = rocsparselt_internal_get_so_path();
+                        if(!so_path_str.empty())
+                        {
+                            std::filesystem::path so_path(so_path_str);
+                            auto                  parent = so_path.parent_path();
+                            if(!parent.empty())
+                                path = parent;
+                        }
+                    }
+                    catch(...)
+                    {
+                        // Fallback to default path on failure
+                        path = ROCSPARSELT_LIB_PATH;
+                    }
+                }
 
-#ifndef HIPSPARSELT_STATIC_LIB
-                auto rocsparselt_so_path = rocsparselt_internal_get_so_path("hipsparselt");
-                if(rocsparselt_so_path.size())
-                    path = std::string{dirname(&rocsparselt_so_path[0])};
-#endif // ifndef HIPSPARSELT_STATIC_LIB
+                // Candidate library directories relative to the base
+                const std::filesystem::path candidate1
+                    = path / ".." / "hipblaslt" / "Tensile" / "library";
+                const std::filesystem::path candidate2 = path / ".." / "Tensile" / "library";
+                const std::filesystem::path candidate3 = path / ".." / "hipsparselt" / "library";
+                const std::filesystem::path candidate4 = path / "hipsparselt" / "library";
 
-                // Find the location of the libraries
-                // The first path below is for new build system where `hipblaslt` is added as a subdirectory
-                if(TestPath(path + "/../hipblaslt/Tensile/library"))
-                    path += "/../hipblaslt/Tensile/library";
-                else if(TestPath(path + "/../Tensile/library"))
-                    path += "/../Tensile/library";
-                else if(TestPath(path + "../hipsparselt/library"))
-                    path += "/../hipsparselt/library";
+                if(TestPath(candidate1.string()))
+                    path = candidate1;
+                else if(TestPath(candidate2.string()))
+                    path = candidate2;
+                else if(TestPath(candidate3.string()))
+                    path = candidate3;
                 else
-                    path += "/hipsparselt/library";
+                    path = candidate4;
 
-                if(TestPath(path + "/" + processor))
-                    path += "/" + processor;
+                // Append architecture directory if present
+                if(TestPath((path / processor).string()))
+                    path /= processor;
             }
 
             // only load modules for the current architecture
-            auto dir = path + "/*" + processor + "*co";
+            const std::string dirPattern = (path / ("*" + processor + "*co")).string();
 #if ROCSPARSELT_TENSILE_LAZY_LOAD == 0
-            bool no_match = false;
-#ifdef _WIN32
-            std::replace(dir.begin(), dir.end(), '/', '\\');
-            _WIN32_FIND_DATAA finddata;
-            HANDLE            hfine = FindFirstFileA(dir.c_str(), &finddata);
-            if(hfine != INVALID_HANDLE_VALUE)
+            bool no_match = true;
+            try
             {
-                do
+                if(std::filesystem::exists(path) && std::filesystem::is_directory(path))
                 {
-                    std::string codeObjectFile = path + "\\" + finddata.cFileName;
-                    adapter.loadCodeObjectFile(codeObjectFile.c_str());
-                } while(FindNextFileA(hfine, &finddata));
+                    for(const auto& entry : std::filesystem::directory_iterator(path))
+                    {
+                        if(!entry.is_regular_file())
+                            continue;
+                        const std::string filename = entry.path().filename().string();
+                        const bool        has_arch = filename.find(processor) != std::string::npos;
+                        const bool        ends_co
+                            = filename.size() >= 2 && filename.substr(filename.size() - 2) == "co";
+                        if(has_arch && ends_co)
+                        {
+                            adapter.loadCodeObjectFile(entry.path().string().c_str());
+                            no_match = false;
+                        }
+                    }
+                }
             }
-            else
+            catch(...)
             {
+                // Ignore filesystem errors; fallback to reporting no match
                 no_match = true;
             }
-            FindClose(hfine);
-#else
-            glob_t glob_result{};
-            int    g = glob(dir.c_str(), GLOB_NOSORT, nullptr, &glob_result);
-            if(!g)
-            {
-                for(size_t i = 0; i < glob_result.gl_pathc; ++i)
-                    (void)adapter.loadCodeObjectFile(glob_result.gl_pathv[i]);
-            }
-            else if(g == GLOB_NOMATCH)
-            {
-                no_match = true;
-            }
-            else
-            {
-                // clang-format off
-                static hipsparselt_internal_ostream& once = hipsparselt_cerr
-                                    << "\nrocsparselt warning: glob(\"" << dir << "\", ...) returned "
-                                    << (g == GLOB_ABORTED ? "GLOB_ABORTED"
-                                                          : g == GLOB_NOSPACE ? "GLOB_NOSPACE"
-                                                                              : "an unknown error")
-                                    << "." << std::endl;
-                (void)once;
-                // clang-format on
-            }
-            globfree(&glob_result);
-#endif
             if(no_match)
             {
                 static hipsparselt_internal_ostream& once
                     = hipsparselt_cerr
-                      << "\nrocsparselt warning: No paths matched " << dir
+                      << "\nrocsparselt warning: No paths matched " << dirPattern
                       << ". Make sure that ROCSPARSELT_TENSILE_LIBPATH is set correctly."
                       << std::endl;
                 (void)once;
@@ -688,15 +719,15 @@ namespace
                 std::string tensileLibPath;
 #if ROCSPARSELT_TENSILE_LAZY_LOAD
 #ifdef TENSILE_YAML
-                tensileLibPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
+                tensileLibPath = (path / ("TensileLibrary_lazy_" + processor + ".yaml")).string();
 #else
-                tensileLibPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
+                tensileLibPath = (path / ("TensileLibrary_lazy_" + processor + ".dat")).string();
 #endif
 #else
 #ifdef TENSILE_YAML
-                tensileLibPath = path + "/TensileLibrary_" + processor + ".yaml";
+                tensileLibPath = (path / ("TensileLibrary_" + processor + ".yaml")).string();
 #else
-                tensileLibPath = path + "/TensileLibrary_" + processor + ".dat";
+                tensileLibPath = (path / ("TensileLibrary_" + processor + ".dat")).string();
 #endif
 #endif
                 if(!TestPath(tensileLibPath))
@@ -750,7 +781,7 @@ namespace
                 return 0;
             }();
 
-            static_cast<void>(adapter.initializeLazyLoading(processor, path));
+            static_cast<void>(adapter.initializeLazyLoading(processor, path.string()));
 
             if(!m_library && once != 0)
             {
