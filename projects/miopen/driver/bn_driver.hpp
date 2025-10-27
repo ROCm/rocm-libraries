@@ -1805,8 +1805,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 
 #if(MIO_BN_DEBUG == 1)
     const Tref tolerance =
-        static_cast<Tref>(1000 * (sizeof(TInput) == 4) ? ERRTOL_FP32 : ERRTOL_FP16);
-    Tref diff = static_cast<Tref>(0.0);
+        static_cast<Tref>(1000 * ((sizeof(TInput) == 4) ? ERRTOL_FP32 : ERRTOL_FP16));
 #endif
     maxval          = static_cast<Tref>(0.0);
     auto errordxout = miopen::rms_range(out_ref.data, out_bwd.GetVector());
@@ -1818,7 +1817,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 #if(MIO_BN_DEBUG == 1)
         for(int i = 0; i < out_ref.data.size() && i < MIO_BN_MAX_DEBUGLOOP; i++)
         {
-            diff   = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
+            auto diff   = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
             maxval = maxval < diff ? diff : maxval;
             if(!std::isfinite(diff) || diff > tolerance)
             {
@@ -1883,7 +1882,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 #if(MIO_BN_DEBUG == 1)
         for(int i = 0; i < dBias.GetVector().size() && i < MIO_BN_MAX_DEBUGLOOP; i++)
         {
-            diff = fabs(TAcc(fabs(dBias.GetVector()[i]) - fabs(dBias_ref.data[i])));
+            auto diff = fabs(TAcc(fabs(dBias.GetVector()[i]) - fabs(dBias_ref.data[i])));
             if(!std::isfinite(diff) || diff > tolerance)
             {
                 std::cout << "dbias[" << i << "]: " << dBias.GetVector()[i];
