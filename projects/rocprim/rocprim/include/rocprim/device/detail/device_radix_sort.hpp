@@ -1271,9 +1271,21 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    int offset = ranks[i] - x;
-                    offset     = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
-                    storage.ordered_block_keys[offset] = keys[i];
+                    // It only seems worse on mi308 in some cases.
+                    if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
+                    {
+                        const int offset = ranks[i] - x;
+                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
+                        {
+                            storage.ordered_block_keys[offset] = keys[i];
+                        }
+                    }
+                    else
+                    {
+                        int offset = ranks[i] - x;
+                        offset = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NKey);
+                        storage.ordered_block_keys[offset] = keys[i];
+                    }
                 }
             }
 
@@ -1350,12 +1362,24 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    int offset = ranks[i] - x;
-                    offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NValue)
-                                     ? offset
-                                     : BlockSize * NValue;
+                    // It only seems worse on mi308 in some cases.
+                    if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
+                    {
+                        const int offset = ranks[i] - x;
+                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
+                        {
+                            storage.ordered_block_values[offset] = v_pack::create(values[i]);
+                        }
+                    }
+                    else
+                    {
+                        int offset = ranks[i] - x;
+                        offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NValue)
+                                            ? offset
+                                            : BlockSize * NValue;
 
-                    storage.ordered_block_values[offset] = v_pack::create(values[i]);
+                        storage.ordered_block_values[offset] = v_pack::create(values[i]);
+                    }
                 }
 
                 ::rocprim::syncthreads();
