@@ -36,6 +36,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 10, 500, 7111, 10000]
   N: [0, 33, 842, 4441, 10000]
+  ell_width: [0, 2]
   alpha: [3.0]
   alphai: [-0.2]
   beta: [0.67]
@@ -49,9 +50,10 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  alpha: [0.5]
+  ell_width: [0, 2]
+  alpha: [3.0]
   alphai: [-0.2]
-  beta: [0.7]
+  beta: [0.67]
   betai: [1.7]
   part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

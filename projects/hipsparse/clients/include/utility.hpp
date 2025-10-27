@@ -134,8 +134,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #define CHECK_HIP_ERROR(error)                \
     if(error != hipSuccess)                   \
@@ -149,7 +149,7 @@ inline std::string get_filename(const std::string& matrix_filename)
         exit(EXIT_FAILURE);                   \
     }
 
-#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 
 #define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
     case token_:                             \
@@ -1146,7 +1146,7 @@ bool generate_csr_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "*")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1175,8 +1175,8 @@ bool generate_csr_matrix(const std::string    filename,
     else
     {
         std::string full_filename_path = get_filename(filename);
-
         std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
             if(read_bin_matrix(full_filename_path.c_str(),
