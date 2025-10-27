@@ -165,8 +165,6 @@ struct callback_test_data
 {
     // scalar to modify the input/output with
     double scalar;
-    // base address of input, to ensure that each callback gets an offset from that base
-    void* base;
 };
 
 void* get_load_callback_host(fft_array_type itype,
@@ -264,8 +262,6 @@ inline void execute_gpu_fft(Tparams&              params,
                 load_cb_data_host.scalar = params.load_cb_scalar;
             }
 
-            load_cb_data_host.base = ibuffer;
-
             auto& load_cb_data_dev = all_cb_data.emplace_back();
             auto  hip_status       = load_cb_data_dev.alloc(sizeof(callback_test_data));
             if(hip_status != hipSuccess)
@@ -333,8 +329,6 @@ inline void execute_gpu_fft(Tparams&              params,
             {
                 store_cb_data_host.scalar = params.store_cb_scalar;
             }
-
-            store_cb_data_host.base = obuffer;
 
             auto& store_cb_data_dev = all_cb_data.emplace_back();
             auto  hip_status        = store_cb_data_dev.alloc(sizeof(callback_test_data));
