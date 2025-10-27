@@ -1265,8 +1265,14 @@ bool generate_coo_matrix(const std::string    filename,
         if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
-            if(read_bin_matrix(
-                   full_filename_path.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(), 
+                               nrow, 
+                               ncol, 
+                               nnz, 
+                               csr_row_ptr, 
+                               coo_col_ind, 
+                               coo_val, 
+                               idx_base)
                == 0)
             {
                 coo_row_ind.resize(nnz);
