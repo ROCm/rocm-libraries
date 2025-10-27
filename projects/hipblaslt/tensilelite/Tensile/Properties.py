@@ -94,21 +94,27 @@ class Predicate(Property):
         if self.tag == 'TruePred':
             return False
 
-        # EqualityMatching < RangeMatching < PredictionMatching
+        # EqualityMatching < RangeMatching < FreeSizeMatching
         if self.tag == 'EqualityMatching':
+            if other.tag == 'EqualityMatching':
+                return False
             if other.tag == 'RangeMatching':
                 return True
-            if other.tag == 'PredictionMatching':
+            if other.tag == 'FreeSizeMatching':
                 return True
         if self.tag == 'RangeMatching':
             if other.tag == 'EqualityMatching':
                 return False
-            if other.tag == 'PredictionMatching':
+            if other.tag == 'RangeMatching':
+                return False
+            if other.tag == 'FreeSizeMatching':
                 return True
-        if self.tag == 'PredictionMatching':
+        if self.tag == 'FreeSizeMatching':
             if other.tag == 'EqualityMatching':
                 return False
             if other.tag == 'RangeMatching':
+                return False
+            if other.tag == 'FreeSizeMatching':
                 return False
 
         selfValue = self.value

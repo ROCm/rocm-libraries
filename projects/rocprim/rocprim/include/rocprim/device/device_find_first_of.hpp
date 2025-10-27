@@ -23,6 +23,7 @@
 
 #include "../config.hpp"
 #include "../detail/temp_storage.hpp"
+#include "../detail/various.hpp"
 #include "config_types.hpp"
 #include "detail/ordered_block_id.hpp"
 #include "device_find_first_of_config.hpp"

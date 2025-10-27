@@ -431,7 +431,7 @@ class MasterSolutionLibrary:
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": freesizeLib})
             elif d["LibraryType"] == "Prediction":
-                predicate = Properties.Predicate(tag="PredictionMatching")
+                predicate = Properties.Predicate(tag="FreeSizeMatching") # TODO Do we need a new predicate here?
 
                 predictionLib = PredictionLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")

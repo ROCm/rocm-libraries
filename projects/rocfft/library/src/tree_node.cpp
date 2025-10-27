@@ -410,6 +410,8 @@ void TreeNode::CollapseContiguousDims()
         auto curStride = dist;
         for(auto i = collapsibleDims.rbegin(); i != collapsibleDims.rend(); ++i)
         {
+            if(stride[*i] == 0)
+                break;
             if(curStride % stride[*i] != 0)
                 break;
             if(curStride / stride[*i] != length[*i])

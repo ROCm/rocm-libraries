@@ -799,7 +799,7 @@ public:
             h.m, h.n, h.ind, h.val, h.width, get_indextype<I>(), h.base, get_datatype<T>())
     {
     }
-
+    rocsparse_local_spmat() {}
     ~rocsparse_local_spmat()
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -825,6 +825,7 @@ class rocsparse_local_dnvec
     rocsparse_dnvec_descr descr{};
 
 public:
+    rocsparse_local_dnvec(){};
     rocsparse_local_dnvec(int64_t size, void* values, rocsparse_datatype compute_type)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
@@ -840,6 +841,12 @@ public:
     template <memory_mode::value_t MODE, typename T>
     explicit rocsparse_local_dnvec(dense_matrix<MODE, T>& h)
         : rocsparse_local_dnvec(h.m, (T*)h, get_datatype<T>())
+    {
+    }
+
+    template <memory_mode::value_t MODE, typename T>
+    explicit rocsparse_local_dnvec(dense_vector<MODE, T>& h)
+        : rocsparse_local_dnvec(h.size(), h.data(), get_datatype<T>())
     {
     }
 

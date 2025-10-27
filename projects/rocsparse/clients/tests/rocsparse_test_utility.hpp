@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -72,9 +72,13 @@ ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_sddmm_alg,
                                                       rocsparse_sddmmalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spmv_alg, rocsparse_spmvalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spsv_alg, rocsparse_spsvalg2string);
+ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_sptrsv_alg,
+                                                      rocsparse_sptrsvalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spitsv_alg,
                                                       rocsparse_spitsvalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spsm_alg, rocsparse_spsmalg2string);
+ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_sptrsm_alg,
+                                                      rocsparse_sptrsmalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spmm_alg, rocsparse_spmmalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spgemm_alg,
                                                       rocsparse_spgemmalg2string);
