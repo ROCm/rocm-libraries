@@ -25,7 +25,7 @@
  *******************************************************************************/
 #pragma once
 
-#if defined(__GFX9__)
+#if defined(__GFX8__) || defined(__GFX9__)
 #define MIOPEN_WARP_SIZE 64
 #else
 #define MIOPEN_WARP_SIZE 32

@@ -307,6 +307,7 @@ void test_arch_name()
                        "gfx900",
                        "gfx942",
                        "gfx950",
+                       "gfx803",
                        "gfx1030",
                        "gfx1031",
                        "gfx1100",
@@ -322,7 +323,8 @@ void test_arch_name()
 
 int main()
 {
-    if(miopen::IsHipKernelsEnabled())
+    auto&& h = get_handle();
+    if(h.GetDeviceName() != "gfx803" && miopen::IsHipKernelsEnabled())
     {
         test_multithreads(miopenHIPKernelType);
         test_errors(miopenHIPKernelType);

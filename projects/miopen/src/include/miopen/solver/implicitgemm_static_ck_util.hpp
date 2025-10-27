@@ -193,6 +193,9 @@ static inline bool use_amd_inline_asm(const ExecutionContext& ctx,
                                       const miopen::conv::ProblemDescription& problem)
 {
 
+    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx8"))
+        return false;
+
     // disable fp16 inline asm for <= gfx900
     const auto device_name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(device_name, "gfx906") || StartsWith(device_name, "gfx908")) &&

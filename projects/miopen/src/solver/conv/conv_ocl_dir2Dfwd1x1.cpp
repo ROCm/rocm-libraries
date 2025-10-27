@@ -57,7 +57,7 @@ bool ConvOclDirectFwd1x1::IsApplicable(const ExecutionContext& ctx,
     }
 #endif
     const std::string name = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
     if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1))
         return false;

@@ -43,7 +43,8 @@ namespace legacy_ck {
 /// \todo Check which devices are currently supported
 static inline bool is_ck_supported_hardware(const Handle& handle)
 {
-    return StartsWith(handle.GetDeviceName(), "gfx900") ||
+    return (StartsWith(handle.GetDeviceName(), "gfx803") && handle.GetMaxComputeUnits() == 64) ||
+           StartsWith(handle.GetDeviceName(), "gfx900") ||
            StartsWith(handle.GetDeviceName(), "gfx906") ||
            StartsWith(handle.GetDeviceName(), "gfx908") ||
            StartsWith(handle.GetDeviceName(), "gfx90a") ||

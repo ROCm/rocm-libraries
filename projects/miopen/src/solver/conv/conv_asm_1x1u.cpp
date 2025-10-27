@@ -342,7 +342,7 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
         if(!(vgprs < 256))
             return false;
         const auto sgprs = 25 + 2 * k_mult * c_mult;
-        if(!(sgprs < 102)) /// \todo This is valid for Gfx9. Check for newer parts.
+        if(!(sgprs < 102)) /// \todo This is valid for Gfx8 and Gfx9. Check for newer parts.
             return false;
     }
     if(sequence_length > 6)

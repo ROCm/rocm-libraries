@@ -418,6 +418,10 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         {
             maxTotalSize = 16; // twice the available L2 (8MB)
         }
+        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
+        {
+            maxTotalSize = 4; // twice the available L2 (2MB)
+        }
         else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
                 miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
         {
