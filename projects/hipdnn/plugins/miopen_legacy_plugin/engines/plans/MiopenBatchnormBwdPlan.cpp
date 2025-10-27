@@ -42,7 +42,7 @@ BatchnormBwdParams::BatchnormBwdParams(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dy_tensor_uid()))
+          pointwiseAttributes.in_1_tensor_uid().has_value()
     , _dx(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
     , _dscale(

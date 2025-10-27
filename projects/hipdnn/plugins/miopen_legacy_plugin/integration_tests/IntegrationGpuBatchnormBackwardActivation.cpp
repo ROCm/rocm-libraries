@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <iostream>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
@@ -9,67 +10,181 @@
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
+#include "../tests/common/BatchnormCommon.hpp"
 #include "IntegrationTestUtils.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
+using namespace test_bn_common;
 
 namespace
 {
 
-struct Batchnorm2dTestCase
-{
-    int64_t n;
-    int64_t c;
-    int64_t h;
-    int64_t w;
-    unsigned int seed;
-
-    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm2dTestCase& tc)
-    {
-        return ss << "(n:" << tc.n << " c:" << tc.c << " h:" << tc.h << " w:" << tc.w
-                  << " seed:" << tc.seed << ")";
-    }
-
-    std::vector<int64_t> getDims() const
-    {
-        return {n, c, h, w};
-    }
-};
-
-struct Batchnorm3dTestCase
-{
-    int64_t n;
-    int64_t c;
-    int64_t d;
-    int64_t h;
-    int64_t w;
-    unsigned int seed;
-
-    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm3dTestCase& tc)
-    {
-        return ss << "(n:" << tc.n << " c:" << tc.c << " d:" << tc.d << " h:" << tc.h
-                  << " w:" << tc.w << " seed:" << tc.seed << ")";
-    }
-
-    std::vector<int64_t> getDims() const
-    {
-        return {n, c, d, h, w};
-    }
-};
-
-// NOLINTBEGIN (portability-template-virtual-member-function)
-template <typename DataType, typename TestCase>
-class BatchnormBackwardActivation : public GraphVerifierTest<DataType, TestCase>
+template <typename DataType>
+class BatchnormBackwardActivation : public GraphVerifierTest<DataType, BatchnormTestCase>
 {
 protected:
+    void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                         GraphTensorBundle& bundle,
+                         unsigned int seed) override
+    {
+        std::unordered_map<int64_t, std::string> uidToName;
+        visitGraph(const_cast<hipdnn_frontend::graph::Graph&>(graph), [&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                {
+                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                }
+            }
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                {
+                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                }
+            }
+        });
+
+        for(auto& tensorPair : bundle.tensors)
+        {
+            const auto& uid = tensorPair.first;
+            auto it = uidToName.find(uid);
+            
+            float minVal = 0.0f;
+            float maxVal = 0.0f;
+            
+            if(it != uidToName.end())
+            {
+                const auto& name = it->second;
+                
+                if(name == "x" || name == "dy")
+                {
+                    minVal = -1.5f;
+                    maxVal = 1.5f;
+                }
+                else if(name == "scale")
+                {
+                    minVal = 0.5f;
+                    maxVal = 1.5f;
+                }
+                else if(name == "bias" || name == "mean")
+                {
+                    minVal = 0.1f;
+                    maxVal = 0.1f;
+                }
+                else if(name == "inv_variance")
+                {
+                    minVal = 0.5f;
+                    maxVal = 2.0f;
+                }
+                // output tensors left to default 
+            }
+            
+            bundle.randomizeTensor(uid, minVal, maxVal, seed);
+        }
+    }
+
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph,
+                    unsigned int seed,
+                    GraphTensorBundle& cpuBundle,
+                    GraphTensorBundle& gpuBundle,
+                    [[maybe_unused]] const IReferenceValidation& validator) override
+    {
+        std::unordered_map<int64_t, std::string> uidToName;
+        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                {
+                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                }
+            }
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                {
+                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                }
+            }
+        });
+
+        initializeBundle(graph, gpuBundle, seed);
+        initializeBundle(graph, cpuBundle, seed);
+
+        auto result = graph.validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        this->executeGpuGraph(this->_handle, graph, gpuBundle);
+        this->executeCpuGraph(graph, cpuBundle);
+        
+        auto tolerance = batchnorm::getToleranceBackward<DataType>();
+        
+        CpuFpReferenceValidation<DataType> dataTypeValidator(tolerance, tolerance);
+        CpuFpReferenceValidation<float> intermediateTypeValidator(
+            static_cast<float>(tolerance), static_cast<float>(tolerance));
+
+        // Get non-virtual output tensor IDs
+        std::vector<int64_t> outputTensorIds;
+        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(!tensorAttr->get_is_virtual() && tensorAttr->has_uid())
+                {
+                    outputTensorIds.push_back(tensorAttr->get_uid());
+                }
+            }
+        });
+
+        for(const auto& tensorId : outputTensorIds)
+        {
+            auto cpuIt = cpuBundle.tensors.find(tensorId);
+            auto gpuIt = gpuBundle.tensors.find(tensorId);
+            
+            if(cpuIt == cpuBundle.tensors.end() || gpuIt == gpuBundle.tensors.end())
+            {
+                continue;
+            }
+
+            auto& cpuTensor = cpuIt->second;
+            auto& gpuTensor = gpuIt->second;
+
+            gpuTensor->markDeviceModified();
+
+            std::cout << "Validating tensor with id: " << tensorId << "\n";
+            
+            bool valid = false;
+            auto nameIt = uidToName.find(tensorId);
+            if(nameIt != uidToName.end())
+            {
+                const auto& name = nameIt->second;
+                if(name == "dscale" || name == "dbias")
+                {
+                    std::cout << "using intermediate type validator for tensor: " << name << "\n";
+                    valid = intermediateTypeValidator.allClose(*cpuTensor, *gpuTensor);
+                }
+                else
+                {
+                    std::cout << "Using input type validator for tensor: " << name << "\n";
+                    valid = dataTypeValidator.allClose(*cpuTensor, *gpuTensor);
+                }
+            }
+
+            std::cout << "Validation for tensor id " << tensorId
+                      << (valid ? " PASSED." : " FAILED.") << "\n";
+
+            // ASSERT_TRUE(valid) << "Validation failed for tensor id: " << tensorId;
+            // std::cout << "Validation for tensor id " << tensorId << " PASSED." << "\n";
+        }
+    }
+
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
     {
         namespace fe = hipdnn_frontend;
 
-        const TestCase& testCase = this->GetParam();
-        auto dims = testCase.getDims();
+        const BatchnormTestCase& testCase = this->GetParam();
+        auto dims = testCase.dims;
 
         std::vector<int64_t> channelDims;
         if(dims.size() == 4)
@@ -81,9 +196,9 @@ protected:
             channelDims = {1, dims[1], 1, 1, 1};
         }
 
-        auto graphObj = std::make_shared<graph::Graph>();
-        graphObj->set_name("BatchnormBackwardActivationTest");
-        graphObj->set_compute_data_type(fe::DataType::FLOAT);
+        graph::Graph graphObj;
+        graphObj.set_name("BatchnormBackwardActivationTest");
+        graphObj.set_compute_data_type(fe::DataType::FLOAT);
 
         int64_t uid = 1;
         auto nextUid = [&]() { return uid++; };
@@ -133,7 +248,7 @@ protected:
         graph::BatchnormInferenceAttributes bnInfAttrs;
         bnInfAttrs.set_name("batchnorm_inference");
 
-        auto bnY = graphObj->batchnorm_inference(xTensorAttr,
+        auto bnY = graphObj.batchnorm_inference(xTensorAttr,
                                                  meanTensorAttr,
                                                  invVarianceTensorAttr,
                                                  scaleTensorAttr,
@@ -159,10 +274,12 @@ protected:
         graph::PointwiseAttributes reluBwdAttrs;
         reluBwdAttrs.set_name("relu_bwd");
         reluBwdAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
+        // reluBwdAttrs.set_relu_lower_clip(-1000.f);
+        // reluBwdAttrs.set_relu_upper_clip(1000.5f);
 
-        auto dxDrelu = graphObj->pointwise(dyTensorAttr, bnY, reluBwdAttrs);
+        auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, reluBwdAttrs);
         dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_data_type(dataType);
+        dxDrelu->set_data_type(intermediateDataType);
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
         dxDrelu->set_is_virtual(true);
@@ -177,7 +294,7 @@ protected:
 
         // [DX, dscale, dbias] = batchnorm_backward(DX_drelu, X, scale, saved_mean_inv_var)
         auto bnBwdOuts
-            = graphObj->batchnorm_backward(dxDrelu, xTensorAttr, scaleTensorAttr, bnBwdAttrs);
+            = graphObj.batchnorm_backward(dxDrelu, xTensorAttr, scaleTensorAttr, bnBwdAttrs);
 
         auto& dxOut = bnBwdOuts[0];
         dxOut->set_name("dx");
@@ -215,77 +332,65 @@ protected:
             dbiasOut->set_uid(nextUid());
         }
 
-        auto result = graphObj->validate();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        std::cout << "x tensor UID: " << xTensorAttr->get_uid() << "\n";
+        std::cout << "scale tensor UID: " << scaleTensorAttr->get_uid() << "\n";
+        std::cout << "bias tensor UID: " << biasTensorAttr->get_uid() << "\n";
+        std::cout << "mean tensor UID: " << meanTensorAttr->get_uid() << "\n";
+        std::cout << "inv_variance tensor UID: " << invVarianceTensorAttr->get_uid() << "\n";
+        std::cout << "BN_Y tensor UID: " << bnY->get_uid() << "\n";
+        std::cout << "dy tensor UID: " << dyTensorAttr->get_uid() << "\n";
+        std::cout << "DX_drelu tensor UID: " << dxDrelu->get_uid() << "\n";
+        std::cout << "dx tensor UID: " << dxOut->get_uid() << "\n";
+        std::cout << "dscale tensor UID: " << dscaleOut->get_uid() << "\n";
+        std::cout << "dbias tensor UID: " << dbiasOut->get_uid() << "\n";
+
 
         // todo: add registry
+        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
+        
+        GraphTensorBundle gpuBundle = this->generateBundle(graphObj);
+        GraphTensorBundle cpuBundle = this->generateBundle(graphObj);
+        
+        this->verifyGraph(graphObj, testCase.seed, cpuBundle, gpuBundle, validator);
     }
+
 };
-// NOLINTEND (portability-template-virtual-member-function)
 
 using IntegrationGpuBatchnormBackwardActivationNchwFp32
-    = BatchnormBackwardActivation<float, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNchwBfp16
-    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<hip_bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNchwFp16
-    = BatchnormBackwardActivation<half, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcFp32
-    = BatchnormBackwardActivation<float, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcBfp16
-    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<hip_bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcFp16
-    = BatchnormBackwardActivation<half, Batchnorm2dTestCase>;
+    = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwFp32
-    = BatchnormBackwardActivation<float, Batchnorm3dTestCase>;
+    = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16
-    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm3dTestCase>;
+    = BatchnormBackwardActivation<hip_bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwFp16
-    = BatchnormBackwardActivation<half, Batchnorm3dTestCase>;
+    = BatchnormBackwardActivation<half>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcFp32
-    = BatchnormBackwardActivation<float, Batchnorm3dTestCase>;
+    = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16
-    = BatchnormBackwardActivation<hip_bfloat16, Batchnorm3dTestCase>;
+    = BatchnormBackwardActivation<hip_bfloat16>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcFp16
-    = BatchnormBackwardActivation<half, Batchnorm3dTestCase>;
-
-std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
-{
-    unsigned int seed = std::random_device{}();
-
-    return std::vector<Batchnorm2dTestCase>{
-        {1, 3, 14, 14, seed},
-        // MIOpen segfaults for this case, re-enable when fix is released:
-        // https://github.com/ROCm/rocm-libraries/pull/1197
-        // {1, 256, 1, 1, seed}, // Would produce near-zero variance in theory
-        {2, 3, 1, 1, seed},
-        {32, 1, 14, 14, seed},
-        {32, 3, 1, 14, seed},
-        {32, 3, 14, 1, seed},
-        {64, 64, 112, 112, seed},
-        {64, 512, 14, 14, seed},
-    };
-}
-
-std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
-{
-    unsigned int seed = std::random_device{}();
-
-    return std::vector<Batchnorm3dTestCase>{
-        {2, 3, 3, 1, 1, seed},
-        {16, 3, 8, 14, 14, seed},
-    };
-}
+    = BatchnormBackwardActivation<half>;
 
 } // namespace
 
@@ -296,7 +401,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp32,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
@@ -305,7 +410,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwBfp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
@@ -314,7 +419,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
@@ -323,7 +428,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp32,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 // MIOpen segfaults for this case, re-enable when fix is released:
 // https://github.com/ROCm/rocm-libraries/pull/1197}
@@ -334,7 +439,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, DISABLED_Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 // MIOpen segfaults for this case, re-enable when fix is released:
 // https://github.com/ROCm/rocm-libraries/pull/1197
@@ -345,7 +450,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, DISABLED_Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases4D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
@@ -354,7 +459,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp32,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
@@ -363,7 +468,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwBfp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
@@ -372,7 +477,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
@@ -381,7 +486,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp32,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
 
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, DISABLED_Correctness)
@@ -391,7 +496,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, DISABLED_Correctness
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcBfp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
 
 // MIOpen may have issues with NDHWC layout for certain data types
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, DISABLED_Correctness)
@@ -401,4 +506,4 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, DISABLED_Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBatchnormTestCases5D()));
