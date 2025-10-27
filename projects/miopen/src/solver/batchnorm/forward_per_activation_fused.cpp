@@ -77,12 +77,12 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto mode    = bn_problem.GetMode();
         if(mode == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "SpatialHIP.cpp";
+            kernel.kernel_file += "Spatial.cpp";
             kernel.kernel_name += "Spatial";
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerActHIP.cpp";
+            kernel.kernel_file += "PerAct.cpp";
             kernel.kernel_name += "PerActivation";
         }
         size_t xlocalsize, ylocalsize, zlocalsize;
