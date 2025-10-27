@@ -66,10 +66,7 @@ protected:
         dxTensorAttr->set_output(true);
         dxTensorAttr->set_data_type(dataType);
 
-        this->registerValidator(dxTensorAttr->get_uid(),
-                                createAllCloseValidator(toSdkType(dxTensorAttr->get_data_type()),
-                                                        tolerance,
-                                                        tolerance));
+        this->registerValidator(dxTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
     }
 };

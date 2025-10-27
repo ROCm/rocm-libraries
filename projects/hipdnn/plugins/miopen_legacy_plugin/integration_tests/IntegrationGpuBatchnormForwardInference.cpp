@@ -102,9 +102,7 @@ protected:
         yTensorAttr->set_stride(generateStrides(testCase.getDims(), layout.strideOrder));
         yTensorAttr->set_output(true);
 
-        this->registerValidator(
-            yTensorAttr->get_uid(),
-            createAllCloseValidator(toSdkType(yTensorAttr->get_data_type()), tolerance, tolerance));
+        this->registerValidator(yTensorAttr, tolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
     }

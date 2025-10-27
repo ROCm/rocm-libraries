@@ -27,9 +27,6 @@ public:
     {
         auto graphWrap = hipdnn_plugin::GraphWrapper(graphBuffer, size);
 
-        // HIPDNN_LOG_INFO("Executing graph:\n{}",
-        //                 static_cast<nlohmann::json>(graphWrap.getGraph()).dump(4));
-
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
         //The graph in graphBuffer is guaranteed to be topologically sorted.

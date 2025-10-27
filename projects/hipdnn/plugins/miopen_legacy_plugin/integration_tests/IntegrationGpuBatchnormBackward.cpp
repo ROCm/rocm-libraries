@@ -142,21 +142,9 @@ protected:
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<IntermediateType>();
 
-        this->registerValidator(dxTensorAttr->get_uid(),
-                                createAllCloseValidator(toSdkType(dxTensorAttr->get_data_type()),
-                                                        tolerance,
-                                                        tolerance));
-
-        this->registerValidator(
-            dscaleTensorAttr->get_uid(),
-            createAllCloseValidator(toSdkType(dscaleTensorAttr->get_data_type()),
-                                    intermediateTolerance,
-                                    intermediateTolerance));
-
-        this->registerValidator(dbiasTensorAttr->get_uid(),
-                                createAllCloseValidator(toSdkType(dbiasTensorAttr->get_data_type()),
-                                                        intermediateTolerance,
-                                                        intermediateTolerance));
+        this->registerValidator(dxTensorAttr, tolerance);
+        this->registerValidator(dscaleTensorAttr, intermediateTolerance);
+        this->registerValidator(dbiasTensorAttr, intermediateTolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
     }

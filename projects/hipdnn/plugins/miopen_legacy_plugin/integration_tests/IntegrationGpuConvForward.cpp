@@ -66,9 +66,7 @@ protected:
         yAttr->set_dim(testCase.yDims);
         yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
-        this->registerValidator(
-            yAttr->get_uid(),
-            createAllCloseValidator(toSdkType(yAttr->get_data_type()), tolerance, tolerance));
+        this->registerValidator(yAttr, tolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
     }

@@ -95,11 +95,20 @@ protected:
         }
     }
 
-    void registerValidator(
-        int64_t tensorId,
-        std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation> validator)
+    void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                           float tolerance)
     {
-        _tensorIdToValidatorMap.insert({tensorId, std::move(validator)});
+        registerValidator(attr, tolerance, tolerance);
+    }
+
+    void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                           float absoluteTolerance,
+                           float relativeTolerance)
+    {
+        _tensorIdToValidatorMap.insert({attr->get_uid(),
+                                        createAllCloseValidator(toSdkType(attr->get_data_type()),
+                                                                absoluteTolerance,
+                                                                relativeTolerance)});
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
@@ -110,14 +119,14 @@ protected:
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(addTensorToBundles(tensorAttr, cpuBundle, gpuBundle))
+                if(tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle))
                 {
                     outputTensorIds.push_back(tensorAttr->get_uid());
                 }
             }
             for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
             {
-                addTensorToBundles(tensorAttr, cpuBundle, gpuBundle);
+                tryAddTensorToBundles(tensorAttr, cpuBundle, gpuBundle);
             }
         });
     }
@@ -173,7 +182,7 @@ private:
         return _tensorIdToNameMap.at(tensorId);
     }
 
-    bool addTensorToBundles(
+    bool tryAddTensorToBundles(
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
         GraphTensorBundle& cpuBundle,
         GraphTensorBundle& gpuBundle)
