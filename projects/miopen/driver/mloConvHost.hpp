@@ -1073,7 +1073,7 @@ bool mloVerify_mt(const miopenTensorDescriptor_t& cpu_,
     size_t worst_b = 0, worst_c = 0, worst_i = 0, worst_j = 0, worst_k = 0;
 
     std::mutex mt;
-    par_ford(n_batchs, n_channels)([&](int b, int c) {
+    miopen::par_ford(n_batchs, n_channels)([&](int b, int c) {
         double rms_local          = 0.0;
         Tcheck_ worst_c_val_local = static_cast<Tcheck_>(0);
         Tcheck_ worst_g_val_local = static_cast<Tcheck_>(0);
@@ -1147,7 +1147,7 @@ bool mloVerify_mt(const miopenTensorDescriptor_t& cpu_,
     if(check_ulps)
     {
         std::atomic_bool match = true;
-        par_ford(n_batchs, n_channels)([&](int b, int c) {
+        miopen::par_ford(n_batchs, n_channels)([&](int b, int c) {
             for(size_t k = 0; k < depth && match; ++k)
             {
                 for(size_t j = 0; j < height && match; ++j)

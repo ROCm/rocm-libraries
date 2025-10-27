@@ -369,7 +369,7 @@ bool mloPoolingForwardRunHostAndVerify_mt(int pooling_method,
                           : static_cast<Tgpu_>(65504);
 
     std::mutex stats_mutex;
-    par_ford(n_batchs, n_outputs)([&](int b, int o) {
+    miopen::par_ford(n_batchs, n_outputs)([&](int b, int o) {
         Tcheck_ res               = static_cast<Tcheck_>(0);
         double max_err            = 0.0;
         int max_num_flops_per_res = 0;
@@ -737,7 +737,7 @@ void mloPoolingBackwardRunHost_mt(
 
     std::vector<int> num_flops(bot_df.GetElementSize(), 0);
 
-    par_ford(n_batchs, n_outputs)([&](int b, int o) {
+    miopen::par_ford(n_batchs, n_outputs)([&](int b, int o) {
         int bot_df_v_off = b * bot_df_n_stride + o * bot_df_c_stride;
         int top_df_off   = b * top_df_n_stride + o * top_df_c_stride;
 
