@@ -88,6 +88,22 @@ namespace rocRoller
                 return stream.str();
             }
 
+            std::string operator()(BitfieldCombine const& expr) const
+            {
+                return concatenate(ExpressionInfo<BitfieldCombine>::name(),
+                                   "(",
+                                   call(expr.lhs),
+                                   ", ",
+                                   call(expr.rhs),
+                                   ", dstOffset:",
+                                   expr.dstOffset,
+                                   ", srcOffset:",
+                                   expr.srcOffset,
+                                   ", width:",
+                                   expr.width,
+                                   ")");
+            }
+
             std::string operator()(BitFieldExtract const& expr) const
             {
                 return concatenate(ExpressionInfo<BitFieldExtract>::name(),

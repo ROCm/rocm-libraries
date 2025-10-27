@@ -565,7 +565,9 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
+        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware);
+        uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
+        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
         {
             int idx = 0;
@@ -717,79 +719,100 @@ namespace TensileLite
 
             auto tiles = problem.getNumTiles(sizeMapping, gsu);
 
-            // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
-            // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-            auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-            auto     totalIters   = tiles * itersPerTile;
-            args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("totalIters", totalIters);
+            if(sizeMapping.customKernelName.empty())
+            {
+                // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
+                // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
+                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto     totalIters   = tiles * itersPerTile;
+                uint32_t magicNumberItersPerTile;
+                uint32_t magicShiftItersPerTile;
+                magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
 
-            if(sizeMapping.streamK == 1) // Basic SK
-            {
-                uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
-                args.template append<uint32_t>("SKItersPerWG", itersPerWave);
-            }
-            else if(sizeMapping.streamK >= 2) // Two-tile SK
-            {
-                if(sk.reduction == ReductionType::Parallel)
+                args.template append<uint32_t>("itersPerTile", itersPerTile);
+                args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
+                args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
+                args.template append<uint32_t>("totalIters", totalIters);
+
+                if(sizeMapping.streamK == 1) // Basic SK
                 {
-                    uint32_t skSplit = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
-                    // uint32_t skItersPerWG = CeilDivide(totalIters, sk.grid);
-                    // uint32_t skItersPerWG = totalIters / sk.grid;
-                    uint32_t skItersPerWG = itersPerTile / skSplit;
-                    uint32_t skExtraIters = itersPerTile % skSplit;
-                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                    args.template append<uint32_t>("skGrid",       sk.grid);
-                    args.template append<uint32_t>("skTiles",      skSplit);
-                    args.template append<uint32_t>("skExtraIters", skExtraIters);
+                    uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
+                    args.template append<uint32_t>("SKItersPerWG", itersPerWave);
                 }
-                else
+                else if(sizeMapping.streamK >= 2) // Two-tile SK
                 {
-                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                    int fullTiles = pAMDGPU->skFullTiles;
-
-                    bool bigEnough = tiles > sk.grid;
-                    // skTiles is number of Stream-K tiles to complete
-                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                    // followed by an even number of data-parllel tiles.
-                    // If total tiles is evenly divisble by grid size,
-                    // then no Stream-K tiles are needed, all data-parallel
-                    uint32_t skTiles = sk.grid;
-                    // If not evenly divisible, determine number of Stream-K tiles
-                    if(tiles % sk.grid != 0)
+                    if(sk.reduction == ReductionType::Parallel)
                     {
-                        // Number of data-parallel tiles on each workgroup would be:
-                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                        skTiles = min(skTiles, tiles);
-                    }
-
-                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
-                    uint32_t skExtraIters = skTiles * itersPerTile % (sk.grid);
-
-                    if(sizeMapping.customKernelName.empty())
-                    {
+                        uint32_t skSplit = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                        uint32_t skItersPerWG = itersPerTile / skSplit;
+                        
                         args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
                         args.template append<uint32_t>("skGrid",       sk.grid);
-                        args.template append<uint32_t>("skTiles",      skTiles);
-                        args.template append<uint32_t>("skExtraIters", skExtraIters);
+                        args.template append<uint32_t>("skTiles",      skSplit);
                     }
                     else
                     {
-                        uint32_t skGridAndTiles = (sk.grid << 16) | (skTiles & 0xFFFF);
-                        // safe guard
-                        if(sk.grid > 65535 || skTiles > 65535)
+                        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                        int fullTiles = pAMDGPU->skFullTiles;
+
+                        bool bigEnough = tiles > sk.grid;
+                        // skTiles is number of Stream-K tiles to complete
+                        // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
+                        // followed by an even number of data-parllel tiles.
+                        // If total tiles is evenly divisble by grid size,
+                        // then no Stream-K tiles are needed, all data-parallel
+                        uint32_t skTiles = sk.grid;
+                        // If not evenly divisible, determine number of Stream-K tiles
+                        if(tiles % sk.grid != 0)
                         {
-                            throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                            // Number of data-parallel tiles on each workgroup would be:
+                            // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
+                            skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                            // Cap Stream-K tiles at total number of tiles in case of large multiplier
+                            skTiles = min(skTiles, tiles);
                         }
 
-                        args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
-                        args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
-                        args.template append<uint32_t>("skExtraIters",   skExtraIters);
+                        uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
+
+                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                        args.template append<uint32_t>("skGrid",       sk.grid);
+                        args.template append<uint32_t>("skTiles",      skTiles);                    
                     }
                 }
+            }
+            else // custom kernel
+            {
+                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+                auto     totalIters   = tiles * itersPerTile;
+
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                int fullTiles = pAMDGPU->skFullTiles;
+
+                bool bigEnough = tiles > sk.grid;
+                uint32_t skTiles = sk.grid;
+                if(tiles % sk.grid != 0)
+                {
+                    skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                    skTiles = min(skTiles, tiles);
+                }
+
+                uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
+                uint32_t skExtraIters = skTiles * itersPerTile % (sk.grid);
+                uint32_t skGridAndTiles = (sk.grid << 16) | (skTiles & 0xFFFF);
+
+                // safe guard
+                if(sk.grid > 65535 || skTiles > 65535)
+                {
+                    throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                }
+
+                args.template append<uint32_t>("itersPerTile", itersPerTile);
+                args.template append<uint32_t>("totalIters", totalIters);
+                args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
+                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
+                args.template append<uint32_t>("skExtraIters",   skExtraIters);
             }
         }
 
@@ -801,7 +824,9 @@ namespace TensileLite
                                           0,
                                           hardware,
                                           problem.getParams(),
-                                          sizeMapping.workGroupMapping);
+                                          autoWGM,
+                                          autoWGMXCC,
+                                          autoGsuVal);
 
         if(!problemType.useScaleAB.empty()) //kernel input data
         {
@@ -966,15 +991,82 @@ namespace TensileLite
         return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
+    
+    std::pair<int32_t, uint32_t> ContractionSolution::calculateAutoWGM(
+        Problem const&  problem,
+        Hardware const* hardware) const
+    {
+        // Default
+        int32_t defaultWGM = sizeMapping.workGroupMapping;
+        uint32_t defaultWGMXCC;
+        if(sizeMapping.workGroupMappingXCC == -1)
+        {
+            hip::HipAMDGPU const* hipAMDGPU
+                    = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+            defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
+        }
+        else
+            defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
-    void ContractionSolution::calculateAutoGSU(Problem const&  problem,
+        // Run-time prediction
+        if(sizeMapping.streamK != 0)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+            // Runtime selection for WGM and WGMXCC
+            if(pAMDGPU->skDynamicWGM == 1)
+            {
+                hip::HipAMDGPU const* hipAMDGPU
+                    = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+                auto sizes = problem.problemSizes();
+                if(sizes.size() >= 4)
+                {
+                    defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
+                                                            sizes[0],
+                                                            sizes[1],
+                                                            sizes[3],
+                                                            sizes[2],
+                                                            sizeMapping.macroTile.x,
+                                                            sizeMapping.macroTile.y,
+                                                            sizeMapping.depthU,
+                                                            false);
+                    defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
+                                                                sizes[0],
+                                                                sizes[1],
+                                                                sizes[3],
+                                                                sizes[2],
+                                                                sizeMapping.macroTile.x,
+                                                                sizeMapping.macroTile.y,
+                                                                sizeMapping.depthU,
+                                                                false);
+                }
+            }
+
+            // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
+            if(pAMDGPU->fixedWGM != std::numeric_limits<int>::max())
+            {
+                defaultWGM = pAMDGPU->fixedWGM;
+            }
+            if(pAMDGPU->fixedWGMXCC != std::numeric_limits<int>::max())
+            {
+                defaultWGMXCC = pAMDGPU->fixedWGMXCC;
+            }
+
+            // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
+            assert(std::fabs(defaultWGM) < 1024);
+            // WGMXCC should be in this range: [1, 2, 3, ..., 63]
+            assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
+        }
+
+        return std::make_pair(defaultWGM, defaultWGMXCC);
+    }
+
+    uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
                                                Hardware const* hardware) const
     {
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
-            autoGSU = sizeMapping.globalSplitU;
-            return;
+            return sizeMapping.globalSplitU;
         }
 
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
@@ -984,8 +1076,7 @@ namespace TensileLite
         // avoid zero division
         if (numWGs == 0)
         {
-            autoGSU = 1;
-            return;
+            return 1;
         }
         uint32_t MT0          = sizeMapping.macroTile.x;
         uint32_t MT1          = sizeMapping.macroTile.y;
@@ -996,31 +1087,31 @@ namespace TensileLite
         uint32_t K            = problem.boundSize(0);
         uint32_t GSULimit1    = max(1, (uint32_t)std::floor(numCUs / numWGs));
         uint32_t GSULimit2    = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
-        autoGSU               = min(GSULimit2, max(1, GSULimit1));
+        uint32_t gsuVal       = min(GSULimit2, max(1, GSULimit1));
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
-        if(autoGSU > 1)
-            autoGSU = min(autoGSU,
+        if(gsuVal > 1)
+            gsuVal = min(gsuVal,
                         MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
                             / std::ceil(static_cast<float>(N) / MT1) / B);
 
         // GlobalSplitUCheckMinK
-        if(autoGSU > 1)
-            autoGSU = min(autoGSU, std::ceil(static_cast<float>(K) / MT2));
+        if(gsuVal > 1)
+            gsuVal = min(gsuVal, std::ceil(static_cast<float>(K) / MT2));
 
         // SynchronizerSizeCheck
-        if(autoGSU > 1)
-            autoGSU = min(autoGSU, 409600/(sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B));
+        if(gsuVal > 1)
+            gsuVal = min(gsuVal, 409600/(sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B));
 
         // avoid gsu < 1
-        autoGSU = max(autoGSU, 1);
+        gsuVal = max(gsuVal, 1);
 
         static const char* envStr = std::getenv("TENSILE_AUTO_GSU_ALGO");
         if(envStr != NULL)
-            std::cout << "autoGSU is calculated: " << autoGSU << std::endl;
+            std::cout << "autoGSU is calculated: " << gsuVal << std::endl;
 
-        return;
+        return gsuVal;
     }
 
     template <bool T_Debug, bool Legacy, typename KA>
@@ -1030,7 +1121,9 @@ namespace TensileLite
                                          uint32_t                            numWorkGroups,
                                          Hardware const*                     hardware,
                                          const ContractionProblemParameters& param,
-                                         int32_t                             defaultWGM) const
+                                         int32_t                             autoWGM,
+                                         uint32_t                            autoWGMXCC,
+                                         uint32_t                            autoGsuVal) const
     {
         if constexpr(!Legacy)
         {
@@ -1040,11 +1133,11 @@ namespace TensileLite
             args.template append<uint32_t>("gemm_count", gemmCount);
         }
 
-        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGSU;
+        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGsuVal;
         bool           gsuc         = false; // initialized false
         bool           gsuwgmrr     = false; // initialized false
-        int32_t        wgm          = param.wgm() != 0 ? param.wgm() : defaultWGM;
-        uint32_t       wgmxcc       = 1;
+        int32_t        wgm          = param.wgm() != 0 ? param.wgm() : autoWGM;
+        uint32_t       wgmxcc       = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
         int32_t        wgmxccg      = -1;
         const uint32_t mask16       = 0xFFFF;
         const uint32_t mask14       = 0x3FFF;
@@ -1068,14 +1161,12 @@ namespace TensileLite
             {
                 internalArg1 = wgm;
             }
-            else if(internalArgsSupport.version == 2)
+            else if(internalArgsSupport.version == 2 && !internalArgsSupport.useSFC)
             {
                 // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
                 //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
                 //     From sizeMapping = from logic yaml. If not set in Config-Yaml, use default value [1, -1]
-                wgmxcc = param.wgmxcc() > 0 ? param.wgmxcc() : sizeMapping.workGroupMappingXCC;
-                wgmxccg
-                    = param.wgmxccg() != 0 ? param.wgmxccg() : sizeMapping.workGroupMappingXCCGroup;
+                wgmxccg = param.wgmxccg() != 0 ? param.wgmxccg() : sizeMapping.workGroupMappingXCCGroup;
                 if(wgmxcc >= 1 && wgmxccg == -1)
                 {
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
@@ -1083,6 +1174,10 @@ namespace TensileLite
                     wgmxccg = pAMDGPU->computeUnitCount;
                 }
                 internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+            }
+            else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
+            {
+              internalArg1 = wgm;
             }
         }
 
@@ -1175,7 +1270,8 @@ namespace TensileLite
 
         dim3 problemNumGroupTiles = rv.numWorkGroups;
 
-        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
+        uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
+        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
@@ -1220,49 +1316,14 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto defaultWGM = sizeMapping.workGroupMapping;
-            if(sizeMapping.streamK != 0)
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware);
+            if(T_Debug)
             {
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                if(pAMDGPU->fixedWGM >= -1024 && pAMDGPU->fixedWGM <= 1024)
-                {
-                    defaultWGM = pAMDGPU->fixedWGM;
-                }
-                else if(pAMDGPU->skDynamicWGM == 1)
-                {
-                    hip::HipAMDGPU const* hipAMDGPU
-                        = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-                    auto sizes = problem.problemSizes();
-                    if(sizes.size() >= 4)
-                    {
-                        std::vector<size_t> wgmList
-                            = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
-                        size_t elementSize = GetElementSize(problemType.aType);
-                        double H_L2        = 0.0; // TODO
-                        auto   bestWGM     = origami::select_best_wgm(sizes[0],
-                                                                   sizes[1],
-                                                                   sizes[3],
-                                                                   sizes[2],
-                                                                   *(hipAMDGPU->analyticalHardware),
-                                                                   sizeMapping.macroTile.x,
-                                                                   sizeMapping.macroTile.y,
-                                                                   sizeMapping.depthU,
-                                                                   sizeMapping.matrixInstruction[0],
-                                                                   sizeMapping.matrixInstruction[1],
-                                                                   sizeMapping.matrixInstruction[2],
-                                                                   wgmList,
-                                                                   elementSize,
-                                                                   H_L2,
-                                                                   false);
-                        defaultWGM         = bestWGM.second;
-                        if(T_Debug)
-                            std::cout << "Predicted WGM: " << defaultWGM << std::endl;
-                    }
-                }
+                std::cout << "AutoWGM: " << autoWGM << std::endl;
+                std::cout << "AutoWGMXCC: " << autoWGMXCC << std::endl;
             }
-
             kernelArgs<T_Debug, false>(
-                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), defaultWGM);
+                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoGsuVal);
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1293,7 +1354,8 @@ namespace TensileLite
         const TensileLite::dim3&    workGroupSize,
         TensileLite::dim3&          numWorkGroups,
         TensileLite::dim3&          numWorkItems,
-        KA&                         h_args) const
+        KA&                         h_args,
+        uint32_t                    autoGsuVal) const
     {
 
         uint32_t wgLeft  = 0;
@@ -1335,7 +1397,7 @@ namespace TensileLite
                 numWorkGroups.x = CeilDivide(numWorkGroups.x, sizeMapping.macroTile.x);
                 numWorkGroups.y = CeilDivide(numWorkGroups.y, sizeMapping.macroTile.y);
 
-                uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
+                uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
                 if(gsu > 0)
                     numWorkGroups.y *= gsu;
 
@@ -1385,8 +1447,9 @@ namespace TensileLite
 
             rv.sharedMemBytes = 0;
         }
+        auto autoGsuVal = calculateAutoGSU(problems[0], &hardware);
         calculateSingleCallWorkGroupItems(
-            problems, rv.workGroupSize, rv.numWorkGroups, rv.numWorkItems, h_args);
+            problems, rv.workGroupSize, rv.numWorkGroups, rv.numWorkItems, h_args, autoGsuVal);
 
         uint32_t workspaceOffsetInByte
             = this->requiredHostWorkspaceSizePerProblem * problems.size();
@@ -1396,10 +1459,14 @@ namespace TensileLite
             {
                 auto problem = problems[idx];
                 StreamKSettings sk;
+                // Grouped gemm currently not supported in SK
+                // But this code path is run to calculate to determine if solution is supported
+                // Set SK grid to 1 for now to avoid 0 division
+                sk.grid = 1;
                 singleCallArgs<T_Debug, false>(problem,
                                                inputs.grouped[idx],
                                                workspaceOffsetInByte,
-                                               nullptr,
+                                               &hardware,
                                                rv.numWorkGroups,
                                                rv.numWorkGroups,
                                                h_args,
@@ -1420,6 +1487,8 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware);
+
             if(internalArgsSupport.useUniversalArgs)
             {
                 KERNELARGTYPE argType = KERNELARGTYPE::HBM;
@@ -1433,7 +1502,9 @@ namespace TensileLite
                                            getNumWorkGroups(rv),
                                            &hardware,
                                            problems[0].getParams(),
-                                           sizeMapping.workGroupMapping);
+                                           autoWGM,
+                                           autoWGMXCC,
+                                           autoGsuVal);
                 // For user input
                 if(argType == KERNELARGTYPE::USERARGS)
                 {
@@ -1459,7 +1530,9 @@ namespace TensileLite
                                           0,
                                           &hardware,
                                           problems[0].getParams(),
-                                          sizeMapping.workGroupMapping);
+                                          autoWGM,
+                                          autoWGMXCC,
+                                          autoGsuVal);
             }
 
             rv.args.append<void const*>("Synchronizer", (void*)inputs.grouped[0].Synchronizer);
@@ -1664,7 +1737,8 @@ namespace TensileLite
                                                        ContractionInputs const&            inputs,
                                                        uint32_t const& workspaceOffsetInByte,
                                                        KA&             args,
-                                                       StreamKSettings const& sk) const
+                                                       StreamKSettings const& sk,
+                                                       uint32_t        autoGsuVal) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -1819,7 +1893,7 @@ namespace TensileLite
         }
         uint32_t gsu = sizeMapping.globalAccumulation == 1
                            ? 1
-                           : (problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU);
+                           : (problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal);
 
         if(sizeMapping.streamK > 0)
         {
@@ -1838,7 +1912,8 @@ namespace TensileLite
     KernelInvocation
         ContractionSolution::generateOutputConversionCall(Problem const&           problem,
                                                           ContractionInputs const& inputs,
-                                                          StreamKSettings const&   sk) const
+                                                          StreamKSettings const&   sk,
+                                                          uint32_t                 autoGsuVal) const
     {
         KernelInvocation rv;
 
@@ -1874,7 +1949,7 @@ namespace TensileLite
 
         uint32_t gsu = sizeMapping.globalAccumulation == 1
                            ? 1
-                           : (problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU);
+                           : (problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal);
 
         if(sizeMapping.streamK > 0)
         {
@@ -1893,7 +1968,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
@@ -2035,10 +2110,11 @@ namespace TensileLite
         calculateConversionCallWorkGroupItems(
             problems, vw, rv.workGroupSize, rv.numWorkGroups, rv.numWorkItems, h_args);
 
+        uint32_t autoGsuVal = calculateAutoGSU(problems[0], &hardware);
         uint32_t gsu
             = sizeMapping.globalAccumulation == 1
                   ? 1
-                  : (problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGSU);
+                  : (problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGsuVal);
 
         if constexpr(std::is_same<KA, KernelArguments>::value)
         {
@@ -2052,7 +2128,7 @@ namespace TensileLite
             auto problem = problems[idx];
             StreamKSettings sk;
             outputConversionCallArgs<T_Debug>(
-                problem, inputs.grouped[idx], workspaceOffsetInByte, h_args, sk);
+                problem, inputs.grouped[idx], workspaceOffsetInByte, h_args, sk, autoGsuVal);
             if constexpr(std::is_same<KA, KernelArguments>::value)
                 workspaceOffsetInByte += requiredWorkspaceSize(problem, hardware);
         }
@@ -2488,7 +2564,8 @@ namespace TensileLite
 
         std::vector<KernelInvocation> rv;
 
-        auto gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
+        auto autoGsuVal = calculateAutoGSU(problem, &hardware);
+        auto gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         if(gsu > 1 && sizeMapping.globalAccumulation != 2 && sizeMapping.globalAccumulation != 3)
         {
             if(debug)
@@ -2526,9 +2603,9 @@ namespace TensileLite
         if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation) || sk.reduction == ReductionType::Parallel)
         {
             if(debug)
-                rv.push_back(generateOutputConversionCall<true>(problem, inputs, sk));
+                rv.push_back(generateOutputConversionCall<true>(problem, inputs, sk, autoGsuVal));
             else
-                rv.push_back(generateOutputConversionCall<false>(problem, inputs, sk));
+                rv.push_back(generateOutputConversionCall<false>(problem, inputs, sk, autoGsuVal));
         }
 
         // The reduction of A is done in ConversionKernel when GSU > 1 in MultipleBuffer mode
@@ -2560,7 +2637,6 @@ namespace TensileLite
         size_t                                           hipHostMemorySize,
         hipStream_t                                      stream) const
     {
-        calculateAutoGSU(problems[0], &hardware);
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName() << std::endl;
 
@@ -2640,7 +2716,8 @@ namespace TensileLite
         }
         h_args.reserve(32768, 8192);
 
-        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGSU;
+        auto autoGsuVal = calculateAutoGSU(problems[0], &hardware);
+        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGsuVal;
 
         // if((sizeMapping.globalSplitU > 1 || sizeMapping.globalSplitU == -1) && sizeMapping.globalAccumulation != 2)
         // {
@@ -2695,7 +2772,6 @@ namespace TensileLite
                                                  const void*                 workspace,
                                                  hipStream_t                 stream) const
     {
-        calculateAutoGSU(problems[0], &hardware);
         if(!problemType.supportDeviceUserArguments)
         {
             throw std::runtime_error("Currently this solution does not support user args.");
@@ -2713,7 +2789,7 @@ namespace TensileLite
             rv.push_back(
                 generateSingleCallGroupedGemm<false>(problems, inputs, hardware, h_args, dUA));
 
-        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : autoGSU;
+        auto gsu = problems[0].getParams().gsu() > 0 ? problems[0].getParams().gsu() : calculateAutoGSU(problems[0], &hardware);
 
         if((sizeMapping.globalAccumulation && gsu > 1) && (sizeMapping.globalAccumulation != 3))
         {
@@ -2918,8 +2994,7 @@ namespace TensileLite
         else
         {
             // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
-            calculateAutoGSU(problem, &hardware);
-            size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
+            size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : calculateAutoGSU(problem, &hardware);
             size_t gsuMultiplier = gsu > 1 ? gsu : 0;
             size_t batch         = problem.d().sizes()[2];
             size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
@@ -3012,7 +3087,7 @@ namespace TensileLite
         {
             size_t batch = problem.d().sizes()[2];
             size_t tiles = problem.getNumTiles(sizeMapping, 1) * batch;
-            return tiles * sizeMapping.synchronizerSizePerWG;
+            return tiles * sizeMapping.synchronizerSizePerWG * sizeof(int);
         }
         return 0;
     }
@@ -3163,28 +3238,29 @@ namespace TensileLite
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             skGrid = origami::streamk::select_grid(x,
-                                                              y,
-                                                              z,
-                                                              batch,
-                                                              problem.transA(),
-                                                              problem.transB(),
-                                                              problem.a().elementBytes() * 8,
-                                                              problem.b().elementBytes() * 8,
-                                                              problem.c().elementBytes() * 8,
-                                                              miDataType,
-                                                              problem.workspaceSize(),
-                                                              sizeMapping.macroTile.x,
-                                                              sizeMapping.macroTile.y,
-                                                              sizeMapping.depthU,
-                                                              sizeMapping.matrixInstruction[0],
-                                                              sizeMapping.matrixInstruction[1],
-                                                              sizeMapping.matrixInstruction[2],
-                                                              sizeMapping.workGroupMapping,
-                                                              sizeMapping.workspaceSizePerElemC,
-                                                              sizeMapping.CUOccupancy,
-                                                              *(hipAMDGPU->analyticalHardware),
-                                                              pAMDGPU->skDynamicGrid,
-                                                              reductionStrat);
+                                                   y,
+                                                   z,
+                                                   batch,
+                                                   problem.transA(),
+                                                   problem.transB(),
+                                                   problem.a().elementBytes() * 8,
+                                                   problem.b().elementBytes() * 8,
+                                                   problem.c().elementBytes() * 8,
+                                                   miDataType,
+                                                   problem.workspaceSize(),
+                                                   sizeMapping.macroTile.x,
+                                                   sizeMapping.macroTile.y,
+                                                   sizeMapping.depthU,
+                                                   sizeMapping.matrixInstruction[0],
+                                                   sizeMapping.matrixInstruction[1],
+                                                   sizeMapping.matrixInstruction[2],
+                                                   sizeMapping.workGroupMapping,
+                                                   sizeMapping.workspaceSizePerElemC,
+                                                   sizeMapping.CUOccupancy,
+                                                   *(hipAMDGPU->analyticalHardware),
+                                                   pAMDGPU->skDynamicGrid,
+                                                   reductionStrat,
+                                                   pAMDGPU->skMaxCUs);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
@@ -3227,7 +3303,7 @@ namespace TensileLite
     }
 
     ContractionSolution::Granularities ContractionSolution::computeGranularities(
-        Hardware const& hardware, double M, double N, double K, double NumBatches) const
+        Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const
     {
         ContractionSolution::Granularities granularities;
 
@@ -3241,7 +3317,7 @@ namespace TensileLite
         double wavefrontSize = pAMDGPU->wavefrontSize;
         double simdPerCu     = pAMDGPU->simdPerCu;
 
-        double GlobalSplitU = autoGSU;
+        double GlobalSplitU = autoGsuVal;
         double LocalSplitU  = sizeMapping.workGroupSize.z;
 
         granularities.MT0 = MT0;
@@ -3300,7 +3376,6 @@ namespace TensileLite
         ContractionSolution::projectedPerformance(Problem const&  problem,
                                                   Hardware const& hardware) const
     {
-        calculateAutoGSU(problem, &hardware);
         ProjectedPerformance pp;
 
         double M = 1.0, N = 1.0;
@@ -3332,7 +3407,7 @@ namespace TensileLite
         }
         double K = problem.boundSize(0); // TODO - fix for multiple summations
 
-        pp.granularities = ContractionSolution::computeGranularities(hardware, M, N, K, NumBatches);
+        pp.granularities = ContractionSolution::computeGranularities(hardware, M, N, K, NumBatches, calculateAutoGSU(problem, &hardware));
 
         auto it = ideals.begin();
 
@@ -3365,114 +3440,6 @@ namespace TensileLite
         pp.CUs         = NumCUs;
 
         return pp;
-    }
-
-    ContractionSolution::TAMetricProblemScore ContractionSolution::computeProblemScore(
-        Hardware const& hardware, double M, double N, double K, double NumBatches) const
-    {
-        ContractionSolution::TAMetricProblemScore pp;
-        pp.granularites = ContractionSolution::computeGranularities(hardware, M, N, K, NumBatches);
-
-        pp.M = M;
-        pp.N = N;
-        pp.K = K;
-
-        double slope     = linearModel.slope;
-        double intercept = linearModel.intercept;
-        double perf_max  = linearModel.max;
-
-        double sum_value        = K;
-        double sum_perf0        = sum_value / (intercept + (slope * sum_value));
-        pp.summationPerformance = 1000.0 * sum_perf0 / perf_max;
-
-        return pp;
-    }
-
-    double ContractionSolution::computeTileAwareMetric(
-        ContractionSolution::TAMetricProblemScore pp,
-        ContractionSolution::TAMetricProblemScore ppReference) const
-    {
-        double tile0GranularityDim = abs(log(ppReference.granularites.tile0Granularity)
-                                         - log(pp.granularites.tile0Granularity));
-        double metric              = tile0GranularityDim;
-
-        double tile1GranularityDim = abs(log(ppReference.granularites.tile1Granularity)
-                                         - log(pp.granularites.tile1Granularity));
-        metric += tile1GranularityDim;
-
-        double natCuGranularityDim = abs(log(ppReference.granularites.natCuGranularity)
-                                         - log(pp.granularites.natCuGranularity));
-        metric += natCuGranularityDim;
-
-        double suCuGranularityDim = abs(log(ppReference.granularites.suCuGranularity)
-                                        - log(pp.granularites.suCuGranularity));
-        metric += suCuGranularityDim;
-
-        double suWaveGranularityDim = abs(log(ppReference.granularites.suWaveGranularity)
-                                          - log(pp.granularites.suWaveGranularity));
-        metric += suWaveGranularityDim;
-
-        double natTilesPerCuDim
-            = abs(log(ppReference.granularites.natTilesPerCu) - log(pp.granularites.natTilesPerCu));
-        metric += natTilesPerCuDim;
-
-        double suTilesPerCuDim
-            = abs(log(ppReference.granularites.suTilesPerCu) - log(pp.granularites.suTilesPerCu));
-        metric += suTilesPerCuDim;
-
-        double summationPerformanceDim
-            = abs(ppReference.summationPerformance - pp.summationPerformance);
-        metric += summationPerformanceDim;
-
-        return metric;
-    }
-
-    double ContractionSolution::computeTAMScore(Problem const&  problem,
-                                                Hardware const& hardware,
-                                                double          model_M,
-                                                double          model_N,
-                                                double          model_K,
-                                                double          model_NumBatches) const
-    {
-        calculateAutoGSU(problem, &hardware);
-        double M = 1.0, N = 1.0;
-        if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
-        {
-            std::vector<size_t> packedIndices
-                = generatePackedIndicesA(problem, sizeMapping.packBatchDims);
-            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
-                M *= problem.a().sizes()[*pi];
-        }
-        else
-            M = problem.freeSizeA(0);
-
-        if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
-        {
-            std::vector<size_t> packedIndices
-                = generatePackedIndicesB(problem, sizeMapping.packBatchDims);
-            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
-                N *= problem.b().sizes()[*pi];
-        }
-        else
-            N = problem.freeSizeB(0);
-
-        double NumBatches = 1;
-        if(sizeMapping.packBatchDims == 0)
-        {
-            for(size_t i = 0; i < problem.batchIndices().size(); i++)
-                NumBatches *= problem.batchSize(i);
-        }
-        double K = problem.boundSize(0); // TODO - fix for multiple summations
-
-        ContractionSolution::TAMetricProblemScore pp
-            = computeProblemScore(hardware, M, N, K, NumBatches);
-
-        ContractionSolution::TAMetricProblemScore ppReference
-            = computeProblemScore(hardware, model_M, model_N, model_K, model_NumBatches);
-
-        double distance = computeTileAwareMetric(pp, ppReference);
-
-        return distance;
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,

@@ -103,9 +103,9 @@ public:
     EncodeInputFeatures(const std::map<std::string, float>& features) const;
     MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
     EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates) const;
-    MIOPEN_INTERNALS_EXPORT int
-    SelectBestCandidateIdx(const std::vector<float>& encoded_features,
-                           const std::vector<std::vector<float>>& encoded_configs) const;
+    MIOPEN_INTERNALS_EXPORT std::vector<std::pair<int, float>>
+    SelectBestCandidateIndices(const std::vector<float>& encoded_features,
+                               const std::vector<std::vector<float>>& encoded_configs) const;
     const CandidateSelectionMetadata& metadata() const { return metadata_; }
 
 private:
@@ -121,10 +121,27 @@ MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
                    const CandidateSelectionMetadata& metadata);
 
-struct CandidateSelectionResult
+MIOPEN_INTERNALS_EXPORT struct CandidateSelectionResult
 {
-    int kernel_index; // Index of the original kernel in the input list
-    int split_k;      // The selected split_k value
+    std::vector<int> kernel_indices; // Sorted list of kernel indices (best to worst)
+    std::vector<int> split_k_values; // Corresponding split_k values
+
+    // Helper methods for backward compatibility and convenience
+    int GetBestKernelIndex() const { return kernel_indices.empty() ? -1 : kernel_indices[0]; }
+    int GetBestSplitK() const { return split_k_values.empty() ? 1 : split_k_values[0]; }
+
+    int GetFallbackKernelIndex(size_t fallback_level = 1) const
+    {
+        return (fallback_level < kernel_indices.size()) ? kernel_indices[fallback_level] : -1;
+    }
+
+    int GetFallbackSplitK(size_t fallback_level = 1) const
+    {
+        return (fallback_level < split_k_values.size()) ? split_k_values[fallback_level] : 1;
+    }
+
+    size_t GetNumCandidates() const { return kernel_indices.size(); }
+    bool IsEmpty() const { return kernel_indices.empty(); }
 };
 
 MIOPEN_INTERNALS_EXPORT

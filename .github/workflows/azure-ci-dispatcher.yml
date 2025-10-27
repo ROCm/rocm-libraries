@@ -95,8 +95,7 @@ jobs:
         python .github/scripts/pr_detect_changed_subtrees.py \
           --repo "${{ github.repository }}" \
           --pr "${{ github.event.pull_request.number }}" \
-          --config ".github/repos-config.json" \
-          --require-auto-push
+          --config ".github/repos-config.json"
 
     - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress
@@ -108,7 +107,7 @@ jobs:
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\") | .id")
+        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\" and .definition.name != \"rocm-libraries-superbuild\") | .id")
 
         if [ -z "$runs" ]; then
           echo "No in-progress/not-started runs found for ROCm/rocm-libraries PR #$pr_number"

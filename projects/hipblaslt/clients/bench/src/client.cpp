@@ -296,6 +296,7 @@ try
     bool        datafile          = hipblaslt_parse_data(argc, argv);
     bool        log_function_name = false;
     bool        any_stride        = false;
+    bool        dump_matrix       = false;
 
     int         api_method      = 0;
     std::string api_method_str  = "";
@@ -413,7 +414,7 @@ try
 
         ("compute_type",
          value<std::string>(&compute_type)->default_value("f32_r"), "Precision of computation. "
-         "Options: s,f32_r,x,xf32_r,f64_r,i32_r")
+         "Options: s,f32_r,x,xf32_r,f64_r,i32_r,f32_bf16_r")
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
@@ -626,6 +627,10 @@ try
         ("flush",
         value<bool>(&arg.flush)->default_value(tuningEnv ? true : false),
         "Flush icache, only works for gemm.")
+
+        ("dump_matrix",
+        value<bool>(&arg.dump_matrix)->default_value(false),
+        "Dump input and output matrices to a file.")
 
         ("help,h", "produces this help message")
 

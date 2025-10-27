@@ -3,15 +3,18 @@
 
 cmake_minimum_required(VERSION 3.24.4)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(Origami VERSION 1.0.0 LANGUAGES CXX)
+project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(ORIGAMI_STANDALONE ON)
 else()
     set(ORIGAMI_STANDALONE OFF)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Set cpack license file here to avoid rocm-cmake warning
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
 include(dependencies)
 
@@ -30,7 +33,7 @@ else()
     add_library(origami STATIC)
 endif()
 
-rocm_set_soversion(origami ${PROJECT_VERSION_MAJOR})
+rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
@@ -60,7 +63,6 @@ target_link_libraries(origami PUBLIC roc::origami-headers)
 target_sources(origami
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/utils.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
 )
@@ -74,6 +76,8 @@ endif()
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
     
+    add_subdirectory(tests)
+
     if(ORIGAMI_ENABLE_PYTHON)
         find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
@@ -110,6 +114,17 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
         NAMESPACE roc::
     )
 
+    if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+        rocm_install(TARGETS origami-tests
+            COMPONENT tests
+        )
+        
+        rocm_install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/origami_gtest.yaml"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT tests
+        )
+    endif()
+
     rocm_install(
         DIRECTORY include/
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
@@ -140,4 +155,3 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
     )
 endif()
-

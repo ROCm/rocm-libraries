@@ -40,6 +40,8 @@
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
 
+#include "ordered_block_id.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -1052,7 +1054,8 @@ template<class Key,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 struct onesweep_iteration_helper
 {
     static constexpr unsigned int radix_size      = 1u << RadixBits;
@@ -1068,7 +1071,7 @@ struct onesweep_iteration_helper
 
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
 
-    union storage_type_
+    union data_storage
     {
         typename radix_rank_type::storage_type rank;
         struct
@@ -1080,6 +1083,12 @@ struct onesweep_iteration_helper
                 Value ordered_block_values[items_per_block];
             };
         };
+    };
+
+    struct storage_type_
+    {
+        data_storage                          data;
+        typename BlockIdWrapper::storage_type ordered_bid;
     };
 
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
@@ -1103,10 +1112,11 @@ struct onesweep_iteration_helper
                   const unsigned int       bit,
                   const unsigned int       current_radix_bits,
                   const unsigned int       valid_items,
-                  storage_type_&           storage)
+                  data_storage&            storage,
+                  unsigned int             ordered_bid)
     {
         const unsigned int flat_id      = ::rocprim::detail::block_thread_id<0>();
-        const unsigned int block_id     = ::rocprim::detail::block_id<0>();
+        const unsigned int block_id     = ordered_bid;
         const unsigned int block_offset = block_id * items_per_block;
 
         // Load keys into private memory, and encode them to unsigned integers.
@@ -1348,7 +1358,8 @@ template<unsigned int               BlockSize,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Offset,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     onesweep_iteration(KeysInputIterator        keys_input,
                        KeysOutputIterator       keys_output,
@@ -1361,7 +1372,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                        Decomposer               decomposer,
                        const unsigned int       bit,
                        const unsigned int       current_radix_bits,
-                       const unsigned int       full_blocks)
+                       const unsigned int       full_blocks,
+                       BlockIdWrapper           ordered_bid)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -1374,12 +1386,14 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      RadixBits,
                                                                      Descending,
                                                                      RadixRankAlgorithm,
-                                                                     Decomposer>;
-
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_id = ::rocprim::detail::block_id<0>();
+                                                                     Decomposer,
+                                                                     BlockIdWrapper>;
 
     ROCPRIM_SHARED_MEMORY typename onesweep_iteration_helper_type::storage_type storage;
+
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int     thread_id       = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int     block_id        = ordered_bid.get(thread_id, storage.get().ordered_bid);
 
     if(block_id < full_blocks)
     {
@@ -1394,7 +1408,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                  bit,
                                                                  current_radix_bits,
                                                                  items_per_block,
-                                                                 storage.get());
+                                                                 storage.get().data,
+                                                                 block_id);
     }
     else
     {
@@ -1410,7 +1425,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                   bit,
                                                                   current_radix_bits,
                                                                   valid_in_last_block,
-                                                                  storage.get());
+                                                                  storage.get().data,
+                                                                  block_id);
     }
 }
 

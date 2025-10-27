@@ -47,10 +47,10 @@ namespace {
 int LayoutStringToCode(const std::string& layout)
 {
     if(layout == "NCDHW")
-        return 0.0;
+        return 0;
     if(layout == "NDHWC")
-        return 1.0;
-    return -1.0; // Unknown
+        return 1;
+    return -1; // Unknown
 }
 
 // Dummy kernels for testing
@@ -322,10 +322,10 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
         ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
 
-    ASSERT_TRUE(result);
+    ASSERT_TRUE(ai_success);
     ASSERT_FALSE(kernel_id.empty());
 }
 
@@ -340,10 +340,10 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
+    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
         ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
 
-    ASSERT_FALSE(result);
+    ASSERT_FALSE(ai_success);
     ASSERT_TRUE(kernel_id.empty());
 }
 

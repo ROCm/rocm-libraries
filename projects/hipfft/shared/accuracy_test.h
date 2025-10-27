@@ -352,41 +352,43 @@ inline void execute_gpu_fft(Tparams&              params,
     // Execute the transform:
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
-        throw std::runtime_error("plan execution failure");
-    // work around potential problem of following hipMemcpy
-    // not properly waiting for rocFFT's kernels to finish
-    if(hipDeviceSynchronize() != hipSuccess)
-        throw std::runtime_error("hipDeviceSynchronize after execute failed");
+        throw std::runtime_error("FFT plan execution failure");
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
     if(!fftw_compare)
         return;
 
-    // finalize a multi-GPU transform
-    params.multi_gpu_finalize(obuffer, pobuffer);
-
     ASSERT_TRUE(!gpu_output.empty()) << "no output buffers";
-    for(unsigned int idx = 0; idx < gpu_output.size(); ++idx)
+
+    // if output is in multiple bricks, collect it into the
+    // host buffer where the results need to go
+    params.multi_gpu_finalize(gpu_output, obuffer, pobuffer);
+
+    if(params.ofields.empty())
     {
-        ASSERT_TRUE(gpu_output[idx].data() != nullptr)
-            << "output buffer index " << idx << " is empty";
-        auto hip_status = hipMemcpy(gpu_output[idx].data(),
-                                    pobuffer.at(idx),
-                                    gpu_output[idx].size(),
-                                    hipMemcpyDeviceToHost);
-        if(hip_status != hipSuccess)
+        // otherwise, copy directly from the device
+        for(unsigned int idx = 0; idx < gpu_output.size(); ++idx)
         {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "hipMemcpy failure";
-            if(skip_runtime_fails)
+            ASSERT_TRUE(gpu_output[idx].data() != nullptr)
+                << "output buffer index " << idx << " is empty";
+            auto hip_status = hipMemcpy(gpu_output[idx].data(),
+                                        pobuffer.at(idx),
+                                        gpu_output[idx].size(),
+                                        hipMemcpyDeviceToHost);
+            if(hip_status != hipSuccess)
             {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
+                ++n_hip_failures;
+                std::stringstream ss;
+                ss << "hipMemcpy failure";
+                if(skip_runtime_fails)
+                {
+                    throw ROCFFT_SKIP{ss.str()};
+                }
+                else
+                {
+                    throw ROCFFT_FAIL{ss.str()};
+                }
             }
         }
     }
@@ -547,7 +549,6 @@ void check_output_strides(const std::vector<hostbuf>& output, Tparams& params)
 // run rocFFT inverse transform
 template <class Tparams>
 inline void run_round_trip_inverse(Tparams&              params,
-                                   std::vector<gpubuf>&  ibuffer,
                                    std::vector<gpubuf>&  obuffer,
                                    std::vector<void*>&   pibuffer,
                                    std::vector<void*>&   pobuffer,
@@ -593,8 +594,7 @@ inline void run_round_trip_inverse(Tparams&              params,
             // shouldn't have been touched.
             if(params.check_output_strides)
             {
-                auto hip_status
-                    = hipMemset(obuffer[i].data(), OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
+                auto hip_status = hipMemset(pobuffer[i], OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
                 if(hip_status != hipSuccess)
                 {
                     ++n_hip_failures;
@@ -612,14 +612,17 @@ inline void run_round_trip_inverse(Tparams&              params,
             }
         }
     }
+
     if(params.multiGPU > 1)
     {
         if(verbose > 0)
         {
             std::cout << "scattering data for multi-GPU inverse" << std::endl;
         }
-        params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
+        std::vector<hostbuf> cpu_input;
+        params.multi_gpu_prepare(cpu_input, obuffer, pibuffer, pobuffer);
     }
+
     // execute GPU transform
     execute_gpu_fft(params, pibuffer, pobuffer, obuffer, gpu_output, true);
 }
@@ -724,7 +727,7 @@ inline void compare_round_trip_inverse(Tparams&              params,
         << params.str();
 
     EXPECT_TRUE(diff.l_2 / cpu_input_norm.l_2
-                < sqrt(log2(total_length)) * type_epsilon(params.precision))
+                <= sqrt(log2(total_length)) * type_epsilon(params.precision))
         << "L2 test failed. L2: " << diff.l_2
         << "\tnormalized L2: " << diff.l_2 / cpu_input_norm.l_2
         << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)
@@ -1273,6 +1276,9 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         pobuffer[i] = obuffer->at(i).data();
     }
 
+    // scatter data out to multi-GPUs if this is a multi-GPU test
+    params.multi_gpu_prepare(cpu_input, ibuffer, pibuffer, pobuffer);
+
     // Run CPU transform
     //
     // NOTE: This must happen after input is copied to GPU and input
@@ -1310,9 +1316,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 std::cout << "CPU Output L2 norm:   " << cpu_output_norm.l_2 << "\n";
             }
         });
-
-    // scatter data out to multi-GPUs if this is a multi-GPU test
-    params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
 
     // execute GPU transform
     std::vector<hostbuf> gpu_output
@@ -1414,7 +1417,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params_inverse.inverse_from_forward(params);
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, *obuffer, ibuffer, pobuffer, pibuffer, gpu_input_data);
+            params_inverse, *obuffer, pobuffer, pibuffer, gpu_input_data);
     }
 
     if(fftw_compare)

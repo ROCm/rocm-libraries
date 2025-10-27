@@ -55,6 +55,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InstructionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArgumentsTest.cpp"
@@ -89,4 +90,9 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp" 
+)
+
+target_include_directories(rocroller-tests-catch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include
 )

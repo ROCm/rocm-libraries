@@ -72,12 +72,12 @@ int main()
     }
 
     // Define list of GPUs to use
-    std::array<int, 2> gpus = {0, 1};
+    std::vector<int> gpus = {0, 1};
 
     // Create the multi-gpu plan
     hipLibXtDesc* desc; // input descriptor
 
-    hipfftHandle plan{};
+    hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
@@ -94,13 +94,13 @@ int main()
         throw std::runtime_error("hipfftXtSetGPUs failed.");
 
     // Make the 2D plan
-    size_t workSize[gpus.size()];
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+    std::vector<size_t> workSize(gpus.size());
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
     // Copy input data to GPUs
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
     hipfft_rt                  = hipfftXtMalloc(plan, &desc, format);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMalloc failed.");

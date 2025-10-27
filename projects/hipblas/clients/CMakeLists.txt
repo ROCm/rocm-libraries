@@ -23,18 +23,20 @@
 cmake_minimum_required( VERSION 3.5 )
 
 function( get_lapack lapack_lib lapack_inc )
-  if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/liblapack.a")
-    set( lib "${BUILD_DIR}/deps/deps-install/lib/liblapack.a" )
+  if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/liblapack64.a")
+    set( lib "${BUILD_DIR}/deps/deps-install/lib/liblapack64.a" )
     set( inc "${BUILD_DIR}/deps/deps-install/include" )
-    set( ${cblas_inc} ${inc} PARENT_SCOPE )
+    set( ${lapack_inc} ${inc} PARENT_SCOPE )
   else()
+    set(BLA_SIZEOF_INTEGER 8)
     find_package( LAPACK REQUIRED )
     set( lib "${LAPACK_LIBRARIES}" )
   endif()
   set( ${lapack_lib} ${lib} PARENT_SCOPE )
+  enable_language( Fortran )
 endfunction( )
 
-function( get_cblas cblas_libs cblas_inc )
+function( get_cblas cblas_libs cblas_inc cblas_defs )
   if(LINK_BLIS)
     if(EXISTS    "${BUILD_DIR}/deps/blis/lib/libblis.a")
         set( libs ${BUILD_DIR}/deps/blis/lib/libblis.a )
@@ -46,16 +48,39 @@ function( get_cblas cblas_libs cblas_inc )
         set( ${cblas_inc} ${inc} PARENT_SCOPE )
     endif()
   else()
-    if(EXISTS "${BUILD_DIR}/deps/deps-install/lib/libcblas.a" AND EXISTS "${BUILD_DIR}/deps/deps-install/lib/libblas.a")
-      set( libs ${BUILD_DIR}/deps/deps-install/lib/libcblas.a ${BUILD_DIR}/deps/deps-install/lib/libblas.a )
+    if(EXISTS "${BUILD_DIR}/deps/deps-install/lib/libcblas64.a" AND EXISTS "${BUILD_DIR}/deps/deps-install/lib/libblas64.a")
+      set( libs ${BUILD_DIR}/deps/deps-install/lib/libcblas64.a ${BUILD_DIR}/deps/deps-install/lib/libblas64.a )
       set( inc "${BUILD_DIR}/deps/deps-install/include" )
       set( ${cblas_inc} ${inc} PARENT_SCOPE )
     else()
-      find_package( cblas REQUIRED CONFIG )
-      set( libs ${CBLAS_LIBRARIES} )
+      # get BLAS
+      set(BLA_SIZEOF_INTEGER 8)
+      find_package( BLAS REQUIRED )
+      set( libs ${BLAS_LIBRARIES} )
+
+      # get CBLAS from the same source as BLAS
+      get_filename_component(BLAS_DIR "${BLAS_LIBRARIES}" DIRECTORY)
+      set(ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+      if(BLA_STATIC)
+        if(WIN32)
+          list(PREPEND CMAKE_FIND_LIBRARY_SUFFIXES .lib .a)
+        else()
+          set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+        endif()
+      endif()
+      find_library(CBLAS_LIBRARIES NAMES cblas64 PATHS BLAS_DIR)
+      set(CMAKE_FIND_LIBRARY_SUFFIXES ${ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+
+      if(CBLAS_LIBRARIES)
+        list( PREPEND libs ${CBLAS_LIBRARIES} )
+      endif()
     endif()
+
+    # defines to set cblas.h to 64-bit indices
+    set ( defs "WeirdNEC" "LAPACK_ILP64" "USE64BITINT" "OPENBLAS_USE64BITINT")
   endif()
   set( ${cblas_libs} ${libs} PARENT_SCOPE )
+  set( ${cblas_defs} ${defs} PARENT_SCOPE )
 endfunction( )
 
 function( apply_omp_settings lib_target_ )
@@ -92,7 +117,13 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
 endif()
 
 # This project may compile dependencies for clients
-project( hipblas-clients LANGUAGES CXX Fortran )
+if ( BUILD_FORTRAN_CLIENTS )
+  if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
+    set( CMAKE_Fortran_COMPILER  "gfortran" )
+  endif()
+  set( fortran_language "Fortran" )
+endif()
+project( hipblas-clients LANGUAGES CXX ${fortran_language} )
 
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )
@@ -101,7 +132,7 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 include( build-options )
 
-if( NOT WIN32 )
+if( BUILD_FORTRAN_CLIENTS )
     set(hipblas_f90_source_clients_no_solver
       include/hipblas_fortran_no_solver_module.f90
     )
@@ -117,13 +148,13 @@ endif()
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES )
   # Create hipBLAS Fortran module
-  if(NOT WIN32)
+  if( BUILD_FORTRAN_CLIENTS )
       # Set Fortran module output directory
       set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipblas)
       add_library(hipblas_fortran OBJECT ${hipblas_f90_source})
   endif()
 
-  if( NOT WIN32 )
+  if( BUILD_FORTRAN_CLIENTS )
     if( BUILD_WITH_SOLVER )
       add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} $<TARGET_OBJECTS:hipblas_fortran>)
     else()
@@ -170,10 +201,14 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   endif()
 
   set( COMMON_DEFINES HIPBLAS_BFLOAT16_CLASS ROCM_USE_FLOAT16 HIPBLAS_NO_DEPRECATED_WARNINGS ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
+  if (BUILD_FORTRAN_CLIENTS)
+    list( APPEND COMMON_DEFINES "HIPBLAS_FORTRAN_CLIENTS" )
+  endif()
 
-  message(STATUS "CLIENT COMMON_DEFINES: ${COMMON_DEFINES}")
-  message(STATUS "CLIENT COMMON CXX_OPTIONS: ${COMMON_CXX_OPTIONS}")
-  message(STATUS "CLIENT COMMON LINK: ${COMMON_LINK_LIBS}")
+  # Default search for static host libraries
+  if(NOT DEFINED BLA_STATIC)
+    set(BLA_STATIC ON)
+  endif()
 
   if( NOT WIN32 )
     if (LINK_BLIS)
@@ -196,14 +231,16 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       else()
         # fallbacks include earlier blis
         get_lapack( LAPACK_LIB LAPACK_INCLUDE_DIR )
-        get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR )
+        get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR BLAS_DEFINES )
         list( PREPEND BLAS_LIBRARY ${LAPACK_LIB} )
+        list( APPEND COMMON_DEFINES ${BLAS_DEFINES} )
       endif()
     else()
       # Linking lapack library requires fortran flags
       get_lapack( LAPACK_LIB LAPACK_INCLUDE_DIR )
-      get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR )
+      get_cblas( BLAS_LIBRARY BLAS_INCLUDE_DIR BLAS_DEFINES )
       list( PREPEND BLAS_LIBRARY ${LAPACK_LIB} )
+      list( APPEND COMMON_DEFINES ${BLAS_DEFINES} )
     endif()
   else() # WIN32
     file(TO_CMAKE_PATH "C:/Program\ Files/AMD/AOCL-Windows" AOCL_ROOT)
@@ -226,6 +263,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     endif()
   endif()
 
+  message(STATUS "CLIENT COMMON_DEFINES: ${COMMON_DEFINES}")
+  message(STATUS "CLIENT COMMON CXX_OPTIONS: ${COMMON_CXX_OPTIONS}")
+  message(STATUS "CLIENT COMMON LINK: ${COMMON_LINK_LIBS}")
+
   if ( DEFINED BLIS_INCLUDE_DIR )
     set( BLIS_CPP ../common/blis_interface.cpp )
   endif()
@@ -236,6 +277,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   find_package( GTest REQUIRED )
 
   message(STATUS "Build Dir: ${BUILD_DIR}")
+  message(STATUS "LINK_BLIS: ${LINK_BLIS}")
   message(STATUS "Linking Libs: ${BLAS_LIBRARY}")
 
   if( NOT TARGET hipblas )

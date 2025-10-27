@@ -179,11 +179,9 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
             iot::mapRequired(io, "unroll_x", params.unrollX);
             iot::mapRequired(io, "unroll_y", params.unrollY);
-            iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
-            iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
+            iot::mapRequired(io, "load_A", params.loadPathA);
+            iot::mapRequired(io, "load_B", params.loadPathB);
             iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
-            iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
-            iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
             iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
@@ -202,6 +200,7 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "streamK", params.streamK);
             iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
+            iot::mapRequired(io, "streamKTwoTileDPFirst", params.streamKTwoTileDPFirst);
 
             iot::mapOptional(io, "version", params.version);
         }

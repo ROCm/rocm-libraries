@@ -34,9 +34,9 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
   .. grid-item-card:: Conceptual
 
     * :doc:`Programming guide <./conceptual/programmers-guide>`
-
     * :ref:`curand-compatibility`
     * :ref:`dynamic-ordering-configuration`
+    * :doc:`Random number generators <./conceptual/generator-types>`
 
   .. grid-item-card:: Examples
 

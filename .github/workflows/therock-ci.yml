@@ -15,6 +15,7 @@ on:
       projects:
         type: string
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
+  workflow_call:
 
 permissions:
   contents: read
@@ -33,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       projects: ${{ steps.projects.outputs.projects }}
+      test_type: ${{ steps.projects.outputs.test_type }}
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -51,27 +53,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pydantic requests
 
-      - name: Detect changed subtrees
-        id: detect
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python .github/scripts/pr_detect_changed_subtrees.py \
-            --repo "${{ github.repository }}" \
-            --pr "${{ github.event.pull_request.number }}" \
-            --config ".github/repos-config.json"
-
       - name: Determine projects to run
         id: projects
         env:
-          SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
   therock-ci-linux:
-    name: TheRock CI Linux
+    name: Linux (${{ matrix.projects.project_to_test }})
     permissions:
       contents: read
       id-token: write
@@ -86,10 +76,10 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
-      subtree_checkout: ${{ matrix.projects.subtree_checkout }}
+      test_type: ${{ needs.setup.outputs.test_type }}
 
   therock-ci-windows:
-    name: TheRock CI Windows
+    name: Windows (${{ matrix.projects.project_to_test }})
     permissions:
       contents: read
       id-token: write
@@ -104,7 +94,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
-      subtree_checkout: ${{ matrix.projects.subtree_checkout }}
+      test_type: ${{ needs.setup.outputs.test_type }}
 
   therock_ci_summary:
     name: TheRock CI Summary

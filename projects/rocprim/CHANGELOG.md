@@ -11,6 +11,11 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added experimental support for SPIR-V, to use the correct tuned config for part of the appliable algorithms.
 * Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+* Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
+* Added a new cmake option, `BENCHMARK_USE_AMDSMI`. It is set to `OFF` by default. When this option is set to `ON`, it lets benchmarks use AMD SMI to output more GPU statistics.
+* Added `apply_config_improvements.py`, which generates improved configs by taking the best specializations from old and new configs.
+  * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
+* Added the first tested example program for `device_search`, which is linked in the documentation.
 
 ### Changed
 
@@ -31,6 +36,14 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
 * Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+* Fixed the issue where `rocprim::device_scan_by_key` failed when performing an "in-place" inclusive scan by reusing "keys" as output, by adding a buffer to store the last keys of each block (excluding the last block). This fix only affects the specific case of reusing "keys" as output in an inclusive scan, and does not affect other cases.
+
+## rocPRIM 4.0.1 for ROCm 7.0.2
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+* Fixed a HIP version check used to determine whether hipStreamLegacy is supported. This resolves runtime errors that occur when hipStreamLegacy is used in versions of ROCm later than 6.4.
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 
