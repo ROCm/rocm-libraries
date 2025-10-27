@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -43,8 +43,9 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
         this->batch_count = 1;
 
-        this->filename      = "";
-        this->function_name = "";
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
+        this->category[0] = '\0';
 
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
@@ -56,6 +57,8 @@ hipsparse_arguments_config::hipsparse_arguments_config()
         this->betai      = 0.0;
         this->threshold  = 0.0;
         this->percentage = 0.0;
+        this->c          = 1.0;
+        this->s          = 1.0;
 
         this->transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
         this->transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
@@ -162,7 +165,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "Batch count (default: 1)")
 
     ("file",
-     value<std::string>(&this->filename)->default_value(""),
+     value<std::string>(&this->b_filename)->default_value(""),
      "read from file with file extension detection.")
 
     ("alpha",
@@ -223,7 +226,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "N = no level data, L = level data, (default = N)")
 
     ("function,f",
-     value<std::string>(&this->function_name)->default_value("axpyi"),
+     value<std::string>(&function_name)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
      "  Level2: bsrsv2, coomv, csrmv, csrsv, gemvi, hybmv\n"
@@ -281,39 +284,39 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "Indicates whether a sparse matrix is laid out in coo format: 0, coo_aos format: 1, csr format: 2, csc format: 3, bell format: 4 (default:0)")
 
     ("csr2csc_alg",
-     value<int>(&this->csr2csc_alg)->default_value(csr2csc_alg_support::get_default_algorithm()),
+     value<int>(&this->b_csr2csc_alg)->default_value(csr2csc_alg_support::get_default_algorithm()),
      csr2csc_alg_support::get_description())
 
     ("dense2sparse_alg",
-     value<int>(&this->dense2sparse_alg)->default_value(dense2sparse_alg_support::get_default_algorithm()),
+     value<int>(&this->b_dense2sparse_alg)->default_value(dense2sparse_alg_support::get_default_algorithm()),
      dense2sparse_alg_support::get_description())
 
     ("sparse2dense_alg",
-     value<int>(&this->sparse2dense_alg)->default_value(sparse2dense_alg_support::get_default_algorithm()),
+     value<int>(&this->b_sparse2dense_alg)->default_value(sparse2dense_alg_support::get_default_algorithm()),
      sparse2dense_alg_support::get_description())
 
     ("sddmm_alg",
-     value<int>(&this->sddmm_alg)->default_value(sddmm_alg_support::get_default_algorithm()),
+     value<int>(&this->b_sddmm_alg)->default_value(sddmm_alg_support::get_default_algorithm()),
      sddmm_alg_support::get_description())
 
     ("spgemm_alg",
-     value<int>(&this->spgemm_alg)->default_value(spgemm_alg_support::get_default_algorithm()),
+     value<int>(&this->b_spgemm_alg)->default_value(spgemm_alg_support::get_default_algorithm()),
      spgemm_alg_support::get_description())
 
     ("spmm_alg",
-     value<int>(&this->spmm_alg)->default_value(spmm_alg_support::get_default_algorithm()),
+     value<int>(&this->b_spmm_alg)->default_value(spmm_alg_support::get_default_algorithm()),
      spmm_alg_support::get_description())
 
     ("spmv_alg",
-     value<int>(&this->spmv_alg)->default_value(spmv_alg_support::get_default_algorithm()),
+     value<int>(&this->b_spmv_alg)->default_value(spmv_alg_support::get_default_algorithm()),
      spmv_alg_support::get_description())
 
     ("spsm_alg",
-     value<int>(&this->spsm_alg)->default_value(spsm_alg_support::get_default_algorithm()),
+     value<int>(&this->b_spsm_alg)->default_value(spsm_alg_support::get_default_algorithm()),
      spsm_alg_support::get_description())
 
     ("spsv_alg",
-     value<int>(&this->spsv_alg)->default_value(spsv_alg_support::get_default_algorithm()),
+     value<int>(&this->b_spsv_alg)->default_value(spsv_alg_support::get_default_algorithm()),
      spsv_alg_support::get_description())
 
     ("ell_width",
@@ -390,6 +393,22 @@ int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&
     this->orderC  = (this->b_orderC == 0) ? HIPSPARSE_ORDER_ROW : HIPSPARSE_ORDER_COL;
     this->formatA = (hipsparseFormat_t)this->b_formatA;
     this->formatB = (hipsparseFormat_t)this->b_formatB;
+
+    this->csr2csc_alg = (hipsparseCsr2CscAlg_t)this->b_csr2csc_alg;
+    this->dense2sparse_alg = (hipsparseDenseToSparseAlg_t)this->b_dense2sparse_alg;
+    this->sparse2dense_alg = (hipsparseSparseToDenseAlg_t)this->b_sparse2dense_alg;
+    this->sddmm_alg = (hipsparseSDDMMAlg_t)this->b_sddmm_alg;
+    this->spgemm_alg = (hipsparseSpGEMMAlg_t)this->b_spgemm_alg;
+    this->spmm_alg = (hipsparseSpMMAlg_t)this->b_spmm_alg;
+    this->spmv_alg = (hipsparseSpMVAlg_t)this->b_spmv_alg;
+    this->spsm_alg = (hipsparseSpSMAlg_t)this->b_spsm_alg;
+    this->spsv_alg = (hipsparseSpSVAlg_t)this->b_spsv_alg;
+
+    strncpy(this->filename, this->b_filename.c_str(), this->b_filename.length());
+    this->filename[this->b_filename.length()] = '\0';
+
+    strncpy(this->function, this->function_name.c_str(), this->function_name.length());
+    this->function[this->function_name.length()] = '\0';
 
     if(this->M < 0 || this->N < 0)
     {

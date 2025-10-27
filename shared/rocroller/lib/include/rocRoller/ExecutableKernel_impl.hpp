@@ -24,6 +24,10 @@
  *
  *******************************************************************************/
 
+#pragma once
+
+#include <rocRoller/ExecutableKernel.hpp>
+
 namespace rocRoller
 {
     inline bool ExecutableKernel::kernelLoaded() const

@@ -1,18 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(GTest CONFIG REQUIRED)
-endif()
-
-include(GoogleTest)
-
-
-if(HIP_DNN_SKIP_TESTS)
-    message(STATUS "Skipping MIOpen Legacy Plugin tests")
-    return()
-endif()
-
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
@@ -23,9 +11,12 @@ add_executable(miopen_legacy_plugin_tests
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
+    engines/plans/TestMiopenConvBwdPlan.cpp
+    engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
+    TestMiopenActivationDescriptor.cpp
     TestMiopenBatchnormFwdInferenceOperations.cpp
     TestMiopenBatchnormBwdOperations.cpp
     TestMiopenConvFwdOperations.cpp
@@ -60,11 +51,8 @@ target_include_directories(miopen_legacy_plugin_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin_tests)
-    
-    add_target_to_check_targets(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
-MakeExecutableRelocatable(miopen_legacy_plugin_tests "$ORIGIN/../lib/hipdnn_plugins/engines")
+add_unit_test_target(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})

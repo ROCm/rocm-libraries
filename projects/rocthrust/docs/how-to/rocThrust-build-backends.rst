@@ -9,8 +9,7 @@ Building rocThrust applications on different backends
 
 Applications that use the rocThrust libraries can be built for different backends.
 
-rocThrust supports CPP, OpenMP, and TBB on HOST and device, and NVIDIA CUDA on device only.
-
+rocThrust supports CPP, OpenMP, and TBB on HOST and device. NVIDIA CUDA is supported on device only.
 
 The ``THRUST_HOST_SYSTEM``, ``_THRUST_HOST_SYSTEM_NAMESPACE``, ``THRUST_DEVICE_SYSTEM``, and ``_THRUST_DEVICE_SYSTEM_NAMESPACE`` build options specify the backend to use.
 

@@ -8,6 +8,21 @@
 
 using namespace hipdnn_sdk::utilities;
 
+TEST(TestTensor, Swap)
+{
+    Tensor<float> tensorA({2, 2});
+    Tensor<float> tensorB{{2}};
+    tensorA.fillWithValue(1.f);
+    tensorB.fillWithValue(2.f);
+
+    std::swap(tensorA, tensorB);
+
+    ASSERT_EQ(tensorA.dims().size(), 1);
+    ASSERT_EQ(tensorB.dims().size(), 2);
+    ASSERT_EQ(tensorA.memory().hostData()[0], 2.f);
+    ASSERT_EQ(tensorB.memory().hostData()[0], 1.f);
+}
+
 TEST(TestTensor, BasicRowMajorUsage)
 {
     Tensor<float> tensor({1, 2, 3, 4});
@@ -186,6 +201,18 @@ TEST(TestTensor, SetHostValueWithVector)
     EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2), 10.0f);
     EXPECT_FLOAT_EQ(tensor.getHostValue(1, 0, 3), 20.0f);
     EXPECT_FLOAT_EQ(tensor.getHostValue(1, 2, 1), 30.0f);
+}
+
+TEST(TestTensor, FillWithData)
+{
+    std::vector<int> data{0, 1, 2, 3};
+    Tensor<int> tensor({2, 2});
+    tensor.fillWithData(data.data(), data.size() * sizeof(int));
+
+    for(size_t i = 0; i < data.size(); i++)
+    {
+        EXPECT_EQ(data[i], tensor.memory().hostData()[i]);
+    }
 }
 
 TEST(TestTensor, MixedIndexingMethods)
@@ -409,4 +436,111 @@ TEST(TestTensor, GetIndex5DNdhwc)
     EXPECT_EQ(tensor.getIndex(1, 1, 2, 3, 4), 239);
     std::vector<int64_t> indices = {1, 1, 2, 3, 4};
     EXPECT_EQ(tensor.getIndex(indices), 239);
+}
+
+TEST(TestTensor, ConstructorThrowsOnMismatchedDimsAndStrides)
+{
+    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> strides = {12, 4}; // Only 2 strides for 3 dims
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnNegativeDimension)
+{
+    std::vector<int64_t> dims = {2, -3, 4};
+    std::vector<int64_t> strides = {12, 4, 1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnZeroDimension)
+{
+    std::vector<int64_t> dims = {2, 0, 4};
+    std::vector<int64_t> strides = {12, 4, 1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnNegativeStride)
+{
+    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> strides = {12, -4, 1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnZeroStride)
+{
+    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> strides = {12, 0, 1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnMultipleInvalidDimensions)
+{
+    std::vector<int64_t> dims = {-2, 1, -4};
+    std::vector<int64_t> strides = {12, 4, 1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+TEST(TestTensor, ConstructorThrowsOnMultipleInvalidStrides)
+{
+    std::vector<int64_t> dims = {2, 3, 4};
+    std::vector<int64_t> strides = {-12, 1, -1};
+
+    EXPECT_THROW(Tensor<float> tensor(dims, strides), std::invalid_argument);
+}
+
+// Sparse (strided) tensor test
+TEST(TestTensor, SparseTensorCreationAndUsage)
+{
+    // Create a sparse tensor with dims {2,2,2,2} and strides {2,4,8,16}
+    // This represents a non-packed layout with gaps in memory
+    std::vector<int64_t> dims = {2, 2, 2, 2};
+    std::vector<int64_t> strides = {2, 4, 8, 16};
+
+    Tensor<float> tensor(dims, strides);
+
+    // Verify properties
+    EXPECT_EQ(tensor.dims(), dims);
+    EXPECT_EQ(tensor.strides(), strides);
+    EXPECT_EQ(tensor.elementCount(), 16); // Logical elements: 2*2*2*2
+
+    // But calculateElementSpace returns sum of (dim-1)*stride
+    // = (2-1)*2 + (2-1)*4 + (2-1)*8 + (2-1)*16 = 2+4+8+16 = 30
+    // Add the init value of 1 and you get 31
+    EXPECT_EQ(tensor.elementSpace(), 31);
+
+    // Verify it's not packed
+    EXPECT_FALSE(tensor.isPacked());
+
+    // Test setting and getting values at different indices
+    tensor.fillWithValue(0.0f);
+
+    // Set values at specific logical indices
+    tensor.setHostValue(10.0f, 0, 0, 0, 0); // Offset: 0
+    tensor.setHostValue(20.0f, 1, 0, 0, 0); // Offset: 1*2 = 2
+    tensor.setHostValue(30.0f, 0, 1, 0, 0); // Offset: 1*4 = 4
+    tensor.setHostValue(40.0f, 0, 0, 1, 0); // Offset: 1*8 = 8
+    tensor.setHostValue(50.0f, 0, 0, 0, 1); // Offset: 1*16 = 16
+    tensor.setHostValue(99.0f, 1, 1, 1, 1); // Offset: 2+4+8+16 = 30
+
+    // Verify values
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 0, 0, 0), 10.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(1, 0, 0, 0), 20.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 0, 0), 30.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 0, 1, 0), 40.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 0, 0, 1), 50.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(1, 1, 1, 1), 99.0f);
+
+    // Verify index calculations
+    EXPECT_EQ(tensor.getIndex(0, 0, 0, 0), 0);
+    EXPECT_EQ(tensor.getIndex(1, 0, 0, 0), 2);
+    EXPECT_EQ(tensor.getIndex(0, 1, 0, 0), 4);
+    EXPECT_EQ(tensor.getIndex(0, 0, 1, 0), 8);
+    EXPECT_EQ(tensor.getIndex(0, 0, 0, 1), 16);
+    EXPECT_EQ(tensor.getIndex(1, 1, 1, 1), 30);
 }

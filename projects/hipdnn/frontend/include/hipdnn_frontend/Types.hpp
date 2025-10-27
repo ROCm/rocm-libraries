@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
@@ -161,6 +162,27 @@ inline hipdnn_sdk::data_objects::DataType toSdkType(const DataType& type)
     }
 }
 
+inline hipdnn_frontend::DataType fromSdkType(const hipdnn_sdk::data_objects::DataType& type)
+{
+    switch(type)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return hipdnn_frontend::DataType::FLOAT;
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return hipdnn_frontend::DataType::HALF;
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return hipdnn_frontend::DataType::BFLOAT16;
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return hipdnn_frontend::DataType::DOUBLE;
+    case hipdnn_sdk::data_objects::DataType::UINT8:
+        return hipdnn_frontend::DataType::UINT8;
+    case hipdnn_sdk::data_objects::DataType::INT32:
+        return hipdnn_frontend::DataType::INT32;
+    default:
+        return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
 inline hipdnn_sdk::data_objects::PointwiseMode toSdkType(const PointwiseMode& type)
 {
     switch(type)
@@ -302,107 +324,38 @@ inline std::ostream& operator<<(std::ostream& os, const DataType& type)
     return os << to_string(type);
 }
 
-// Bitset size based on the maximum PointwiseMode value + 1
-static constexpr size_t POINTWISE_MODE_COUNT
-    = static_cast<size_t>(hipdnn_sdk::data_objects::PointwiseMode::MAX) + 1;
-
-using PointwiseModeBitset = std::bitset<POINTWISE_MODE_COUNT>;
-
-constexpr size_t toBitPosition(PointwiseMode mode)
-{
-    return static_cast<size_t>(mode);
-}
-
-inline const PointwiseModeBitset& getUnaryModesBitset()
-{
-    static const PointwiseModeBitset unaryModes = []() {
-        PointwiseModeBitset bitset;
-        bitset.set(toBitPosition(PointwiseMode::ABS));
-        bitset.set(toBitPosition(PointwiseMode::CEIL));
-        bitset.set(toBitPosition(PointwiseMode::ELU_FWD));
-        bitset.set(toBitPosition(PointwiseMode::ERF));
-        bitset.set(toBitPosition(PointwiseMode::EXP));
-        bitset.set(toBitPosition(PointwiseMode::FLOOR));
-        bitset.set(toBitPosition(PointwiseMode::GELU_APPROX_TANH_FWD));
-        bitset.set(toBitPosition(PointwiseMode::GELU_FWD));
-        bitset.set(toBitPosition(PointwiseMode::GEN_INDEX));
-        bitset.set(toBitPosition(PointwiseMode::IDENTITY));
-        bitset.set(toBitPosition(PointwiseMode::LOG));
-        bitset.set(toBitPosition(PointwiseMode::LOGICAL_NOT));
-        bitset.set(toBitPosition(PointwiseMode::NEG));
-        bitset.set(toBitPosition(PointwiseMode::RECIPROCAL));
-        bitset.set(toBitPosition(PointwiseMode::RELU_FWD));
-        bitset.set(toBitPosition(PointwiseMode::RSQRT));
-        bitset.set(toBitPosition(PointwiseMode::SIGMOID_FWD));
-        bitset.set(toBitPosition(PointwiseMode::SIN));
-        bitset.set(toBitPosition(PointwiseMode::SOFTPLUS_FWD));
-        bitset.set(toBitPosition(PointwiseMode::SQRT));
-        bitset.set(toBitPosition(PointwiseMode::SWISH_FWD));
-        bitset.set(toBitPosition(PointwiseMode::TAN));
-        bitset.set(toBitPosition(PointwiseMode::TANH_FWD));
-        return bitset;
-    }();
-    return unaryModes;
-}
-
-inline const PointwiseModeBitset& getBinaryModesBitset()
-{
-    static const PointwiseModeBitset binaryModes = []() {
-        PointwiseModeBitset bitset;
-        bitset.set(toBitPosition(PointwiseMode::ADD));
-        bitset.set(toBitPosition(PointwiseMode::ADD_SQUARE));
-        bitset.set(toBitPosition(PointwiseMode::CMP_EQ));
-        bitset.set(toBitPosition(PointwiseMode::CMP_GE));
-        bitset.set(toBitPosition(PointwiseMode::CMP_GT));
-        bitset.set(toBitPosition(PointwiseMode::CMP_LE));
-        bitset.set(toBitPosition(PointwiseMode::CMP_LT));
-        bitset.set(toBitPosition(PointwiseMode::CMP_NEQ));
-        bitset.set(toBitPosition(PointwiseMode::DIV));
-        bitset.set(toBitPosition(PointwiseMode::ELU_BWD));
-        bitset.set(toBitPosition(PointwiseMode::GELU_APPROX_TANH_BWD));
-        bitset.set(toBitPosition(PointwiseMode::GELU_BWD));
-        bitset.set(toBitPosition(PointwiseMode::LOGICAL_AND));
-        bitset.set(toBitPosition(PointwiseMode::LOGICAL_OR));
-        bitset.set(toBitPosition(PointwiseMode::MAX));
-        bitset.set(toBitPosition(PointwiseMode::MIN));
-        bitset.set(toBitPosition(PointwiseMode::MUL));
-        bitset.set(toBitPosition(PointwiseMode::RELU_BWD));
-        bitset.set(toBitPosition(PointwiseMode::SIGMOID_BWD));
-        bitset.set(toBitPosition(PointwiseMode::SOFTPLUS_BWD));
-        bitset.set(toBitPosition(PointwiseMode::SUB));
-        bitset.set(toBitPosition(PointwiseMode::SWISH_BWD));
-        bitset.set(toBitPosition(PointwiseMode::TANH_BWD));
-        return bitset;
-    }();
-    return binaryModes;
-}
-
-inline const PointwiseModeBitset& getTernaryModesBitset()
-{
-    static const PointwiseModeBitset ternaryModes = []() {
-        PointwiseModeBitset bitset;
-        bitset.set(toBitPosition(PointwiseMode::BINARY_SELECT));
-        return bitset;
-    }();
-    return ternaryModes;
-}
+// Frontend functions delegate to SDK for single source of truth
+// Convert frontend PointwiseMode to SDK type and call SDK validation functions
 
 inline bool isUnaryPointwiseMode(PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
-    return position < POINTWISE_MODE_COUNT && getUnaryModesBitset().test(position);
+    return hipdnn_sdk::utilities::isUnaryPointwiseMode(toSdkType(mode));
 }
 
 inline bool isBinaryPointwiseMode(PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
-    return position < POINTWISE_MODE_COUNT && getBinaryModesBitset().test(position);
+    return hipdnn_sdk::utilities::isBinaryPointwiseMode(toSdkType(mode));
 }
 
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
-    auto position = toBitPosition(mode);
-    return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
+    return hipdnn_sdk::utilities::isTernaryPointwiseMode(toSdkType(mode));
+}
+
+// Expose SDK bitset functions for compatibility (delegate to SDK)
+inline const auto& getUnaryModesBitset()
+{
+    return hipdnn_sdk::utilities::getUnaryModesBitset();
+}
+
+inline const auto& getBinaryModesBitset()
+{
+    return hipdnn_sdk::utilities::getBinaryModesBitset();
+}
+
+inline const auto& getTernaryModesBitset()
+{
+    return hipdnn_sdk::utilities::getTernaryModesBitset();
 }
 
 } // namespace hipdnn_frontend

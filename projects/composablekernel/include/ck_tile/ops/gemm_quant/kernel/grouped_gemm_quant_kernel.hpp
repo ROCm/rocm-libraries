@@ -305,8 +305,8 @@ struct QuantGroupedGemmKernel
     {
         const auto [iM, iN] = block_idx_2d;
 
-        const index_t i_m = __builtin_amdgcn_readfirstlane(iM * TilePartitioner::MPerBlock);
-        const index_t i_n = __builtin_amdgcn_readfirstlane(iN * TilePartitioner::NPerBlock);
+        const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
+        const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
 
         const typename Base::SplitKBatchOffset splitk_batch_offset(kargs, block_idx_z);
 
@@ -392,6 +392,13 @@ struct QuantGroupedGemmKernel
                 smem_ptr_0,
                 aq_block_window,
                 bq_block_window);
+        }
+        else if constexpr(kQuantType == QuantType::TensorQuant)
+        {
+            const AccDataType aq_scale = type_convert<AccDataType>(*aq_ptr);
+            const AccDataType bq_scale = type_convert<AccDataType>(*bq_ptr);
+            EpiloguePipeline{}(
+                c_block_window, c_block_tile, c_block_window, smem_ptr_0, aq_scale, bq_scale);
         }
     }
 

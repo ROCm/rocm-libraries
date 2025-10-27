@@ -410,6 +410,8 @@ void TreeNode::CollapseContiguousDims()
         auto curStride = dist;
         for(auto i = collapsibleDims.rbegin(); i != collapsibleDims.rend(); ++i)
         {
+            if(stride[*i] == 0)
+                break;
             if(curStride % stride[*i] != 0)
                 break;
             if(curStride / stride[*i] != length[*i])
@@ -529,6 +531,16 @@ void MultiPlanItem::WaitCommRequests()
 #endif
 }
 
+#ifdef ROCFFT_MPI_ENABLE
+MPI_Comm MultiPlanItem::ActiveMPIComm(rocfft_plan plan) const
+{
+    if(subcomm)
+        return *subcomm;
+    else
+        return plan->mpi_comm;
+}
+#endif
+
 void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                     void*                 in_buffer[],
                                     void*                 out_buffer[],
@@ -587,7 +599,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           destLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->desc.mpi_comm,
+                                          plan->mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -604,7 +616,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           srcLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->desc.mpi_comm,
+                                          plan->mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -701,7 +713,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               op.destLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->desc.mpi_comm,
+                                              plan->mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -718,7 +730,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               srcLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->desc.mpi_comm,
+                                              plan->mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -838,7 +850,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        destLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->desc.mpi_comm,
+                                       plan->mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Isend failed: " + std::to_string(rcmpi));
@@ -852,7 +864,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        op.srcLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->desc.mpi_comm,
+                                       plan->mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Irecv failed: " + std::to_string(rcmpi));
@@ -916,92 +928,35 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
     }
 
 #ifdef ROCFFT_MPI_ENABLE
+    auto mpi_comm = ActiveMPIComm(plan);
 
-    // check that we have as many elems in our count/offset buffers as
-    // we have ranks
-    size_t num_ranks;
-    int    subcomm_rank;
-    if(subcomm)
-    {
-        int tmp_num_ranks = 0;
-        MPI_Comm_size(subcomm, &tmp_num_ranks);
-        if(tmp_num_ranks < 0)
-            throw std::runtime_error("Sub-communicator size is not positive");
-        num_ranks = static_cast<size_t>(tmp_num_ranks);
-        MPI_Comm_rank(subcomm, &subcomm_rank);
-    }
-    else
-    {
-        num_ranks = plan->get_local_comm_size();
-    }
+    MPI_Request  request;
+    MPI_Datatype elem_type       = rocfft_type_to_mpi_type(precision, arrayType);
+    const int    local_comm_rank = plan->get_local_comm_rank();
 
-    if(sendOffsets.size() != num_ranks || sendCounts.size() != num_ranks
-       || recvOffsets.size() != num_ranks || recvCounts.size() != num_ranks)
-    {
-        throw std::runtime_error(
-            "CommAllToAll: number of counts/offsets does not match number of ranks");
-    }
-
-    int global_rank = local_comm_rank;
-
-    const auto  elem_size = element_size(precision, arrayType);
-    MPI_Request request;
-
-    if(subcomm)
-    {
-        if(LOG_PLAN_ENABLED())
-            log_plan("Using MPI_Ialltoall with sub-communicators\n");
-
-        // optimization with pencil sub-communicators
-        if(!uniform_counts)
-            throw std::runtime_error(
-                "CommAllToAll::ExecuteAsync: non-uniform counts in pencil subcomm!");
-
-        void* send_ptr = sendBuf.get(in_buffer, out_buffer, local_comm_rank);
-        void* recv_ptr = recvBuf.get(in_buffer, out_buffer, local_comm_rank);
-
-        if(!send_ptr || !recv_ptr)
-        {
-            throw std::runtime_error("Buffer pointer(s) are null!");
-        }
-
-        // in subcomm: sendCounts, recvCounts, etc are sized for num_ranks, indexed by subcomm_rank
-        const int send_count_bytes = static_cast<int>(uniform_count_inside_subcomm * elem_size);
-
-        int ret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                send_count_bytes,
-                                MPI_CHAR,
-                                recvBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                send_count_bytes,
-                                MPI_CHAR,
-                                subcomm,
-                                &request);
-
-        if(ret != MPI_SUCCESS)
-        {
-            char errmsg[MPI_MAX_ERROR_STRING];
-            int  errlen = 0;
-            MPI_Error_string(ret, errmsg, &errlen);
-            comm_status   = COMM_MPI_ERROR;
-            error_message = "MPI_Ialltoall (subcomm) failed on global rank "
-                            + std::to_string(global_rank) + ": " + std::string(errmsg);
-            return;
-        }
-    }
-    else if(uniform_counts)
+    if(uniform_counts)
     {
         if(LOG_PLAN_ENABLED())
             log_plan("Using MPI_Ialltoall\n");
 
-        const int send_count_bytes = static_cast<int>(sendCounts[0] * elem_size);
+        size_t send_count_elems = sendCounts[0];
+        if(send_count_elems > static_cast<size_t>(std::numeric_limits<int>::max()))
+        {
+            comm_status   = COMM_MPI_ERROR;
+            error_message = "send count too large to fit in MPI int on rank "
+                            + std::to_string(local_comm_rank);
+            return;
+        }
+
+        const int send_count = static_cast<int>(send_count_elems);
 
         const auto mpiret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
+                                          send_count,
+                                          elem_type,
                                           recvBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
-                                          plan->desc.mpi_comm,
+                                          send_count,
+                                          elem_type,
+                                          mpi_comm,
                                           &request);
 
         if(mpiret != MPI_SUCCESS)
@@ -1023,32 +978,45 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
             log_plan("Using MPI_Ialltoallv\n");
 
         // non-uniform exchange case (default)
-        const int local_comm_rank = plan->get_local_comm_rank();
 
-        // MPI takes ints for everything, convert our size_t elements to int bytes
-        auto convertToInt = [](const std::vector<size_t>& src, std::vector<int>& dest) {
+        // MPI takes ints for everything, safely convert our size_t elements to int bytes
+        // prevent overflow for large batched transforms
+        auto convertToInt = [&](const std::vector<size_t>& src, std::vector<int>& dest) -> bool {
+            dest.clear();
             dest.reserve(src.size());
-            std::copy(src.begin(), src.end(), std::back_inserter(dest));
+            for(size_t v : src)
+            {
+                if(v > static_cast<size_t>(std::numeric_limits<int>::max()))
+                    return false; // overflow
+                dest.push_back(static_cast<int>(v));
+            }
+            return true;
         };
 
         std::vector<int> intSendOffsets;
         std::vector<int> intSendCounts;
         std::vector<int> intRecvOffsets;
         std::vector<int> intRecvCounts;
-        convertToInt(sendOffsets, intSendOffsets);
-        convertToInt(sendCounts, intSendCounts);
-        convertToInt(recvOffsets, intRecvOffsets);
-        convertToInt(recvCounts, intRecvCounts);
+
+        if(!convertToInt(sendOffsets, intSendOffsets) || !convertToInt(sendCounts, intSendCounts)
+           || !convertToInt(recvOffsets, intRecvOffsets)
+           || !convertToInt(recvCounts, intRecvCounts))
+        {
+            comm_status   = COMM_MPI_ERROR;
+            error_message = "send/recv counts or offsets too large to fit in MPI int on rank "
+                            + std::to_string(local_comm_rank);
+            return;
+        }
 
         const auto mpiret = MPI_Ialltoallv(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
                                            intSendCounts.data(),
                                            intSendOffsets.data(),
-                                           rocfft_type_to_mpi_type(precision, arrayType),
+                                           elem_type,
                                            recvBuf.get(in_buffer, out_buffer, local_comm_rank),
                                            intRecvCounts.data(),
                                            intRecvOffsets.data(),
-                                           rocfft_type_to_mpi_type(precision, arrayType),
-                                           plan->desc.mpi_comm,
+                                           elem_type,
+                                           mpi_comm,
                                            &request);
 
         if(mpiret != MPI_SUCCESS)
@@ -1096,11 +1064,6 @@ void CommAllToAll::Print(rocfft_ostream& os, const int indent) const
             os << val << " ";
         os << "\n";
     };
-
-    // determine whether counts are uniform
-    auto count_matches_first = [&](size_t count) { return count == sendCounts[0]; };
-    bool uniform_counts = std::all_of(sendCounts.begin(), sendCounts.end(), count_matches_first)
-                          && std::all_of(recvCounts.begin(), recvCounts.end(), count_matches_first);
 
     os << indentStr << "CommAllToAll " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << (uniform_counts ? " (MPI_Ialltoall)" : " (MPI_Ialltoallv)")

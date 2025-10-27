@@ -8,7 +8,7 @@
 namespace hipdnn_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& batchnormJson, BatchnormBackwardAttributes const& bn)
+inline void to_json(nlohmann::json& batchnormJson, const BatchnormBackwardAttributes& bn)
 {
     auto& inputs = batchnormJson["inputs"] = {};
 
@@ -17,7 +17,7 @@ void to_json(nlohmann::json& batchnormJson, BatchnormBackwardAttributes const& b
     inputs["mean_tensor_uid"] = bn.mean_tensor_uid();
     inputs["inv_variance_tensor_uid"] = bn.inv_variance_tensor_uid();
     inputs["scale_tensor_uid"] = bn.scale_tensor_uid();
-    inputs["peer_stats_tensor_uid"] = *bn.peer_stats_tensor_uid();
+    inputs["peer_stats_tensor_uid"] = bn.peer_stats_tensor_uid();
 
     auto& outputs = batchnormJson["outputs"] = {};
     outputs["dbias_tensor_uid"] = bn.dbias_tensor_uid();
@@ -29,8 +29,8 @@ void to_json(nlohmann::json& batchnormJson, BatchnormBackwardAttributes const& b
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::BatchnormBackwardAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                                   const nlohmann::json& entry)
+inline auto to<data_objects::BatchnormBackwardAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                          const nlohmann::json& entry)
 {
     using namespace data_objects;
     auto& inputs = entry.at("inputs");

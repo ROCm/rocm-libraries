@@ -4,6 +4,7 @@
 
 #include "Error.hpp"
 #include "attributes/TensorAttributes.hpp"
+#include "node/Node.hpp"
 #include <algorithm>
 #include <hipdnn_backend.h>
 #include <hipdnn_sdk/logging/CallbackTypes.h>
@@ -75,6 +76,75 @@ inline TensorAttributes
         .set_stride(tensor.strides());
 }
 
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             DataType dataType,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
+        strides);
+}
+
+inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+    createTensorFromAttribute(const TensorAttributes& attribute)
+{
+    switch(attribute.get_data_type())
+    {
+    case DataType::FLOAT:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<float>>(attribute.get_dim(),
+                                                                      attribute.get_stride());
+    case DataType::HALF:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<half>>(attribute.get_dim(),
+                                                                     attribute.get_stride());
+    case DataType::BFLOAT16:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<hip_bfloat16>>(
+            attribute.get_dim(), attribute.get_stride());
+    case DataType::DOUBLE:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<double>>(attribute.get_dim(),
+                                                                       attribute.get_stride());
+    case DataType::UINT8:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<uint8_t>>(attribute.get_dim(),
+                                                                        attribute.get_stride());
+    case DataType::INT32:
+        return std::make_unique<hipdnn_sdk::utilities::Tensor<int32_t>>(attribute.get_dim(),
+                                                                        attribute.get_stride());
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
+// Visit a tree of INodes with a lambda function
+// Performs pre-order traversal (visits parent before children)
+// Example usage:
+//   visitTree(rootNode, [](INode& node) {
+//       // Process node
+//   });
+template <typename Func>
+inline void visitGraph(INode& root, Func&& visitor)
+{
+    // Visit current node first (pre-order traversal)
+    visitor(root);
+
+    // Then visit all children
+    for(const auto& child : root.getSubNodes())
+    {
+        if(child)
+        {
+            visitGraph(*child, std::forward<Func>(visitor));
+        }
+    }
+}
+
+// Overload for shared_ptr
+template <typename Func>
+inline void visitGraph(const std::shared_ptr<INode>& root, Func&& visitor)
+{
+    if(root)
+    {
+        visitGraph(*root, std::forward<Func>(visitor));
+    }
+}
+
 }
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)
@@ -84,10 +154,10 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
         return -1;
     }
 
-    static bool loggingInitialized = false;
-    static bool loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
+    static bool s_loggingInitialized = false;
+    static bool s_loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
 
-    if(loggingInitialized || !loggingEnabled)
+    if(s_loggingInitialized || !s_loggingEnabled)
     {
         return 0;
     }
@@ -98,7 +168,7 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     return -1;
 #endif
 
-    loggingInitialized = true;
+    s_loggingInitialized = true;
     HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
 
     return 0;

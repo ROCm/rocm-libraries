@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
@@ -25,19 +25,14 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.1.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.2.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
 list(GET VERSION_LIST 0 PROJECT_VERSION_MAJOR)
 list(GET VERSION_LIST 1 PROJECT_VERSION_MINOR)
 list(GET VERSION_LIST 2 PROJECT_VERSION_PATCH)
-list(LENGTH VERSION_LIST list_size)
-if(list_size EQUAL 4)
-    list(GET VERSION_LIST 3 PROJECT_VERSION_TWEAK)
-else()
-    rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
-endif()
+rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
 
 set(hipblaslt_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
@@ -60,6 +55,7 @@ option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
+option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -154,16 +150,16 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    if(HIPBLASLT_ENABLE_ASAN AND NOT WIN32)
-        set(ASAN_LIB_PATH "unset")
+    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN"))
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
             OUTPUT_VARIABLE ASAN_LIB_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND_ERROR_IS_FATAL ANY
         )
         # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
         # rather than /path/to/libclang_rt.asan-x86_64.so then
         # we failed to locate it and HAS_PARENT_PATH is false.
-        string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
         cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
         if(NOT result)
             message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
@@ -183,27 +179,22 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_FETCH)
-        block(SCOPE_FOR VARIABLES)
-            #set(ROCROLLER_ENABLE_FETCH ON)
-            #set(ROCROLLER_BUILD_TESTING OFF)
-            #set(ROCROLLER_ENABLE_CLIENT OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            set(BUILD_TESTING OFF)
-            set(BUILD_CLIENTS OFF)
-            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            include(FetchContent)
-            FetchContent_Declare(
-                rocRoller
-                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
-            )
-            FetchContent_MakeAvailable(rocRoller)
-        endblock()
-    else()
-        find_package(rocroller REQUIRED)
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        if(HIPBLASLT_ENABLE_THEROCK)
+            find_package(rocroller REQUIRED)
+        else()
+            block(SCOPE_FOR VARIABLES)
+                set(ROCROLLER_ENABLE_FETCH ON)
+                set(ROCROLLER_BUILD_TESTING OFF)
+                set(ROCROLLER_ENABLE_CLIENT OFF)
+                option(YAML_CPP_INSTALL "" ON)
+                set(BUILD_TESTING OFF)
+                set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+                set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+                add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
+            endblock()
+        endif()
     endif()
 endif()
 
@@ -222,7 +213,14 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     endif()
 endif()
 
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    block(SCOPE_FOR VARIABLES)
+        set(ORIGAMI_ENABLE_INSTALL OFF)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+    endblock()
+endif()
+
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -233,7 +231,6 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
-        target_link_libraries(hipblaslt PRIVATE roc::rocroller)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
     if(HIPBLASLT_ENABLE_MSGPACK)
@@ -305,7 +302,16 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     # work around code object stripping failure if using /usr/bin/strip
-    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip") # need to generalize this
+    find_program(LLVM_STRIP 
+        NAMES llvm-strip
+        PATH_SUFFIXES lib/llvm/bin llvm/bin bin
+    )
+    if(LLVM_STRIP)
+        set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
+    else()
+        message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    endif()
+
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(

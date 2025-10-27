@@ -114,7 +114,12 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 auto cpy = expr;
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
                 return std::make_shared<Expression>(std::move(cpy));
             }
 
@@ -226,7 +231,12 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 auto cpy = expr;
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
                 return std::make_shared<Expression>(std::move(cpy));
             }
 
@@ -470,6 +480,14 @@ namespace rocRoller
                 setComment(tree.back().expr, getComment(expr));
 
                 return tree;
+            }
+
+            ExpressionTree operator()(BitfieldCombine const& expr) const
+            {
+                AssertFatal(
+                    false,
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                return {};
             }
 
             template <CNary Expr>

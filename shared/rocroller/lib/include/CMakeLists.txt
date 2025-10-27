@@ -113,6 +113,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BF6.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BF8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BFloat16.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Buffer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_E8M0.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_E8M0x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_F6_Utils.hpp"
@@ -123,6 +124,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Half.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Int8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Int8x4.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Raw32.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Scale_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_UInt8x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Utils.hpp"
@@ -148,6 +150,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/Hypergraph_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/HypergraphIncidenceContainer.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Graph/HypergraphIncidenceContainer_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/InstructionValues/LDSAllocator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/InstructionValues/LDSAllocator_fwd.hpp"
@@ -279,6 +283,9 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/LoadOption.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler_fwd.hpp"

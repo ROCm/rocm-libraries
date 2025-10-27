@@ -96,14 +96,13 @@ namespace rocRoller
                     rocRoller::streamJoin(rv, std::vector{workgroupRemapXCCValue}, "");
                 }
 
-                rv << "_LDS";
-                rocRoller::streamJoin(rv, std::vector{loadLDSA, loadLDSB, storeLDSD}, "");
+                rv << "_LA" << loadPathA;
+                rv << "_LB" << loadPathB;
+
+                rv << "_SD" << storeLDSD;
 
                 rv << "_SLDS";
                 rocRoller::streamJoin(rv, std::vector{loadLDSScaleA, loadLDSScaleB}, "");
-
-                rv << "_Direct2LDS";
-                rocRoller::streamJoin(rv, std::vector{direct2LDSA, direct2LDSB}, "");
 
                 rv << "_UNROLL";
                 rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
@@ -127,10 +126,10 @@ namespace rocRoller
                 if(streamK)
                 {
                     rv << "_SK";
-                    if(streamKTwoTile)
-                    {
+                    if(streamKTwoTileDPFirst)
+                        rv << "2TDPFirst";
+                    else if(streamKTwoTile)
                         rv << "2T";
-                    }
                 }
 
                 return rv.str();
@@ -183,7 +182,8 @@ namespace rocRoller
                 s << "Arch:      " << x.architecture.toString() << std::endl;
                 if(x.streamK)
                 {
-                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile << std::endl;
+                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile
+                      << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
                 }
                 else
                 {
@@ -194,8 +194,9 @@ namespace rocRoller
                   << std::endl;
                 s << std::endl;
                 s << "SwizzleScale:        " << x.swizzleScale << std::endl;
-                s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
-                s << "Direct2LDS:       " << x.direct2LDSA << x.direct2LDSB << std::endl;
+                s << "Load A: " << x.loadPathA << std::endl;
+                s << "Load B: " << x.loadPathB << std::endl;
+                s << "Store D LDS: " << x.storeLDSD << std::endl;
                 s << "LSDScale:  " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
                 s << "Prefetch:  "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight

@@ -5,6 +5,8 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenUtils.hpp"
 
+#include <hipdnn_sdk/utilities/Constants.hpp>
+
 namespace miopen_legacy_plugin
 {
 
@@ -79,6 +81,13 @@ BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
 {
 }
 
+size_t BatchnormBwdPlan::getWorkspaceSize(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+{
+    // No workspace needed for batchnorm backward
+    return 0;
+}
+
 void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
@@ -88,7 +97,7 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     float betaDataDiff = 0.0f;
     float alphaParamDiff = 1.0f;
     float betaParamDiff = 0.0f;
-    double epsilon = 1e-3;
+    double epsilon = hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
