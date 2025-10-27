@@ -113,7 +113,7 @@ int miopenBNSpatialFwdInferHost_mt(miopenTensorDescriptor_t& inputTensor,
 
     int ret = 0;
 
-    par_for(channels, 1, [&](int cidx) {
+    miopen::par_for(channels, 1, [&](int cidx) {
         double mean       = estimatedMean[cidx];
         double variance   = estimatedVariance[cidx];
         double invertVar  = 1.0 / sqrt(variance + epsilon);
@@ -221,7 +221,7 @@ int miopenBNPerActivFwdInferHost_mt(miopenTensorDescriptor_t& inputTensor,
     unsigned int in_cstride = height * width;
 
     int ret = 0;
-    par_for(channels, 1, [&](size_t cidx) {
+    miopen::par_for(channels, 1, [&](size_t cidx) {
         uint32_t adjIndex = 0;
         double mean       = 0.0;
         double variance   = 0.0;
@@ -381,7 +381,7 @@ void miopenActivationFwdHost_mt(int neuron_type,
     default: printf("ERROR: unknown neuron type: %d\n", neuron_type); break;
     }
 
-    par_ford(size)([&](size_t i) { c_res[i] = f(static_cast<Tref>(bot_ptr[i])); });
+    miopen::par_ford(size)([&](size_t i) { c_res[i] = f(static_cast<Tref>(bot_ptr[i])); });
 }
 
 template <typename Tgpu /* the data type used in GPU computations (usually half) */,

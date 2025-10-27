@@ -92,7 +92,7 @@ int32_t mloSoftMarginLossForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
     int32_t ret = miopenStatusSuccess;
 
     std::atomic<double> sum_loss = 0;
-    par_ford(input_numel)([&](size_t gid) {
+    miopen::par_ford(input_numel)([&](size_t gid) {
         tensor_layout_t<5> idx(i_tv, gid);
         double i    = input[i_tv.get_tensor_view_idx(idx)];
         double t    = target[t_tv.get_tensor_view_idx(idx)];

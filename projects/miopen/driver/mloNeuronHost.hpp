@@ -175,7 +175,7 @@ int mloNeuronForwardRunHostAndVerify_mt(int neuron_type,
     Tcheck_* c_res = new Tcheck_[size];
     Tcheck_* data  = new Tcheck_[size];
 
-    par_ford(size)([&](size_t k) { data[k] = static_cast<Tcheck_>(bot_ptr[k]); });
+    miopen::par_ford(size)([&](size_t k) { data[k] = static_cast<Tcheck_>(bot_ptr[k]); });
 
     std::function<Tcheck_(Tcheck_)> f;
 
@@ -222,10 +222,10 @@ int mloNeuronForwardRunHostAndVerify_mt(int neuron_type,
     default: printf("ERROR: unknown neuron type: %d\n", neuron_type); break;
     }
 
-    par_ford(size)([&](size_t i) { c_res[i] = f(data[i]); });
+    miopen::par_ford(size)([&](size_t i) { c_res[i] = f(data[i]); });
 
     std::atomic_int match = 1;
-    par_ford(size)([&](size_t i) {
+    miopen::par_ford(size)([&](size_t i) {
         Tcheck_ c_val  = c_res[i];
         Tcheck_ g_val  = static_cast<Tcheck_>(top_ptr[i]);
         double err     = std::abs(c_val - g_val);
@@ -379,7 +379,7 @@ int mloNeuronBackwardRunHostAndVerify_mt(int neuron_type,
     Tcheck_* bot_df_cpu = new Tcheck_[size];
     Tcheck_* top_df_cpu = new Tcheck_[size];
 
-    par_ford(size)([&](size_t k) {
+    miopen::par_ford(size)([&](size_t k) {
         bot_cpu[k]    = static_cast<Tcheck_>(bot_ptr[k]);
         top_cpu[k]    = static_cast<Tcheck_>(top_ptr[k]);
         top_df_cpu[k] = static_cast<Tcheck_>(top_df_ptr[k]);
@@ -432,10 +432,11 @@ int mloNeuronBackwardRunHostAndVerify_mt(int neuron_type,
     default: printf("ERROR: unknown neuron type: %d\n", neuron_type); break;
     }
 
-    par_ford(size)([&](size_t i) { bot_df_cpu[i] = f(top_df_cpu[i], bot_cpu[i], top_cpu[i]); });
+    miopen::par_ford(size)(
+        [&](size_t i) { bot_df_cpu[i] = f(top_df_cpu[i], bot_cpu[i], top_cpu[i]); });
 
     std::atomic_int match;
-    par_ford(size)([&](size_t i) {
+    miopen::par_ford(size)([&](size_t i) {
         Tcheck_ c_val  = bot_df_cpu[i];
         Tcheck_ g_val  = static_cast<Tcheck_>(bot_df_ptr[i]);
         double err     = std::abs(c_val - g_val);

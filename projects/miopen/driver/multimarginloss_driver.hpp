@@ -116,7 +116,7 @@ int32_t mloMultiMarginLossForwardRunHost_mt(const miopenTensorDescriptor_t iDesc
     int32_t ret                  = miopenStatusSuccess;
     std::atomic<double> sum_loss = 0;
 
-    par_ford(N)([&](size_t n) {
+    miopen::par_ford(N)([&](size_t n) {
         double loss = 0;
         uint64_t y  = target[T_tv.get_tensor_view_idx({n})];
         if(y < C)
