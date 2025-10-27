@@ -191,7 +191,8 @@ namespace origami
                                  size_t            non_temporal_a = 0,
                                  size_t            non_temporal_b = 0,
                                  size_t            occupancy      = 1,
-                                 size_t            split          = 0);
+                                 size_t            split          = 0,
+                                 size_t            max_cus        = 0);
 
     // Compute the performance from the latency.
     // IMPORTANT : This program is NOT meant to be an analytical model for performance, but rather a way to rank different macro tile sizes.
@@ -213,5 +214,6 @@ namespace origami
                                size_t            element_size_B,
                                size_t            element_size_out,
                                data_type_t       mi_datatype,
-                               int               WGM);
+                               int               WGM,
+                               size_t            max_cus = 0);
 } // namespace origami

@@ -189,7 +189,8 @@ namespace TensileLite
                 0,   // mx_block_size -> MX Data types come from rocroller.
                 0.8, // L2 hit-rate (not used anymore -- should be removed)
                 false,
-                defaultWGM);
+                defaultWGM,
+                pAMDGPU->skMaxCUs);
             for(const auto& tile : selected_tiles)
             {
                 auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
