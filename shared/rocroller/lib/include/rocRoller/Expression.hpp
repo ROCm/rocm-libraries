@@ -679,11 +679,13 @@ namespace rocRoller
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
 
-        ExpressionPtr bfc(ExpressionPtr src,
-                          ExpressionPtr dst,
-                          unsigned      srcOffset,
-                          unsigned      dstOffset,
-                          unsigned      width);
+        ExpressionPtr bfc(ExpressionPtr       src,
+                          ExpressionPtr       dst,
+                          unsigned            srcOffset,
+                          unsigned            dstOffset,
+                          unsigned            width,
+                          std::optional<bool> srcIsZero = std::nullopt,
+                          std::optional<bool> dstIsZero = std::nullopt);
 
         ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v);
 

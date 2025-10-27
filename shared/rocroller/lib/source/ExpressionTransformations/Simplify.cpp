@@ -483,6 +483,8 @@ namespace rocRoller
                 , m_srcOffset(srcOffset)
                 , m_dstOffset(dstOffset)
                 , m_width(width)
+                , m_srcIsZero(std::nullopt)
+                , m_dstIsZero(std::nullopt)
                 , m_sunk(false)
             {
             }
@@ -511,8 +513,13 @@ namespace rocRoller
 
             ExpressionPtr operator()(CommandArgumentValue const& expr) const
             {
-                auto sunkBitfieldCombine
-                    = tryEvaluate(bfc(m_src, literal(expr), m_srcOffset, m_dstOffset, m_width));
+                auto sunkBitfieldCombine = tryEvaluate(bfc(m_src,
+                                                           literal(expr),
+                                                           m_srcOffset,
+                                                           m_dstOffset,
+                                                           m_width,
+                                                           m_srcIsZero,
+                                                           m_dstIsZero));
 
                 if(!sunkBitfieldCombine.has_value())
                     return std::make_shared<Expression>(expr);
@@ -541,11 +548,13 @@ namespace rocRoller
             }
 
         private:
-            ExpressionPtr m_src;
-            uint32_t      m_srcOffset;
-            uint32_t      m_dstOffset;
-            uint32_t      m_width;
-            mutable bool  m_sunk;
+            ExpressionPtr       m_src;
+            uint32_t            m_srcOffset;
+            uint32_t            m_dstOffset;
+            uint32_t            m_width;
+            std::optional<bool> m_srcIsZero;
+            std::optional<bool> m_dstIsZero;
+            mutable bool        m_sunk;
         };
 
         /**
@@ -565,7 +574,13 @@ namespace rocRoller
             if(visitor.sunk())
                 return result;
 
-            return bfc(cpy.lhs, result, cpy.srcOffset, cpy.dstOffset, cpy.width);
+            return bfc(cpy.lhs,
+                       result,
+                       cpy.srcOffset,
+                       cpy.dstOffset,
+                       cpy.width,
+                       cpy.srcIsZero,
+                       cpy.dstIsZero);
         }
 
         struct DeepBitfieldExtractVisitor
