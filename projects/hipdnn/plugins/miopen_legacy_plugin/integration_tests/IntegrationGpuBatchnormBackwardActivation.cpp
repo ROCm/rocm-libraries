@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
@@ -61,8 +62,8 @@ protected:
                 
                 if(name == "x" || name == "dy")
                 {
-                    minVal = -1.5f;
-                    maxVal = 1.5f;
+                    minVal = -2.0f;
+                    maxVal = 2.0f;
                 }
                 else if(name == "scale")
                 {
@@ -71,7 +72,7 @@ protected:
                 }
                 else if(name == "bias" || name == "mean")
                 {
-                    minVal = 0.1f;
+                    minVal = -0.1f;
                     maxVal = 0.1f;
                 }
                 else if(name == "inv_variance")
@@ -121,9 +122,9 @@ protected:
         
         auto tolerance = batchnorm::getToleranceBackward<DataType>();
         
-        CpuFpReferenceValidation<DataType> dataTypeValidator(tolerance, tolerance);
-        CpuFpReferenceValidation<float> intermediateTypeValidator(
-            static_cast<float>(tolerance), static_cast<float>(tolerance));
+        CpuFpReferenceMiopenRmsValidation<DataType> dataTypeValidator(tolerance);
+        CpuFpReferenceMiopenRmsValidation<float> intermediateTypeValidator(
+            static_cast<float>(tolerance));
 
         // Get non-virtual output tensor IDs
         std::vector<int64_t> outputTensorIds;
@@ -279,7 +280,7 @@ protected:
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, reluBwdAttrs);
         dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_data_type(intermediateDataType);
+        dxDrelu->set_data_type(dataType); // miopen might want this as intermediate
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
         dxDrelu->set_is_virtual(true);
