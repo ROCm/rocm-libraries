@@ -120,14 +120,10 @@ int main(int argc, char* argv[])
     CLI::Option* opt_ioffset = non_token->add_option("--ioffset", params.ioffset, "Input offset");
     CLI::Option* opt_ooffset = non_token->add_option("--ooffset", params.ooffset, "Output offset");
 
-    non_token->add_option("--ngpus", "Number of GPUs to use")
+    non_token->add_option("--ngpus", params.multiGPU, "Number of GPUs to use")
         ->default_val(1)
-        ->check(CLI::NonNegativeNumber)
-        ->each([&](const std::string& val){
-            int ngpus = std::stoi(val);
-            params.gpus.resize(ngpus);
-            std::iota(params.gpus.begin(), params.gpus.end(), 0);
-        });
+        ->check(CLI::NonNegativeNumber);
+    
     app.add_option("--verbose", verbose, "Control output verbosity")->default_val(0);
     app.add_option("-N, --ntrial", ntrial, "Trial size for the problem")
         ->default_val(1)
@@ -220,6 +216,7 @@ int main(int argc, char* argv[])
 
     std::cout << std::flush;
 
+    
     params.validate();
 
     if(!params.valid(verbose))
@@ -234,74 +231,112 @@ int main(int argc, char* argv[])
         std::cout << "Token: " << params.token() << std::endl;
     }
 
-    // Check free and total available memory:
-    size_t free  = 0;
-    size_t total = 0;
-
-    if(hipMemGetInfo(&free, &total) != hipSuccess)
-        throw std::runtime_error("hipMemGetInfo failed");
-
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
-    if(!vram_fits_problem(raw_vram_footprint, free))
+    if(params.multiGPU == 1)
     {
-        std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
-                  << ") raw data too large for device.\n";
-        return EXIT_SUCCESS;
-    }
+        // TODO: enable for multi-GPU as well
+        
+        // Check free and total available memory:
+        size_t free  = 0;
+        size_t total = 0;
 
-    size_t vram_footprint = 0;
+        if(hipMemGetInfo(&free, &total) != hipSuccess)
+            throw std::runtime_error("hipMemGetInfo failed");
+        const auto raw_vram_footprint
+            = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
+        if(!vram_fits_problem(raw_vram_footprint, free))
+        {
+            std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
+                      << ") raw data too large for device.\n";
+            return EXIT_SUCCESS;
+        }
+        size_t vram_footprint = 0;
 
-    try
-    {
-        vram_footprint = params.vram_footprint();
+        try
+        {
+            vram_footprint = params.vram_footprint();
+        }
+        catch(ROCFFT_SKIP& e)
+        {
+            std::cout << "SKIPPED: " << e.msg << "\n";
+            return EXIT_SUCCESS;
+        }
+        if(!vram_fits_problem(vram_footprint, free))
+        {
+            std::cout << "SKIPPED: Problem size (" << vram_footprint
+                      << ") raw data too large for device.\n";
+            return EXIT_SUCCESS;
+        }
     }
-    catch(ROCFFT_SKIP& e)
-    {
-        std::cout << "SKIPPED: " << e.msg << "\n";
-        return EXIT_SUCCESS;
-    }
-    if(!vram_fits_problem(vram_footprint, free))
-    {
-        std::cout << "SKIPPED: Problem size (" << vram_footprint
-                  << ") raw data too large for device.\n";
-        return EXIT_SUCCESS;
-    }
-
+    
     // Create plans:
     auto ret = params.create_plan();
     if(ret != fft_status_success)
         throw std::runtime_error("Plan creation failed");
 
     hipError_t hip_rt;
-
     // GPU input buffer:
     auto                ibuffer_sizes = params.ibuffer_sizes();
-    std::vector<gpubuf> ibuffer(ibuffer_sizes.size());
-    std::vector<void*>  pibuffer(ibuffer_sizes.size());
-    for(unsigned int i = 0; i < ibuffer.size(); ++i)
+    std::vector<gpubuf> ibuffer;
+    std::vector<void*>  pibuffer;
+    std::vector<void*>  pobuffer;
+    if(params.multiGPU == 1)
     {
-        hip_rt = ibuffer[i].alloc(ibuffer_sizes[i]);
-        if(hip_rt != hipSuccess)
-            throw std::runtime_error("Creating input Buffer failed");
-        pibuffer[i] = ibuffer[i].data();
-    }
+        ibuffer.resize(ibuffer_sizes.size());
+        pibuffer.resize(ibuffer_sizes.size());
 
+        for(unsigned int i = 0; i < ibuffer.size(); ++i)
+        {
+            hip_rt = ibuffer[i].alloc(ibuffer_sizes[i]);
+            if(hip_rt != hipSuccess)
+                throw std::runtime_error("Creating input Buffer failed");
+            pibuffer[i] = ibuffer[i].data();
+        }
+    }
+    else
+    {
+        params.multi_gpu_setup_buffers(pibuffer, pobuffer);
+    }
+        
     // CPU-side input buffer
     std::vector<hostbuf> ibuffer_cpu;
 
-    auto is_host_gen = (params.igen == fft_input_generator_host
-                        || params.igen == fft_input_random_generator_host);
-
-#ifdef USE_HIPRAND
-    if(!is_host_gen)
+    // Multi-gpu transforms do not currently support device-side input data generation.
+    const auto is_device_gen = params.multiGPU == 1
+        && !(params.igen == fft_input_generator_host
+             || params.igen == fft_input_random_generator_host);
+    
+    if(is_device_gen)
     {
-        // Input data:
+#ifdef USE_HIPRAND
         params.compute_input(ibuffer);
-
-        if(verbose > 1)
+#endif
+    }
+    else
+    {
+        ibuffer_cpu = allocate_host_buffer(params.precision, params.itype, params.isize);
+        params.compute_input(ibuffer_cpu);
+        if(params.multiGPU == 1)
         {
-            // Copy input to CPU
+            for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
+            {
+                HIP_V_THROW(hipMemcpy(pibuffer[idx],
+                                      ibuffer_cpu[idx].data(),
+                                      ibuffer_cpu[idx].size(),
+                                      hipMemcpyHostToDevice),
+                            "hipMemcpy failed");
+            }
+        }
+        else
+        {
+            params.multi_gpu_copy_input(ibuffer_cpu[0]);
+        }
+    }
+
+    if(verbose > 1)
+    {
+        std::cout << "GPU input:\n";
+        if(is_device_gen)
+        {
             ibuffer_cpu = allocate_host_buffer(params.precision, params.itype, params.isize);
             for(unsigned int idx = 0; idx < ibuffer.size(); ++idx)
             {
@@ -311,34 +346,13 @@ int main(int argc, char* argv[])
                                       hipMemcpyDeviceToHost),
                             "hipMemcpy failed");
             }
-
-            std::cout << "GPU input:\n";
+        }
+        else
+        {
             params.print_ibuffer(ibuffer_cpu);
         }
     }
-#endif
-    if(is_host_gen)
-    {
-        // Input data:
-        ibuffer_cpu = allocate_host_buffer(params.precision, params.itype, params.isize);
-        params.compute_input(ibuffer_cpu);
-
-        if(verbose > 1)
-        {
-            std::cout << "GPU input:\n";
-            params.print_ibuffer(ibuffer_cpu);
-        }
-
-        for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
-        {
-            HIP_V_THROW(hipMemcpy(pibuffer[idx],
-                                  ibuffer_cpu[idx].data(),
-                                  ibuffer_cpu[idx].size(),
-                                  hipMemcpyHostToDevice),
-                        "hipMemcpy failed");
-        }
-    }
-
+    
     // GPU output buffer:
     std::vector<gpubuf>  obuffer_data;
     std::vector<gpubuf>* obuffer = &obuffer_data;
@@ -357,7 +371,7 @@ int main(int argc, char* argv[])
                 throw std::runtime_error("Creating output Buffer failed");
         }
     }
-    std::vector<void*> pobuffer(obuffer->size());
+    pobuffer.resize(obuffer->size());
     for(unsigned int i = 0; i < obuffer->size(); ++i)
     {
         pobuffer[i] = obuffer->at(i).data();
@@ -381,20 +395,30 @@ int main(int argc, char* argv[])
 
     for(size_t itrial = 0; itrial < gpu_time.size(); ++itrial)
     {
-#ifdef USE_HIPRAND
         // Compute input on default device
-        if(!is_host_gen)
+        if(is_device_gen)
+        {
+#ifdef USE_HIPRAND
             params.compute_input(ibuffer);
 #endif
-        if(is_host_gen)
+        }
+        else
         {
-            for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
+            
+            if(params.multiGPU == 1)
             {
-                HIP_V_THROW(hipMemcpy(pibuffer[idx],
-                                      ibuffer_cpu[idx].data(),
-                                      ibuffer_cpu[idx].size(),
-                                      hipMemcpyHostToDevice),
-                            "hipMemcpy failed");
+                for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
+                {
+                    HIP_V_THROW(hipMemcpy(pibuffer[idx],
+                                          ibuffer_cpu[idx].data(),
+                                          ibuffer_cpu[idx].size(),
+                                          hipMemcpyHostToDevice),
+                                "hipMemcpy failed");
+                }
+            }
+            else
+            {
+                params.multi_gpu_copy_input(ibuffer_cpu[0]);
             }
         }
 

@@ -157,8 +157,6 @@ public:
     std::vector<long long int> ll_inembed;
     std::vector<long long int> ll_onembed;
 
-    std::vector<int> gpus;
-    
     template <typename T>
     struct many_api_layout_args
     {
@@ -691,15 +689,14 @@ public:
     {
         hipfftResult ret{HIPFFT_EXEC_FAILED};
 
-        // if we're doing multi-GPU, we need to use ExecDescriptor
-        // methods to execute.
+        // If we're doing multi-GPU, we need to use ExecDescriptor methods to execute.
         if(multiGPU > 1)
         {
-            // rotate between generic ExecDescriptor and specific
+            // Rotate between generic ExecDescriptor and specific
             // ExecDescriptorX2Y functions by hashing token (for
             // stability across reruns of test cases)
             //
-            // the specific functions are only for the main transform
+            // The specific functions are only for the main transform
             // types expressible through the hipfftType enum
             bool generic_ExecDescriptor
                 = !hipfft_transform_type || std::hash<std::string>()(token()) % 2;
@@ -925,39 +922,20 @@ public:
         return !compare_err;
     }
 
-    // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
-                           std::vector<gpubuf>&  ibuffer,
-                           std::vector<void*>&   pibuffer,
-                           std::vector<void*>&   pobuffer) override
+    void multi_gpu_setup_buffers(std::vector<void*>&   pibuffer,
+                                 std::vector<void*>&   pobuffer)
     {
-        if(multiGPU <= 1)
-            return;
-
-        // input data is on the device - copy it back to the host so
-        // hipfftXtMemcpy can deal with it
-        hostbuf input_host;
-        input_host.alloc(ibuffer.front().size());
-        if(hipMemcpy(input_host.data(),
-                     ibuffer.front().data(),
-                     ibuffer.front().size(),
-                     hipMemcpyDeviceToHost)
-           != hipSuccess)
-            throw std::runtime_error("copy back to host failed");
-
-        // allocate data on the multiple GPUs
-        if(placement == fft_placement_inplace)
+        // Allocate buffers on multiple GPUs
+        hipLibXtDesc* xt_tmp = nullptr;
+        const bool inplace = placement == fft_placement_inplace;
+        if(inplace)
         {
-            hipLibXtDesc* xt_tmp = nullptr;
-            if(hipfftXtMalloc(plan, &xt_tmp, HIPFFT_XT_FORMAT_INPLACE) != HIPFFT_SUCCESS)
+            const auto ret = hipfftXtMalloc(plan, &xt_tmp,HIPFFT_XT_FORMAT_INPLACE);
+            if(ret != HIPFFT_SUCCESS)
                 throw std::runtime_error("hipfftXtMalloc failed");
             xt_output.reset(xt_tmp);
             xt_tmp = nullptr;
-
-            if(hipfftXtMemcpy(plan, xt_output.get(), input_host.data(), HIPFFT_COPY_HOST_TO_DEVICE)
-               != HIPFFT_SUCCESS)
-                throw std::runtime_error("hipfftXtMemcpy failed");
-
+            
             pibuffer.clear();
             std::copy_n(xt_output->descriptor->data,
                         xt_output->descriptor->nGPUs,
@@ -966,15 +944,12 @@ public:
         }
         else
         {
-            hipLibXtDesc* xt_tmp = nullptr;
-            if(hipfftXtMalloc(plan, &xt_tmp, HIPFFT_XT_FORMAT_INPUT) != HIPFFT_SUCCESS)
+            const auto ret = hipfftXtMalloc(plan, &xt_tmp, HIPFFT_XT_FORMAT_INPUT);
+            if(ret != HIPFFT_SUCCESS)
                 throw std::runtime_error("hipfftXtMalloc failed");
             xt_input.reset(xt_tmp);
             xt_tmp = nullptr;
 
-            if(hipfftXtMemcpy(plan, xt_input.get(), input_host.data(), HIPFFT_COPY_HOST_TO_DEVICE)
-               != HIPFFT_SUCCESS)
-                throw std::runtime_error("hipfftXtMemcpy failed");
             if(hipfftXtMalloc(plan, &xt_tmp, HIPFFT_XT_FORMAT_OUTPUT) != HIPFFT_SUCCESS)
                 throw std::runtime_error("hipfftXtMalloc failed");
             xt_output.reset(xt_tmp);
@@ -984,12 +959,47 @@ public:
             std::copy_n(xt_input->descriptor->data,
                         xt_input->descriptor->nGPUs,
                         std::back_inserter(pibuffer));
+            
             pobuffer.clear();
             std::copy_n(xt_output->descriptor->data,
                         xt_output->descriptor->nGPUs,
                         std::back_inserter(pobuffer));
         }
+    }
 
+    // Copy data on the multiple GPUs
+    void multi_gpu_copy_input(const hostbuf &input_host)
+    {
+        const bool inplace = placement == fft_placement_inplace;
+        if(hipfftXtMemcpy(plan, inplace ? xt_output.get() : xt_input.get(),
+                          input_host.data(), HIPFFT_COPY_HOST_TO_DEVICE)
+           != HIPFFT_SUCCESS)
+            throw std::runtime_error("hipfftXtMemcpy failed");
+    }
+    
+    // call the hipFFT APIs to allocate buffers and distribute data to multiple GPUs
+    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                           std::vector<gpubuf>&  ibuffer,
+                           std::vector<void*>&   pibuffer,
+                           std::vector<void*>&   pobuffer) override
+    {
+        if(multiGPU <= 1)
+            return;
+
+        multi_gpu_setup_buffers(pibuffer, pobuffer);
+        
+        // Input data is on the device - copy it back to the host so hipfftXtMemcpy can deal with it
+        hostbuf input_host;
+        input_host.alloc(ibuffer.front().size());
+        if(hipMemcpy(input_host.data(),
+                     ibuffer.front().data(),
+                     ibuffer.front().size(),
+                     hipMemcpyDeviceToHost)
+           != hipSuccess)
+            throw std::runtime_error("copy back to host failed");
+                
+        multi_gpu_copy_input(input_host);
+        
         // create bricks for this transform so we can confirm data layout
         hipLibXtDesc* compare_desc
             = placement == fft_placement_inplace ? xt_output.get() : xt_input.get();
@@ -1457,12 +1467,19 @@ private:
         ret = hipfftCreate(&plan);
         if(ret != HIPFFT_SUCCESS)
             return ret;
+
         if(scale_factor != 1.0)
         {
             ret = hipfftExtPlanScaleFactor(plan, scale_factor);
             if(ret != HIPFFT_SUCCESS)
                 return ret;
         }
+
+        if(multiGPU > 1 && mp_lib == fft_mp_lib_mpi)
+        {
+            return HIPFFT_NOT_IMPLEMENTED;
+        }
+        
         if(multiGPU > 1)
         {
             int deviceCount = 0;
@@ -1479,6 +1496,7 @@ private:
             if(ret != HIPFFT_SUCCESS)
                 return ret;
         }
+        
         if(mp_lib == fft_mp_lib_mpi)
         {
 #ifdef HIPFFT_MPI_ENABLE
@@ -1556,18 +1574,13 @@ private:
 
         if(ret != HIPFFT_SUCCESS)
             return ret;
-        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly
+        // prevented
         std::vector<size_t> tmp_worksize(get_num_used_gpus());
         size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
                                                ? tmp_worksize.data()
                                                : auto_allocated_worksizes.data();
-        if(gpus.size() > 1)
-        {
-            auto ret = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-            if(HIPFFT_SUCCESS != ret)
-                return ret;
-        }
-        
+
         switch(dim())
         {
         case 1:
@@ -1668,7 +1681,8 @@ private:
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
-        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
+        // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly
+        // prevented
         std::vector<size_t> tmp_worksize(get_num_used_gpus());
         size_t*             worksize_ptr  = is_preventing_auto_allocation_at_generation()
                                                 ? tmp_worksize.data()
