@@ -86,5 +86,30 @@ private:
     T _relativeTolerance;
 };
 
+inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
+    createAllCloseValidator(hipdnn_sdk::data_objects::DataType dataType,
+                            float absoluteTolerance = std::numeric_limits<float>::epsilon(),
+                            float relativeTolerance = std::numeric_limits<float>::epsilon())
+{
+    switch(dataType)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
+                                                                 relativeTolerance);
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceValidation<half>>(
+            static_cast<half>(absoluteTolerance), static_cast<half>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceValidation<hip_bfloat16>>(
+            static_cast<hip_bfloat16>(absoluteTolerance),
+            static_cast<hip_bfloat16>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceValidation<double>>(
+            static_cast<double>(absoluteTolerance), static_cast<double>(relativeTolerance));
+    default:
+        throw std::runtime_error("Unsupported data type for allClose validator");
+    }
+}
+
 } // namespace test_utilities
 } // namespace hipdnn_sdk

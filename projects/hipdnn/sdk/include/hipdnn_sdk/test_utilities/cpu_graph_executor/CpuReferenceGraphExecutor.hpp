@@ -11,6 +11,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
+#include <hipdnn_sdk/utilities/json/Graph.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
