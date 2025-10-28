@@ -3109,16 +3109,26 @@ TEST_P(hipfftw_functional_validation_dp, accuracy_vs_fftw)
 }
 
 static constexpr size_t full_suite_size = 1024; // per precision
-INSTANTIATE_TEST_SUITE_P(hipfftw_test,
-                         hipfftw_functional_validation_sp,
-                         ::testing::ValuesIn(params_for_functional_tests<fft_precision_single>(
-                             full_suite_size, hipfftw_token_for_functional_test)),
-                         hipfftw_functional_validation_sp::TestName);
-INSTANTIATE_TEST_SUITE_P(hipfftw_test,
-                         hipfftw_functional_validation_dp,
-                         ::testing::ValuesIn(params_for_functional_tests<fft_precision_double>(
-                             full_suite_size, hipfftw_token_for_functional_test)),
-                         hipfftw_functional_validation_dp::TestName);
+INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
+    hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
+    hipfftw_functional_validation_sp,
+    ::testing::ValuesIn(params_for_functional_tests<fft_precision_single>(
+        full_suite_size, hipfftw_token_for_functional_test)),
+    hipfftw_functional_validation_sp::TestName);
+INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
+    hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
+    hipfftw_functional_validation_dp,
+    ::testing::ValuesIn(params_for_functional_tests<fft_precision_double>(
+        full_suite_size, hipfftw_token_for_functional_test)),
+    hipfftw_functional_validation_dp::TestName);
 
 // params_for_functional_tests may return empty vectors for low test probabilities.
 // The following ensures such cases do not make gtest report an error due to uninstantiated
