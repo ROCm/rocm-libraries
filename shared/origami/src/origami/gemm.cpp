@@ -1250,15 +1250,17 @@ namespace origami
 
             size_t K_mod_128bytes    = K * safe_ceil_div(element_size_A, 8) % 128;
             size_t MT_K_mod_128bytes = MT_K * safe_ceil_div(element_size_A, 8) % 128;
-            size_t L1_cache_bytes = 64 * 1024; //64kB
-            size_t L2_cache_bytes = 4 * 1024 * 1024; //4MB
-            size_t A_tensor_bytes = M * K * element_size_A;
-            size_t B_tensor_bytes = N * K * element_size_B;
-            size_t A_k_complete_tile_bytes = MT_M * K * element_size_A;
-            size_t B_k_complete_tile_bytes = MT_N * K * element_size_B;
+            // size_t L1_cache_bytes = 64 * 1024; //64kB
+            // size_t L2_cache_bytes = 4 * 1024 * 1024; //4MB
+            // size_t A_tensor_bytes = M * K * element_size_A;
+            // size_t B_tensor_bytes = N * K * element_size_B;
+            // size_t A_k_complete_tile_bytes = MT_M * K * element_size_A;
+            // size_t B_k_complete_tile_bytes = MT_N * K * element_size_B;
             if(K_mod_128bytes == 0 && MT_K_mod_128bytes == 0 && batch == 1)
             {
-                if(M <= MT_M *2 && !transB && (B_tensor_bytes/A_tensor_bytes > 5))
+                //if(M <= MT_M *2 && !transB && (B_tensor_bytes/A_tensor_bytes > 5))
+                // avoid division by 0 if K == 0
+                if(M <= MT_M *2 && !transB && ((N * element_size_B)/(M * element_size_A) > 5))
                 {
                     //Use nontemporal B
                     if(!(non_temporal_b == 4))
@@ -1266,7 +1268,8 @@ namespace origami
                         return std::numeric_limits<double>::max();
                     }
                 }
-                else if(N <= MT_N *2 && transA && (A_tensor_bytes/B_tensor_bytes > 5))
+                //else if(N <= MT_N *2 && transA && (A_tensor_bytes/B_tensor_bytes > 5))
+                else if(N <= MT_N *2 && transA && ((M * element_size_A)/(N * element_size_B) > 5))
                 {
                     //Use Non Temporal A
                     if(!(non_temporal_a == 4))
@@ -1284,7 +1287,6 @@ namespace origami
                     }
                 }
             }
-        
             else if(non_temporal_a || non_temporal_b)
             {
                     return std::numeric_limits<double>::max();
