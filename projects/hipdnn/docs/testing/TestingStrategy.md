@@ -114,6 +114,9 @@ Integration tests validate end-to-end functionality across components.
 - Validate correctness and graph support
 - Each plugin maintains its own test suite
 - Test on all ASICs supported by the plugin
+- Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
+  - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
+  - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
 ---
 
