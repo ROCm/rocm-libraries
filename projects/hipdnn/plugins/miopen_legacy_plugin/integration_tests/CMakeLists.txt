@@ -11,6 +11,7 @@ add_executable(miopen_plugin_integration_test
     main.cpp
     IntegrationGpuBatchnormBackward.cpp
     IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuBatchnormFwdPlusActive.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp

@@ -33,6 +33,27 @@ struct Batchnorm2dTestCase
     }
 };
 
+struct Batchnorm3dTestCase
+{
+    int64_t n;
+    int64_t c;
+    int64_t d;
+    int64_t h;
+    int64_t w;
+    unsigned int seed;
+
+    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm3dTestCase& tc)
+    {
+        return ss << "(n:" << tc.n << " c:" << tc.c << " d:" << tc.d << " h:" << tc.h
+                  << " w:" << tc.w << " seed:" << tc.seed << ")";
+    }
+
+    std::vector<int64_t> getDims() const
+    {
+        return {n, c, d, h, w};
+    }
+};
+
 inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
 {
     unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
