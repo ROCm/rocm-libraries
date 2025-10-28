@@ -87,8 +87,37 @@ RunParameterPredictionModel(
                          std::to_string(split_k) + ". Expected 0 (no split) or 1 (default split).");
         }
 
+        // validation lambda that checks if kernel supports split_k
+        auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
+            if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
+                return false;
+
+            std::string test_kernel_id =
+                valid_kernels[kernel_index] + "+" + std::to_string(split_k_value);
+
+            // Use the appropriate CK device operation type based on alpha_beta_case
+            switch(problem.GetAlphaBetaCase())
+            {
+            case BILINEAR:
+                return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<DataType>,
+                                         CKArgs<DataType>,
+                                         miopen::conv::ProblemDescription,
+                                         true>(problem, test_kernel_id);
+            case SCALE:
+                return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<DataType>,
+                                         CKArgs<DataType>,
+                                         miopen::conv::ProblemDescription,
+                                         true>(problem, test_kernel_id);
+            default:
+                return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<DataType>,
+                                         CKArgs<DataType>,
+                                         miopen::conv::ProblemDescription,
+                                         true>(problem, test_kernel_id);
+            }
+        };
+
         auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
-            arch, solver_name, features, heuristic_kernels, use_split_k);
+            arch, solver_name, features, heuristic_kernels, use_split_k, is_kernel_split_k_valid);
 
         // Check if we have any candidates
         if(!result.IsEmpty())
