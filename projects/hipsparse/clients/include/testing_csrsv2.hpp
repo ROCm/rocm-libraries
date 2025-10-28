@@ -44,7 +44,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrsv2_bad_arg(void)
+void testing_csrsv2_bad_arg(const Arguments& argus)
 {
 #if (!defined(CUDART_VERSION))
     int                    m         = 100;
