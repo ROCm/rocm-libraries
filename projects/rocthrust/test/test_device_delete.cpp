@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/device_delete.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>

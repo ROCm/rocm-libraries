@@ -36,10 +36,8 @@
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-// clang-format on
 #endif
 
 THRUST_NAMESPACE_BEGIN

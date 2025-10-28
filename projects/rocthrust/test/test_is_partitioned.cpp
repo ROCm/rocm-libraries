@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/partition.h>

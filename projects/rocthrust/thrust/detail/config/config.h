@@ -20,12 +20,8 @@
 
 #pragma once
 
-#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
-
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
-#endif
+#include <thrust/detail/libcxx_wrapper/__cccl_config.h> // IWYU pragma: export
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
@@ -43,14 +39,6 @@
 // host_system.h & device_system.h must be #included as early as possible because other config headers depend on it
 #include <thrust/detail/config/host_system.h> // IWYU pragma: export
 
-#include <thrust/detail/config/attributes.h> // IWYU pragma: export
-#include <thrust/detail/config/cuda_toolkit.h> // IWYU pragma: export
-#include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 #include <thrust/detail/config/device_system.h> // IWYU pragma: export
-#include <thrust/detail/config/diagnostic.h> // IWYU pragma: export
-#include <thrust/detail/config/dialect.h> // IWYU pragma: export
-#include <thrust/detail/config/execution_space.h> // IWYU pragma: export
+#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
 #include <thrust/detail/config/namespace.h> // IWYU pragma: export
-#include <thrust/detail/config/rtti.h> // IWYU pragma: export
-#include <thrust/detail/config/sequence_access.h> // IWYU pragma: export
-#include <thrust/detail/config/visibility.h> // IWYU pragma: export

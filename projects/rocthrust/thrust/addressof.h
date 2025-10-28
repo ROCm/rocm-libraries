@@ -16,9 +16,7 @@
 #endif // no system header
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__memory/addressof.h)
-// clang-format on
 #else
 #  include <thrust/detail/memory_wrapper.h>
 #endif

@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>

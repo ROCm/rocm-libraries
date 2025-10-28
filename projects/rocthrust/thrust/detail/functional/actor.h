@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/type_traits.h>
+#include <thrust/detail/type_traits.h> // for internal::decay_t
 #include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(type_traits)

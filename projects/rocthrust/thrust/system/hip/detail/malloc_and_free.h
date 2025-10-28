@@ -29,9 +29,9 @@
 
 #include <thrust/system/hip/config.h>
 
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/detail/malloc_and_free.h>
 #include <thrust/detail/malloc_and_free_fwd.h>
-#include <thrust/detail/nv_target.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/seq.h>

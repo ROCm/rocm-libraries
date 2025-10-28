@@ -38,15 +38,8 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__exception/terminate.h>
 #include <thrust/system/hip/detail/util.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
-#  include _THRUST_STD_INCLUDE(__exception/terminate.h)
-// clang-format on
-#else
-#  include <thrust/detail/nv_target.h>
-#endif
 
 #include <cstdio>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
@@ -66,12 +59,7 @@ inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 #if THRUST_HIP_PRINTF_ENABLED == 0
   (void) message;
 #endif
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  _THRUST_STD_NOVERSION::terminate();
-#else
-  NV_IF_TARGET(NV_IS_HOST, (::std::exit(-1);), (__builtin_trap();));
-  __builtin_unreachable();
-#endif
+  ::internal::terminate();
 }
 } // namespace detail
 } // namespace hip

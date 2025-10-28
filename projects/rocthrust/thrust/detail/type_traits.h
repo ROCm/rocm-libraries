@@ -34,8 +34,10 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD && _THRUST_USE_ROCPRIM
-#  include <rocprim/type_traits.hpp>
+// #  include <rocprim/type_traits.hpp>
 #  include <rocprim/type_traits_functions.hpp>
 #endif // !_THRUST_HAS_DEVICE_SYSTEM_STD
 
@@ -55,15 +57,10 @@ using make_unsigned_t = _THRUST_STD::make_unsigned_t<T>;
 
 template <typename T>
 using decay_t = _THRUST_STD::decay_t<T>;
-
-template <typename Invokable, typename InputT, typename InitT = InputT>
-using accumulator_t = _THRUST_STD::__accumulator_t<Invokable, InputT, InitT>;
 template <typename T>
 using remove_cvref = _THRUST_STD::remove_cvref<T>;
 template <typename T>
 using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
-template <typename... Pred>
-using _And = _THRUST_STD::_And<Pred...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 
@@ -86,34 +83,10 @@ using decay_t = ::std::decay_t<T>;
 #  else
 using decay_t = ::std::__decay_t<T>;
 #  endif
-
-template <typename Invokable, typename InputT, typename InitT = InputT>
-#if _THRUST_USE_ROCPRIM
-using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
-#else
-using accumulator_t = decay_t<::std::invoke_result_t<Invokable, InitT, InputT>>;
-#endif
 template <typename T>
 using remove_cvref = ::std::remove_cv<::std::remove_reference_t<T>>;
 template <typename T>
 using remove_cvref_t = ::std::remove_cv_t<::std::remove_reference_t<T>>;
-
-namespace detail
-{
-template <typename...>
-using expand_to_true = ::std::true_type;
-template <typename... Pred>
-THRUST_HOST_DEVICE expand_to_true<::std::enable_if_t<Pred::value>...> and_helper(int);
-template <typename...>
-THRUST_HOST_DEVICE ::std::false_type and_helper(...);
-} // namespace detail
-
-template <typename... Pred>
-#  if THRUST_CUDA_COMPILER(CLANG) && defined(__has_attribute) && __has_attribute(__nodebug__)
-using _And __attribute__((__nodebug__)) = decltype(detail::and_helper<Pred...>(0));
-#  else
-using _And = decltype(detail::and_helper<Pred...>(0));
-#  endif
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 

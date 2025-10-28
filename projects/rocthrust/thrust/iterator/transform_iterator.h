@@ -41,8 +41,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/construct_at.h>
 #include <thrust/detail/functional/actor.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
+#include <thrust/detail/libcxx_wrapper/std/__memory/construct_at.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_adaptor.h>

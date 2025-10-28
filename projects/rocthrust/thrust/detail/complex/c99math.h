@@ -112,8 +112,7 @@ THRUST_HOST_DEVICE inline int isfinite(double x)
 
 #else
 
-#  if (defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(_NVHPC_CUDA)) \
-    || defined(__HIP_DEVICE_COMPILE__)
+#  if (defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(_NVHPC_CUDA)) || defined(__HIP__)
 // NVCC implements at least some signature of these as functions not macros.
 using ::isfinite;
 using ::isinf;
@@ -127,7 +126,7 @@ using std::isfinite;
 using std::isinf;
 using std::isnan;
 using std::signbit;
-#  endif // __CUDACC__ || __HIP_DEVICE_COMPILE__
+#  endif // __CUDACC__|| __HIP__
 #endif // _MSC_VER
 
 using ::atanh;
@@ -155,7 +154,11 @@ THRUST_HOST_DEVICE inline float copysignf(float x, float y)
 #  if !defined(__CUDACC__) && !defined(_NVHPC_CUDA)
 
 // Simple approximation to log1p as Visual Studio is lacking one
-THRUST_HOST_DEVICE inline double log1p(double x)
+#    if THRUST_COMPILER(HIP) && defined(_MSC_VER) // fix HIP on Windows error
+THRUST_HOST_DEVICE
+#    endif
+inline double
+log1p(double x)
 {
   double u = 1.0 + x;
   if (u == 1.0)
@@ -176,7 +179,11 @@ THRUST_HOST_DEVICE inline double log1p(double x)
   }
 }
 
-THRUST_HOST_DEVICE inline float log1pf(float x)
+#    if THRUST_COMPILER(HIP) && defined(_MSC_VER) // fix HIP on Windows error
+THRUST_HOST_DEVICE
+#    endif
+inline float
+log1pf(float x)
 {
   float u = 1.0f + x;
   if (u == 1.0f)
@@ -197,7 +204,8 @@ THRUST_HOST_DEVICE inline float log1pf(float x)
   }
 }
 
-#    if _MSV_VER <= 1500 && !defined(__clang__)
+// add !THRUST_COMPILER(HIP) to fix HIP on Windows error
+#    if _MSV_VER <= 1500 && !THRUST_COMPILER(HIP)
 #      include <complex>
 
 inline float hypotf(float x, float y)
@@ -210,7 +218,7 @@ inline double hypot(double x, double y)
   return _hypot(x, y);
 }
 
-#    endif // _MSC_VER <= 1500 && !defined(__clang__)
+#    endif // _MSC_VER <= 1500 && !THRUST_COMPILER(HIP)
 
 #  endif // __CUDACC__
 

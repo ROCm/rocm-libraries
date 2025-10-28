@@ -1158,7 +1158,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator==(const unique_ptr<T1, D
   return x.get() == y.get();
 }
 
-#if THRUST_CPP_DIALECT <= 2017
+#if THRUST_STD_VER <= 2017
 template <class T1, class D1, class T2, class D2>
 /*! \brief Compares two \p unique_ptr objects for inequality (C++17 and earlier).
  *
@@ -1225,7 +1225,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>=(const unique_ptr<T1, D
   return !(x < y);
 }
 
-#if THRUST_CPP_DIALECT >= 2020
+#if THRUST_STD_VER >= 2020
 template <class T1, class D1, class T2, class D2>
   THRUST_HOST inline auto operator<=> (const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
@@ -1245,7 +1245,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator==(const unique_ptr<T, D>
   return !x;
 }
 
-#if THRUST_CPP_DIALECT <= 2017
+#if THRUST_STD_VER <= 2017
 /*! \brief Compares nullptr with a \p unique_ptr for equality (C++17 and earlier).
  *
  *  \param y The \p unique_ptr to compare.
@@ -1368,7 +1368,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_CXX23 bool operator>=(std::nullptr_t, const 
   return !(y < nullptr);
 }
 
-#if THRUST_CPP_DIALECT >= 2020
+#if THRUST_STD_VER >= 2020
 template <class T, class D>
   THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
 {
@@ -1422,7 +1422,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_CXX23 unique_ptr<T> make_unique(size_t n)
 template <class T, class... Args, class = std::enable_if_t<thrust::detail::is_bounded_array<T>::value>>
 THRUST_HOST void make_unique(Args&&...) = delete;
 
-#if THRUST_CPP_DIALECT >= 2020
+#if THRUST_STD_VER >= 2020
 
 /*! \brief Constructs an object of type \p T in device memory without initialization (C++20).
  *

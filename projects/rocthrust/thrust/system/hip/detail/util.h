@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/execution_policy.h>
@@ -48,6 +48,8 @@
 
 #  include <cstdio>
 #endif // !THRUST_COMPILER(NVRTC)
+
+#include <thrust/detail/libcxx_wrapper/std/__exception/terminate.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>
@@ -264,14 +266,7 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category());),
-                 (THRUST_TEMP_DEVICE_CODE;
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-                  _THRUST_STD_NOVERSION::terminate();
-#else
-                  __builtin_trap();
-                  __builtin_unreachable();
-#endif
-                  ));
+                 (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -304,14 +299,7 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category(), msg);),
-                 (THRUST_TEMP_DEVICE_CODE;
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-                  _THRUST_STD_NOVERSION::terminate();
-#else
-                  __builtin_trap();
-                  __builtin_unreachable();
-#endif
-                  ));
+                 (THRUST_TEMP_DEVICE_CODE; ::internal::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }

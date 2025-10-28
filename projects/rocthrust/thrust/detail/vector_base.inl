@@ -28,23 +28,21 @@
 
 #include <thrust/advance.h>
 #include <thrust/detail/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/detail/overlapped_copy.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/vector_base.h>
 #include <thrust/distance.h>
 #include <thrust/equal.h>
-#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <thrust/detail/algorithm_wrapper.h>
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-// clang-format on
 #endif
 #include _THRUST_STD_INCLUDE(type_traits)
 
@@ -276,7 +274,7 @@ void vector_base<T, Alloc>::range_init(InputIterator first, InputIterator last)
 } // end vector_base::range_init()
 
 template <typename T, typename Alloc>
-template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int>>
+template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last)
     : m_storage()
     , m_size(0)
@@ -289,7 +287,7 @@ vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last)
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
-template <typename InputIterator, _THRUST_STD::enable_if_t<is_cpp17_input_iterator<InputIterator>::value, int>>
+template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last, const Alloc& alloc)
     : m_storage(alloc)
     , m_size(0)

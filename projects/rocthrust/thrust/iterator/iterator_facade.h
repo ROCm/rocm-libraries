@@ -40,9 +40,9 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/iterator_facade_category.h>
-#include <thrust/type_traits/detail/conditional.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>

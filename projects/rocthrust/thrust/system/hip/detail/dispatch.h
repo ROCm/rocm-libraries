@@ -28,40 +28,16 @@
 #endif // no system header
 
 #include <thrust/detail/integer_math.h>
+#include <thrust/detail/libcxx_wrapper/std/detail/libcxx/include/stdexcept.h>
 #include <thrust/detail/preprocessor.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
-#  include _THRUST_STD_INCLUDE(detail/libcxx/include/stdexcept)
-// clang-format on
 #  include _THRUST_STD_INCLUDE(limits)
 #  include _THRUST_STD_INCLUDE(type_traits)
 #endif
 
 #include <cstdint>
 #include <string>
-
-// TODO(libhipcxx): remove this namespace and replace ::internal with _THRUST_STD in this file
-// once libhipcxx gets ready
-namespace internal
-{
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-
-using _THRUST_STD::__throw_runtime_error;
-
-#else
-
-[[noreturn]] inline THRUST_HOST_DEVICE void __throw_runtime_error(const char* __msg)
-{
-  (void) __msg;
-  __builtin_trap();
-  __builtin_unreachable();
-}
-
-#endif
-
-} // namespace internal
 
 #if defined(THRUST_FORCE_32_BIT_OFFSET_TYPE) && defined(THRUST_FORCE_64_BIT_OFFSET_TYPE)
 #  error "Only THRUST_FORCE_32_BIT_OFFSET_TYPE or THRUST_FORCE_64_BIT_OFFSET_TYPE may be defined!"

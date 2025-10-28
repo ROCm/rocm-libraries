@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <thrust/detail/config/preprocessor.h>
+#include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
 
 // This is a utility file that helps managing which
 // 'std' implementation we're using. The provided

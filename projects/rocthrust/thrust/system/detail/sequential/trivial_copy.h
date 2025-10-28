@@ -30,7 +30,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/system/detail/sequential/general_copy.h>
 
 #include <cstring>

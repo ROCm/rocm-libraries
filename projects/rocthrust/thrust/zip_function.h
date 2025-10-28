@@ -36,13 +36,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/functional/address_stability.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/tuple.h>
 #include <thrust/type_traits/integer_sequence.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(functional)
+#else
+#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -196,8 +197,7 @@ THRUST_NAMESPACE_END
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA
 #else
-THRUST_NAMESPACE_BEGIN
-namespace detail
+namespace internal
 {
 #endif
 template <typename F>
@@ -206,6 +206,5 @@ struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::zip_function<F>> : proc
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 _LIBCUDACXX_END_NAMESPACE_CUDA
 #else
-}
-THRUST_NAMESPACE_END
+} // namespace internal
 #endif

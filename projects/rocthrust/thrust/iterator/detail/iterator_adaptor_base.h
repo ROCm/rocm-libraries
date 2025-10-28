@@ -26,11 +26,11 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/type_traits/detail/conditional.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>

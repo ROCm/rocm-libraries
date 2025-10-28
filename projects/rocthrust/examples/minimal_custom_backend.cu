@@ -29,6 +29,8 @@
 #  include <functional>
 #endif
 
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
+
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.
 

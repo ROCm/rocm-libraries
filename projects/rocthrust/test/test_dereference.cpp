@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>

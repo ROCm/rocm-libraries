@@ -32,7 +32,7 @@
 
 #include <cassert>
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))

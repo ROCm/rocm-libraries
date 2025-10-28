@@ -37,9 +37,7 @@
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-// clang-format on
 #endif
 
 // Contributed by Erich Elsen

@@ -25,6 +25,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
@@ -34,7 +35,6 @@
 #include <thrust/iterator/detail/iterator_category_with_system_and_traversal.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
-#include <thrust/type_traits/detail/conditional.h>
 
 #include _THRUST_STD_INCLUDE(iterator)
 

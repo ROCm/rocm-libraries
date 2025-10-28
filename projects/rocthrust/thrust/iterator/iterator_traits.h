@@ -46,9 +46,7 @@
 
 #include _THRUST_STD_INCLUDE(iterator)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
-// clang-format on
 #else
 #  include <type_traits>
 #endif
@@ -149,7 +147,7 @@ using iterator_reference_t THRUST_DEPRECATED_BECAUSE(
 
 //! deprecated [Since 3.0]
 template <typename Iterator>
-struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::difference_t or _THRUST_STD::iter_difference_t"
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::difference_t or _THRUST_STD::iter_difference_t "
                                  "instead") iterator_difference
 {
 #ifndef THRUST_DOXYGEN_INVOKED

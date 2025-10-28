@@ -32,9 +32,10 @@
 #include <thrust/detail/allocator/fill_construct_range.h>
 #include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/contiguous_storage.h>
-#include <thrust/detail/nv_target.h>
 
 #include <stdexcept> // for std::runtime_error
+
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 
