@@ -611,6 +611,43 @@ def streamk():
             ),
         )
 
+def streamK_multipleFixups():
+    yield GEMMRun(
+        M=256,
+        N=256,
+        K=16384,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=2,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        loadLDS_A=True,
+        loadLDS_B=True,
+        storeLDS_D=True,
+        prefetch=False,
+        streamK=True,
+        betaInFma=True,
+        scheduler="Priority",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="float",
+            type_B="float",
+            type_C="float",
+            type_D="float",
+            type_acc="float",
+        ),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
 
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
