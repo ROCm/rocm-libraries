@@ -53,7 +53,7 @@ constexpr T getToleranceBackward()
     }
     else if constexpr(std::is_same_v<T, float>)
     {
-        return 4e-3f;
+        return 2e-3f;
     }
     else if constexpr(std::is_same_v<T, half>)
     {

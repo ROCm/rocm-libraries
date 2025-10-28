@@ -14,7 +14,6 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
-#include <iostream>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -154,7 +153,7 @@ protected:
         }
     }
 
-protected:
+private:
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
                          GraphTensorBundle& bundle)
