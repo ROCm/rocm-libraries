@@ -218,12 +218,14 @@ inline void execute_cpu_fft(fft_params&                                  params,
 
     // run FFTW (which may destroy CPU input)
     apply_load_callback(params, *input_ptr);
+    params.apply_host_load_ops(*input_ptr);
     fftw_run<Tfloat>(contiguous_params.transform_type, cpu_plan, *input_ptr, cpu_output);
     // clean up
     fftw_destroy_plan_type(cpu_plan);
     // ask FFTW to fully clean up, since it tries to cache plan details
     fftw_cleanup();
     cpu_plan = nullptr;
+    params.apply_host_store_ops(cpu_output);
     apply_store_callback(params, cpu_output);
 }
 

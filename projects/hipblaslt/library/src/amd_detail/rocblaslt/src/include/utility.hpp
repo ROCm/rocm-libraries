@@ -339,6 +339,7 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SIGMOID:
     // backward pass:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:

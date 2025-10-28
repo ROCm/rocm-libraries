@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include(FetchGoogleTest)
+include(fetch_google_test)
 
 set(TEST_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest_main.cpp"
@@ -28,7 +28,6 @@ target_link_libraries(
 )
 hipsparselt_link_blas_libraries(hipsparselt-test)
 
-# Platform-specific link tweaks
 if(WIN32)
     # No extra math/filesystem libs needed on MSVC; std::filesystem is part of the runtime
 else()
