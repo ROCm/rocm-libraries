@@ -224,6 +224,15 @@ namespace rocisa
         UNUSED_PRESERVE = 3
     };
 
+    enum class CacheScope : int
+    {
+        SCOPE_NONE = 0,
+        SCOPE_CU   = 1,
+        SCOPE_SE   = 2,
+        SCOPE_DEV  = 3,
+        SCOPE_SYS  = 4,
+    };
+
     enum class CvtType : int
     {
         CVT_F16_to_F32          = 1,
@@ -293,6 +302,23 @@ namespace rocisa
             return "UNUSED_SEXT";
         case UnusedBit::UNUSED_PRESERVE:
             return "UNUSED_PRESERVE";
+        default:
+            return "";
+        }
+    }
+
+    inline std::string toString(CacheScope scope)
+    {
+        switch(scope)
+        {
+        case CacheScope::SCOPE_CU:
+            return "SCOPE_CU";
+        case CacheScope::SCOPE_SE:
+            return "SCOPE_SE";
+        case CacheScope::SCOPE_DEV:
+            return "SCOPE_DEV";
+        case CacheScope::SCOPE_SYS:
+            return "SCOPE_SYS";
         default:
             return "";
         }

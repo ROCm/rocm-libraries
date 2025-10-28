@@ -163,6 +163,10 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             if(p_dist.placement == fft_placement_inplace
                && p_dist.ifields.empty() != p_dist.ofields.empty())
                 continue;
+
+            all_params.push_back(p_dist);
+            // also test result scaling for multi-GPU plans
+            p_dist.scale_factor = 4.23;
             all_params.push_back(std::move(p_dist));
         }
     };
