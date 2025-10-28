@@ -574,6 +574,7 @@ ModelSelectBestCandidate(const std::string& arch,
                                              split_ks,
                                              std::forward<ValidationFunc>(is_valid));
 
+            // check if any valid combinations were found
             if(expanded_params.empty())
             {
                 MIOPEN_LOG_W("No valid kernel+split_k combinations found after filtering");
