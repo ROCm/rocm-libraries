@@ -484,10 +484,10 @@ inline flatbuffers::FlatBufferBuilder
     {
         const auto biasDims = getDerivedShape(yDims);
         const auto biasStrides = generateStrides(biasDims, extractStrideOrder(yDims));
-        // Virtual bias tensor
+
         biasTensorUid = tensorUid++;
         tensorAttributes.push_back(
-            CreateTensorAttributesDirect(builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims, true));
+            CreateTensorAttributesDirect(builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims));
         // Virtual y_bias tensor
         yBiasTensorUid = tensorUid++;
         tensorAttributes.push_back(

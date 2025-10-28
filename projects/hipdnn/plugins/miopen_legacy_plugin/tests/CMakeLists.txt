@@ -21,6 +21,7 @@ add_executable(miopen_legacy_plugin_tests
     TestMiopenActivationDescriptor.cpp
     TestMiopenBatchnormFwdInferenceOperations.cpp
     TestMiopenBatchnormBwdOperations.cpp
+    TestMiopenConvFwdBiasActivOperations.cpp
     TestMiopenConvFwdOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp

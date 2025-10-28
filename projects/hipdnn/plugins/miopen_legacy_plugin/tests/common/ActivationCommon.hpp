@@ -53,6 +53,7 @@ struct ActivTestCase
         case PointwiseMode::SOFTPLUS_BWD:
         case PointwiseMode::ABS:
         case PointwiseMode::IDENTITY:
+            break;
         default:
             throw std::invalid_argument("Unknown activation mode");
         }
