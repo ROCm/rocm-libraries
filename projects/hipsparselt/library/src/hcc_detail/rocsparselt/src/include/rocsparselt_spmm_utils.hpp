@@ -34,7 +34,9 @@
 #else
 #include "kernel_launcher.hpp"
 #endif
+#ifndef _WIN32
 #include <cxxabi.h>
+#endif
 
 inline rocsparselt_status getOriginalSizes(rocsparselt_operation opA,
                                            rocsparselt_operation opB,
@@ -135,16 +137,22 @@ inline rocsparselt_status validateSetAttributeDataSize(size_t dataSize,
 {
     if(expectedSize != dataSize)
     {
+#ifndef _WIN32
         int   status = -4;
         char* mname  = __cxxabiv1::__cxa_demangle(typeid(T).name(), NULL, NULL, &status);
 
         hipsparselt_cerr << "The parameter number 5 (dataSize) had an illegal value: "
                          << "expected " << expectedSize << " bytes(sizeof("
-                         << (status == 0 ? mname : typeid(T).name()) << "))"
-                         << ", current size " << dataSize << " bytes" << std::endl;
+                         << (status == 0 ? mname : typeid(T).name()) << "))" << ", current size "
+                         << dataSize << " bytes" << std::endl;
 
         if(status == 0)
             free(mname);
+#else
+        hipsparselt_cerr << "The parameter number 5 (dataSize) had an illegal value: "
+                         << "expected " << expectedSize << " bytes(sizeof(" << typeid(T).name()
+                         << "))" << ", current size " << dataSize << " bytes" << std::endl;
+#endif
         return rocsparselt_status_invalid_size;
     }
     return rocsparselt_status_success;
@@ -267,8 +275,8 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
             break;
 #endif
     default:
-        hipsparselt_cerr << "datatype (" << hip_datatype_to_string(valueType) << ") is not supported"
-                         << std::endl;
+        hipsparselt_cerr << "datatype (" << hip_datatype_to_string(valueType)
+                         << ") is not supported" << std::endl;
         log_error(handle, __func__, "datatype is not supported");
         return rocsparselt_status_not_implemented;
     }
