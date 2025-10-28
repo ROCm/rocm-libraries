@@ -370,9 +370,6 @@ class Algorithm:
         if 'target_arch::gfx908' in self.architectures:
             self.architectures['target_arch::unknown'] = copy.deepcopy(self.architectures['target_arch::gfx908'])
             self.architectures['target_arch::unknown'].arch_name = 'target_arch::unknown'
-            if 'target_arch::gfx90a' not in self.architectures:
-                self.architectures['target_arch::gfx90a'] = copy.deepcopy(self.architectures['target_arch::gfx908'])
-                self.architectures['target_arch::gfx90a'].arch_name = 'target_arch::gfx90a'
 
         algorithm_template = env.get_template(self.cpp_configuration_template_name)
         rendered_template = algorithm_template.render(all_architectures=self.architectures.values())

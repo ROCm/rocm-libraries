@@ -211,6 +211,68 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
     return var_size;
 }
 
+template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+static std::vector<T> default_strides(fft_transform_type    dft_type,
+                                      fft_result_placement  placement,
+                                      fft_io                io,
+                                      const std::vector<T>& lengths)
+{
+    std::vector<T> ret(lengths.size());
+    T              def_stride = 1;
+    for(auto dim_idx = lengths.size(); dim_idx-- > 0;)
+    {
+        ret[dim_idx] = def_stride;
+        if(dim_idx == lengths.size() - 1 && is_real(dft_type))
+        {
+            if((io == fft_io_out) == is_fwd(dft_type))
+                def_stride *= (lengths[dim_idx] / 2 + 1);
+            else
+            {
+                if(placement == fft_placement_inplace)
+                    def_stride *= 2 * (lengths[dim_idx] / 2 + 1);
+                else
+                    def_stride *= lengths[dim_idx];
+            }
+        }
+        else
+            def_stride *= lengths[dim_idx];
+    }
+    return ret;
+}
+
+// NOTE: this is generalized for multidimensional batches
+template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+static std::vector<T> default_distances(fft_transform_type    dft_type,
+                                        fft_result_placement  placement,
+                                        fft_io                io,
+                                        const std::vector<T>& lengths,
+                                        const std::vector<T>& batches)
+{
+    if(batches.empty() || lengths.empty())
+        return std::vector<T>(); // empty as well
+    auto temp_lengths = lengths;
+    temp_lengths.insert(temp_lengths.begin(), batches.begin(), batches.end());
+    auto ret = default_strides(dft_type, placement, io, temp_lengths);
+    ret.resize(batches.size());
+    return ret;
+}
+// NOTE: this is for one-dimensional batches
+template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+static T default_distance(fft_transform_type    dft_type,
+                          fft_result_placement  placement,
+                          fft_io                io,
+                          const std::vector<T>& lengths,
+                          const T&              batch_sz)
+{
+    if(lengths.empty())
+        throw std::invalid_argument("empty lengths rejected by default_distance");
+    const auto tmp
+        = default_distances(dft_type, placement, io, lengths, std::vector<T>(1, batch_sz));
+    if(tmp.empty())
+        throw std::runtime_error("internal inconsistency encountered by default_distance");
+    return tmp.front();
+}
+
 #ifdef USE_HIPRAND
 // Given an array type and transform length, strides, etc, initialize
 // values into the input device buffer.
@@ -1702,7 +1764,8 @@ public:
             bool       samestride = true;
             for(unsigned int i = 0; i < stridesize; ++i)
             {
-                if(istride[i] != ostride[i])
+                // (strides are irrelevant for unit lengths)
+                if(istride[i] != ostride[i] && length[i] > 1)
                     samestride = false;
             }
             if((transform_type == fft_transform_type_complex_forward
@@ -1742,7 +1805,7 @@ public:
 
             if((transform_type == fft_transform_type_real_forward
                 || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1))
+               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
             {
                 // In-place real/complex transforms require unit strides.
                 if(verbose)
@@ -1946,52 +2009,18 @@ public:
     // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
     bool is_using_default_layout() const
     {
-        auto is_zero                = [](const decltype(ioffset)::value_type& i) { return i == 0; };
-        bool default_layout_is_used = std::all_of(ioffset.begin(), ioffset.end(), is_zero)
-                                      && std::all_of(ooffset.begin(), ooffset.end(), is_zero);
-        size_t default_ival = 1;
-        size_t default_oval = 1;
-        default_layout_is_used
-            &= (default_ival == istride.back()) && (default_oval == ostride.back());
-        switch(transform_type)
-        {
-        case fft_transform_type_complex_forward:
-        case fft_transform_type_complex_inverse:
-        {
-            default_ival *= length.back();
-            default_oval *= length.back();
-            break;
-        }
-        case fft_transform_type_real_forward:
-        case fft_transform_type_real_inverse:
-        {
-            const size_t hermitian_symmetric_length = length.back() / 2 + 1;
-            size_t*      ptr_default_real_val       = &default_ival;
-            size_t*      ptr_default_cmplx_val      = &default_oval;
-            if(transform_type == fft_transform_type_real_inverse)
-                std::swap(ptr_default_real_val, ptr_default_cmplx_val);
-            *ptr_default_cmplx_val *= hermitian_symmetric_length;
-            if(placement == fft_placement_inplace)
-                *ptr_default_real_val *= 2 * hermitian_symmetric_length; // padding to be used
-            else
-                *ptr_default_real_val *= length.back();
-            break;
-        }
-        default:
-            throw std::runtime_error("Invalid transform type");
-        }
-        // check strides for multi-dimensional cases
-        for(int stride_idx = static_cast<int>(dim()) - 2; stride_idx >= 0 && default_layout_is_used;
-            stride_idx--)
-        {
-            default_layout_is_used
-                &= (default_ival == istride[stride_idx]) && (default_oval == ostride[stride_idx]);
-            default_ival *= length[stride_idx];
-            default_oval *= length[stride_idx];
-        }
-        // check distances
-        default_layout_is_used &= (idist == default_ival) && (odist == default_oval);
-        return default_layout_is_used;
+        static_assert(std::is_same_v<decltype(ioffset), decltype(ooffset)>);
+        auto is_zero = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        return std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+               && std::all_of(ooffset.begin(), ooffset.end(), is_zero)
+               && istride == default_strides(transform_type, placement, fft_io::fft_io_in, length)
+               && ostride == default_strides(transform_type, placement, fft_io::fft_io_out, length)
+               && idist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_in, length, nbatch)
+               && odist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_out, length, nbatch);
     }
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
