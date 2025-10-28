@@ -821,77 +821,26 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                // if(!res.ok)
-                // {
-                //     std::cout << "host result" << std::endl;
-                //     for(size_t i = 0; i < M; i++)
-                //     {
-                //         for(size_t j = 0; j < N; j++)
-                //         {
-                //             auto a = d_result[i * N + j];
-                //             auto b = h_result[i * N + j];
-                //             // if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
-                //             // {
-                //             //    std::cout << std::setw(8) << i << std::setw(8) << j  << std::endl;
-                //             // }
-                //             //    > res.acceptableError.relativeL2Tolerance)
-                //             // {
-                //                 std::cout
-                //                 // << std::setw(8) << i << std::setw(8) << j //
-                //                         //   << std::setw(16) << std::scientific << a //
-                //                           << std::setw(16) << std::scientific << b; //
-                //                         //   << std::setw(16) << std::scientific << a - b //
-                //                         //   << std::endl;
-                //             // }
-                //         }
-                //         std::cout << std::endl;
-                //     }
-
-                //     std::cout << "device result" << std::endl;
-                //     for(size_t i = 0; i < M; i++)
-                //     {
-                //         for(size_t j = 0; j < N; j++)
-                //         {
-                //             auto a = d_result[i * N + j];
-                //             auto b = h_result[i * N + j];
-                //             // if((a - b) * (a - b) / (b * b)
-                //             //    > res.acceptableError.relativeL2Tolerance)
-                //             // {
-                //                 std::cout
-                //                 // << std::setw(8) << i << std::setw(8) << j //
-                //                           << std::setw(16) << std::scientific << a; //
-                //                         //   << std::setw(16) << std::scientific << b; //
-                //                         //   << std::setw(16) << std::scientific << a - b //
-                //                         //   << std::endl;
-                //             // }
-                //         }
-                //         std::cout << std::endl;
-                //     }
-
-                //     std::cout << "diff" << std::endl;
-                //     for(size_t i = 0; i < M; i++)
-                //     {
-                //         for(size_t j = 0; j < N; j++)
-                //         {
-                //             auto a = d_result[i * N + j];
-                //             auto b = h_result[i * N + j];
-                //             if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
-                //             {
-                //                std::cout << std::setw(8) << i << std::setw(8) << j  << std::endl;
-                //             }
-                //             //    > res.acceptableError.relativeL2Tolerance)
-                //             // {
-                //                 // std::cout
-                //                 // // << std::setw(8) << i << std::setw(8) << j //
-                //                 //         //   << std::setw(16) << std::scientific << a //
-                //                 //           << std::setw(16) << std::scientific << b; //
-                //                         //   << std::setw(16) << std::scientific << a - b //
-                //                         //   << std::endl;
-                //             // }
-                //         }
-                //         std::cout << std::endl;
-                //     }
-                // }
+                if(debuggable && !res.ok)
+                {
+                    for(size_t i = 0; i < M; i++)
+                    {
+                        for(size_t j = 0; j < N; j++)
+                        {
+                            auto a = d_result[i * N + j];
+                            auto b = h_result[i * N + j];
+                            if((a - b) * (a - b) / (b * b)
+                               > res.acceptableError.relativeL2Tolerance)
+                            {
+                                std::cout << std::setw(8) << i << std::setw(8) << j //
+                                          << std::setw(16) << std::scientific << a //
+                                          << std::setw(16) << std::scientific << b //
+                                          << std::setw(16) << std::scientific << a - b //
+                                          << std::endl;
+                            }
+                        }
+                    }
+                }
                 EXPECT_TRUE(res.ok) << res.message();
             }
         }

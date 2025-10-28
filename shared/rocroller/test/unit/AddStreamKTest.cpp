@@ -91,6 +91,7 @@ namespace AddStreamKTest
                     uint k = tile % numTileK;
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
+                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                 }
             }
 
@@ -106,6 +107,7 @@ namespace AddStreamKTest
 
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
+                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                 }
             }
         }

@@ -94,7 +94,7 @@ namespace rocRoller
         /**
          * @brief Create a range-based for loop.
          *
-         * returns {forLoopDimension, forLoopOperation}
+         * returns {dimension, operation}
          */
         std::pair<int, int> rangeFor(KernelGraph&              graph,
                                      Expression::ExpressionPtr size,
