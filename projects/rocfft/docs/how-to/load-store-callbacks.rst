@@ -18,7 +18,7 @@ to the library using
 :cpp:func:`rocfft_execution_info_set_store_callback`.
 
 Callback functions are passed as arrays of function pointers, with
-one function per brick in the input or output field.  For example, to
+one function per brick in the :ref:`input or output field<input_output_fields>`.  For example, to
 specify a load callback on a transform with 4 input bricks, pass an
 array of 4 function pointers to
 :cpp:func:`rocfft_execution_info_set_load_callback`.  Or, to specify
@@ -35,7 +35,7 @@ All functions in an array must perform the same logical operation.
 That is, any function in an array must be substitutable for any other
 function in the array if the data being loaded or stored were moved
 to another brick.  Behavior of the transform is not defined if
-functions in a array do not behave the same.
+functions in an array do not behave the same.
 
 .. note::
 
