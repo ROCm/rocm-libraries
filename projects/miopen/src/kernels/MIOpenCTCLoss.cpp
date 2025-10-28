@@ -37,7 +37,10 @@ inline __device__ FLOAT LogAddExp(const FLOAT* x, const FLOAT* y)
     FLOAT c = b - a;
 
     return c <= negative_cutoff_val ? max(a, negative_cutoff_val)
-                                    : max(a + log1pf(expf(b - a)), negative_cutoff_val);
+                                    // We don't need the extra precision of log1pf() and it adds
+                                    // performance overhead.
+                                    // cppcheck-suppress unpreciseMathCall
+                                    : max(a + logf(expf(b - a) + 1), negative_cutoff_val);
 }
 
 template <class T>
@@ -129,7 +132,10 @@ inline __device__ void AtomicLogAddExp(const int& j1,
         float c       = b - a;
         float new_val = c <= negative_cutoff_val
                             ? max(a, negative_cutoff_val)
-                            : max(a + log1pf(expf(b - a)), negative_cutoff_val);
+                            // We don't need the extra precision of log1pf() and it adds performance
+                            // overhead.
+                            // cppcheck-suppress unpreciseMathCall
+                            : max(a + logf(expf(b - a) + 1), negative_cutoff_val);
 
         unsigned int new_val_int;
         memcpy(&new_val_int, &new_val, sizeof(new_val));
