@@ -12,7 +12,7 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -23,162 +23,33 @@ namespace
 {
 
 template <typename DataType>
-class BatchnormBackwardActivation : public GraphVerifierTest<DataType, BatchnormTestCase>
+class BatchnormBackwardActivation
+    : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
-    void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+    std::unordered_map<std::string, int64_t> _inputTensorIds;
+
+    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        std::unordered_map<int64_t, std::string> uidToName;
-        visitGraph(const_cast<hipdnn_frontend::graph::Graph&>(graph),
-                   [&](const hipdnn_frontend::graph::INode& node) {
-                       for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-                       {
-                           if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                           {
-                               uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                           }
-                       }
-                       for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-                       {
-                           if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                           {
-                               uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                           }
-                       }
-                   });
+        // x and dy: wider range
+        bundle.tensors.at(_inputTensorIds.at("x"))->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+        bundle.tensors.at(_inputTensorIds.at("dy"))->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
 
-        for(auto& tensorPair : bundle.tensors)
-        {
-            const auto& uid = tensorPair.first;
-            auto it = uidToName.find(uid);
+        // scale: around 1.0
+        bundle.tensors.at(_inputTensorIds.at("scale"))
+            ->fillTensorWithRandomValues(0.5f, 1.5f, seed);
 
-            float minVal = 0.0f;
-            float maxVal = 0.0f;
+        // bias and mean: small values
+        bundle.tensors.at(_inputTensorIds.at("bias"))
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+        bundle.tensors.at(_inputTensorIds.at("mean"))
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
 
-            if(it != uidToName.end())
-            {
-                const auto& name = it->second;
-
-                if(name == "x" || name == "dy")
-                {
-                    minVal = -1.8f;
-                    maxVal = 1.8f;
-                }
-                else if(name == "scale")
-                {
-                    minVal = 0.5f;
-                    maxVal = 1.5f;
-                }
-                else if(name == "bias" || name == "mean")
-                {
-                    minVal = -0.1f;
-                    maxVal = 0.1f;
-                }
-                else if(name == "inv_variance")
-                {
-                    minVal = 0.5f;
-                    maxVal = 2.0f;
-                }
-                // output tensors left to default
-            }
-
-            bundle.randomizeTensor(uid, minVal, maxVal, seed);
-        }
-    }
-
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph,
-                     unsigned int seed,
-                     GraphTensorBundle& cpuBundle,
-                     GraphTensorBundle& gpuBundle,
-                     [[maybe_unused]] const IReferenceValidation& validator) override
-    {
-        std::unordered_map<int64_t, std::string> uidToName;
-        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                {
-                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                }
-            }
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                {
-                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                }
-            }
-        });
-
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
-
-        auto result = graph.validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        this->executeGpuGraph(this->_handle, graph, gpuBundle);
-        this->executeCpuGraph(graph, cpuBundle);
-
-        auto tolerance = batchnorm::getToleranceBackward<DataType>() * static_cast<DataType>(2.0f);
-
-        CpuFpReferenceMiopenRmsValidation<DataType> dataTypeValidator(tolerance);
-        CpuFpReferenceMiopenRmsValidation<float> intermediateTypeValidator(
-            static_cast<float>(tolerance));
-
-        // Get non-virtual output tensor IDs
-        std::vector<int64_t> outputTensorIds;
-        visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(!tensorAttr->get_is_virtual() && tensorAttr->has_uid())
-                {
-                    outputTensorIds.push_back(tensorAttr->get_uid());
-                }
-            }
-        });
-
-        for(const auto& tensorId : outputTensorIds)
-        {
-            auto cpuIt = cpuBundle.tensors.find(tensorId);
-            auto gpuIt = gpuBundle.tensors.find(tensorId);
-
-            if(cpuIt == cpuBundle.tensors.end() || gpuIt == gpuBundle.tensors.end())
-            {
-                continue;
-            }
-
-            auto& cpuTensor = cpuIt->second;
-            auto& gpuTensor = gpuIt->second;
-
-            gpuTensor->markDeviceModified();
-
-            // std::cout << "Validating tensor with id: " << tensorId << "\n";
-
-            bool valid = false;
-            auto nameIt = uidToName.find(tensorId);
-            if(nameIt != uidToName.end())
-            {
-                const auto& name = nameIt->second;
-                if(name == "dscale" || name == "dbias")
-                {
-                    // std::cout << "using intermediate type validator for tensor: " << name << "\n";
-                    valid = intermediateTypeValidator.allClose(*cpuTensor, *gpuTensor);
-                }
-                else
-                {
-                    // std::cout << "Using input type validator for tensor: " << name << "\n";
-                    valid = dataTypeValidator.allClose(*cpuTensor, *gpuTensor);
-                }
-            }
-
-            std::cout << "Validation for tensor id " << tensorId
-                      << (valid ? " PASSED." : " FAILED.") << "\n";
-
-            // ASSERT_TRUE(valid) << "Validation failed for tensor id: " << tensorId;
-            // std::cout << "Validation for tensor id " << tensorId << " PASSED." << "\n";
-        }
+        // inv_variance: positive values
+        bundle.tensors.at(_inputTensorIds.at("inv_variance"))
+            ->fillTensorWithRandomValues(0.5f, 2.0f, seed);
     }
 
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
@@ -212,6 +83,7 @@ protected:
             "x", dataType, dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(nextUid());
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        _inputTensorIds.insert({"x", xTensorAttr->get_uid()});
 
         auto scaleAttr
             = graph::makeTensorAttributes("scale",
@@ -220,6 +92,7 @@ protected:
                                           generateStrides(channelDims, layout.strideOrder));
         scaleAttr.set_uid(nextUid());
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        _inputTensorIds.insert({"scale", scaleTensorAttr->get_uid()});
 
         auto biasAttr
             = graph::makeTensorAttributes("bias",
@@ -228,6 +101,7 @@ protected:
                                           generateStrides(channelDims, layout.strideOrder));
         biasAttr.set_uid(nextUid());
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        _inputTensorIds.insert({"bias", biasTensorAttr->get_uid()});
 
         auto meanAttr
             = graph::makeTensorAttributes("mean",
@@ -236,6 +110,7 @@ protected:
                                           generateStrides(channelDims, layout.strideOrder));
         meanAttr.set_uid(nextUid());
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+        _inputTensorIds.insert({"mean", meanTensorAttr->get_uid()});
 
         auto invVarAttr
             = graph::makeTensorAttributes("inv_variance",
@@ -245,6 +120,7 @@ protected:
         invVarAttr.set_uid(nextUid());
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
+        _inputTensorIds.insert({"inv_variance", invVarianceTensorAttr->get_uid()});
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
         graph::BatchnormInferenceAttributes bnInfAttrs;
@@ -271,17 +147,17 @@ protected:
             "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
         dyAttr.set_uid(nextUid());
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        _inputTensorIds.insert({"dy", dyTensorAttr->get_uid()});
 
         // DX_drelu = pointwise(DY, BN_Y, RELU_BWD)
         graph::PointwiseAttributes reluBwdAttrs;
         reluBwdAttrs.set_name("relu_bwd");
         reluBwdAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
-        // reluBwdAttrs.set_relu_lower_clip(-1000.f);
-        // reluBwdAttrs.set_relu_upper_clip(1000.5f);
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, reluBwdAttrs);
         dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_data_type(dataType); // miopen might want this as intermediate
+        dxDrelu->set_data_type(
+            dataType); // leaving this as intermediate could yield more accurate results
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
         dxDrelu->set_is_virtual(true);
@@ -334,25 +210,17 @@ protected:
             dbiasOut->set_uid(nextUid());
         }
 
-        // std::cout << "x tensor UID: " << xTensorAttr->get_uid() << "\n";
-        // std::cout << "scale tensor UID: " << scaleTensorAttr->get_uid() << "\n";
-        // std::cout << "bias tensor UID: " << biasTensorAttr->get_uid() << "\n";
-        // std::cout << "mean tensor UID: " << meanTensorAttr->get_uid() << "\n";
-        // std::cout << "inv_variance tensor UID: " << invVarianceTensorAttr->get_uid() << "\n";
-        // std::cout << "BN_Y tensor UID: " << bnY->get_uid() << "\n";
-        // std::cout << "dy tensor UID: " << dyTensorAttr->get_uid() << "\n";
-        // std::cout << "DX_drelu tensor UID: " << dxDrelu->get_uid() << "\n";
-        // std::cout << "dx tensor UID: " << dxOut->get_uid() << "\n";
-        // std::cout << "dscale tensor UID: " << dscaleOut->get_uid() << "\n";
-        // std::cout << "dbias tensor UID: " << dbiasOut->get_uid() << "\n";
+        auto baseTolerance = batchnorm::getToleranceBackward<DataType>();
+        auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 
-        // todo: add registry
-        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
+        // dx uses input data type tolerance
+        this->registerValidator(dxOut, static_cast<float>(baseTolerance));
 
-        GraphTensorBundle gpuBundle = this->generateBundle(graphObj);
-        GraphTensorBundle cpuBundle = this->generateBundle(graphObj);
+        // dscale and dbias use intermediate (float) type tolerance
+        this->registerValidator(dscaleOut, intermediateTolerance);
+        this->registerValidator(dbiasOut, intermediateTolerance);
 
-        this->verifyGraph(graphObj, testCase.seed, cpuBundle, gpuBundle, validator);
+        this->verifyGraph(graphObj, testCase.seed);
     }
 };
 
