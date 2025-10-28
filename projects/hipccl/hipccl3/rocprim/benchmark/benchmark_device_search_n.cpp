@@ -46,20 +46,27 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 10);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    CREATE_BENCHMARKS(rocprim::int128_t)
+    CREATE_BENCHMARKS(int64_t)
+    CREATE_BENCHMARKS(int32_t)
+    CREATE_BENCHMARKS(int16_t)
+    CREATE_BENCHMARKS(int8_t)
+    CREATE_BENCHMARKS(double)
+    CREATE_BENCHMARKS(float)
+    CREATE_BENCHMARKS(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARKS(rocprim::uint128_t)
+
+    // Not tuned custom types
     using custom_int2            = common::custom_type<int>;
     using custom_longlong_double = common::custom_type<long long, double>;
 
     CREATE_BENCHMARKS(custom_int2)
     CREATE_BENCHMARKS(custom_longlong_double)
-    CREATE_BENCHMARKS(int8_t)
-    CREATE_BENCHMARKS(int16_t)
-    CREATE_BENCHMARKS(int32_t)
-    CREATE_BENCHMARKS(int64_t)
-    CREATE_BENCHMARKS(rocprim::int128_t)
-    CREATE_BENCHMARKS(rocprim::uint128_t)
-    CREATE_BENCHMARKS(rocprim::half)
-    CREATE_BENCHMARKS(float)
-    CREATE_BENCHMARKS(double)
+    #endif
 #endif
 
     // Run benchmarks

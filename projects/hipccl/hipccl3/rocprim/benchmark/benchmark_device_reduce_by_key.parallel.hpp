@@ -230,7 +230,7 @@ struct device_reduce_by_key_benchmark_generator
     CREATE_BENCHMARK(KEY, VALUE, 10)      \
     CREATE_BENCHMARK(KEY, VALUE, 1000)
 
-// some of the tuned types
+// Some of the tuned types
 #define CREATE_BENCHMARK_TYPES(KEY)                \
     CREATE_BENCHMARK_TYPE(KEY, int8_t)             \
     CREATE_BENCHMARK_TYPE(KEY, rocprim::half)      \
@@ -240,33 +240,43 @@ struct device_reduce_by_key_benchmark_generator
     CREATE_BENCHMARK_TYPE(KEY, float)              \
     CREATE_BENCHMARK_TYPE(KEY, double)
 
-// all of the tuned types
-#define CREATE_BENCHMARK_TYPE_TUNING(KEY)          \
-    CREATE_BENCHMARK_TYPE(KEY, int8_t)             \
-    CREATE_BENCHMARK_TYPE(KEY, int16_t)            \
-    CREATE_BENCHMARK_TYPE(KEY, int32_t)            \
-    CREATE_BENCHMARK_TYPE(KEY, int64_t)            \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t)  \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::uint128_t) \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::half)      \
-    CREATE_BENCHMARK_TYPE(KEY, float)              \
-    CREATE_BENCHMARK_TYPE(KEY, double)
+// All of the tuned types
+#define CREATE_BENCHMARK_TYPE_TUNING(KEY)         \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t) \
+    CREATE_BENCHMARK_TYPE(KEY, int64_t)           \
+    CREATE_BENCHMARK_TYPE(KEY, int)               \
+    CREATE_BENCHMARK_TYPE(KEY, short)             \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, double)            \
+    CREATE_BENCHMARK_TYPE(KEY, float)             \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half)
 
 template<bool Deterministic>
 void add_benchmarks(benchmark_utils::executor& executor)
 {
-    // tuned types
-    CREATE_BENCHMARK_TYPES(int8_t)
-    CREATE_BENCHMARK_TYPES(int16_t)
-    CREATE_BENCHMARK_TYPE_TUNING(int32_t)
+    // Tuned types
+    CREATE_BENCHMARK_TYPE_TUNING(rocprim::int128_t)
     CREATE_BENCHMARK_TYPE_TUNING(int64_t)
-    CREATE_BENCHMARK_TYPES(rocprim::half)
-    CREATE_BENCHMARK_TYPES(float)
-    CREATE_BENCHMARK_TYPES(double)
-    CREATE_BENCHMARK_TYPES(rocprim::int128_t)
-    CREATE_BENCHMARK_TYPES(rocprim::uint128_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int)
+    CREATE_BENCHMARK_TYPE_TUNING(short)
+    CREATE_BENCHMARK_TYPE_TUNING(int8_t)
 
-    // custom types
+#ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARK_TYPE(rocprim::int128_t, rocprim::uint128_t)
+    CREATE_BENCHMARK_TYPE(int, rocprim::uint128_t)
+    CREATE_BENCHMARK_TYPE(short, rocprim::uint128_t)
+    CREATE_BENCHMARK_TYPES(int8_t)
+    CREATE_BENCHMARK_TYPES(double)
+    CREATE_BENCHMARK_TYPES(float)
+    CREATE_BENCHMARK_TYPES(rocprim::half)
+    CREATE_BENCHMARK_TYPES(int16_t)
+    CREATE_BENCHMARK_TYPES(rocprim::uint128_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int32_t)
+    CREATE_BENCHMARK_TYPE(int32_t, int16_t)
+    CREATE_BENCHMARK_TYPE(int32_t, rocprim::uint128_t)
+
+    // Not tuned custom types
     using custom_float2  = common::custom_type<float, float>;
     using custom_double2 = common::custom_type<double, double>;
 
@@ -275,6 +285,7 @@ void add_benchmarks(benchmark_utils::executor& executor)
 
     CREATE_BENCHMARK_TYPE(long long, custom_float2)
     CREATE_BENCHMARK_TYPE(long long, custom_double2)
+#endif
 }
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_REDUCE_BY_KEY_PARALLEL_HPP_

@@ -54,29 +54,35 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::int128_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int64_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int)
+    CREATE_ADJACENT_FIND_BENCHMARKS(short)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int8_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(double)
+    CREATE_ADJACENT_FIND_BENCHMARKS(float)
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_ADJACENT_FIND_BENCHMARKS(int16_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(int32_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
+
+    // Not tuned custom types
     using custom_float2          = common::custom_type<float, float>;
     using custom_double2         = common::custom_type<double, double>;
     using custom_int2            = common::custom_type<int, int>;
     using custom_char_double     = common::custom_type<char, double>;
     using custom_longlong_double = common::custom_type<long long, double>;
 
-    // Tuned types
-    CREATE_ADJACENT_FIND_BENCHMARKS(int8_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int16_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int32_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int64_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::half)
-    CREATE_ADJACENT_FIND_BENCHMARKS(float)
-    CREATE_ADJACENT_FIND_BENCHMARKS(double)
-    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::int128_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
-
-    // Custom types
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_float2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_double2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_int2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_char_double)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_longlong_double)
+    #endif
 #endif
 
     executor.run();
