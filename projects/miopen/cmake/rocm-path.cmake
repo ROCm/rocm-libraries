@@ -25,4 +25,8 @@
 ################################################################################
 
 # Find the compiler path when building MIOpen
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+if(WIN32)
+  list(APPEND CMAKE_PREFIX_PATH $ENV{HIP_PATH})
+else()
+  list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+endif()
