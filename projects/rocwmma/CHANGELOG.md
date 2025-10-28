@@ -8,7 +8,6 @@ Documentation for rocWMMA is available at
 ### Added
 
 * Added more unit tests to increase the code coverage.
-* Added sample `perf_i8gemm` to demonstrate `int8_t` as matrix input data type.
 
 ### Changed
 
