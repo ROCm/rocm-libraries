@@ -220,7 +220,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
                                              const fs::path& filename)
 {
     dir.emplace(filename.filename().string());
-    hsaco_file = make_object_file_name(dir.get() / filename);
+    hsaco_file = make_object_file_name(dir.value() / filename);
 
     if(filename.extension() == dynamic_library_postfix) // ".so" or ".dll"
     {
@@ -233,7 +233,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
     }
     else if(filename.extension() == ".cpp")
     {
-        hsaco_file = HipBuild(dir.get(), filename, src, params, target);
+        hsaco_file = HipBuild(dir.value(), filename, src, params, target);
     }
 #if MIOPEN_USE_MLIR
     else if(filename.extension() == ".mlir")
@@ -248,7 +248,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
         params += " " + GetCodeObjectVersionOption();
         if(env::enabled(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP))
             params += " -mwavefrontsize64 -mcumode";
-        WriteFile(src, dir.get() / filename);
+        WriteFile(src, dir.value() / filename);
         params += " -target amdgcn-amd-amdhsa -x cl -D__AMD__=1  -O3";
         params += " -cl-kernel-arg-info -cl-denorms-are-zero";
         params += " -cl-std=CL2.0 -mllvm -amdgpu-early-inline-all";
