@@ -148,20 +148,21 @@ MIOPEN_INTERNALS_EXPORT struct CandidateSelectionResult
 };
 
 MIOPEN_INTERNALS_EXPORT
-CandidateSelectionResult
-ModelSelectBestCandidate(const std::string& arch,
-                         const std::string& solver,
-                         const std::map<std::string, float>& features,
-                         const std::vector<std::vector<std::string>>& valid_kernel_params,
-                         bool use_split_k,
-                         ValidationFunc&& is_valid);
+CandidateSelectionResult ModelSelectBestCandidate(
+    const std::string& arch,
+    const std::string& solver,
+    const std::map<std::string, float>& features,
+    const std::vector<std::vector<std::string>>& valid_kernel_params,
+    bool use_split_k,
+    ValidationFunc&& is_valid = [](int, int) { return true; });
 
 MIOPEN_INTERNALS_EXPORT
 std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
-ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
-                             const std::vector<int>& indexes,
-                             const std::vector<int>& split_ks,
-                             ValidationFunc&& is_valid);
+ExpandKernelParamsWithSplitK(
+    const std::vector<std::vector<std::string>>& kernels,
+    const std::vector<int>& indexes,
+    const std::vector<int>& split_ks,
+    ValidationFunc&& is_valid = [](int, int) { return true; });
 
 } // namespace candidate_selection
 } // namespace tuning
