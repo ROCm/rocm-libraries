@@ -42,96 +42,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         class IndexIterator,
-         class KeysInputIterator1,
-         class KeysInputIterator2,
-         class BinaryFunction>
-inline hipError_t launch_partition(detail::target_arch arch,
-                                   IndexIterator       index,
-                                   KeysInputIterator1  keys_input1,
-                                   KeysInputIterator2  keys_input2,
-                                   const size_t        input1_size,
-                                   const size_t        input2_size,
-                                   const unsigned int  spacing,
-                                   BinaryFunction      compare_function,
-                                   dim3                grid,
-                                   dim3                block,
-                                   size_t              shmem,
-                                   hipStream_t         stream)
-{
-    auto kernel = [=](auto)
-    {
-        partition_kernel_impl<IndexIterator,
-                              KeysInputIterator1,
-                              KeysInputIterator2,
-                              BinaryFunction>(index,
-                                              keys_input1,
-                                              keys_input2,
-                                              input1_size,
-                                              input2_size,
-                                              spacing,
-                                              compare_function);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<class Config,
-         class IndexIterator,
-         class KeysInputIterator1,
-         class KeysInputIterator2,
-         class KeysOutputIterator,
-         class ValuesInputIterator1,
-         class ValuesInputIterator2,
-         class ValuesOutputIterator,
-         class BinaryFunction>
-inline hipError_t launch_merge(detail::target_arch  arch,
-                               IndexIterator        index,
-                               KeysInputIterator1   keys_input1,
-                               KeysInputIterator2   keys_input2,
-                               KeysOutputIterator   keys_output,
-                               ValuesInputIterator1 values_input1,
-                               ValuesInputIterator2 values_input2,
-                               ValuesOutputIterator values_output,
-                               const size_t         input1_size,
-                               const size_t         input2_size,
-                               BinaryFunction       compare_function,
-                               detail::vsmem_t      vsmem,
-                               dim3                 grid,
-                               dim3                 block,
-                               size_t               shmem,
-                               hipStream_t          stream)
-{
-    auto kernel = [=](auto arch_config) mutable
-    {
-        using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
-        using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
-
-        using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
-
-        using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
-        // Get temporary storage
-        typename merge_kernel_impl_t::storage_type& storage
-            = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
-
-        merge_kernel_impl_t().merge(index,
-                                    keys_input1,
-                                    keys_input2,
-                                    keys_output,
-                                    values_input1,
-                                    values_input2,
-                                    values_output,
-                                    input1_size,
-                                    input2_size,
-                                    compare_function,
-                                    storage);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<typename Config, typename Key, typename Value>
 inline size_t get_merge_vsmem_size_per_block(detail::target_arch arch)
 {
@@ -244,41 +154,71 @@ inline hipError_t merge_impl(void*                temporary_storage,
     const unsigned int partition_blocks = ((number_of_blocks + 1) + half_block - 1) / half_block;
 
     if(debug_synchronous)
+    {
         start = std::chrono::steady_clock::now();
+    }
 
-    ROCPRIM_RETURN_ON_ERROR(launch_partition<config>(target_arch,
-                                                     index,
-                                                     keys_input1,
-                                                     keys_input2,
-                                                     input1_size,
-                                                     input2_size,
-                                                     items_per_block,
-                                                     compare_function,
-                                                     partition_blocks,
-                                                     half_block,
-                                                     0,
-                                                     stream));
+    auto partition_kernel = [=](auto)
+    {
+        partition_kernel_impl<unsigned int*,
+                              KeysInputIterator1,
+                              KeysInputIterator2,
+                              BinaryFunction>(index,
+                                              keys_input1,
+                                              keys_input2,
+                                              input1_size,
+                                              input2_size,
+                                              items_per_block,
+                                              compare_function);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                        partition_kernel,
+                                                        partition_blocks,
+                                                        half_block,
+                                                        0,
+                                                        stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", input1_size, start);
 
     if(debug_synchronous)
+    {
         start = std::chrono::steady_clock::now();
+    }
 
-    ROCPRIM_RETURN_ON_ERROR(launch_merge<config>(target_arch,
-                                                 index,
-                                                 keys_input1,
-                                                 keys_input2,
-                                                 keys_output,
-                                                 values_input1,
-                                                 values_input2,
-                                                 values_output,
-                                                 input1_size,
-                                                 input2_size,
-                                                 compare_function,
-                                                 detail::vsmem_t{vsmem},
-                                                 dim3(number_of_blocks),
-                                                 dim3(block_size),
-                                                 0,
-                                                 stream));
+    auto merge_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+    {
+        using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
+        using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
+
+        using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
+
+        using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        // Get temporary storage
+        typename merge_kernel_impl_t::storage_type& storage
+            = VSmemHelperT::get_temp_storage(static_temp_storage, vsm);
+
+        merge_kernel_impl_t().merge(index,
+                                    keys_input1,
+                                    keys_input2,
+                                    keys_output,
+                                    values_input1,
+                                    values_input2,
+                                    values_output,
+                                    input1_size,
+                                    input2_size,
+                                    compare_function,
+                                    storage);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                        merge_kernel,
+                                                        dim3(number_of_blocks),
+                                                        dim3(block_size),
+                                                        0,
+                                                        stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("merge_kernel", input1_size, start);
 
     return hipSuccess;

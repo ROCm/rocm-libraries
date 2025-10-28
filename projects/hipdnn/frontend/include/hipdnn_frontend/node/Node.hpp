@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <functional>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -61,9 +62,36 @@ public:
         return {};
     }
 
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
+    void visit(const std::function<void(INode&)>& visitor)
     {
-        return _sub_nodes;
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                child->visit(visitor);
+            }
+        }
+    }
+
+    void visit(const std::function<void(const INode&)>& visitor) const
+    {
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                // Explicitly call const version by getting const reference
+                const INode& constChild = *child;
+                constChild.visit(visitor);
+            }
+        }
     }
 
 protected:
