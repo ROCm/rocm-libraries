@@ -41,9 +41,9 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrmm_bad_arg(void)
+void testing_csrmm_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                  N         = 100;
     int                  M         = 100;
     int                  K         = 100;
@@ -51,8 +51,8 @@ void testing_csrmm_bad_arg(void)
     int                  ldc       = 100;
     int                  nnz       = 100;
     int                  safe_size = 100;
-    T                    alpha     = 0.6;
-    T                    beta      = 0.2;
+    T                    alpha     = make_DataType<T>(0.6);
+    T                    beta      = make_DataType<T>(0.2);
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseOperation_t transB    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -294,7 +294,7 @@ void testing_csrmm_bad_arg(void)
 template <typename T>
 hipsparseStatus_t testing_csrmm(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M        = argus.M;
     int                  N        = argus.N;
     int                  K        = argus.K;
