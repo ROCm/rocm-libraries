@@ -52,6 +52,7 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 // Main template implementation
+// Version with default validation (accept all)
 template <typename DataType>
 std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel(
@@ -64,6 +65,36 @@ RunParameterPredictionModel(
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
         fill_valid_kernels,
     std::string solver_name)
+{
+    // Default validation: accept all combinations
+    auto default_validation = [](int, int) { return true; };
+
+    // Call the version with validation
+    return RunParameterPredictionModel<DataType>(ctx,
+                                                 problem,
+                                                 valid_kernels,
+                                                 index,
+                                                 split_k,
+                                                 kernel_id,
+                                                 fill_valid_kernels,
+                                                 solver_name,
+                                                 default_validation);
+}
+
+// Version with custom validation function
+template <typename DataType, typename ValidationFunc>
+std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel(
+    const miopen::ExecutionContext& ctx,
+    const miopen::conv::ProblemDescription& problem,
+    std::vector<std::string>& valid_kernels,
+    int& index,
+    int& split_k,
+    std::string& kernel_id,
+    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
+        fill_valid_kernels,
+    std::string solver_name,
+    ValidationFunc&& is_valid)
 {
     valid_kernels = fill_valid_kernels(problem);
 
@@ -87,37 +118,13 @@ RunParameterPredictionModel(
                          std::to_string(split_k) + ". Expected 0 (no split) or 1 (default split).");
         }
 
-        // validation lambda that checks if kernel supports split_k
-        auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
-            if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
-                return false;
-
-            std::string test_kernel_id =
-                valid_kernels[kernel_index] + "+" + std::to_string(split_k_value);
-
-            // Use the appropriate CK device operation type based on alpha_beta_case
-            switch(problem.GetAlphaBetaCase())
-            {
-            case BILINEAR:
-                return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<DataType>,
-                                         CKArgs<DataType>,
-                                         miopen::conv::ProblemDescription,
-                                         true>(problem, test_kernel_id);
-            case SCALE:
-                return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<DataType>,
-                                         CKArgs<DataType>,
-                                         miopen::conv::ProblemDescription,
-                                         true>(problem, test_kernel_id);
-            default:
-                return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<DataType>,
-                                         CKArgs<DataType>,
-                                         miopen::conv::ProblemDescription,
-                                         true>(problem, test_kernel_id);
-            }
-        };
-
         auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
-            arch, solver_name, features, heuristic_kernels, use_split_k, is_kernel_split_k_valid);
+            arch,
+            solver_name,
+            features,
+            heuristic_kernels,
+            use_split_k,
+            std::forward<ValidationFunc>(is_valid));
 
         // Check if we have any candidates
         if(!result.IsEmpty())
