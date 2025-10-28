@@ -423,10 +423,8 @@ Tests:
   M: 4
   N: 4
   K: 0
-  transA: [ N, T ]
-  transB: [ N, T ]
-  alpha: 1
-  beta: 0
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
 
 #OCP F8
 - name: matmul_f8_bf8_dst_fp32
