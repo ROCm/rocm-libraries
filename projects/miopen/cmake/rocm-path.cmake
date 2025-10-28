@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2019 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,5 +24,5 @@
 #
 ################################################################################
 
-# Find the compiler path when building rocBLAS
+# Find the compiler path when building MIOpen
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm)

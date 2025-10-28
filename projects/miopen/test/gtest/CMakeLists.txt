@@ -18,7 +18,6 @@ set(SOURCES
     unit_conv_solver.cpp
     )
 
-
 # We use a special entry point for HIP backend testing so we can detect and flag any HIP errors that tests don't
 # clean up themselves
 if(MIOPEN_BACKEND_HIP)
@@ -71,7 +70,7 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
   #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main MIOpen ${Boost_LIBRARIES} hip::host )
+  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main MIOpen hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()
@@ -229,7 +228,7 @@ else()
   add_gtest(miopen_gtest "${TESTS_CPP}")
 
   if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
+    if(MIOPEN_BUILD_CK)
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
         target_include_directories(miopen_gtest SYSTEM PRIVATE
