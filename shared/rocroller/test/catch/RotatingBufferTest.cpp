@@ -43,7 +43,7 @@ static std::vector<T> copyDeviceSpanToHost(std::span<T> dSpan)
     return h;
 }
 
-TEST_CASE("Disabled rotation returns base pointer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Disabled rotation returns base pointer", "[RotatingBuffer]")
 {
     std::vector<float>    hostData(16, 1.0f);
     RotatingBuffer<float> buf(hostData, 0);
@@ -61,7 +61,7 @@ TEST_CASE("Disabled rotation returns base pointer", "[RotatingBuffer]")
     }
 }
 
-TEST_CASE("Matrix smaller than cache rotates correctly", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Matrix smaller than cache rotates correctly", "[RotatingBuffer]")
 {
     std::vector<int> hostData(4, 42);
     size_t           cacheBytes = 64;
@@ -86,7 +86,7 @@ TEST_CASE("Matrix smaller than cache rotates correctly", "[RotatingBuffer]")
     }
 }
 
-TEST_CASE("Matrix larger than cache gracefully falls back to single buffer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Matrix larger than cache gracefully falls back to single buffer", "[RotatingBuffer]")
 {
     std::vector<double> hostData(1024, 3.14);
     size_t              cacheBytes = 128; // smaller than one matrix
@@ -105,7 +105,7 @@ TEST_CASE("Matrix larger than cache gracefully falls back to single buffer", "[R
         REQUIRE(v == 3.14);
 }
 
-TEST_CASE("Data integrity across rotations", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Data integrity across rotations", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; i++)
@@ -126,13 +126,13 @@ TEST_CASE("Data integrity across rotations", "[RotatingBuffer]")
     }
 }
 
-TEST_CASE("Empty host data throws FatalError", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Empty host data throws FatalError", "[RotatingBuffer]")
 {
     std::vector<float> hostData;
     REQUIRE_THROWS_AS(RotatingBuffer<float>(hostData, 32), FatalError);
 }
 
-TEST_CASE("Small cacheBytes triggers graceful fallback to full buffer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Small cacheBytes triggers graceful fallback to full buffer", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8, 7);
     size_t           cacheBytes = sizeof(int) * 4; // too small for one full copy
@@ -148,7 +148,7 @@ TEST_CASE("Small cacheBytes triggers graceful fallback to full buffer", "[Rotati
     REQUIRE(std::all_of(h.begin(), h.end(), [](int v) { return v == 7; }));
 }
 
-TEST_CASE("Odd cache size falls back safely", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Odd cache size falls back safely", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; i++)
@@ -180,7 +180,7 @@ TEST_CASE("Odd cache size falls back safely", "[RotatingBuffer]")
 }
 
 // Exact-fit cache (== one tensor): should not rotate; spans remain identical.
-TEST_CASE("Exact-fit cache does not rotate", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Exact-fit cache does not rotate", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; ++i)
@@ -202,7 +202,7 @@ TEST_CASE("Exact-fit cache does not rotate", "[RotatingBuffer]")
 }
 
 // Multi-copy rotation cycles deterministically (3 copies): addresses should cycle 0->+N->+2N->0...
-TEST_CASE("Multi-copy rotation cycles addresses deterministically", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Multi-copy rotation cycles addresses deterministically", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; ++i)
@@ -261,7 +261,7 @@ TEST_CASE("Multi-copy rotation cycles addresses deterministically", "[RotatingBu
 }
 
 // Many iterations should never segfault (stress rotation & modulo logic)
-TEST_CASE("Many rotations do not segfault and data remains stable", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Many rotations do not segfault and data remains stable", "[RotatingBuffer]")
 {
     std::vector<float> hostData(32);
     for(int i = 0; i < 32; ++i)
@@ -283,7 +283,7 @@ TEST_CASE("Many rotations do not segfault and data remains stable", "[RotatingBu
 }
 
 // Alloc/free churn: ensure deleter (hipFree) path is exercised without faults or leaks
-TEST_CASE("Allocator/deleter churn is safe", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Allocator/deleter churn is safe", "[RotatingBuffer]")
 {
     for(int rep = 0; rep < 64; ++rep)
     {
