@@ -21,18 +21,49 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
 
-# extra
-include: test_csrgeam.yaml
-include: test_csrgeam2.yaml
-include: test_csrgemm.yaml
-include: test_csrgemm2_a.yaml
-include: test_csrgemm2_b.yaml
+
+Tests:
+- name: csrgemm2_a_bad_arg
+  category: pre_checkin
+  function: csrgemm2_a_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csrgemm2_a
+  category: quick
+  function: csrgemm2_a
+  precision: *single_double_precisions_complex_real
+  M: [0, 50, 647, 1799]
+  N: [0, 13, 523, 3712]
+  K: [0, 50, 254, 1942]
+  alpha: [2.0]
+  alphai: [-0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: csrgemm2_a
+  category: pre_checkin
+  function: csrgemm2_a
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: 1
+  alpha: [2.0]
+  alphai: [-0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]

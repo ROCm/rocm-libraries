@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,176 +21,191 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_csrgeam.hpp"
-#include "utility.hpp"
 
-#include <hipsparse.h>
-#include <string>
+TEST_ROUTINE(csrgeam,
+             extra,
+             arg.N,
+             arg.N,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.baseA,
+             arg.baseB,
+             arg.baseC);
 
-typedef hipsparseIndexBase_t base;
+// #include "testing_csrgeam.hpp"
+// #include "utility.hpp"
 
-typedef std::tuple<int, int, double, double, base, base, base>    csrgeam_tuple;
-typedef std::tuple<double, double, base, base, base, std::string> csrgeam_bin_tuple;
+// #include <hipsparse.h>
+// #include <string>
 
-double csrgeam_alpha_range[] = {0.0, 1.0};
-double csrgeam_beta_range[]  = {0.0, 2.0};
+// typedef hipsparseIndexBase_t base;
 
-int csrgeam_M_range[] = {0, 50, 647, 1799};
-int csrgeam_N_range[] = {0, 13, 523, 3712};
+// typedef std::tuple<int, int, double, double, base, base, base>    csrgeam_tuple;
+// typedef std::tuple<double, double, base, base, base, std::string> csrgeam_bin_tuple;
 
-base csrgeam_idxbaseA_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-base csrgeam_idxbaseB_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-base csrgeam_idxbaseC_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
+// double csrgeam_alpha_range[] = {0.0, 1.0};
+// double csrgeam_beta_range[]  = {0.0, 2.0};
 
-std::string csrgeam_bin[] = {/*"rma10.bin",*/
-                             "mac_econ_fwd500.bin",
-                             /*"bibd_22_8.bin",*/
-                             "mc2depi.bin",
-                             "scircuit.bin",
-                             /*"bmwcra_1.bin",*/
-                             "nos1.bin",
-                             "nos2.bin",
-                             "nos3.bin",
-                             "nos4.bin",
-                             "nos5.bin",
-                             "nos6.bin",
-                             "nos7.bin"};
+// int csrgeam_M_range[] = {0, 50, 647, 1799};
+// int csrgeam_N_range[] = {0, 13, 523, 3712};
 
-class parameterized_csrgeam : public testing::TestWithParam<csrgeam_tuple>
-{
-protected:
-    parameterized_csrgeam() {}
-    virtual ~parameterized_csrgeam() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
+// base csrgeam_idxbaseA_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
+// base csrgeam_idxbaseB_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
+// base csrgeam_idxbaseC_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-class parameterized_csrgeam_bin : public testing::TestWithParam<csrgeam_bin_tuple>
-{
-protected:
-    parameterized_csrgeam_bin() {}
-    virtual ~parameterized_csrgeam_bin() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
+// std::string csrgeam_bin[] = {/*"rma10.bin",*/
+//                              "mac_econ_fwd500.bin",
+//                              /*"bibd_22_8.bin",*/
+//                              "mc2depi.bin",
+//                              "scircuit.bin",
+//                              /*"bmwcra_1.bin",*/
+//                              "nos1.bin",
+//                              "nos2.bin",
+//                              "nos3.bin",
+//                              "nos4.bin",
+//                              "nos5.bin",
+//                              "nos6.bin",
+//                              "nos7.bin"};
 
-Arguments setup_csrgeam_arguments(csrgeam_tuple tup)
-{
-    Arguments arg;
-    arg.M     = std::get<0>(tup);
-    arg.N     = std::get<1>(tup);
-    arg.alpha = std::get<2>(tup);
-    arg.beta  = std::get<3>(tup);
-    arg.baseA = std::get<4>(tup);
-#ifdef __HIP_PLATFORM_NVIDIA__
-    // There is a bug with index base in cusparse
-    arg.baseB = std::get<4>(tup);
-    arg.baseC = std::get<4>(tup);
-#else
-    arg.baseB = std::get<5>(tup);
-    arg.baseC = std::get<6>(tup);
-#endif
-    arg.timing = 0;
-    return arg;
-}
+// class parameterized_csrgeam : public testing::TestWithParam<csrgeam_tuple>
+// {
+// protected:
+//     parameterized_csrgeam() {}
+//     virtual ~parameterized_csrgeam() {}
+//     virtual void SetUp() {}
+//     virtual void TearDown() {}
+// };
 
-Arguments setup_csrgeam_arguments(csrgeam_bin_tuple tup)
-{
-    Arguments arg;
-    arg.M     = -99;
-    arg.N     = -99;
-    arg.alpha = std::get<0>(tup);
-    arg.beta  = std::get<1>(tup);
-    arg.baseA = std::get<2>(tup);
-#ifdef __HIP_PLATFORM_NVIDIA__
-    // There is a bug with index base in cusparse
-    arg.baseB = std::get<2>(tup);
-    arg.baseC = std::get<2>(tup);
-#else
-    arg.baseB = std::get<3>(tup);
-    arg.baseC = std::get<4>(tup);
-#endif
-    arg.timing = 0;
+// class parameterized_csrgeam_bin : public testing::TestWithParam<csrgeam_bin_tuple>
+// {
+// protected:
+//     parameterized_csrgeam_bin() {}
+//     virtual ~parameterized_csrgeam_bin() {}
+//     virtual void SetUp() {}
+//     virtual void TearDown() {}
+// };
 
-    // Determine absolute path of test matrix
-    std::string bin_file = std::get<5>(tup);
+// Arguments setup_csrgeam_arguments(csrgeam_tuple tup)
+// {
+//     Arguments arg;
+//     arg.M     = std::get<0>(tup);
+//     arg.N     = std::get<1>(tup);
+//     arg.alpha = std::get<2>(tup);
+//     arg.beta  = std::get<3>(tup);
+//     arg.baseA = std::get<4>(tup);
+// #ifdef __HIP_PLATFORM_NVIDIA__
+//     // There is a bug with index base in cusparse
+//     arg.baseB = std::get<4>(tup);
+//     arg.baseC = std::get<4>(tup);
+// #else
+//     arg.baseB = std::get<5>(tup);
+//     arg.baseC = std::get<6>(tup);
+// #endif
+//     arg.timing = 0;
+//     return arg;
+// }
 
-    // Matrices are stored at the same path in matrices directory
-    arg.set_filename(get_filename(bin_file));
+// Arguments setup_csrgeam_arguments(csrgeam_bin_tuple tup)
+// {
+//     Arguments arg;
+//     arg.M     = -99;
+//     arg.N     = -99;
+//     arg.alpha = std::get<0>(tup);
+//     arg.beta  = std::get<1>(tup);
+//     arg.baseA = std::get<2>(tup);
+// #ifdef __HIP_PLATFORM_NVIDIA__
+//     // There is a bug with index base in cusparse
+//     arg.baseB = std::get<2>(tup);
+//     arg.baseC = std::get<2>(tup);
+// #else
+//     arg.baseB = std::get<3>(tup);
+//     arg.baseC = std::get<4>(tup);
+// #endif
+//     arg.timing = 0;
 
-    return arg;
-}
+//     // Determine absolute path of test matrix
+//     std::string bin_file = std::get<5>(tup);
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
-TEST(csrgeam_bad_arg, csrgeam_float)
-{
-    testing_csrgeam_bad_arg<float>();
-}
+//     // Matrices are stored at the same path in matrices directory
+//     arg.set_filename(get_filename(bin_file));
 
-TEST_P(parameterized_csrgeam, csrgeam_float)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+//     return arg;
+// }
 
-    hipsparseStatus_t status = testing_csrgeam<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+// #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+// TEST(csrgeam_bad_arg, csrgeam_float)
+// {
+//     testing_csrgeam_bad_arg<float>();
+// }
 
-TEST_P(parameterized_csrgeam, csrgeam_double)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+// TEST_P(parameterized_csrgeam, csrgeam_float)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgeam<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_csrgeam<float>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_csrgeam, csrgeam_float_complex)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+// TEST_P(parameterized_csrgeam, csrgeam_double)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgeam<hipComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_csrgeam<double>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_csrgeam, csrgeam_double_complex)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+// TEST_P(parameterized_csrgeam, csrgeam_float_complex)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgeam<hipDoubleComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_csrgeam<hipComplex>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_csrgeam_bin, csrgeam_bin_float)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+// TEST_P(parameterized_csrgeam, csrgeam_double_complex)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgeam<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_csrgeam<hipDoubleComplex>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_csrgeam_bin, csrgeam_bin_double)
-{
-    Arguments arg = setup_csrgeam_arguments(GetParam());
+// TEST_P(parameterized_csrgeam_bin, csrgeam_bin_float)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgeam<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_csrgeam<float>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-INSTANTIATE_TEST_SUITE_P(csrgeam,
-                         parameterized_csrgeam,
-                         testing::Combine(testing::ValuesIn(csrgeam_M_range),
-                                          testing::ValuesIn(csrgeam_N_range),
-                                          testing::ValuesIn(csrgeam_alpha_range),
-                                          testing::ValuesIn(csrgeam_beta_range),
-                                          testing::ValuesIn(csrgeam_idxbaseA_range),
-                                          testing::ValuesIn(csrgeam_idxbaseB_range),
-                                          testing::ValuesIn(csrgeam_idxbaseC_range)));
+// TEST_P(parameterized_csrgeam_bin, csrgeam_bin_double)
+// {
+//     Arguments arg = setup_csrgeam_arguments(GetParam());
 
-INSTANTIATE_TEST_SUITE_P(csrgeam_bin,
-                         parameterized_csrgeam_bin,
-                         testing::Combine(testing::ValuesIn(csrgeam_alpha_range),
-                                          testing::ValuesIn(csrgeam_beta_range),
-                                          testing::ValuesIn(csrgeam_idxbaseA_range),
-                                          testing::ValuesIn(csrgeam_idxbaseB_range),
-                                          testing::ValuesIn(csrgeam_idxbaseC_range),
-                                          testing::ValuesIn(csrgeam_bin)));
-#endif
+//     hipsparseStatus_t status = testing_csrgeam<double>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
+
+// INSTANTIATE_TEST_SUITE_P(csrgeam,
+//                          parameterized_csrgeam,
+//                          testing::Combine(testing::ValuesIn(csrgeam_M_range),
+//                                           testing::ValuesIn(csrgeam_N_range),
+//                                           testing::ValuesIn(csrgeam_alpha_range),
+//                                           testing::ValuesIn(csrgeam_beta_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseA_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseB_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseC_range)));
+
+// INSTANTIATE_TEST_SUITE_P(csrgeam_bin,
+//                          parameterized_csrgeam_bin,
+//                          testing::Combine(testing::ValuesIn(csrgeam_alpha_range),
+//                                           testing::ValuesIn(csrgeam_beta_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseA_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseB_range),
+//                                           testing::ValuesIn(csrgeam_idxbaseC_range),
+//                                           testing::ValuesIn(csrgeam_bin)));
+// #endif

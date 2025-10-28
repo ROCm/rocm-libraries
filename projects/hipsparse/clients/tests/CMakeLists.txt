@@ -218,7 +218,13 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_sctr.yaml
                          test_roti.yaml
                          test_gthr.yaml
-                         test_gthrz.yaml)
+                         test_gthrz.yaml
+                         
+                         test_csrgeam.yaml 
+                         test_csrgeam2.yaml 
+                         test_csrgemm.yaml
+                         test_csrgemm2_a.yaml
+                         test_csrgemm2_b.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
