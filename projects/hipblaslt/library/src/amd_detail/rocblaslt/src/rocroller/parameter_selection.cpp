@@ -37,9 +37,9 @@ std::string SolutionParameters::toString() const
     result << "MachineInstruction:" << machineInstruction.m << "x" << machineInstruction.n << "x"
            << machineInstruction.k << std::endl;
     result << "WorkgroupSize:" << workgroupSizeX << "x" << workgroupSizeY << std::endl;
+    result << "LoadA: " << loadPathA << std::endl;
+    result << "LoadB: " << loadPathB << std::endl;
     result << "LDS Usage";
-    result << " A:" << (direct2LDSA ? "DirectToLDS" : (loadLDSA ? "On" : "Off"));
-    result << " B:" << (direct2LDSB ? "DirectToLDS" : (loadLDSB ? "On" : "Off"));
     result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
     result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC << std::endl;
     result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
@@ -95,6 +95,7 @@ std::shared_ptr<SolutionParameters>
     genSolutionParameters(const KernelType&              kernelType,
                           const SolutionIndexParameters& solutionIndexParameters)
 {
+    namespace SolutionParams = rocRoller::Parameters::Solution;
     auto gemm = std::make_shared<SolutionParameters>();
 
     gemm->kernelType = kernelType;
@@ -143,19 +144,20 @@ std::shared_ptr<SolutionParameters>
 
     // Direct To LDS only supported in certain situations
     if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
-        gemm->direct2LDSA = false;
+        gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     if(kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6)
-        gemm->direct2LDSB = false;
+        gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     if((kernelType.typeA == rocRoller::DataType::FP4
         || kernelType.typeB == rocRoller::DataType::FP4)
        && (solutionIndexParameters.workgroupTile.m <= 64
            || solutionIndexParameters.workgroupTile.n <= 64))
     {
-        gemm->direct2LDSA = false;
-        gemm->direct2LDSB = false;
+        gemm->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     }
 
-    if(gemm->direct2LDSA == false || gemm->direct2LDSB == false)
+    if(not(SolutionParams::IsBufferToLDS(gemm->loadPathA)
+           and SolutionParams::IsBufferToLDS(gemm->loadPathB)))
     {
         gemm->prefetchLDSFactor = 2;
     }

@@ -128,6 +128,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
             -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     else \
         echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
@@ -137,6 +138,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DTHEROCK_ENABLE_ALL=OFF \
             -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
 

@@ -189,13 +189,10 @@ class GEMMSolution:
     unroll_x: int = 0
     unroll_y: int = 0
 
-    loadLDS_A: bool = True
-    loadLDS_B: bool = True
+    load_A: str = "BufferToLDSViaVGPR"
+    load_B: str = "BufferToLDSViaVGPR"
     storeLDS_D: bool = True
     betaInFma: bool = True
-
-    direct2LDS_A: bool = False
-    direct2LDS_B: bool = False
 
     scheduler: str = "Priority"
     schedulerCost: str = "LinearWeighted"
@@ -385,8 +382,9 @@ class GEMMResult(GEMM, RRPerfResult):
             "n": self.mac_n,
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
-            "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
-            "Direct2LDS": TF(self.direct2LDS_A) + TF(self.direct2LDS_B),
+            "Load_A": TF(self.load_A),
+            "Load_B": TF(self.load_B),
+            "Store_D": TF(self.storeLDS_D),
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)

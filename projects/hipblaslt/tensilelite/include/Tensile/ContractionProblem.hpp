@@ -88,12 +88,12 @@ namespace TensileLite
             return m_wgm;
         }
 
-        void setWGMXCC(uint16_t wgmxcc)
+        void setWGMXCC(int16_t wgmxcc)
         {
             m_wgmxcc = wgmxcc;
         }
 
-        uint16_t wgmxcc() const
+        int16_t wgmxcc() const
         {
             return m_wgmxcc;
         }
@@ -159,7 +159,7 @@ namespace TensileLite
         bool             m_gsuc           = false; // default value
         bool             m_gsuwgmrr       = false; // default value
         int16_t          m_wgm            = 0; // default value
-        uint16_t         m_wgmxcc         = 0; // default value
+        int16_t          m_wgmxcc         = 0; // default value
         int16_t          m_wgmxccg        = 0; // default value
         rocisa::DataType m_biasType       = rocisa::DataType::None;
         int              m_factorDim      = 0;

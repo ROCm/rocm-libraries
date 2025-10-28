@@ -188,8 +188,8 @@ protected:
         runCpuConvBwdData(testCase, cpuTensorBundle);
 
         CpuFpReferenceValidation<DataType> cpuRefValidation(tolerance, tolerance);
-        EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
-                                              graphTensorBundle.dxTensor.memory()));
+        EXPECT_TRUE(
+            cpuRefValidation.allClose(cpuTensorBundle.dxTensor, graphTensorBundle.dxTensor));
     }
 
 private:
