@@ -101,6 +101,7 @@ protected:
         auto graphObj = std::make_shared<hipdnn_frontend::graph::Graph>();
 
         graphObj->set_name("ConvolutionBackwardWeightTest");
+        graphObj->set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         int64_t uid = 1;
 
