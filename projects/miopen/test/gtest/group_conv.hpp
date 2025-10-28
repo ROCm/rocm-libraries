@@ -475,6 +475,11 @@ protected:
                 test_skipped = true;
                 GTEST_SKIP() << "bf16 tests skipped on this hardware.";
             }
+            if(!IsTestSupportedByDevice(Gpu::gfx94X) && compute_type == "TF32")
+            {
+                test_skipped = true;
+                GTEST_SKIP() << "tf32 tests skipped on this hardware.";
+            }
         }
 
         float alpha_val;
