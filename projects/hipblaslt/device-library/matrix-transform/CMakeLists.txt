@@ -29,7 +29,7 @@ list(REMOVE_DUPLICATES archs)
 # Create separate --offload-arch flags for each architecture
 set(arch_flags "")
 foreach(arch IN LISTS archs)
-    list(APPEND arch_flags " --offload-arch=${arch} ")
+    list(APPEND arch_flags "--offload-arch=${arch}")
 endforeach()
 
 set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform.hsaco")
