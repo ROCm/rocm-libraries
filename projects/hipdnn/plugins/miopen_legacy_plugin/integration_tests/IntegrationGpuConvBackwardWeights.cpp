@@ -11,7 +11,7 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/ConvolutionCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -22,7 +22,7 @@ namespace
 {
 
 template <typename DataType>
-class ConvBackwardWeights : public GraphVerifierTest<DataType, ConvTestCase>
+class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
@@ -66,8 +66,8 @@ protected:
         dwTensorAttr->set_output(true);
         dwTensorAttr->set_data_type(dataType);
 
-        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        this->verifyGraph(graphObj, testCase.seed, validator);
+        this->registerValidator(dwTensorAttr, tolerance);
+        this->verifyGraph(graphObj, testCase.seed);
     }
 };
 
