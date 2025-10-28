@@ -85,12 +85,11 @@ std::vector<TensorsConfig> TensorsConfigs()
     if constexpr(PERF_ENABLE)
     {
         const auto& handle = get_handle();
-        auto deviceName = handle.GetDeviceName();
+        auto deviceName    = handle.GetDeviceName();
         size_t maxTotalSize;
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(deviceName, "gfx90a") ||
-           miopen::StartsWith(deviceName, "gfx908"))
+        if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
         {
             maxTotalSize = 16; // twice the 8MB L2
         }
@@ -255,8 +254,8 @@ protected:
         }
 
         num_wg_orig = num_wg;
-        max_num_wg = 4096;
-        num_wg = num_wg > max_num_wg ? max_num_wg : num_wg;
+        max_num_wg  = 4096;
+        num_wg      = num_wg > max_num_wg ? max_num_wg : num_wg;
 
         size_t local_threads = 256;
 
@@ -554,7 +553,7 @@ struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>
 TEST_P(GPU_Op4dTensorGenericTest_FP32, PortTest)
 {
     // run CPU implementation
-//    runCPU();
+    //    runCPU();
     // run OCL kernel
     runOCL();
     // run HIP kernel
