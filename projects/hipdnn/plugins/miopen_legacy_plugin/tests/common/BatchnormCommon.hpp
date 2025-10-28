@@ -64,4 +64,74 @@ inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
     };
 }
 
+inline std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {1, 3, 14, 14, seed},
+        {1, 256, 1, 1, seed},
+        {2, 3, 1, 1, seed},
+        {32, 1, 14, 14, seed},
+        {32, 3, 1, 14, seed},
+        {32, 3, 14, 1, seed},
+    };
+}
+
+inline std::vector<Batchnorm2dTestCase> getBnFwdInferenceFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {64, 64, 112, 112, seed},
+        {64, 512, 14, 14, seed},
+    };
+}
+
+inline std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {2, 3, 3, 1, 1, seed},
+        {16, 3, 8, 14, 14, seed},
+    };
+}
+
+inline std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return std::vector<Batchnorm2dTestCase>{
+        {1, 3, 14, 14, seed},
+        // MIOpen segfaults for this case, re-enable when fix is released:
+        // https://github.com/ROCm/rocm-libraries/pull/1197
+        // {1, 256, 1, 1, seed}, // Would produce near-zero variance in theory
+        {2, 3, 1, 1, seed},
+        {32, 1, 14, 14, seed},
+        {32, 3, 1, 14, seed},
+        {32, 3, 14, 1, seed},
+    };
+}
+
+inline std::vector<Batchnorm2dTestCase> getBnBwdFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return std::vector<Batchnorm2dTestCase>{
+        {64, 64, 112, 112, seed},
+        {64, 512, 14, 14, seed},
+    };
+}
+
+inline std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return std::vector<Batchnorm3dTestCase>{
+        {2, 3, 3, 1, 1, seed},
+        {16, 3, 8, 14, 14, seed},
+    };
+}
+
 } // namespace test_bn_common
