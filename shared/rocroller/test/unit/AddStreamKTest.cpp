@@ -77,10 +77,6 @@ namespace AddStreamKTest
                 forTileIdx += forKIdx)
             {
                 uint tile = numSKTilesPerWG * wg + forTileIdx;
-                std::cout << "(tile, numTileK) " << tile << ", " << numTileK << std::endl;
-                bool sendTile    = (tile % numTileK) > 0;
-                bool receiveTile = false;
-                auto myTile      = -1;
 
                 auto nextNonAccum = ((tile) / numTileK + 1) * numTileK;
                 auto lastTile     = std::min(nextNonAccum, numTilesSK);
@@ -90,27 +86,11 @@ namespace AddStreamKTest
                 {
                     uint tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
 
-                    uint m      = (tile / numTileK) / numTileN;
-                    uint n      = (tile / numTileK) % numTileN;
-                    uint k      = tile % numTileK;
-                    receiveTile = ((tile % numTileK) < (numTileK - 1)) && (!sendTile);
-                    myTile      = tile;
-
+                    uint m = (tile / numTileK) / numTileN;
+                    uint n = (tile / numTileK) % numTileN;
+                    uint k = tile % numTileK;
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
-                    std::cout << "SKTile (m, n, k, wg): " << m << ", " << n << ", " << k << ", "
-                              << wg << std::endl;
-                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
-                }
-                std::cout << "(myTile, myTile mod numTileK) " << myTile << ", " << myTile % numTileK
-                          << std::endl;
-
-                std::cout << "(send, receive) " << sendTile << ", " << receiveTile << std::endl;
-
-                if(receiveTile)
-                {
-                    std::cout << "!!! receiveTile (wg, numFixups) " << wg << ", "
-                              << numTileK / numSKTilesPerWG << std::endl;
                 }
             }
 
@@ -126,9 +106,6 @@ namespace AddStreamKTest
 
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
-                    std::cout << "DPTile (m, n, k, wg): " << m << ", " << n << ", " << k << ", "
-                              << wg << std::endl;
-                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                 }
             }
         }
@@ -209,7 +186,7 @@ namespace AddStreamKTest
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
-        auto [forKCoord, forKOp, rangeK]
+        auto [forKCoord, forKOp]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto user = kgraph.coordinates.addElement(User({}, "result"));
@@ -280,19 +257,12 @@ namespace AddStreamKTest
 
                 numTilesSK = numTileK * ((numTileM * numTileN) % numWGs + numWGs);
                 numTilesDP = numTileM * numTileN * numTileK - numTilesSK;
-                std::cout << "twoTile" << std::endl;
             }
             else
             {
                 numTilesSK = numTileM * numTileN * numTileK;
                 numTilesDP = 0;
-                std::cout << "basic" << std::endl;
             }
-            std::cout << "numWGs, numTileM, numTileN, numTileK: " << numWGs << ", " << numTileM
-                      << ", " << numTileN << ", " << numTileK << std::endl;
-
-            std::cout << "(numTilesSK, numTilesDP): " << numTilesSK << ", " << numTilesDP
-                      << std::endl;
 
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
@@ -405,7 +375,7 @@ namespace AddStreamKTest
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
-        auto [forKCoord, forKOp, rangeK]
+        auto [forKCoord, forKOp]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto in  = kgraph.coordinates.addElement(User({}, "in"));

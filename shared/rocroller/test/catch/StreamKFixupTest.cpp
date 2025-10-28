@@ -52,108 +52,120 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     auto numWGs     = example.getTotalWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
 
+    // Verify the control graph matches the pseudocode
+    // if ReceiveTile
+    //  for ReceiveTileLoop
+    //      Assert(WG + forReceiveTileLoopCoord + 1 < numWGs)
+    //      DoWhile
+    //          LoadSGPR(flag[WG + forReceiveTileLoopCoord + 1])
+    //      for XLoop and YLoop
+    //          partialResult = LoadTiled(scratchAccTile[WG + forReceiveTileLoopCoord + 1])
+    //          fullyAccTile = Assign Add(localAccTile, partialResult)
+    //          localAccTile = Assign(fullyAccTile)
+    //          WaitZero()
+    auto verifyStreamKReceiveTileLoop = [](rocRoller::KernelGraph::KernelGraph const& kgraph) {
+        auto forLoopTags        = kgraph.control.getNodes<ForLoopOp>().to<std::vector>();
+        auto receiveTileLoopTag = -1;
+
+        // verify there is only 1 fixup for-loop
+        for(const auto& tag : forLoopTags)
+        {
+            auto forLoopOp = kgraph.control.get<ForLoopOp>(tag);
+            if(forLoopOp->loopName == rocRoller::RECEIVE)
+            {
+                CHECK(receiveTileLoopTag == -1);
+                receiveTileLoopTag = tag;
+            }
+        }
+        CHECK(receiveTileLoopTag != -1);
+
+        // verify the for-loop is under the receive tile condition
+        auto receiveTileCondTag = -1;
+        auto parent = only(kgraph.control.getInputNodeIndices<Body>(receiveTileLoopTag));
+        CHECK(parent.has_value());
+        receiveTileCondTag = parent.value();
+        CHECK(kgraph.control.get<ConditionalOp>(receiveTileCondTag).has_value());
+
+        // verify there is onlyl 1 for-XLoop and for-YLoop under the fixup for-loop
+        auto isForXLoopPredicate = [&](int tag) -> bool {
+            auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+            if(maybeForLoop.has_value())
+                return maybeForLoop->loopName == rocRoller::XLOOP;
+            return false;
+        };
+        auto isForYLoopPredicate = [&](int tag) -> bool {
+            auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+            if(maybeForLoop.has_value())
+                return maybeForLoop->loopName == rocRoller::YLOOP;
+            return false;
+        };
+        auto fixupXLoop = only(kgraph.control.findNodes(receiveTileLoopTag, isForXLoopPredicate));
+        auto fixupYLoop = only(kgraph.control.findNodes(receiveTileLoopTag, isForYLoopPredicate));
+        CHECK(fixupXLoop.has_value());
+        CHECK(fixupYLoop.has_value());
+
+        // verify this sequence chain: LoadTiled -> AssignAdd -> Assign
+        auto loadPartialResult
+            = only(kgraph.control.getOutputNodeIndices<Body>(fixupYLoop.value()));
+        CHECK(loadPartialResult.has_value());
+        std::cout << "LoadTiled tag: " << loadPartialResult.value() << std::endl;
+        CHECK(kgraph.control.get<LoadTiled>(loadPartialResult.value()).has_value());
+        auto assignAdd
+            = only(kgraph.control.getOutputNodeIndices<Sequence>(loadPartialResult.value()));
+        CHECK(assignAdd.has_value());
+        CHECK(kgraph.control.get<Assign>(assignAdd.value()).has_value());
+        auto assignTile = only(kgraph.control.getOutputNodeIndices<Sequence>(assignAdd.value()));
+        CHECK(assignTile.has_value());
+        CHECK(kgraph.control.get<Assign>(assignTile.value()).has_value());
+    };
+
+    auto applyGraphTransforms
+        = [&numWGsExpr, &context](CommandParametersPtr                 params,
+                                  rocRoller::KernelGraph::KernelGraph& kgraph) {
+              std::vector<GraphTransformPtr> transforms;
+              transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+              transforms.push_back(std::make_shared<OrderMemory>(false));
+              transforms.push_back(std::make_shared<UpdateParameters>(params));
+              transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+              transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+              transforms.push_back(std::make_shared<Simplify>());
+              transforms.push_back(std::make_shared<FuseExpressions>());
+              transforms.push_back(std::make_shared<AddStreamK>(
+                  context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+
+              for(auto& t : transforms)
+                  kgraph = kgraph.transform(t);
+          };
+
     SECTION("Standard StreamK Multiple Fixups")
     {
         example.setStreamK(StreamKMode::Standard);
-
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        std::vector<GraphTransformPtr> transforms;
-        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-        transforms.push_back(std::make_shared<OrderMemory>(false));
-        transforms.push_back(std::make_shared<UpdateParameters>(params));
-        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-        transforms.push_back(std::make_shared<Simplify>());
-        transforms.push_back(std::make_shared<FuseExpressions>());
-
-        for(auto& t : transforms)
-            kgraph = kgraph.transform(t);
-
-        std::ofstream outFile0("graph0-standard.dot"); // Create and open a file
-
-        outFile0 << kgraph.toDOT();
-
-        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
-            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
-
-        std::ofstream outFile1("graph1-standard.dot"); // Create and open a file
-        outFile1 << kgraph.toDOT();
-
-        std::ofstream outFile2("graph2-mapper-standard.dot"); // Create and open a file
-        outFile2 << kgraph.toDOT(true);
+        applyGraphTransforms(params, kgraph);
+        verifyStreamKReceiveTileLoop(kgraph);
     }
 
     SECTION("TwoTile StreamK Multiple Fixups")
     {
         example.setStreamK(StreamKMode::TwoTile);
-
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        std::vector<GraphTransformPtr> transforms;
-        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-        transforms.push_back(std::make_shared<OrderMemory>(false));
-        transforms.push_back(std::make_shared<UpdateParameters>(params));
-        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-        transforms.push_back(std::make_shared<Simplify>());
-        transforms.push_back(std::make_shared<FuseExpressions>());
-
-        for(auto& t : transforms)
-            kgraph = kgraph.transform(t);
-
-        std::ofstream outFile0("graph0-2tile.dot"); // Create and open a file
-
-        outFile0 << kgraph.toDOT();
-
-        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
-            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
-
-        std::ofstream outFile1("graph1-2tile.dot"); // Create and open a file
-        outFile1 << kgraph.toDOT();
-
-        std::ofstream outFile2("graph2-mapper-2tile.dot"); // Create and open a file
-        outFile2 << kgraph.toDOT(true);
+        applyGraphTransforms(params, kgraph);
+        verifyStreamKReceiveTileLoop(kgraph);
     }
 
     SECTION("TwoTileDPFirst StreamK Multiple Fixups")
     {
         example.setStreamK(StreamKMode::TwoTileDPFirst);
-
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        std::vector<GraphTransformPtr> transforms;
-        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
-        transforms.push_back(std::make_shared<OrderMemory>(false));
-        transforms.push_back(std::make_shared<UpdateParameters>(params));
-        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
-        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
-        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
-        transforms.push_back(std::make_shared<Simplify>());
-        transforms.push_back(std::make_shared<FuseExpressions>());
-
-        for(auto& t : transforms)
-            kgraph = kgraph.transform(t);
-
-        std::ofstream outFile0("graph0-dpfirst.dot"); // Create and open a file
-
-        outFile0 << kgraph.toDOT();
-
-        kgraph = kgraph.transform(std::make_shared<AddStreamK>(
-            context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
-
-        std::ofstream outFile1("graph1-dpfirst.dot"); // Create and open a file
-        outFile1 << kgraph.toDOT();
-
-        std::ofstream outFile2("graph2-dpfirst-mapper.dot"); // Create and open a file
-        outFile2 << kgraph.toDOT(true);
+        applyGraphTransforms(params, kgraph);
+        verifyStreamKReceiveTileLoop(kgraph);
     }
 }

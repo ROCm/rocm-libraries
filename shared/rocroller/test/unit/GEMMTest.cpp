@@ -1322,8 +1322,8 @@ namespace GEMMDriverTest
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
 
-        gemm.macM = 64;
-        gemm.macN = 64;
+        gemm.macM = 128;
+        gemm.macN = 128;
         gemm.macK = 16;
 
         gemm.waveK = 8;
@@ -4206,7 +4206,7 @@ namespace GEMMDriverTest
             ::testing::Combine(::testing::Values(StreamKMode::Standard,
                                                  StreamKMode::TwoTile,
                                                  StreamKMode::TwoTileDPFirst), /* TwoTile */
-                               ::testing::Values(false), /* ldsA */
-                               ::testing::Values(true), /* ldsB */
-                               ::testing::Values(false))));
+                               ::testing::Values(true, false), /* ldsA */
+                               ::testing::Values(true, false), /* ldsB */
+                               ::testing::Values(true, false))));
 }

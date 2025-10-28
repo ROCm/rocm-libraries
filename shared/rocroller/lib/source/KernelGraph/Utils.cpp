@@ -221,11 +221,11 @@ namespace rocRoller
         /**
          * Create a range-based for loop.
          */
-        std::tuple<int, int, int> rangeFor(KernelGraph&              graph,
-                                           Expression::ExpressionPtr size,
-                                           const std::string&        loopName,
-                                           VariableType              vtype,
-                                           int                       forLoopCoord)
+        std::pair<int, int> rangeFor(KernelGraph&              graph,
+                                     Expression::ExpressionPtr size,
+                                     const std::string&        loopName,
+                                     VariableType              vtype,
+                                     int                       forLoopCoord)
         {
             auto sizeDataType
                 = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
@@ -256,7 +256,7 @@ namespace rocRoller
             graph.mapper.connect(initK, rangeK, NaryArgument::DEST);
             graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
 
-            return {dimK, forK, rangeK};
+            return {dimK, forK};
         }
 
         int cloneForLoop(KernelGraph& graph, int tag)
@@ -268,7 +268,7 @@ namespace rocRoller
 
             auto forLoopSize = graph.coordinates.get<CT::ForLoop>(forLoopDim)->size;
 
-            auto [forLoopCoord, forLoopOp, forLoopLinear] = rangeFor(
+            auto [forLoopCoord, forLoopOp] = rangeFor(
                 graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
 
             return forLoopOp;

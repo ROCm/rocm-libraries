@@ -55,8 +55,8 @@ TEST_CASE("Test getForLoopName", "[kernel-graph][unroll]")
 
     kg::KernelGraph kgraph;
 
-    auto [forDim, forOp, rangeK]    = kg::rangeFor(kgraph, Expression::literal(4), KLOOP);
-    auto [forDim2, forOp2, rangeK2] = kg::rangeFor(kgraph, Expression::literal(16), "Another loop");
+    auto [forDim, forOp]   = kg::rangeFor(kgraph, Expression::literal(4), KLOOP);
+    auto [forDim2, forOp2] = kg::rangeFor(kgraph, Expression::literal(16), "Another loop");
 
     CHECK(kg::getForLoopName(kgraph, forOp) == KLOOP);
     CHECK(kg::getForLoopName(kgraph, forOp2) == "Another loop");
@@ -73,9 +73,9 @@ TEST_CASE("Test getUnrollAmount", "[kernel-graph][unroll]")
     params->unrollK = 5;
     params->unrollX = 2;
 
-    auto [forDim, forOp, rangeK]    = kg::rangeFor(kgraph, Expression::literal(4), KLOOP);
-    auto [forDim2, forOp2, rangeK2] = kg::rangeFor(kgraph, Expression::literal(16), "Another loop");
-    auto [forDim3, forOp3, rangeK3] = kg::rangeFor(kgraph, Expression::literal(4), XLOOP);
+    auto [forDim, forOp]   = kg::rangeFor(kgraph, Expression::literal(4), KLOOP);
+    auto [forDim2, forOp2] = kg::rangeFor(kgraph, Expression::literal(16), "Another loop");
+    auto [forDim3, forOp3] = kg::rangeFor(kgraph, Expression::literal(4), XLOOP);
 
     CHECK(kg::getUnrollAmount(kgraph, forOp, params) == 5);
     CHECK(kg::getUnrollAmount(kgraph, forOp2, params) == 1);
@@ -109,7 +109,7 @@ TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll][graph-transforms]")
     auto argTag = command->allocateTag();
     auto arg    = command->allocateArgument(DataType::Int32, argTag, ArgumentType::Limit);
 
-    auto [forDim, forOp, rangeK] = kg::rangeFor(kgraph, arg->expression(), rocRoller::KLOOP);
+    auto [forDim, forOp] = kg::rangeFor(kgraph, arg->expression(), rocRoller::KLOOP);
 
     kgraph.coordinates.addElement(kg::CoordinateGraph::Tile{}, {user}, {wg, wi, forDim});
     kgraph.coordinates.addElement(kg::CoordinateGraph::Forget{}, {wg, wi, forDim}, {vgpr});

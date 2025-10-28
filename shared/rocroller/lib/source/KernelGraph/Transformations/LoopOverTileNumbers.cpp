@@ -104,7 +104,7 @@ namespace rocRoller
                 numTotalTiles = numTotalTiles * m_tileNumberCoordSizes[d];
             numTotalTiles = simplify(numTotalTiles);
 
-            auto [forLoopCoord, forLoopOp, forLoopLinearCoord]
+            auto [forLoopCoord, forLoopOp]
                 = rangeFor(graph, m_numIteratedTileNumbers, "TileLoop", DataType::UInt32);
 
             // Create forward/reverse tile-numbers for each dimension
