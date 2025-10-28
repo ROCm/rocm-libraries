@@ -220,6 +220,13 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_gthr.yaml
                          test_gthrz.yaml
                          
+                         test_bsrmv.yaml 
+                         test_csrmv.yaml 
+                         test_bsrsv2.yaml
+                         test_csrsv2.yaml 
+                         test_gemvi.yaml
+                         test_hybmv.yaml
+                         
                          test_csrgeam.yaml 
                          test_csrgeam2.yaml 
                          test_csrgemm.yaml
