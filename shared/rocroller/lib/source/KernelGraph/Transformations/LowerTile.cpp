@@ -1326,7 +1326,7 @@ namespace rocRoller
                 memoryType = macTile.memoryType;
             }
 
-            auto       internalTile = MacroTile(sizes, memoryType, {thrTileM, thrTileN});
+            auto internalTile       = MacroTile(sizes, memoryType, {thrTileM, thrTileN});
             internalTile.layoutType = macTile.layoutType;
             if(splitStore)
                 internalTile.memoryType = MemoryType::WAVE_SPLIT;

@@ -108,7 +108,7 @@ namespace rocRoller
                                         ShowValue(loadTileDirect2LDSTag)));
 
                 const auto op = std::get<Operation>(element);
-                AssertFatal(isGlobalToLDSOp(kgraph, loadTileDirect2LDSTag),
+                AssertFatal(std::holds_alternative<LoadTileDirect2LDS>(op),
                             fmt::format("Expected LoadTileDirect2LDS but got {}", toString(op)));
 
                 auto codegen = getCodeGeneratorCoordinates(kgraph, storeLDSTileTag);
@@ -117,7 +117,9 @@ namespace rocRoller
                 moveConnections(kgraph, storeLDSTileTag, loadTileDirect2LDSTag, codegen.size());
 
                 replaceWith(kgraph, loadTiledTag, loadTileDirect2LDSTag, false);
-                Log::debug("  Replaced LoadTiled {} with {}.", loadTiledTag, loadTileDirect2LDSTag);
+                Log::debug("  Replaced LoadTiled({}) with LoadTileDirect2LDS({}).",
+                           loadTiledTag,
+                           loadTileDirect2LDSTag);
             }
         }
 
@@ -156,7 +158,7 @@ namespace rocRoller
             for(auto [loadTiledTag, storeLDSTileTag] : candidates)
             {
                 Log::debug(
-                    "  Found LoadTiled {} and StoreLDSTile {}.", loadTiledTag, storeLDSTileTag);
+                    "  Found LoadTiled({}) and StoreLDSTile({}).", loadTiledTag, storeLDSTileTag);
 
                 // create LoadTileDirect2LDS operation
                 auto variableType = getVariableType(kgraph, loadTiledTag);
@@ -168,7 +170,7 @@ namespace rocRoller
                 if(nodesToPurge.count(storeLDSTileTag) == 0)
                 {
                     replaceWith(kgraph, storeLDSTileTag, kgraph.control.addElement(NOP()), false);
-                    Log::debug("  Replaced StoreLDSTile {} with NOP.", storeLDSTileTag);
+                    Log::debug("  Replaced StoreLDSTile({}) with NOP.", storeLDSTileTag);
                     nodesToPurge.insert(storeLDSTileTag);
                 }
             }

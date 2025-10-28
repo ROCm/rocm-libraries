@@ -419,7 +419,8 @@ namespace rocRoller::KernelGraph
                 stride = graph.coordinates.addElement(Stride(), {inCoord}, {outCoord});
                 if(info.base == -1 && offset != -1)
                 {
-                    const bool isDirect2LDS = graph.control.get<LoadTileDirect2LDS>(op).has_value();
+                    const bool isDirect2LDS
+                        = isOperation<LoadTileDirect2LDS>(graph.control.getElement(op));
                     const bool isStorePartOfDirect2LDSOp
                         = (isDirect2LDS && spec.isStorePartOfGlobalToLDSOp);
                     buffer = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
