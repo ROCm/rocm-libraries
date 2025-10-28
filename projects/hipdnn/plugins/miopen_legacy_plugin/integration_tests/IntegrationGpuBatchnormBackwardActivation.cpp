@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <iostream>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <iostream>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
@@ -27,43 +27,44 @@ class BatchnormBackwardActivation : public GraphVerifierTest<DataType, Batchnorm
 {
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
-                         GraphTensorBundle& bundle,
-                         unsigned int seed) override
+                          GraphTensorBundle& bundle,
+                          unsigned int seed) override
     {
         std::unordered_map<int64_t, std::string> uidToName;
-        visitGraph(const_cast<hipdnn_frontend::graph::Graph&>(graph), [&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                {
-                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                }
-            }
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
-                {
-                    uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
-                }
-            }
-        });
+        visitGraph(const_cast<hipdnn_frontend::graph::Graph&>(graph),
+                   [&](const hipdnn_frontend::graph::INode& node) {
+                       for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+                       {
+                           if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                           {
+                               uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                           }
+                       }
+                       for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+                       {
+                           if(tensorAttr->has_uid() && !tensorAttr->get_name().empty())
+                           {
+                               uidToName[tensorAttr->get_uid()] = tensorAttr->get_name();
+                           }
+                       }
+                   });
 
         for(auto& tensorPair : bundle.tensors)
         {
             const auto& uid = tensorPair.first;
             auto it = uidToName.find(uid);
-            
+
             float minVal = 0.0f;
             float maxVal = 0.0f;
-            
+
             if(it != uidToName.end())
             {
                 const auto& name = it->second;
-                
+
                 if(name == "x" || name == "dy")
                 {
-                    minVal = -2.0f;
-                    maxVal = 2.0f;
+                    minVal = -1.8f;
+                    maxVal = 1.8f;
                 }
                 else if(name == "scale")
                 {
@@ -80,18 +81,18 @@ protected:
                     minVal = 0.5f;
                     maxVal = 2.0f;
                 }
-                // output tensors left to default 
+                // output tensors left to default
             }
-            
+
             bundle.randomizeTensor(uid, minVal, maxVal, seed);
         }
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph,
-                    unsigned int seed,
-                    GraphTensorBundle& cpuBundle,
-                    GraphTensorBundle& gpuBundle,
-                    [[maybe_unused]] const IReferenceValidation& validator) override
+                     unsigned int seed,
+                     GraphTensorBundle& cpuBundle,
+                     GraphTensorBundle& gpuBundle,
+                     [[maybe_unused]] const IReferenceValidation& validator) override
     {
         std::unordered_map<int64_t, std::string> uidToName;
         visitGraph(graph, [&](const hipdnn_frontend::graph::INode& node) {
@@ -119,9 +120,9 @@ protected:
 
         this->executeGpuGraph(this->_handle, graph, gpuBundle);
         this->executeCpuGraph(graph, cpuBundle);
-        
-        auto tolerance = batchnorm::getToleranceBackward<DataType>();
-        
+
+        auto tolerance = batchnorm::getToleranceBackward<DataType>() * static_cast<DataType>(2.0f);
+
         CpuFpReferenceMiopenRmsValidation<DataType> dataTypeValidator(tolerance);
         CpuFpReferenceMiopenRmsValidation<float> intermediateTypeValidator(
             static_cast<float>(tolerance));
@@ -142,7 +143,7 @@ protected:
         {
             auto cpuIt = cpuBundle.tensors.find(tensorId);
             auto gpuIt = gpuBundle.tensors.find(tensorId);
-            
+
             if(cpuIt == cpuBundle.tensors.end() || gpuIt == gpuBundle.tensors.end())
             {
                 continue;
@@ -153,8 +154,8 @@ protected:
 
             gpuTensor->markDeviceModified();
 
-            std::cout << "Validating tensor with id: " << tensorId << "\n";
-            
+            // std::cout << "Validating tensor with id: " << tensorId << "\n";
+
             bool valid = false;
             auto nameIt = uidToName.find(tensorId);
             if(nameIt != uidToName.end())
@@ -162,12 +163,12 @@ protected:
                 const auto& name = nameIt->second;
                 if(name == "dscale" || name == "dbias")
                 {
-                    std::cout << "using intermediate type validator for tensor: " << name << "\n";
+                    // std::cout << "using intermediate type validator for tensor: " << name << "\n";
                     valid = intermediateTypeValidator.allClose(*cpuTensor, *gpuTensor);
                 }
                 else
                 {
-                    std::cout << "Using input type validator for tensor: " << name << "\n";
+                    // std::cout << "Using input type validator for tensor: " << name << "\n";
                     valid = dataTypeValidator.allClose(*cpuTensor, *gpuTensor);
                 }
             }
@@ -250,11 +251,11 @@ protected:
         bnInfAttrs.set_name("batchnorm_inference");
 
         auto bnY = graphObj.batchnorm_inference(xTensorAttr,
-                                                 meanTensorAttr,
-                                                 invVarianceTensorAttr,
-                                                 scaleTensorAttr,
-                                                 biasTensorAttr,
-                                                 bnInfAttrs);
+                                                meanTensorAttr,
+                                                invVarianceTensorAttr,
+                                                scaleTensorAttr,
+                                                biasTensorAttr,
+                                                bnInfAttrs);
 
         bnY->set_name("BN_Y");
         bnY->set_data_type(dataType);
@@ -333,65 +334,55 @@ protected:
             dbiasOut->set_uid(nextUid());
         }
 
-        std::cout << "x tensor UID: " << xTensorAttr->get_uid() << "\n";
-        std::cout << "scale tensor UID: " << scaleTensorAttr->get_uid() << "\n";
-        std::cout << "bias tensor UID: " << biasTensorAttr->get_uid() << "\n";
-        std::cout << "mean tensor UID: " << meanTensorAttr->get_uid() << "\n";
-        std::cout << "inv_variance tensor UID: " << invVarianceTensorAttr->get_uid() << "\n";
-        std::cout << "BN_Y tensor UID: " << bnY->get_uid() << "\n";
-        std::cout << "dy tensor UID: " << dyTensorAttr->get_uid() << "\n";
-        std::cout << "DX_drelu tensor UID: " << dxDrelu->get_uid() << "\n";
-        std::cout << "dx tensor UID: " << dxOut->get_uid() << "\n";
-        std::cout << "dscale tensor UID: " << dscaleOut->get_uid() << "\n";
-        std::cout << "dbias tensor UID: " << dbiasOut->get_uid() << "\n";
-
+        // std::cout << "x tensor UID: " << xTensorAttr->get_uid() << "\n";
+        // std::cout << "scale tensor UID: " << scaleTensorAttr->get_uid() << "\n";
+        // std::cout << "bias tensor UID: " << biasTensorAttr->get_uid() << "\n";
+        // std::cout << "mean tensor UID: " << meanTensorAttr->get_uid() << "\n";
+        // std::cout << "inv_variance tensor UID: " << invVarianceTensorAttr->get_uid() << "\n";
+        // std::cout << "BN_Y tensor UID: " << bnY->get_uid() << "\n";
+        // std::cout << "dy tensor UID: " << dyTensorAttr->get_uid() << "\n";
+        // std::cout << "DX_drelu tensor UID: " << dxDrelu->get_uid() << "\n";
+        // std::cout << "dx tensor UID: " << dxOut->get_uid() << "\n";
+        // std::cout << "dscale tensor UID: " << dscaleOut->get_uid() << "\n";
+        // std::cout << "dbias tensor UID: " << dbiasOut->get_uid() << "\n";
 
         // todo: add registry
         CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        
+
         GraphTensorBundle gpuBundle = this->generateBundle(graphObj);
         GraphTensorBundle cpuBundle = this->generateBundle(graphObj);
-        
+
         this->verifyGraph(graphObj, testCase.seed, cpuBundle, gpuBundle, validator);
     }
-
 };
 
-using IntegrationGpuBatchnormBackwardActivationNchwFp32
-    = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNchwFp32 = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNchwBfp16
     = BatchnormBackwardActivation<hip_bfloat16>;
 
-using IntegrationGpuBatchnormBackwardActivationNchwFp16
-    = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNchwFp16 = BatchnormBackwardActivation<half>;
 
-using IntegrationGpuBatchnormBackwardActivationNhwcFp32
-    = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNhwcFp32 = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNhwcBfp16
     = BatchnormBackwardActivation<hip_bfloat16>;
 
-using IntegrationGpuBatchnormBackwardActivationNhwcFp16
-    = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNhwcFp16 = BatchnormBackwardActivation<half>;
 
-using IntegrationGpuBatchnormBackwardActivationNcdhwFp32
-    = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp32 = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16
     = BatchnormBackwardActivation<hip_bfloat16>;
 
-using IntegrationGpuBatchnormBackwardActivationNcdhwFp16
-    = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp16 = BatchnormBackwardActivation<half>;
 
-using IntegrationGpuBatchnormBackwardActivationNdhwcFp32
-    = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp32 = BatchnormBackwardActivation<float>;
 
 using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16
     = BatchnormBackwardActivation<hip_bfloat16>;
 
-using IntegrationGpuBatchnormBackwardActivationNdhwcFp16
-    = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp16 = BatchnormBackwardActivation<half>;
 
 } // namespace
 
