@@ -451,11 +451,10 @@ auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
     for_each_arch(
         [&](auto arch_tag)
         {
-            constexpr target_arch Arch = decltype(arch_tag)::value;
-            if(Arch != arch || tuned_kernel)
+            if(arch_tag != arch || tuned_kernel)
                 return;
 
-            tuned_kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
+            tuned_kernel = trampoline_kernel<Config, arch_tag, Kernel, LaunchSelector>;
         });
 
     if(!tuned_kernel)
