@@ -80,6 +80,16 @@ void add_benchmarks(benchmark_utils::executor& executor, size_t bytes)
     }
 }
 
+#define BENCHMARK_TYPE_TUNING(KEY_TYPE, VALUE_TYPE) \
+    add_benchmarks<KEY_TYPE, VALUE_TYPE>(executor, bytes);
+
+#define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int)               \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, short)             \
+    BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
+
 int main(int argc, char* argv[])
 {
     size_t bytes = 128 * benchmark_utils::MiB;
@@ -87,18 +97,31 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, bytes, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    BENCHMARK_TYPES_TUNING(rocprim::int128_t)
+    BENCHMARK_TYPES_TUNING(int64_t)
+    BENCHMARK_TYPES_TUNING(int)
+    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int8_t)
+    BENCHMARK_TYPES_TUNING(double)
+    BENCHMARK_TYPES_TUNING(float)
+    BENCHMARK_TYPES_TUNING(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    add_benchmarks<int, float>(executor, bytes);
+    add_benchmarks<long long, double>(executor, bytes);
+    add_benchmarks<uint8_t, uint8_t>(executor, bytes);
+    add_benchmarks<rocprim::half, rocprim::half>(executor, bytes);
+    add_benchmarks<rocprim::uint128_t, rocprim::uint128_t>(executor, bytes);
+
+    // Not tuned custom types
     using custom_float2  = common::custom_type<float, float>;
     using custom_double2 = common::custom_type<double, double>;
 
-    add_benchmarks<int, float>(executor, bytes);
-    add_benchmarks<long long, double>(executor, bytes);
-    add_benchmarks<int8_t, int8_t>(executor, bytes);
-    add_benchmarks<uint8_t, uint8_t>(executor, bytes);
-    add_benchmarks<rocprim::half, rocprim::half>(executor, bytes);
     add_benchmarks<int, custom_float2>(executor, bytes);
     add_benchmarks<long long, custom_double2>(executor, bytes);
-    add_benchmarks<rocprim::int128_t, rocprim::int128_t>(executor, bytes);
-    add_benchmarks<rocprim::uint128_t, rocprim::uint128_t>(executor, bytes);
+    #endif
 #endif
 
     executor.run();
