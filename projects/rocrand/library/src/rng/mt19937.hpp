@@ -203,7 +203,7 @@ void jump_ahead_mt19937(dim3 block_idx,
                 unsigned int tm = temp[wrap_n(ptr + mt19937_constants::m)];
                 unsigned int y
                     = (t0 & mt19937_constants::upper_mask) | (t1 & mt19937_constants::lower_mask);
-                temp[ptr] = tm ^ (y >> 1) ^ ((y & 0x1U) ? mt19937_constants::matrix_a : 0);
+                temp[ptr] = tm ^ (y >> 1) ^ (((y & 1) ? -1 : 0) & mt19937_constants::matrix_a);
             }
             system::syncthreads<isDevice>{}();
             ptr = wrap_n(ptr + 1);
@@ -555,7 +555,9 @@ void generate_long_mt19937(dim3 block_idx,
             mt19937_octo_engine& engine    = thread_engines[warp_lane];
             const unsigned int   thread_id = block_idx.x * block_size + thread_idx.x + warp_lane;
 #endif
-#pragma unroll
+// Disabled for warning: optimizer failed to unroll when compiling
+// TODO: enable when the compiler successfully unrolls the loop
+// #pragma unroll
             for(unsigned int j = 0; j < inputs_per_state; j++)
             {
 #pragma unroll
@@ -599,7 +601,9 @@ void generate_long_mt19937(dim3 block_idx,
             mt19937_octo_engine& engine    = thread_engines[warp_lane];
             const unsigned int   thread_id = block_idx.x * block_size + thread_idx.x + warp_lane;
 #endif
-#pragma unroll
+// Disabled for warning: optimizer failed to unroll when compiling
+// TODO: enable when the compiler successfully unrolls the loop
+// #pragma unroll
             for(unsigned int j = 0; j < inputs_per_state; j++)
             {
 #pragma unroll

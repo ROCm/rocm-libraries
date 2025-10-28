@@ -192,6 +192,7 @@ public:
     std::unordered_map<InputNames, std::shared_ptr<TensorAttributes>> inputs;
     std::unordered_map<OutputNames, std::shared_ptr<TensorAttributes>> outputs;
 
+    // NOLINTBEGIN(readability-identifier-naming)
     PointwiseMode mode = PointwiseMode::NOT_SET;
     std::optional<float> relu_lower_clip = std::nullopt;
     std::optional<float> relu_upper_clip = std::nullopt;
@@ -200,6 +201,7 @@ public:
     std::optional<float> swish_beta = std::nullopt;
     std::optional<float> elu_alpha = std::nullopt;
     std::optional<float> softplus_beta = std::nullopt;
+    // NOLINTEND(readability-identifier-naming)
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::PointwiseAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT

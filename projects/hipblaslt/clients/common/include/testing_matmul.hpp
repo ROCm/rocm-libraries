@@ -755,6 +755,10 @@ auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
         std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
 };
 
+auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
+    return static_cast<decltype(in)>(static_cast<decltype(in)>(1)/(static_cast<decltype(in)>(1) + std::exp(-in)));
+};
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -2002,6 +2006,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         realDataTypeSize(TiB),
                                         do_swizzle_b));
             CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
+
+            if(arg.dump_matrix)
+            {
+                hipblasltDispatchValuesToFile(transA, TiA, M[i], K[i], lda[i], hA[i].buf(), "batch_"+ std::to_string(i)+"_A_input.txt");
+                hipblasltDispatchValuesToFile(transB, TiB, K[i], N[i], ldb[i], hB[i].buf(), "batch_"+ std::to_string(i)+"_B_input.txt");
+                hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[i], N[i], ldc[i], hC[i].buf(), "batch_"+ std::to_string(i)+"_C_input.txt");
+            }
         }
 
         if(do_swizzle_a)
@@ -3970,6 +3981,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 case hipblaslt_activation_type::clamp:
                     flops += clamp_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
                     break;
+                case hipblaslt_activation_type::sigmoid:
+                    flops += sigmoid_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
+                    break;
                 default:
                     break;
                 }
@@ -3989,6 +4003,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
+                if(arg.dump_matrix)
+                {
+                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_1[0].buf(), "batch_0_D_output.txt");
+                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_gold[0].buf(), "batch_0_D_Gold_output.txt");
+                }
                 check(stream,
                       arg,
                       gemm_count,
