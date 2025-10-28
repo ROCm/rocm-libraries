@@ -19,8 +19,10 @@
 
 #include <thrust/detail/preprocessor.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
 #include _THRUST_STD_INCLUDE(utility)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(type_traits)
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 

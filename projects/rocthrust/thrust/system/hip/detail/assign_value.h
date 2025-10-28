@@ -30,7 +30,7 @@
 #if THRUST_COMPILER(HIP)
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/nv_target.h>
+#  include <thrust/detail/libcxx_wrapper/nv/target.h>
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/system/hip/detail/copy.h>
 #  include <thrust/system/hip/detail/execution_policy.h>

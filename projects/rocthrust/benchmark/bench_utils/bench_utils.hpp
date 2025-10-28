@@ -125,7 +125,7 @@ public:
     return elapsed_time / 1000.0;
   }
 };
-#elif THRUST_HAS_CUDA_COMPILER
+#elif THRUST_HAS_CUDA_COMPILER()
 
 #  define CUDA_SAFE_CALL_NO_SYNC(call)                                                                              \
     do                                                                                                              \

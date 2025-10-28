@@ -30,17 +30,10 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/function.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/invoke.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
-#  include _THRUST_STD_INCLUDE(__functional/invoke.h)
-// clang-format on
-#else
-#  include <iterator>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system

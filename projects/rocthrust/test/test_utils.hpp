@@ -34,9 +34,7 @@
 #include "test_seed.hpp"
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-// clang-format on
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
 
@@ -937,7 +935,7 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
-#elif THRUST_HAS_CUDA_COMPILER
+#elif THRUST_HAS_CUDA_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 cuda
 #  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name

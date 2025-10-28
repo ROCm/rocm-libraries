@@ -15,9 +15,10 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
-#include <thrust/functional.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -28,10 +29,6 @@
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 #include <unittest/unittest.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
-#endif
 
 #if THRUST_COMPILER(GCC, >=, 7)
 // This header pulls in an unsuppressable warning on GCC 6

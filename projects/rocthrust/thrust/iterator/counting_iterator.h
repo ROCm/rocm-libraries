@@ -40,40 +40,19 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/type_traits/detail/conditional.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
 #include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(type_traits)
 #else
-
 #  include <rocprim/type_traits.hpp>
-
-#  include <limits>
-#endif
-
-#ifndef THRUST_DOXYGEN_INVOKED
-namespace internal
-{
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
-
-using _THRUST_STD::type_identity;
-
-#  else
-
-template <typename Tp>
-struct type_identity
-{
-  using type = Tp;
-};
-
-#  endif
-} // namespace internal
 #endif
 
 THRUST_NAMESPACE_BEGIN

@@ -27,7 +27,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

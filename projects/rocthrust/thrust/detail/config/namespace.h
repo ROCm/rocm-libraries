@@ -17,8 +17,6 @@
 
 #pragma once
 
-// TODO(libhipcxx): need to check this file once libhipcxx gets ready
-
 // Internal config header that is only included through thrust/detail/config/config.h
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
@@ -30,7 +28,6 @@
 #endif // no system header
 
 #include <thrust/detail/config/device_system.h>
-#include <thrust/detail/config/preprocessor.h>
 #include <thrust/version.h>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #  include <thrust/rocthrust_version.hpp>
@@ -133,7 +130,7 @@
 #      define THRUST_DETAIL_ABI_NS_END }
 #    endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  endif // not defined(THRUST_DISABLE_ABI_NAMESPACE)
-#else // !(THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP)
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA && THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
 #  define THRUST_DETAIL_ABI_NS_BEGIN
 #  define THRUST_DETAIL_ABI_NS_END
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP

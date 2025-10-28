@@ -19,7 +19,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/config/preprocessor.h>
+#include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 

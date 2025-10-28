@@ -27,11 +27,9 @@
 #endif // no system header
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/disjunction.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/negation.h)
-// clang-format on
 #else
 #  include <type_traits>
 #endif

@@ -27,6 +27,7 @@
 #endif // no system header
 
 #include <thrust/detail/internal_functional.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -36,7 +37,6 @@
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
 #include <thrust/transform.h>
-#include <thrust/type_traits/detail/conditional.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(iterator)

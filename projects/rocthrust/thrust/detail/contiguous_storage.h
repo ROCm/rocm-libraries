@@ -28,7 +28,6 @@
 
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execution_policy.h>
-#include <thrust/detail/nv_target.h>
 #include <thrust/iterator/detail/normal_iterator.h>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <thrust/swap.h>

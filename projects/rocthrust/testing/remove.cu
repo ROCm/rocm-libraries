@@ -16,6 +16,7 @@
  */
 
 #include <thrust/count.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>

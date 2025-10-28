@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
 #include <thrust/system/hip/detail/par.h>
@@ -24,9 +25,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(__cccl_config)
-#else
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 

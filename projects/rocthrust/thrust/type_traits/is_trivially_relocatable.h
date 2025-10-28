@@ -39,11 +39,9 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__fwd/pair.h)
 #  include _THRUST_STD_INCLUDE(__fwd/tuple.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
-// clang-format on
 #endif
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD

@@ -31,6 +31,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>

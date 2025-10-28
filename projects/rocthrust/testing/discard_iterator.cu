@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/iterator/detail/iterator_traits.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/discard_iterator.h>
 
 #include <unittest/unittest.h>
@@ -43,9 +43,9 @@ void TestDiscardIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::thrust::detail::is_cpp17_random_access_iterator<it>::value);
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);

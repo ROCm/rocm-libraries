@@ -26,10 +26,11 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/nv_target.h>
 #include <thrust/detail/type_deduction.h>
 
 #include _THRUST_STD_INCLUDE(type_traits)
+
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 #include <limits>
 

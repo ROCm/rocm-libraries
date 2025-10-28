@@ -40,7 +40,7 @@
 #if THRUST_COMPILER(HIP)
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/functional/address_stability.h>
+#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>

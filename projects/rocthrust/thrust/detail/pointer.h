@@ -38,9 +38,7 @@
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_adaptor.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(type_traits)
 
 #include <cstddef>
 #include <ostream>
@@ -149,8 +147,9 @@ public:
   template <typename OtherElement>
   THRUST_HOST_DEVICE explicit pointer(OtherElement* ptr);
 
-  // Fixes hipcc linkage error
+#if THRUST_COMPILER(HIP) // Fixes hipcc linkage error
   THRUST_HOST_DEVICE explicit pointer(Element* ptr);
+#endif
 
   // OtherPointer's element_type shall be convertible to Element
   // OtherPointer's system shall be convertible to Tag

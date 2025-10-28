@@ -20,14 +20,11 @@
 #endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_wrapper.h>
-#include <thrust/detail/nv_target.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__memory/addressof.h)
-// clang-format on
 #endif
 
 #include <new>
@@ -35,6 +32,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
+
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 

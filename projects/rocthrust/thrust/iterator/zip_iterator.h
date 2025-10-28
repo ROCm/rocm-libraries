@@ -669,7 +669,7 @@ THRUST_NAMESPACE_END
 // libcu++ iterator traits fail for complex zip_iterators in C++17, see e.g.: https://godbolt.org/z/7jb4qG3bb
 // The reason is that libcu++ backported the C++20 range iterator machinery to C++17, but C++17 has slightly different
 // language rules, especially regarding `void`. We deemed to it too hard to work around the issues.
-#if THRUST_CPP_DIALECT < 2020 && !defined(THRUST_DOXYGEN_INVOKED)
+#if THRUST_STD_VER < 2020 && !defined(THRUST_DOXYGEN_INVOKED)
 _THRUST_STD_NAMESPACE_BEGIN
 template <typename IteratorTuple>
 struct iterator_traits<THRUST_NS_QUALIFIER::zip_iterator<IteratorTuple>>
@@ -682,4 +682,4 @@ struct iterator_traits<THRUST_NS_QUALIFIER::zip_iterator<IteratorTuple>>
   using difference_type   = typename It::difference_type;
 };
 _THRUST_STD_NAMESPACE_END
-#endif // THRUST_CPP_DIALECT < 2020 && !defined(THRUST_DOXYGEN_INVOKED)
+#endif // THRUST_STD_VER < 2020 && !defined(THRUST_DOXYGEN_INVOKED)

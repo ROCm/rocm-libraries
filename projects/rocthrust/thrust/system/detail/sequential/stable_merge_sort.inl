@@ -36,13 +36,11 @@
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-// clang-format on
 #  include _THRUST_STD_INCLUDE(iterator)
 #endif
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system

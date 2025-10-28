@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/nv_target.h>
+#include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/uninitialized_copy.h>

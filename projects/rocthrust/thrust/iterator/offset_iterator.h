@@ -14,6 +14,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__iterator/concepts.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -22,36 +23,7 @@
 #  include _THRUST_STD_INCLUDE(cstdint)
 #else
 #  include <iterator>
-#  include <type_traits>
 #  include <utility>
-#endif
-
-// TODO(libhipcxx): remove this namespace once libhipcxx gets ready
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD && THRUST_CPP_DIALECT < 2020
-namespace internal
-{
-
-namespace detail
-{
-
-template <typename, typename = void>
-struct is_indirectly_readable : ::std::false_type
-{};
-
-template <typename T>
-struct is_indirectly_readable<T, ::std::void_t<decltype(*::std::declval<T&>()), typename T::value_type>>
-    : ::std::true_type
-{};
-
-template <typename T>
-struct is_indirectly_readable<T*, void> : ::std::true_type
-{};
-
-} // namespace detail
-
-template <typename T>
-inline constexpr bool indirectly_readable = detail::is_indirectly_readable<T>::value;
-} // namespace internal
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -145,11 +117,7 @@ public:
   //! \cond
 
 private:
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_CPP_DIALECT >= 2020
-  static constexpr bool indirect_offset = _THRUST_STD::indirectly_readable<Offset>;
-#else
   static constexpr bool indirect_offset = ::internal::indirectly_readable<Offset>;
-#endif
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE auto offset_value() const

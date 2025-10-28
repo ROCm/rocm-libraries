@@ -40,8 +40,8 @@
 #if THRUST_COMPILER(HIP)
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/distance.h>
-#  include <thrust/functional.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
