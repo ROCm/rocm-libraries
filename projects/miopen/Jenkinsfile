@@ -153,6 +153,10 @@ pipeline {
             defaultValue: true,
             description: "")
         booleanParam(
+            name: "DATATYPE_TF32",
+            defaultValue: true,
+            description: "")
+        booleanParam(
             name: "DATATYPE_FP16",
             defaultValue: true,
             description: "")
@@ -195,6 +199,7 @@ pipeline {
         Bf16_flags      = " -DMIOPEN_TEST_BFLOAT16=On"
         Int8_flags      = " -DMIOPEN_TEST_INT8=On"
         Full_test       = " -DMIOPEN_TEST_ALL=On"
+        Tf32_flags      = " -DMIOPEN_TEST_TF32=On"
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
@@ -643,6 +648,24 @@ pipeline {
                     }
                     steps{
                         runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('TF32 Hip All gfx942') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX942 && params.DATATYPE_TF32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx942") }
+                    steps{
+                        runBuildAndSingleGtestJob(Tf32_flags, Build_timeout_minutes)
                     }
                     post {
                         always {
