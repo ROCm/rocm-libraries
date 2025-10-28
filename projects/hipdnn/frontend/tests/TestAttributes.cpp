@@ -57,3 +57,18 @@ TEST(TestAttributes, FillFromContext)
               graphAttributes.get_intermediate_data_type());
     EXPECT_EQ(attributes.outputs[setTypeId]->get_data_type(), DataType::DOUBLE);
 }
+
+TEST(TestAttributes, FillFromContextSetNodeComputeTypeNotOverriden)
+{
+    GraphAttributes graphAttributes;
+    graphAttributes.set_compute_data_type(DataType::INT32);
+
+    auto nodeDataType = hipdnn_frontend::DataType::INT32;
+
+    Dummy attributes;
+    attributes.set_compute_data_type(nodeDataType);
+
+    attributes.fill_from_context(graphAttributes);
+
+    EXPECT_EQ(attributes.get_compute_data_type(), nodeDataType);
+}
