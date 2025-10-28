@@ -404,7 +404,7 @@ struct target_config
 
 // trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
-// will be derived from the template
+// will be derived from the template.
 template<typename Config,
          target_arch Arch,
          class Kernel,
