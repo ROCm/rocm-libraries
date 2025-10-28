@@ -1,5 +1,7 @@
-# ROCmClientPackages.cmake
-# Provides functions for setting up client package dependencies based on OS
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# ROCmClientPackages.cmake Provides functions for setting up client package dependencies based on OS
 
 include_guard(GLOBAL)
 
