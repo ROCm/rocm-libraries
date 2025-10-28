@@ -74,27 +74,38 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
     if(localDeviceCount < 2 && mp_lib == fft_params::fft_mp_lib_none)
         return {};
 
-    auto params_complex = param_generator_complex(test_prob,
-                                                  multi_gpu_sizes,
-                                                  precision_range_sp_dp,
-                                                  {4, 1},
-                                                  stride_generator({{1}}),
-                                                  stride_generator({{1}}),
-                                                  {{0, 0}},
-                                                  {{0, 0}},
-                                                  {fft_placement_inplace, fft_placement_notinplace},
-                                                  false);
+    // gather cases to test as single-device params, then distribute
+    // to multiple GPUs
+    std::vector<fft_params> params_single;
 
-    auto params_real = param_generator_real(test_prob,
-                                            multi_gpu_sizes,
-                                            precision_range_sp_dp,
-                                            {4, 1},
-                                            stride_generator({{1}}),
-                                            stride_generator({{1}}),
-                                            {{0, 0}},
-                                            {{0, 0}},
-                                            {fft_placement_notinplace},
-                                            false);
+    for(auto run_callbacks : {false, true})
+    {
+        auto params = param_generator_complex(test_prob,
+                                              multi_gpu_sizes,
+                                              precision_range_sp_dp,
+                                              {4, 1},
+                                              stride_generator({{1}}),
+                                              stride_generator({{1}}),
+                                              {{0, 0}},
+                                              {{0, 0}},
+                                              {fft_placement_inplace, fft_placement_notinplace},
+                                              false,
+                                              run_callbacks);
+        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
+
+        params = param_generator_real(test_prob,
+                                      multi_gpu_sizes,
+                                      precision_range_sp_dp,
+                                      {4, 1},
+                                      stride_generator({{1}}),
+                                      stride_generator({{1}}),
+                                      {{0, 0}},
+                                      {{0, 0}},
+                                      {fft_placement_notinplace},
+                                      false,
+                                      run_callbacks);
+        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
+    }
 
     std::vector<fft_params> all_params;
 
@@ -103,6 +114,10 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
         for(auto& p : params)
         {
+            // callbacks are not currently supported for multi-proc transforms
+            if(p.run_callbacks && mp_lib == fft_params::fft_mp_lib_mpi)
+                continue;
+
             // start with all-ones in grids
             std::vector<unsigned int> input_grid(p.length.size() + 1, 1);
             std::vector<unsigned int> output_grid(p.length.size() + 1, 1);
@@ -171,8 +186,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
         }
     };
 
-    distribute_params(params_complex);
-    distribute_params(params_real);
+    distribute_params(params_single);
 
     return all_params;
 }
