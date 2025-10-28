@@ -25,18 +25,17 @@
  *******************************************************************************/
 #pragma once
 
+#include "timer.hpp"
 #include <cmath>
 #include <cassert>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <cfloat>
-#include <fstream>
-#include <memory>
-#include <numeric>
-#include <sstream>
 #include <vector>
-#include <array>
+
+#include "../test/verify.hpp"
+#include <miopen/par_for.hpp>
 
 #define NEGATIVE_CUTOFF_VAL (-1e20)
 
@@ -78,6 +77,8 @@ void subvec_logsoftmax_gpu(Tgpu* in, Tref* out, size_t in_offset, size_t out_off
     for(int i = 0; i < length; i++)
         *(itr_out + i) = std::max(*(itr_out + i) - sum, Tref(NEGATIVE_CUTOFF_VAL));
 }
+
+// ===================== Forward (alpha) =====================
 
 template <typename T>
 void ctc_alpha_gpu(std::vector<int>& probsDesc,
@@ -136,6 +137,8 @@ void ctc_alpha_gpu(std::vector<int>& probsDesc,
     int alpha_size = input_length * label_prime_len;
     *loss          = -logaddexp_gpu(&(alpha[alpha_size - 1]), &(alpha[alpha_size - 2]));
 }
+
+// ===================== Backward (beta) + gradients =====================
 
 template <typename T>
 void ctc_gradient_gpu(std::vector<int>& probsDesc,
@@ -270,6 +273,8 @@ void ctc_gradient_gpu(std::vector<int>& probsDesc,
                                        : logaddexp_gpu(&(beta_buff0[0]), &(beta_buff0[1]));
 }
 
+// ===================== Orchestrator =====================
+
 template <typename Tgpu, typename Tref = Tgpu>
 void launchCTCLoss(const int class_sz,
                    const int batch_size,
@@ -283,6 +288,7 @@ void launchCTCLoss(const int class_sz,
                    std::vector<Tref>& gradients_gpu,
                    std::vector<Tref>& workspace_gpu,
                    std::vector<Tref>& beta_loss,
+                   bool parallel,
                    const int blank_lb      = 0,
                    bool is_softmax_applied = true)
 {
@@ -294,18 +300,38 @@ void launchCTCLoss(const int class_sz,
               workspace_gpu.begin() + alpha_offset + max_time_step * batch_size * max_S_len,
               Tref(NEGATIVE_CUTOFF_VAL));
 
+    const int tb_count = max_time_step * batch_size;
+    const std::size_t mt_tb =
+        std::min<std::size_t>(tb_count, std::max<unsigned>(1, std::thread::hardware_concurrency()));
+    const std::size_t mt_b = std::min<std::size_t>(
+        batch_size, std::max<unsigned>(1, std::thread::hardware_concurrency()));
+
     if(is_softmax_applied)
-        for(int j = 0; j < max_time_step * batch_size; j++)
-            subvec_logsoftmax_gpu(&(probs[0]),
-                                  &(workspace_gpu[problog_offset]),
-                                  j * class_sz,
-                                  j * class_sz,
-                                  class_sz);
+    {
+        if(parallel)
+        {
+            miopen::par_for(tb_count, miopen::max_threads{mt_tb}, [&](std::size_t tb) {
+                subvec_logsoftmax_gpu(&(probs[0]),
+                                      &(workspace_gpu[problog_offset]),
+                                      tb * size_t(class_sz),
+                                      tb * size_t(class_sz),
+                                      size_t(class_sz));
+            });
+        }
+        else
+        {
+            for(int j = 0; j < max_time_step * batch_size; j++)
+                subvec_logsoftmax_gpu(&(probs[0]),
+                                      &(workspace_gpu[problog_offset]),
+                                      j * class_sz,
+                                      j * class_sz,
+                                      class_sz);
+        }
+    }
     else
         std::copy(probs.begin(), probs.end(), workspace_gpu.begin() + problog_offset);
 
-    for(int j = 0; j < batch_size; j++)
-    {
+    auto work_per_batch = [&](int j) {
         int input_len     = workspace_gpu[j];
         int label_len     = workspace_gpu[batch_size + j];
         int label_offsets = workspace_gpu[2 * batch_size + j];
@@ -342,6 +368,16 @@ void launchCTCLoss(const int class_sz,
                          &(beta_loss[j]),
                          blank_lb,
                          is_softmax_applied);
+    };
+
+    if(parallel)
+    {
+        miopen::par_for(batch_size, miopen::max_threads{mt_b}, work_per_batch);
+    }
+    else
+    {
+        for(int j = 0; j < batch_size; j++)
+            work_per_batch(j);
     }
 }
 
@@ -356,6 +392,7 @@ void RunCTCLossGPUEmulator(std::vector<int>& probsDesc,
                            std::vector<Tref>& gradients_gpu,
                            std::vector<Tref>& workspace_gpu,
                            std::vector<Tref>& beta_loss,
+                           bool parallel,
                            const int blank_lb      = 0,
                            bool is_softmax_applied = true)
 {
@@ -444,6 +481,7 @@ void RunCTCLossGPUEmulator(std::vector<int>& probsDesc,
                   gradients_gpu,
                   workspace_gpu,
                   beta_loss,
+                  parallel,
                   blank_lb,
                   is_softmax_applied);
 }
