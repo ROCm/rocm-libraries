@@ -37,18 +37,26 @@ namespace rocisa
         return getGfxNameTuple(arch);
     }
 
-    std::string getGlcBitName(bool hasGLCModifier)
+    std::string getGlcBitName()
     {
+        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
+        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
         if(hasGLCModifier)
             return "glc";
-        return "sc0";
+        if(hasSC0Modifier)
+            return "sc0";
+        return "";
     }
 
-    std::string getSlcBitName(bool hasGLCModifier)
+    std::string getSlcBitName()
     {
+        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
+        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
         if(hasGLCModifier)
             return "slc";
-        return "sc1";
+        if(hasSC0Modifier)
+            return "sc1";
+        return "";
     }
 
     // Force init the instance

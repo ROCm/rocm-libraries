@@ -13,6 +13,7 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Fixed potential division by zero when constructing plans using dimensions of length 1.
+* Fixed result scaling to work properly with multi-device transforms.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 

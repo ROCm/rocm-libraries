@@ -25,7 +25,6 @@
 #include <array>
 #include <cstdint> // std::int64_t
 #include <cstdlib>
-#include <hip/hip_runtime_api.h>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -33,6 +32,26 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+
+#if defined(__GNUC__) || defined(__clang__)
+#define DO_PRAGMA(X) _Pragma(#X)
+#define DISABLE_WARNING_PUSH DO_PRAGMA(GCC diagnostic push)
+#define DISABLE_WARNING_POP DO_PRAGMA(GCC diagnostic pop)
+#define DISABLE_WARNING(warningName) DO_PRAGMA(GCC diagnostic ignored #warningName)
+
+// clang-format off
+#define DISABLE_WARNING_IGNORED_ATTRIBUTES DISABLE_WARNING(-Wignored-attributes)
+// clang-format on
+#else
+#define DISABLE_WARNING_PUSH
+#define DISABLE_WARNING_POP
+#define DISABLE_WARNING_IGNORED_ATTRIBUTES
+#endif
+
+DISABLE_WARNING_PUSH
+DISABLE_WARNING_IGNORED_ATTRIBUTES
+#include <hip/hip_runtime_api.h>
+DISABLE_WARNING_POP
 
 // anonymous namespace for implementation details
 namespace
@@ -336,6 +355,71 @@ namespace
         static rocfft_initializer init;
     }
 
+    template <size_t rank,
+              size_t batch_rank,
+              std::enable_if_t<(rank > 0 && batch_rank > 0), bool> = true>
+    struct hipfftw_general_layout_data
+    {
+        std::array<ptrdiff_t, rank>       lengths; // row-major
+        std::array<ptrdiff_t, rank>       istrides; // row-major
+        std::array<ptrdiff_t, rank>       ostrides; // row-major
+        std::array<ptrdiff_t, batch_rank> batches;
+        std::array<ptrdiff_t, batch_rank> idist;
+        std::array<ptrdiff_t, batch_rank> odist;
+        // constexpr getters
+        constexpr inline size_t get_rank() const
+        {
+            return rank;
+        }
+        constexpr inline size_t get_batch_rank() const
+        {
+            return batch_rank;
+        }
+        template <rocfft_transform_type dft_type, rocfft_precision prec>
+        bool is_compatible_for_inplace() const
+        {
+            constexpr size_t ielem_sz
+                = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>);
+            constexpr size_t oelem_sz
+                = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>);
+            // Check that the memory location is identical on input an output for the first
+            // element of every leading dimension's sub-array. In other words, using row-major
+            // convention, check that for every integer arrays
+            // {k[0], k[1], ..., k[rank - 2], 0} ":= k" and every
+            // {m[0], m[1], .., m[batch_dim-1]} ":= m" (in applicable ranges), the byte offset
+            // on input, i.e.,
+            // ielem_sz * std::inner_product(m.begin(), m.end(), idist.begin(),
+            //                               std::inner_product(k.begin(), k.end(), istrides.begin(), 0))
+            // must be equal to the byte offset on output, i.e.,
+            // oelem_sz * std::inner_product(m.begin(), m.end(), odist.begin(),
+            //                               std::inner_product(k.begin(), k.end(), ostrides.begin(), 0)).
+            // This requirement translates into the followng element-wise conditions on
+            // idist, odist, istrides, and ostrides.
+            for(size_t batch_dim = 0; batch_dim < batch_rank; batch_dim++)
+            {
+                // 0 <= m[batch_dim] < batches[batch_dim], so the corresponding distance is
+                // irrelevant if batches[batch_dim] == 1.
+                if(batches[batch_dim] == 1)
+                    continue;
+                if(idist[batch_dim] * ielem_sz != odist[batch_dim] * oelem_sz)
+                    return false;
+            }
+            for(size_t dim = 0; dim < rank - 1 /* exclude leading dimension */; dim++)
+            {
+                if(lengths[dim] == 1)
+                    continue;
+                if(istrides[dim] * ielem_sz != ostrides[dim] * oelem_sz)
+                    return false;
+            }
+            if(lengths.back() == 1)
+                return true; // leading dimension's stride is irrelevant
+            if constexpr(!is_real(dft_type)) // elementary strides must be equal
+                return istrides.back() == ostrides.back();
+            else // elementary strides must both be 1
+                return istrides.back() == 1 && ostrides.back() == 1;
+        }
+    };
+
     template <rocfft_precision prec,
               // single or double precision only
               std::enable_if_t<prec == rocfft_precision_single || prec == rocfft_precision_double,
@@ -409,37 +493,45 @@ namespace
             internal_execute(new_exec_in, new_exec_out);
         }
 
-        template <rocfft_transform_type dft_type, size_t rank, typename T, size_t batch_rank>
-        void init(const std::array<T, rank>&                                          lengths_rm,
-                  const std::array<T, rank>&                                          istrides_rm,
-                  const std::array<T, rank>&                                          ostrides_rm,
+        template <rocfft_transform_type dft_type, size_t rank, size_t batch_rank>
+        void init(const hipfftw_general_layout_data<rank, batch_rank>&                data_layout,
                   hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
                   hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
-                  const std::array<T, batch_rank>&                                    batch,
-                  const std::array<T, batch_rank>&                                    idist,
-                  const std::array<T, batch_rank>&                                    odist,
                   unsigned                                                            flags)
         {
             // compile-time validations of template specialization values
             static_assert(1 <= rank && rank <= 3);
             static_assert(1 == batch_rank); // only supported case at the moment
-            // assuming no overflow when converting values from T into size_t below
-            static_assert(std::numeric_limits<T>::max() <= std::numeric_limits<size_t>::max());
+            // assuming no overflow when converting values from ptrdiff_t into size_t below
+            static_assert(std::numeric_limits<ptrdiff_t>::max()
+                          <= std::numeric_limits<size_t>::max());
             // Validation of input arguments:
-            auto is_strictly_negative = [](const T& val) { return val < static_cast<T>(0); };
-            auto is_strictly_positive = [](const T& val) { return val > static_cast<T>(0); };
-            if(!std::all_of(lengths_rm.begin(), lengths_rm.end(), is_strictly_positive))
-                throw hipfftw_invalid_arg("length(s) must be strictly positive.");
-            // Negative strides are not supported
-            for(const auto& strides : {istrides_rm, ostrides_rm})
-                if(std::any_of(strides.begin(), strides.end(), is_strictly_negative))
-                    throw hipfftw_unsupported("strides must be positive.");
-            if(!std::all_of(batch.begin(), batch.end(), is_strictly_positive))
-                throw hipfftw_invalid_arg("batch(es) must be strictly positive.");
-            // Negative distances are not supported
-            for(const auto& dist : {idist, odist})
-                if(std::any_of(dist.begin(), dist.end(), is_strictly_negative))
-                    throw hipfftw_unsupported("distance(s) must be positive.");
+            for(size_t dim = 0; dim < rank; dim++)
+            {
+                if(data_layout.lengths[dim] <= 0)
+                    throw hipfftw_invalid_arg("length(s) must be strictly positive.");
+                if(data_layout.lengths[dim] > 1)
+                {
+                    if(data_layout.istrides[dim] == 0 || data_layout.ostrides[dim] == 0)
+                        throw hipfftw_invalid_arg(
+                            "stride(s) must not be zero for nontrivial dimensions.");
+                    if(data_layout.istrides[dim] < 0 || data_layout.ostrides[dim] < 0)
+                        throw hipfftw_unsupported("negative stride(s) are not supported.");
+                }
+            }
+            for(size_t batch_dim = 0; batch_dim < batch_rank; batch_dim++)
+            {
+                if(data_layout.batches[batch_dim] <= 0)
+                    throw hipfftw_invalid_arg("batch(es) must be strictly positive.");
+                if(data_layout.batches[batch_dim] > 1)
+                {
+                    if(data_layout.idist[batch_dim] == 0 || data_layout.odist[batch_dim] == 0)
+                        throw hipfftw_invalid_arg(
+                            "distance(s) must not be zero for nontrivial batching dimensions.");
+                    if(data_layout.idist[batch_dim] < 0 || data_layout.odist[batch_dim] < 0)
+                        throw hipfftw_unsupported("negative distance(s) are not supported.");
+                }
+            }
             // Valid flag values are defined as bitwise OR of zero or more (unsigned) power-of-2
             // compile-time constants, (enabling well-defined identification via bitwise manipulations).
             if(flags
@@ -473,56 +565,13 @@ namespace
                                  ? rocfft_placement_inplace
                                  : rocfft_placement_notinplace;
             plan_dft_type  = dft_type;
-            if(plan_placement == rocfft_placement_inplace)
-            {
-                // Check that the memory location is identical on input an output for the first
-                // element of every leading dimension's sub-array. In order words, using row-major
-                // convention, check that for every integer arrays
-                // {k[0], k[1], ..., k[rank - 2], 0} ":= k" and every
-                // {m[0], m[1], .., m[batch_dim-1]} ":= m" (in applicable ranges), the byte offset
-                // on input, i.e.,
-                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)*
-                //      std::inner_product(m.begin(), m.end(), idist.begin(),
-                //                         std::inner_product(k.begin(), k.end(), istrides_rm.begin(), 0))
-                // must be equal to the byte offset on output, i.e.,
-                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>)*
-                //      std::inner_product(m.begin(), m.end(), odist.begin(),
-                //                         std::inner_product(k.begin(), k.end(), ostrides_rm.begin(), 0)).
-                // This requirement translates into the followng element-wise conditions on
-                // idist, odist, istides_rm, and ostides_rm.
-                for(auto batch_dim = 0; batch_dim < batch_rank; batch_dim++)
-                {
-                    // 0 <= m[batch_dim] < batch[batch_dim], so the corresponding distance is
-                    // irrelevant if batch[batch_dim] == 1.
-                    if(batch[batch_dim] == 1)
-                        continue;
-                    if(idist[batch_dim]
-                           * sizeof(
-                               hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
-                       != odist[batch_dim]
-                              * sizeof(hipfftw_user_data_t<dft_type,
-                                                           prec,
-                                                           hipfftw_io_label::OUTPUT_DATA>))
-                        throw hipfftw_invalid_arg("distances rejected for in-place configuration.");
-                }
-                for(auto dim = 0; dim < rank - 1 /* exclude leading dimension */; dim++)
-                {
-                    if(lengths_rm[dim] == 1)
-                        continue;
-                    if(istrides_rm[dim]
-                           * sizeof(
-                               hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
-                       != ostrides_rm[dim]
-                              * sizeof(hipfftw_user_data_t<dft_type,
-                                                           prec,
-                                                           hipfftw_io_label::OUTPUT_DATA>))
-                    {
-                        throw hipfftw_invalid_arg("strides rejected for in-place configuration..");
-                    }
-                }
-            }
             // TODO (required when user-defined strides/distances may be used): add validity check
             // on strides and distances for non-aliasing data
+            if(plan_placement == rocfft_placement_inplace)
+            {
+                if(!data_layout.template is_compatible_for_inplace<dft_type, prec>())
+                    throw hipfftw_invalid_arg("data layout rejected for in-place configuration.");
+            }
 
             // Generalized input are validated... Let's initialize the plan!
             init_rocfft(); // "magic" common to all template specializations
@@ -531,31 +580,25 @@ namespace
             // (resp. strictly positive), as verified above
             size_t last_input_element_idx  = 0;
             size_t last_output_element_idx = 0;
-            for(auto dim = 0; dim < rank; dim++)
+            for(size_t dim = 0; dim < rank; dim++)
             {
                 const auto last_input_entry_for_dim
                     = dft_type == rocfft_transform_type_real_inverse && dim == rank - 1
-                          ? lengths_rm[dim] / 2
-                          : lengths_rm[dim] - 1;
+                          ? data_layout.lengths[dim] / 2
+                          : data_layout.lengths[dim] - 1;
                 const auto last_output_entry_for_dim
                     = dft_type == rocfft_transform_type_real_forward && dim == rank - 1
-                          ? lengths_rm[dim] / 2
-                          : lengths_rm[dim] - 1;
-                last_input_element_idx += last_input_entry_for_dim * istrides_rm[dim];
-                last_output_element_idx += last_output_entry_for_dim * ostrides_rm[dim];
+                          ? data_layout.lengths[dim] / 2
+                          : data_layout.lengths[dim] - 1;
+                last_input_element_idx += last_input_entry_for_dim * data_layout.istrides[dim];
+                last_output_element_idx += last_output_entry_for_dim * data_layout.ostrides[dim];
             }
-            for(auto batch_dim = 0; batch_dim < batch_rank; batch_dim++)
+            for(size_t batch_dim = 0; batch_dim < batch_rank; batch_dim++)
             {
-                last_input_element_idx += (batch[batch_dim] - 1) * idist[batch_dim];
-                last_output_element_idx += (batch[batch_dim] - 1) * odist[batch_dim];
-            }
-            if(last_input_element_idx > std::numeric_limits<T>::max()
-               || last_output_element_idx > std::numeric_limits<T>::max())
-            {
-                throw hipfftw_unsupported(
-                    "data layouts involving element indices that exceed the maximum value "
-                    "representable in the chosen integral type are not supported (consider using "
-                    "guru64 plan creation functions).");
+                last_input_element_idx
+                    += (data_layout.batches[batch_dim] - 1) * data_layout.idist[batch_dim];
+                last_output_element_idx
+                    += (data_layout.batches[batch_dim] - 1) * data_layout.odist[batch_dim];
             }
             in_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
                        * (last_input_element_idx + 1);
@@ -566,15 +609,15 @@ namespace
                 in_bytes = out_bytes = std::max(in_bytes, out_bytes);
             }
 
-            // Change row-major to col-major for all relevant inputs, converting from T to size_t
-            auto reverse = [](const std::array<T, rank>& in_array) {
+            // Change row-major to col-major for all relevant inputs, converting from ptrdiff_t to size_t
+            auto reverse = [](const std::array<ptrdiff_t, rank>& in_array) {
                 auto ret = std::array<size_t, rank>();
                 std::reverse_copy(in_array.begin(), in_array.end(), ret.begin());
                 return ret;
             };
-            const auto lengths_cm  = reverse(lengths_rm);
-            const auto istrides_cm = reverse(istrides_rm);
-            const auto ostrides_cm = reverse(ostrides_rm);
+            const auto lengths_cm  = reverse(data_layout.lengths);
+            const auto istrides_cm = reverse(data_layout.istrides);
+            const auto ostrides_cm = reverse(data_layout.ostrides);
 
             // Create plan description
             if(rocfft_plan_description_create(&internal_rocfft_desc) != rocfft_status_success)
@@ -590,10 +633,10 @@ namespace
                    nullptr /* out_offsets */,
                    rank /* in_strides_sizes */,
                    istrides_cm.data(),
-                   idist[0],
+                   data_layout.idist[0],
                    rank /* out_strides_size */,
                    ostrides_cm.data(),
-                   odist[0])
+                   data_layout.odist[0])
                != rocfft_status_success)
             {
                 throw rocfft_failure(
@@ -606,7 +649,7 @@ namespace
                                   prec,
                                   rank,
                                   lengths_cm.data(),
-                                  batch[0],
+                                  data_layout.batches[0],
                                   internal_rocfft_desc)
                != rocfft_status_success)
             {
@@ -743,70 +786,62 @@ namespace
         }
     };
 
-    template <size_t rank,
-              size_t batch_rank,
-              typename T,
-              std::enable_if_t<std::is_integral_v<T> && (rank > 0 && batch_rank > 0), bool> = true>
-    struct hipfftw_general_layout_data
-    {
-        std::array<T, rank>       lengths;
-        std::array<T, rank>       istrides;
-        std::array<T, rank>       ostrides;
-        std::array<T, batch_rank> batches;
-        std::array<T, batch_rank> idist;
-        std::array<T, batch_rank> odist;
-        // constexpr getters
-        constexpr inline size_t get_rank() const
-        {
-            return rank;
-        }
-        constexpr inline size_t get_batch_rank() const
-        {
-            return batch_rank;
-        }
-    };
-
+    // default values are consistent with basic plans' data layouts
     template <size_t rank, rocfft_transform_type dft_type>
-    hipfftw_general_layout_data<rank, 1, int> hipfftw_get_default_data_layout_info_rm(
-        bool is_in_place, const std::array<int, rank>& user_lengths_rm, size_t batch_sz = 1)
+    hipfftw_general_layout_data<rank, 1> hipfftw_get_data_layout(const int*  n,
+                                                                 const void* input_ptr,
+                                                                 const void* output_ptr,
+                                                                 const int   istride = 1,
+                                                                 const int   ostride = 1,
+                                                                 const int*  inembed = nullptr,
+                                                                 const int*  onembed = nullptr,
+                                                                 const int   howmany = 1,
+                                                                 const int   idist   = 0,
+                                                                 const int   odist   = 0)
     {
-        auto overflow_guarded_mult = [](int& a, const int& b) {
-            auto tmp = static_cast<std::int64_t>(a) * static_cast<std::int64_t>(b);
-            if(tmp > std::numeric_limits<int>::max() || tmp < std::numeric_limits<int>::min())
-                throw hipfftw_unsupported(
-                    "length(s) that trigger integer overflow(s) for default stride(s) and/or "
-                    "distance(s) are not supported via the default plan creation functions "
-                    "(consider guru64 plan creation functions).");
-            a = static_cast<int>(tmp);
-        };
+        if(!n)
+            throw hipfftw_invalid_arg("lengths argument must not be nullptr.");
 
-        hipfftw_general_layout_data<rank, 1, int> ret;
-        ret.lengths = user_lengths_rm;
-        int ival = 1, oval = 1;
+        hipfftw_general_layout_data<rank, 1> ret;
+        // length(s) and strides
+        ptrdiff_t ival = istride, oval = ostride;
         for(auto dim_idx = rank; dim_idx-- > 0;)
         {
-            ret.istrides[dim_idx] = ival;
-            ret.ostrides[dim_idx] = oval;
-            if(is_real(dft_type) && dim_idx == rank - 1)
+            ret.lengths[dim_idx] = n[dim_idx];
+            for(auto io : {hipfftw_io_label::INPUT_DATA, hipfftw_io_label::OUTPUT_DATA})
             {
-                int& cmplx_stride_val
-                    = dft_type == rocfft_transform_type_real_forward ? oval : ival;
-                int& real_stride_val = dft_type == rocfft_transform_type_real_forward ? ival : oval;
-                overflow_guarded_mult(cmplx_stride_val, ret.lengths[dim_idx] / 2 + 1);
-                if(is_in_place)
-                    overflow_guarded_mult(real_stride_val, 2 * (ret.lengths[dim_idx] / 2 + 1));
-                else
-                    overflow_guarded_mult(real_stride_val, ret.lengths[dim_idx]);
-            }
-            else
-            {
-                overflow_guarded_mult(ival, ret.lengths[dim_idx]);
-                overflow_guarded_mult(oval, ret.lengths[dim_idx]);
+                std::array<ptrdiff_t, rank>& strides
+                    = io == hipfftw_io_label::INPUT_DATA ? ret.istrides : ret.ostrides;
+                auto&      stride_val = io == hipfftw_io_label::INPUT_DATA ? ival : oval;
+                const int* nembed     = io == hipfftw_io_label::INPUT_DATA ? inembed : onembed;
+                int        default_embed_val = n[dim_idx];
+                if(is_real(dft_type) && dim_idx == rank - 1)
+                {
+                    if((io == hipfftw_io_label::INPUT_DATA)
+                       == (dft_type == rocfft_transform_type_real_inverse))
+                        default_embed_val = n[dim_idx] / 2 + 1; // hermition domain
+                    else if(input_ptr == output_ptr)
+                        default_embed_val = 2 * (n[dim_idx] / 2 + 1); // padded real domain
+                }
+
+                const auto embed_val = nembed ? nembed[dim_idx] : default_embed_val;
+                if(embed_val < default_embed_val)
+                {
+                    std::ostringstream exception_info;
+                    exception_info << "the value of "
+                                   << (io == hipfftw_io_label::INPUT_DATA ? "inembed" : "onembed")
+                                   << "[" << dim_idx << "], i.e., " << embed_val
+                                   << " is invalid (smaller than " << default_embed_val << ").";
+                    throw hipfftw_invalid_arg(exception_info.str());
+                }
+                strides[dim_idx] = stride_val;
+                stride_val *= embed_val;
             }
         }
-        ret.batches[0] = batch_sz;
-        ret.idist[0]   = ival;
-        ret.odist[0]   = oval;
+        // batch size and distances
+        ret.batches[0] = howmany;
+        ret.idist[0]   = idist;
+        ret.odist[0]   = odist;
         return ret;
     }
 
@@ -1038,50 +1073,20 @@ struct hipfftw_plan<rocfft_precision_double>
 template <rocfft_precision prec>
 using hipfftw_plan_t = typename hipfftw_plan<prec>::type;
 
-template <rocfft_transform_type dft_type,
-          rocfft_precision      prec,
-          size_t                rank,
-          typename T,
-          size_t batch_rank = 1>
+template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank, size_t batch_rank = 1>
 static hipfftw_plan_t<prec>* hipfftw_create_plan(
-    const std::array<T, rank>&                                          lengths_rm,
-    const std::array<T, rank>&                                          istrides_rm,
-    const std::array<T, rank>&                                          ostrides_rm,
+    const hipfftw_general_layout_data<rank, batch_rank>                 layout,
     hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
     hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
-    const std::array<T, batch_rank>&                                    batch,
-    const std::array<T, batch_rank>&                                    idist,
-    const std::array<T, batch_rank>&                                    odist,
     unsigned                                                            flags)
 {
     auto ret = std::make_unique<hipfftw_plan_t<prec>>();
-    ret->template init<dft_type, rank, T, batch_rank>(
-        lengths_rm, istrides_rm, ostrides_rm, user_in, user_out, batch, idist, odist, flags);
+    ret->template init<dft_type, rank, batch_rank>(layout, user_in, user_out, flags);
     return ret.release();
 }
 
-template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank>
-static hipfftw_plan_t<prec>* hipfftw_create_default_unbatched_plan(
-    const std::array<int, rank>&                                        n,
-    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
-    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
-    unsigned                                                            flags)
-{
-    auto layout_data = hipfftw_get_default_data_layout_info_rm<rank, dft_type>(
-        static_cast<void*>(in) == static_cast<void*>(out), n);
-    return hipfftw_create_plan<dft_type, prec, rank, int>(layout_data.lengths,
-                                                          layout_data.istrides,
-                                                          layout_data.ostrides,
-                                                          in,
-                                                          out,
-                                                          layout_data.batches,
-                                                          layout_data.idist,
-                                                          layout_data.odist,
-                                                          flags);
-}
-
 template <rocfft_transform_type dft_type, rocfft_precision prec>
-static hipfftw_plan_t<prec>* hipfftw_create_default_unbatched_plan(
+static hipfftw_plan_t<prec>* hipfftw_create_basic_plan(
     int                                                                 rank,
     const int*                                                          n,
     hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
@@ -1089,61 +1094,45 @@ static hipfftw_plan_t<prec>* hipfftw_create_default_unbatched_plan(
     unsigned                                                            flags)
 {
     if(rank <= 0)
-        throw hipfftw_invalid_arg("ranks must be strictly positive.");
-    if(!n)
-        throw hipfftw_invalid_arg("lengths argument must not be nullptr.");
+        throw hipfftw_invalid_arg("rank values must be strictly positive.");
     // rank == 1, 2, 3, or unsupported
     switch(rank)
     {
     case 1:
-        return hipfftw_create_default_unbatched_plan<dft_type, prec, 1>(
-            std::array<int, 1>({n[0]}), in, out, flags);
+    {
+        const auto data_layout = hipfftw_get_data_layout<1, dft_type>(n, in, out);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
     case 2:
-        return hipfftw_create_default_unbatched_plan<dft_type, prec, 2>(
-            std::array<int, 2>({n[0], n[1]}), in, out, flags);
+    {
+        const auto data_layout = hipfftw_get_data_layout<2, dft_type>(n, in, out);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
     case 3:
-        return hipfftw_create_default_unbatched_plan<dft_type, prec, 3>(
-            std::array<int, 3>({n[0], n[1], n[2]}), in, out, flags);
+    {
+        const auto data_layout = hipfftw_get_data_layout<3, dft_type>(n, in, out);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
     default:
         throw hipfftw_unsupported("rank values larger than 3 are not supported.");
     }
     // unreachable
 }
 
-template <rocfft_precision prec, size_t rank>
-static hipfftw_plan_t<prec>*
-    hipfftw_create_default_unbatched_complex_plan(const std::array<int, rank>&  n,
-                                                  int                           sign,
-                                                  hipfftw_complex_data_t<prec>* in,
-                                                  hipfftw_complex_data_t<prec>* out,
-                                                  unsigned                      flags)
-{
-    hipfftw_validate_sign(sign);
-    if(sign == FFTW_FORWARD)
-        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward,
-                                                     prec,
-                                                     rank>(n, in, out, flags);
-    else
-        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse,
-                                                     prec,
-                                                     rank>(n, in, out, flags);
-}
-
 template <rocfft_precision prec>
-static hipfftw_plan_t<prec>*
-    hipfftw_create_default_unbatched_complex_plan(int                           rank,
-                                                  const int*                    n,
-                                                  int                           sign,
-                                                  hipfftw_complex_data_t<prec>* in,
-                                                  hipfftw_complex_data_t<prec>* out,
-                                                  unsigned                      flags)
+static hipfftw_plan_t<prec>* hipfftw_create_basic_complex_plan(int                           rank,
+                                                               const int*                    n,
+                                                               int                           sign,
+                                                               hipfftw_complex_data_t<prec>* in,
+                                                               hipfftw_complex_data_t<prec>* out,
+                                                               unsigned                      flags)
 {
     hipfftw_validate_sign(sign);
     if(sign == FFTW_FORWARD)
-        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward, prec>(
+        return hipfftw_create_basic_plan<rocfft_transform_type_complex_forward, prec>(
             rank, n, in, out, flags);
     else
-        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse, prec>(
+        return hipfftw_create_basic_plan<rocfft_transform_type_complex_inverse, prec>(
             rank, n, in, out, flags);
 }
 
@@ -1248,6 +1237,10 @@ void fftwf_destroy_plan(fftwf_plan plan)
 void fftw_cleanup() {}
 
 void fftwf_cleanup() {}
+
+/* ------------------------------------------------------------------------- */
+/*                          EXECUTION FUNCTIONS                              */
+/* ------------------------------------------------------------------------- */
 
 void fftw_execute(const fftw_plan plan)
 try
@@ -1373,13 +1366,17 @@ catch(...)
     return;
 }
 
+/* ------------------------------------------------------------------------- */
+/*                    BASIC PLAN CREATION FUNCTIONS                          */
+/* ------------------------------------------------------------------------- */
+
 fftw_plan fftw_plan_dft_1d(int n, fftw_complex* in, fftw_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 1;
-    constexpr auto prec = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n}), sign, in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1390,10 +1387,10 @@ catch(...)
 fftwf_plan fftwf_plan_dft_1d(int n, fftwf_complex* in, fftwf_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 1;
-    constexpr auto prec = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n}), sign, in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1405,10 +1402,10 @@ fftw_plan
     fftw_plan_dft_2d(int n0, int n1, fftw_complex* in, fftw_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 2;
-    constexpr auto prec = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n0, n1}), sign, in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1420,10 +1417,10 @@ fftwf_plan fftwf_plan_dft_2d(
     int n0, int n1, fftwf_complex* in, fftwf_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 2;
-    constexpr auto prec = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n0, n1}), sign, in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1435,10 +1432,10 @@ fftw_plan fftw_plan_dft_3d(
     int n0, int n1, int n2, fftw_complex* in, fftw_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 3;
-    constexpr auto prec = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), sign, in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1450,10 +1447,10 @@ fftwf_plan fftwf_plan_dft_3d(
     int n0, int n1, int n2, fftwf_complex* in, fftwf_complex* out, int sign, unsigned flags)
 try
 {
-    constexpr int  rank = 3;
-    constexpr auto prec = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_complex_plan<prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), sign, in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_complex_plan<prec>(rank, len, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1466,7 +1463,7 @@ fftw_plan fftw_plan_dft(
 try
 {
     constexpr auto prec = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_complex_plan<prec>(rank, n, sign, in, out, flags);
+    return hipfftw_create_basic_complex_plan<prec>(rank, n, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1479,7 +1476,7 @@ fftwf_plan fftwf_plan_dft(
 try
 {
     constexpr auto prec = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_complex_plan<prec>(rank, n, sign, in, out, flags);
+    return hipfftw_create_basic_complex_plan<prec>(rank, n, sign, in, out, flags);
 }
 catch(...)
 {
@@ -1490,11 +1487,11 @@ catch(...)
 fftw_plan fftw_plan_dft_r2c_1d(int n, double* in, fftw_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 1;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n}), in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1505,11 +1502,11 @@ catch(...)
 fftwf_plan fftwf_plan_dft_r2c_1d(int n, float* in, fftwf_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 1;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n}), in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1520,11 +1517,11 @@ catch(...)
 fftw_plan fftw_plan_dft_r2c_2d(int n0, int n1, double* in, fftw_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 2;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1}), in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1535,11 +1532,11 @@ catch(...)
 fftwf_plan fftwf_plan_dft_r2c_2d(int n0, int n1, float* in, fftwf_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 2;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1}), in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1551,11 +1548,11 @@ fftw_plan
     fftw_plan_dft_r2c_3d(int n0, int n1, int n2, double* in, fftw_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 3;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1567,11 +1564,11 @@ fftwf_plan
     fftwf_plan_dft_r2c_3d(int n0, int n1, int n2, float* in, fftwf_complex* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 3;
-    constexpr auto dft_type = rocfft_transform_type_real_forward;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto dft_type  = rocfft_transform_type_real_forward;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1584,7 +1581,7 @@ try
 {
     constexpr auto dft_type = rocfft_transform_type_real_forward;
     constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec>(rank, n, in, out, flags);
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, n, in, out, flags);
 }
 catch(...)
 {
@@ -1597,7 +1594,7 @@ try
 {
     constexpr auto dft_type = rocfft_transform_type_real_forward;
     constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec>(rank, n, in, out, flags);
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, n, in, out, flags);
 }
 catch(...)
 {
@@ -1608,11 +1605,11 @@ catch(...)
 fftw_plan fftw_plan_dft_c2r_1d(int n, fftw_complex* in, double* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 1;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n}), in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1623,11 +1620,11 @@ catch(...)
 fftwf_plan fftwf_plan_dft_c2r_1d(int n, fftwf_complex* in, float* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 1;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n}), in, out, flags);
+    constexpr int  rank      = 1;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1638,11 +1635,11 @@ catch(...)
 fftw_plan fftw_plan_dft_c2r_2d(int n0, int n1, fftw_complex* in, double* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 2;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1}), in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1653,11 +1650,11 @@ catch(...)
 fftwf_plan fftwf_plan_dft_c2r_2d(int n0, int n1, fftwf_complex* in, float* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 2;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1}), in, out, flags);
+    constexpr int  rank      = 2;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1669,11 +1666,11 @@ fftw_plan
     fftw_plan_dft_c2r_3d(int n0, int n1, int n2, fftw_complex* in, double* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 3;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_double;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1685,11 +1682,11 @@ fftwf_plan
     fftwf_plan_dft_c2r_3d(int n0, int n1, int n2, fftwf_complex* in, float* out, unsigned flags)
 try
 {
-    constexpr int  rank     = 3;
-    constexpr auto dft_type = rocfft_transform_type_real_inverse;
-    constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec, rank>(
-        std::array<int, rank>({n0, n1, n2}), in, out, flags);
+    constexpr int  rank      = 3;
+    constexpr auto dft_type  = rocfft_transform_type_real_inverse;
+    constexpr auto prec      = rocfft_precision_single;
+    const int      len[rank] = {n0, n1, n2};
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, len, in, out, flags);
 }
 catch(...)
 {
@@ -1702,7 +1699,7 @@ try
 {
     constexpr auto dft_type = rocfft_transform_type_real_inverse;
     constexpr auto prec     = rocfft_precision_double;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec>(rank, n, in, out, flags);
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, n, in, out, flags);
 }
 catch(...)
 {
@@ -1715,13 +1712,17 @@ try
 {
     constexpr auto dft_type = rocfft_transform_type_real_inverse;
     constexpr auto prec     = rocfft_precision_single;
-    return hipfftw_create_default_unbatched_plan<dft_type, prec>(rank, n, in, out, flags);
+    return hipfftw_create_basic_plan<dft_type, prec>(rank, n, in, out, flags);
 }
 catch(...)
 {
     hipfftw_exception_handler(__func__);
     return nullptr;
 }
+
+/* ------------------------------------------------------------------------- */
+/*                           UTILITY FUNCTIONS                               */
+/* ------------------------------------------------------------------------- */
 
 void   fftw_print_plan(const fftw_plan) {}
 void   fftwf_print_plan(const fftwf_plan) {}
