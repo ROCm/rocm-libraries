@@ -210,15 +210,15 @@ protected:
             dbiasOut->set_uid(nextUid());
         }
 
-        auto baseTolerance = batchnorm::getToleranceBackward<DataType>();
+        auto baseTolerance = static_cast<float>(batchnorm::getToleranceBackward<DataType>());
         auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 
         // dx uses input data type tolerance
-        this->registerValidator(dxOut, static_cast<float>(baseTolerance));
+        this->registerRmsValidator(dxOut, baseTolerance);
 
-        // dscale and dbias use intermediate (float) type tolerance
-        this->registerValidator(dscaleOut, intermediateTolerance);
-        this->registerValidator(dbiasOut, intermediateTolerance);
+        // dscale and dbias use RMS validation for intermediate (float) type
+        this->registerRmsValidator(dscaleOut, intermediateTolerance);
+        this->registerRmsValidator(dbiasOut, intermediateTolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
     }
@@ -261,7 +261,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp32,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
@@ -270,7 +270,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwBfp16,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
@@ -279,7 +279,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp16,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
@@ -288,29 +288,25 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp32,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197}
-TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197
-TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp16,
-                         testing::ValuesIn(getBatchnormTestCases4D()));
+                         testing::ValuesIn(getBnBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
@@ -319,7 +315,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp32,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
@@ -328,7 +324,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwBfp16,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
@@ -337,7 +333,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp16,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
@@ -346,24 +342,22 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp32,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcBfp16,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp16,
-                         testing::ValuesIn(getBatchnormTestCases5D()));
+                         testing::ValuesIn(getBnBwd3dTestCases()));
