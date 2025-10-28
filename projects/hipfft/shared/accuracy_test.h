@@ -165,8 +165,6 @@ struct callback_test_data
 {
     // scalar to modify the input/output with
     double scalar;
-    // base address of input, to ensure that each callback gets an offset from that base
-    void* base;
 };
 
 void* get_load_callback_host(fft_array_type itype,
@@ -242,13 +240,13 @@ inline void execute_gpu_fft(Tparams&              params,
     // after the transform is completed
     std::vector<gpubuf_t<callback_test_data>> all_cb_data;
 
+    std::vector<void*> load_cb_func;
+    std::vector<void*> load_cb_data;
+    std::vector<void*> store_cb_func;
+    std::vector<void*> store_cb_data;
+
     if(params.run_callbacks)
     {
-        std::vector<void*> load_cb_func;
-        std::vector<void*> load_cb_data;
-        std::vector<void*> store_cb_func;
-        std::vector<void*> store_cb_data;
-
         auto add_load_cb = [&](void* ibuffer) {
             void* load_cb_host
                 = get_load_callback_host(params.itype, params.precision, round_trip_inverse);
@@ -263,8 +261,6 @@ inline void execute_gpu_fft(Tparams&              params,
             {
                 load_cb_data_host.scalar = params.load_cb_scalar;
             }
-
-            load_cb_data_host.base = ibuffer;
 
             auto& load_cb_data_dev = all_cb_data.emplace_back();
             auto  hip_status       = load_cb_data_dev.alloc(sizeof(callback_test_data));
@@ -333,8 +329,6 @@ inline void execute_gpu_fft(Tparams&              params,
             {
                 store_cb_data_host.scalar = params.store_cb_scalar;
             }
-
-            store_cb_data_host.base = pobuffer.front();
 
             auto& store_cb_data_dev = all_cb_data.emplace_back();
             auto  hip_status        = store_cb_data_dev.alloc(sizeof(callback_test_data));
