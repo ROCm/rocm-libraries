@@ -55,8 +55,10 @@ namespace rocRoller
             x = fuseAssociative(x);
             x = combineShifts(x);
             x = fuseTernary(x);
+            x = simplify(x);
             x = launchTimeSubExpressions(x, m_context);
             x = convertPropagation(x);
+            x = simplify(x);
 
             if(!identical(orig, x))
             {
