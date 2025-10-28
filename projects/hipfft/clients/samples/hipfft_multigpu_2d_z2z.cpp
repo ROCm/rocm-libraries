@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -94,8 +94,8 @@ int main()
         throw std::runtime_error("hipfftXtSetGPUs failed.");
 
     // Make the 2D plan
-    size_t workSize[gpus.size()];
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+    std::vector<size_t> workSize(gpus.size());
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftMakePlan2d failed.");
 
