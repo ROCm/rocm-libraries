@@ -50,6 +50,7 @@ Datatypes:
         gelu: 2
         swish: 3
         clamp: 4
+        sigmoid: 5
   - hipblaslt_bias_source:
       bases: [ c_int ]
       attr:

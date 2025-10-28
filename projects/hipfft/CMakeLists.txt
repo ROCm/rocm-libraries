@@ -123,7 +123,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()

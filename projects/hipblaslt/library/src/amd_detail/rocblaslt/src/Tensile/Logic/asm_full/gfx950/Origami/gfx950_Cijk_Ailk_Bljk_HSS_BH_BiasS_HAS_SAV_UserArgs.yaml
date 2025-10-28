@@ -4,7 +4,7 @@
 - [Device 75a0]
 - Activation: 1
   ActivationComputeDataType: 0
-  ActivationFuncCall: 1
+  ActivationFuncCall: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all
   AllowNoFreeDims: false
@@ -81,7 +81,7 @@
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -306,7 +306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -531,7 +531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -756,7 +756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -981,7 +981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -1206,7 +1206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -1431,7 +1431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -1656,7 +1656,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -1881,7 +1881,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -2106,7 +2106,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -2331,7 +2331,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -2556,7 +2556,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -2781,7 +2781,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -3006,7 +3006,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -3231,7 +3231,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -3456,7 +3456,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -3681,7 +3681,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -3906,7 +3906,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -4131,7 +4131,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -4356,7 +4356,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -4581,7 +4581,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -4806,7 +4806,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -5031,7 +5031,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -5256,7 +5256,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -5481,7 +5481,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -5706,7 +5706,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -5931,7 +5931,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -6156,7 +6156,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -6381,7 +6381,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -6606,7 +6606,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -6831,7 +6831,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -7056,7 +7056,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -7281,7 +7281,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -7506,7 +7506,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -7731,7 +7731,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -7956,7 +7956,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -8181,7 +8181,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -8406,7 +8406,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -8631,7 +8631,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -8856,7 +8856,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -9081,7 +9081,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -9306,7 +9306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -9531,7 +9531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -9756,7 +9756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -9981,7 +9981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -10206,7 +10206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -10431,7 +10431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -10656,7 +10656,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -10881,7 +10881,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -11106,7 +11106,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -11331,7 +11331,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -11556,7 +11556,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -11781,7 +11781,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -12006,7 +12006,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -12231,7 +12231,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -12456,7 +12456,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -12681,7 +12681,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -12906,7 +12906,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -13131,7 +13131,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -13356,7 +13356,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -13581,7 +13581,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -13806,7 +13806,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -14031,7 +14031,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -14256,7 +14256,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -14481,7 +14481,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -14706,7 +14706,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -14931,7 +14931,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -15156,7 +15156,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -15381,7 +15381,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -15606,7 +15606,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -15831,7 +15831,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -16056,7 +16056,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -16281,7 +16281,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -16506,7 +16506,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -16731,7 +16731,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -16956,7 +16956,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -17181,7 +17181,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -17406,7 +17406,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -17631,7 +17631,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -17856,7 +17856,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -18081,7 +18081,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -18306,7 +18306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -18531,7 +18531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -18756,7 +18756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -18981,7 +18981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -19206,7 +19206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -19431,7 +19431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -19656,7 +19656,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -19881,7 +19881,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -20106,7 +20106,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -20331,7 +20331,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -20556,7 +20556,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -20781,7 +20781,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -21006,7 +21006,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -21231,7 +21231,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -21456,7 +21456,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -21681,7 +21681,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -21906,7 +21906,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -22131,7 +22131,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -22356,7 +22356,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -22581,7 +22581,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -22806,7 +22806,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -23031,7 +23031,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -23256,7 +23256,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -23481,7 +23481,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -23706,7 +23706,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -23931,7 +23931,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -24156,7 +24156,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -24381,7 +24381,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -24606,7 +24606,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -24831,7 +24831,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -25056,7 +25056,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -25281,7 +25281,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -25506,7 +25506,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -25731,7 +25731,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -25956,7 +25956,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -26181,7 +26181,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -26406,7 +26406,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -26631,7 +26631,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -26856,7 +26856,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -27081,7 +27081,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -27306,7 +27306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -27531,7 +27531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -27756,7 +27756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -27981,7 +27981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -28206,7 +28206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -28431,7 +28431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -28656,7 +28656,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -28881,7 +28881,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -29106,7 +29106,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -29331,7 +29331,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -29556,7 +29556,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -29781,7 +29781,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -30006,7 +30006,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -30231,7 +30231,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -30456,7 +30456,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -30681,7 +30681,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -30906,7 +30906,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -31131,7 +31131,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -31356,7 +31356,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -31581,7 +31581,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -31806,7 +31806,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -32031,7 +32031,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -32256,7 +32256,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -32481,7 +32481,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -32706,7 +32706,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -32931,7 +32931,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -33156,7 +33156,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -33381,7 +33381,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -33606,7 +33606,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -33831,7 +33831,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -34056,7 +34056,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -34281,7 +34281,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -34506,7 +34506,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -34731,7 +34731,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -34956,7 +34956,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -35181,7 +35181,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -35406,7 +35406,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -35631,7 +35631,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -35856,7 +35856,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -36081,7 +36081,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -36306,7 +36306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -36531,7 +36531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -36756,7 +36756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -36981,7 +36981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -37206,7 +37206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -37431,7 +37431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -37656,7 +37656,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -37881,7 +37881,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -38106,7 +38106,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -38331,7 +38331,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -38556,7 +38556,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -38781,7 +38781,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -39006,7 +39006,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -39231,7 +39231,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -39456,7 +39456,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -39681,7 +39681,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -39906,7 +39906,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -40131,7 +40131,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -40356,7 +40356,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -40581,7 +40581,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -40806,7 +40806,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -41031,7 +41031,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -41256,7 +41256,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -41481,7 +41481,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -41706,7 +41706,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -41931,7 +41931,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -42156,7 +42156,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -42381,7 +42381,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -42606,7 +42606,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -42831,7 +42831,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -43056,7 +43056,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -43281,7 +43281,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -43506,7 +43506,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -43731,7 +43731,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -43956,7 +43956,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -44181,7 +44181,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -44406,7 +44406,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -44631,7 +44631,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -44856,7 +44856,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -45081,7 +45081,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -45306,7 +45306,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -45531,7 +45531,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -45756,7 +45756,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -45981,7 +45981,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -46206,7 +46206,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -46431,7 +46431,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1

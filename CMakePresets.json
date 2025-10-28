@@ -31,10 +31,17 @@
             }
         },
         {
+            "name": "origami",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "origami"
+            }
+        },
+        {
             "name": "hipblaslt",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;hipblas-common;hipblaslt"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;hipblas-common;hipblaslt"
             }
         },
         {
