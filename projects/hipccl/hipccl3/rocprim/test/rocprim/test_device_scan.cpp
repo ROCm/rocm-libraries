@@ -476,29 +476,33 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
             const auto launch_err = with_scan_state(
                 [&](const auto scan_state)
                 {
-                    return rocprim::detail::launch_lookback_scan < config,
-                           deterministic
-                               ? rocprim::detail::lookback_scan_determinism::deterministic
-                               : rocprim::detail::lookback_scan_determinism::nondeterministic,
-                           Exclusive, use_initial_value, decltype(input_iterator), U*, scan_op_type,
-                           acc_type,
-                           acc_type > (target_arch,
-                                       input_iterator,
-                                       d_output.get(),
-                                       size,
-                                       initial_value,
-                                       scan_op,
-                                       scan_state,
-                                       number_of_blocks,
-                                       dim3(grid_size),
-                                       dim3(block_size),
-                                       0,
-                                       stream,
-                                       previous_last_element,
-                                       new_last_element,
-                                       false,
-                                       false,
-                                       ordered_bid);
+                    auto lookback_scan_kernel = [=, out_ptr = d_output.get()](auto arch_config)
+                    {
+                        rocprim::detail::lookback_scan_kernel_impl<
+                            decltype(arch_config),
+                            deterministic
+                                ? rocprim::detail::lookback_scan_determinism::deterministic
+                                : rocprim::detail::lookback_scan_determinism::nondeterministic,
+                            Exclusive,
+                            use_initial_value>(input_iterator,
+                                               out_ptr,
+                                               size,
+                                               initial_value,
+                                               scan_op,
+                                               scan_state,
+                                               number_of_blocks,
+                                               previous_last_element,
+                                               new_last_element,
+                                               false,
+                                               false,
+                                               ordered_bid);
+                    };
+                    return rocprim::detail::execute_launch_plan<config>(target_arch,
+                                                                        lookback_scan_kernel,
+                                                                        dim3(grid_size),
+                                                                        dim3(block_size),
+                                                                        0,
+                                                                        stream);
                 });
 
             ASSERT_EQ(hipSuccess, launch_err);
@@ -710,28 +714,33 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
         const auto launch_err = with_scan_state(
             [&](const auto scan_state)
             {
-                return rocprim::detail::launch_lookback_scan < config,
-                       deterministic ? rocprim::detail::lookback_scan_determinism::deterministic
-                                     : rocprim::detail::lookback_scan_determinism::nondeterministic,
-                       Exclusive, use_initial_value, decltype(input_iterator), U*, scan_op_type,
-                       acc_type,
-                       acc_type > (target_arch,
-                                   input_iterator,
-                                   d_output.get(),
-                                   size,
-                                   initial_value,
-                                   scan_op,
-                                   scan_state,
-                                   number_of_blocks,
-                                   dim3(grid_size),
-                                   dim3(block_size),
-                                   0,
-                                   stream,
-                                   previous_last_element,
-                                   new_last_element,
-                                   false,
-                                   false,
-                                   ordered_bid);
+                auto lookback_scan_kernel = [=, out_ptr = d_output.get()](auto arch_config)
+                {
+                    rocprim::detail::lookback_scan_kernel_impl<
+                        decltype(arch_config),
+                        deterministic
+                            ? rocprim::detail::lookback_scan_determinism::deterministic
+                            : rocprim::detail::lookback_scan_determinism::nondeterministic,
+                        Exclusive,
+                        use_initial_value>(input_iterator,
+                                           out_ptr,
+                                           size,
+                                           initial_value,
+                                           scan_op,
+                                           scan_state,
+                                           number_of_blocks,
+                                           previous_last_element,
+                                           new_last_element,
+                                           false,
+                                           false,
+                                           ordered_bid);
+                };
+                return rocprim::detail::execute_launch_plan<config>(target_arch,
+                                                                    lookback_scan_kernel,
+                                                                    dim3(grid_size),
+                                                                    dim3(block_size),
+                                                                    0,
+                                                                    stream);
             });
 
         ASSERT_EQ(hipSuccess, launch_err);

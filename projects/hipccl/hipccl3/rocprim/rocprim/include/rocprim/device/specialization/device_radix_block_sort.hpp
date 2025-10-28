@@ -37,49 +37,6 @@ template<class Config,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Decomposer>
-inline hipError_t launch_radix_sort_block_sort(detail::target_arch  arch,
-                                               KeysInputIterator    keys_input,
-                                               KeysOutputIterator   keys_output,
-                                               ValuesInputIterator  values_input,
-                                               ValuesOutputIterator values_output,
-                                               unsigned int         size,
-                                               Decomposer           decomposer,
-                                               unsigned int         bit,
-                                               unsigned int         current_radix_bits,
-                                               dim3                 grid,
-                                               dim3                 block,
-                                               size_t               shmem,
-                                               hipStream_t          stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        static constexpr auto params = decltype(arch_config)::params;
-
-        sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,
-                                                                            keys_output,
-                                                                            values_input,
-                                                                            values_output,
-                                                                            size,
-                                                                            decomposer,
-                                                                            bit,
-                                                                            current_radix_bits);
-    };
-
-    return execute_launch_plan<Config, decltype(kernel), radix_sort_config_selector>(arch,
-                                                                                     kernel,
-                                                                                     grid,
-                                                                                     block,
-                                                                                     shmem,
-                                                                                     stream);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class Decomposer>
 inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
                                         KeysOutputIterator   keys_output,
                                         ValuesInputIterator  values_input,
@@ -127,20 +84,29 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
         start = std::chrono::steady_clock::now();
     }
 
+    auto radix_sort_block_sort_kernel = [=](auto arch_config)
+    {
+        static constexpr auto params = decltype(arch_config)::params;
+
+        sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,
+                                                                            keys_output,
+                                                                            values_input,
+                                                                            values_output,
+                                                                            size,
+                                                                            decomposer,
+                                                                            bit,
+                                                                            current_radix_bits);
+    };
+
     ROCPRIM_RETURN_ON_ERROR(
-        launch_radix_sort_block_sort<config, Descending>(target_arch,
-                                                         keys_input,
-                                                         keys_output,
-                                                         values_input,
-                                                         values_output,
-                                                         size,
-                                                         decomposer,
-                                                         bit,
-                                                         current_radix_bits,
-                                                         dim3(sort_number_of_blocks),
-                                                         dim3(params.block_size),
-                                                         0,
-                                                         stream));
+        execute_launch_plan<config,
+                            decltype(radix_sort_block_sort_kernel),
+                            radix_sort_config_selector>(target_arch,
+                                                        radix_sort_block_sort_kernel,
+                                                        dim3(sort_number_of_blocks),
+                                                        dim3(params.block_size),
+                                                        0,
+                                                        stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start);
     return hipSuccess;
 }

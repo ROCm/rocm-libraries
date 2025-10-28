@@ -48,136 +48,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Single kernel scan (performs scan on one thread block only)
-template<class ArchConfig,
-         bool Exclusive,
-         bool UseInitialValue,
-         class InputIterator,
-         class OutputIterator,
-         class BinaryFunction,
-         class AccType>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  input,
-                                                                 const size_t   input_size,
-                                                                 AccType        initial_value,
-                                                                 OutputIterator output,
-                                                                 BinaryFunction scan_op)
-{
-    static constexpr scan_config_params params = ArchConfig::params;
-
-    constexpr unsigned int block_size       = params.kernel_config.block_size;
-    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
-
-    using block_load_type
-        = ::rocprim::block_load<AccType, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type
-        = ::rocprim::block_store<AccType, block_size, items_per_thread, params.block_store_method>;
-    using block_scan_type = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
-
-    ROCPRIM_SHARED_MEMORY union
-    {
-        typename block_load_type::storage_type  load;
-        typename block_store_type::storage_type store;
-        typename block_scan_type::storage_type  scan;
-    } storage;
-
-    AccType values[items_per_thread];
-    // load input values into values
-    block_load_type().load(input, values, input_size, *(input), storage.load);
-    ::rocprim::syncthreads(); // sync threads to reuse shared memory
-
-    single_scan_block_scan<Exclusive, UseInitialValue, block_scan_type>(values, // input
-                                                                        values, // output
-                                                                        initial_value,
-                                                                        storage.scan,
-                                                                        scan_op);
-    ::rocprim::syncthreads(); // sync threads to reuse shared memory
-
-    // Save values into output array
-    block_store_type().store(output, values, input_size, storage.store);
-}
-
-template<class Config,
-         bool Exclusive,
-         bool UseInitialValue,
-         class InputIterator,
-         class OutputIterator,
-         class BinaryFunction,
-         class InitValueType,
-         class AccType>
-inline hipError_t launch_single_scan(detail::target_arch arch,
-                                     InputIterator       input,
-                                     const size_t        size,
-                                     const InitValueType initial_value,
-                                     OutputIterator      output,
-                                     BinaryFunction      scan_op,
-                                     dim3                grid,
-                                     dim3                block,
-                                     size_t              shmem,
-                                     hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        single_scan_kernel_impl<decltype(arch_config), Exclusive, UseInitialValue>(
-            input,
-            size,
-            static_cast<AccType>(get_input_value(initial_value)),
-            output,
-            scan_op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-// Single pass (look-back kernels)
-template<class Config,
-         lookback_scan_determinism Determinism,
-         bool                      Exclusive,
-         bool                      UseInitialValue,
-         class InputIterator,
-         class OutputIterator,
-         class BinaryFunction,
-         class InitValueType,
-         class AccType,
-         class LookBackScanState,
-         class BlockIdWrapper>
-inline hipError_t launch_lookback_scan(detail::target_arch arch,
-                                       InputIterator       input,
-                                       OutputIterator      output,
-                                       const size_t        size,
-                                       InitValueType       initial_value,
-                                       BinaryFunction      scan_op,
-                                       LookBackScanState   lookback_scan_state,
-                                       const unsigned int  number_of_blocks,
-                                       dim3                grid,
-                                       dim3                block,
-                                       size_t              shmem,
-                                       hipStream_t         stream,
-                                       AccType*            previous_last_element,
-                                       AccType*            new_last_element,
-                                       bool                override_first_value,
-                                       bool                save_last_value,
-                                       BlockIdWrapper      ordered_bid)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        lookback_scan_kernel_impl<decltype(arch_config), Determinism, Exclusive, UseInitialValue>(
-            input,
-            output,
-            size,
-            static_cast<AccType>(get_input_value(initial_value)),
-            scan_op,
-            lookback_scan_state,
-            number_of_blocks,
-            previous_last_element,
-            new_last_element,
-            override_first_value,
-            save_last_value,
-            ordered_bid);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool                      UseInitialValue,
@@ -324,31 +194,31 @@ inline auto scan_impl(void*               temporary_storage,
                         std::cout << "items_per_block " << items_per_block << '\n';
                     }
 
-                    ROCPRIM_RETURN_ON_ERROR(launch_lookback_scan<config,
-                                                                 Determinism,
-                                                                 Exclusive,
-                                                                 UseInitialValue,
-                                                                 InputIterator,
-                                                                 OutputIterator,
-                                                                 BinaryFunction,
-                                                                 InitValueType,
-                                                                 AccType>(target_arch,
-                                                                          input + offset,
-                                                                          output + offset,
-                                                                          current_size,
-                                                                          initial_value,
-                                                                          scan_op,
-                                                                          scan_state,
-                                                                          number_of_blocks,
-                                                                          dim3(grid_size),
-                                                                          dim3(block_size),
-                                                                          0,
-                                                                          stream,
-                                                                          previous_last_element,
-                                                                          new_last_element,
-                                                                          i != size_t(0),
-                                                                          number_of_launch > 1,
-                                                                          block_id));
+                    auto lookback_scan_kernel = [=](auto arch_config)
+                    {
+                        lookback_scan_kernel_impl<decltype(arch_config),
+                                                  Determinism,
+                                                  Exclusive,
+                                                  UseInitialValue>(
+                            input + offset,
+                            output + offset,
+                            current_size,
+                            static_cast<AccType>(get_input_value(initial_value)),
+                            scan_op,
+                            scan_state,
+                            number_of_blocks,
+                            previous_last_element,
+                            new_last_element,
+                            (i != size_t(0)),
+                            (number_of_launch > 1),
+                            block_id);
+                    };
+                    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                        lookback_scan_kernel,
+                                                                        dim3(grid_size),
+                                                                        dim3(block_size),
+                                                                        0,
+                                                                        stream));
                     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
                                                                 current_size,
                                                                 start);
@@ -376,24 +246,51 @@ inline auto scan_impl(void*               temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                ROCPRIM_RETURN_ON_ERROR(
-                    launch_single_scan<config,
-                                       Exclusive, // flag for exclusive scan operation
-                                       UseInitialValue,
-                                       InputIterator,
-                                       OutputIterator,
-                                       BinaryFunction,
-                                       InitValueType,
-                                       AccType>(target_arch,
-                                                input,
-                                                size,
-                                                initial_value,
-                                                output,
-                                                scan_op,
-                                                dim3(1),
-                                                dim3(block_size),
-                                                0,
-                                                stream));
+                auto single_scan_kernel = [=](auto arch_config) mutable
+                {
+                    static constexpr scan_config_params params = decltype(arch_config)::params;
+
+                    constexpr unsigned int block_size       = params.kernel_config.block_size;
+                    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
+
+                    using block_load_type = ::rocprim::
+                        block_load<AccType, block_size, items_per_thread, params.block_load_method>;
+                    using block_store_type = ::rocprim::block_store<AccType,
+                                                                    block_size,
+                                                                    items_per_thread,
+                                                                    params.block_store_method>;
+                    using block_scan_type
+                        = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
+
+                    ROCPRIM_SHARED_MEMORY union
+                    {
+                        typename block_load_type::storage_type  load;
+                        typename block_store_type::storage_type store;
+                        typename block_scan_type::storage_type  scan;
+                    } storage;
+
+                    AccType values[items_per_thread];
+                    // load input values into values
+                    block_load_type().load(input, values, size, *(input), storage.load);
+                    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+                    single_scan_block_scan<Exclusive, UseInitialValue, block_scan_type>(
+                        values, // input
+                        values, // output
+                        static_cast<AccType>(get_input_value(initial_value)),
+                        storage.scan,
+                        scan_op);
+                    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+                    // Save values into output array
+                    block_store_type().store(output, values, size, storage.store);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    single_scan_kernel,
+                                                                    dim3(1),
+                                                                    dim3(block_size),
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
             }
             return hipSuccess;
