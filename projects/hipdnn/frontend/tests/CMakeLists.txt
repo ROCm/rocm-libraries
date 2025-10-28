@@ -31,6 +31,7 @@ add_executable(
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
+    TestINode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
