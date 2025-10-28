@@ -46,248 +46,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetT,
-         class BinaryFunction>
-inline hipError_t launch_block_sort(detail::target_arch  arch,
-                                    KeysInputIterator    keys_input,
-                                    KeysOutputIterator   keys_output,
-                                    ValuesInputIterator  values_input,
-                                    ValuesOutputIterator values_output,
-                                    const OffsetT        size,
-                                    const unsigned int   num_blocks,
-                                    BinaryFunction       compare_function,
-                                    detail::vsmem_t      vsmem,
-                                    dim3                 grid,
-                                    dim3                 block,
-                                    size_t               shmem,
-                                    hipStream_t          stream)
-{
-    auto kernel = [=](auto arch_config) mutable
-    {
-        constexpr auto params = decltype(arch_config)::params;
-
-        constexpr unsigned int items_per_block
-            = params.kernel_config.block_size * params.kernel_config.items_per_thread;
-
-        const unsigned int flat_block_id = ::rocprim::flat_block_id();
-        if(flat_block_id >= num_blocks)
-        {
-            return;
-        }
-
-        const OffsetT      block_offset = static_cast<OffsetT>(flat_block_id) * items_per_block;
-        const unsigned int valid_in_last_block = size - block_offset;
-        const bool         is_incomplete_block = flat_block_id == (size / items_per_block);
-
-        // Shared memory or global memory pointer (vsmem)
-        using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
-        using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-
-        using sort_impl = block_sort_impl<key_type,
-                                          value_type,
-                                          params.kernel_config.block_size,
-                                          params.kernel_config.items_per_thread>;
-        using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
-
-        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
-
-        typename sort_impl::storage_type& storage
-            = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
-
-        // Core part of the block sort kernel
-        sort_impl().sort(valid_in_last_block,
-                         is_incomplete_block,
-                         keys_input + block_offset,
-                         keys_output + block_offset,
-                         values_input + block_offset,
-                         values_output + block_offset,
-                         compare_function,
-                         storage);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<class Config,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetT,
-         class BinaryFunction>
-inline hipError_t launch_device_block_merge_oddeven(detail::target_arch  arch,
-                                                    KeysInputIterator    keys_input,
-                                                    KeysOutputIterator   keys_output,
-                                                    ValuesInputIterator  values_input,
-                                                    ValuesOutputIterator values_output,
-                                                    const OffsetT        input_size,
-                                                    const OffsetT        sorted_block_size,
-                                                    BinaryFunction       compare_function,
-                                                    dim3                 grid,
-                                                    dim3                 block,
-                                                    size_t               shmem,
-                                                    hipStream_t          stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
-        block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
-                                   params.merge_oddeven_config.items_per_thread>(keys_input,
-                                                                                 keys_output,
-                                                                                 values_input,
-                                                                                 values_output,
-                                                                                 input_size,
-                                                                                 sorted_block_size,
-                                                                                 compare_function);
-    };
-
-    return execute_launch_plan<Config, decltype(kernel), merge_oddeven_config_selector>(arch,
-                                                                                        kernel,
-                                                                                        grid,
-                                                                                        block,
-                                                                                        shmem,
-                                                                                        stream);
-}
-
-template<class Config,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetT,
-         class BinaryFunction>
-inline hipError_t launch_device_block_merge_mergepath(detail::target_arch  arch,
-                                                      KeysInputIterator    keys_input,
-                                                      KeysOutputIterator   keys_output,
-                                                      ValuesInputIterator  values_input,
-                                                      ValuesOutputIterator values_output,
-                                                      const OffsetT        input_size,
-                                                      const OffsetT        sorted_block_size,
-                                                      const unsigned int   num_blocks,
-                                                      BinaryFunction       compare_function,
-                                                      const OffsetT*       merge_partitions,
-                                                      detail::vsmem_t      vsmem,
-                                                      dim3                 grid,
-                                                      dim3                 block,
-                                                      size_t               shmem,
-                                                      hipStream_t          stream)
-{
-    auto kernel = [=](auto arch_config) mutable
-    {
-        static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
-
-        // Shared memory or global memory pointer (vsmem)
-        using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
-        using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-
-        using merge_impl = block_merge_impl<key_type,
-                                            value_type,
-                                            params.merge_mergepath_config.block_size,
-                                            params.merge_mergepath_config.items_per_thread>;
-
-        using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
-        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
-
-        typename merge_impl::storage_type& storage
-            = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
-
-        // Core part of block mergepath kernel
-        merge_impl().process_tile(keys_input,
-                                  keys_output,
-                                  values_input,
-                                  values_output,
-                                  input_size,
-                                  sorted_block_size,
-                                  num_blocks,
-                                  compare_function,
-                                  merge_partitions,
-                                  storage);
-    };
-
-    return execute_launch_plan<Config, decltype(kernel), merge_mergepath_config_selector>(arch,
-                                                                                          kernel,
-                                                                                          grid,
-                                                                                          block,
-                                                                                          shmem,
-                                                                                          stream);
-}
-
-template<typename Config, typename KeysInputIterator, typename OffsetT, typename CompareOpT>
-inline hipError_t launch_device_block_merge_mergepath_partition(detail::target_arch arch,
-                                                                KeysInputIterator   keys,
-                                                                const OffsetT       input_size,
-                                                                const unsigned int  num_partitions,
-                                                                OffsetT*         merge_partitions,
-                                                                const CompareOpT compare_op,
-                                                                const OffsetT    sorted_block_size,
-                                                                dim3             grid,
-                                                                dim3             block,
-                                                                size_t           shmem,
-                                                                hipStream_t      stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        static constexpr merge_sort_block_merge_config_params params
-            = decltype(arch_config)::params;
-        static constexpr unsigned int items_per_tile
-            = params.merge_mergepath_config.block_size
-              * params.merge_mergepath_config.items_per_thread;
-
-        const unsigned int partition_id
-            = blockIdx.x * params.merge_mergepath_partition_config.block_size + threadIdx.x;
-
-        if(partition_id >= num_partitions)
-        {
-            return;
-        }
-
-        const unsigned int merged_tiles        = sorted_block_size / items_per_tile;
-        const unsigned int target_merged_tiles = merged_tiles * 2;
-        const unsigned int mask                = target_merged_tiles - 1;
-
-        // id of the first tile in the current tile-group
-        const unsigned int tilegroup_start_id = ~mask & partition_id;
-        // id of the current tile in the current tile-group
-        const unsigned int local_tile_id = mask & partition_id;
-
-        // index of the first item in the current tile-group
-        const OffsetT tilegroup_start = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
-
-        const OffsetT keys1_beg = rocprim::min(input_size, tilegroup_start);
-        const OffsetT keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
-        const OffsetT keys2_beg = keys1_end;
-        const OffsetT keys2_end = rocprim::min(input_size, keys2_beg + sorted_block_size);
-
-        const OffsetT partition_at
-            = rocprim::min(keys2_end - keys1_beg,
-                           static_cast<OffsetT>(local_tile_id) * items_per_tile);
-
-        const OffsetT partition_diag = ::rocprim::detail::merge_path(keys + keys1_beg,
-                                                                     keys + keys2_beg,
-                                                                     keys1_end - keys1_beg,
-                                                                     keys2_end - keys2_beg,
-                                                                     partition_at,
-                                                                     compare_op);
-
-        merge_partitions[partition_id] = keys1_beg + partition_diag;
-    };
-
-    return execute_launch_plan<Config, decltype(kernel), merge_mergepath_partition_config_selector>(
-        arch,
-        kernel,
-        grid,
-        block,
-        shmem,
-        stream);
-}
-
 // it assumes the temporary storage has been already partitioned
 // it is used by merge_sort where partition is done externally for
 // both block_sort and block_merge
@@ -397,44 +155,121 @@ inline hipError_t merge_sort_block_merge_impl(
             if(use_mergepath && block >= merge_mergepath_items_per_block)
             {
                 if(debug_synchronous)
+                {
                     start = std::chrono::steady_clock::now();
+                }
+
+                auto device_block_merge_mergepath_partition_kernel = [=](auto arch_config)
+                {
+                    static constexpr merge_sort_block_merge_config_params params
+                        = decltype(arch_config)::params;
+                    static constexpr unsigned int items_per_tile
+                        = params.merge_mergepath_config.block_size
+                          * params.merge_mergepath_config.items_per_thread;
+
+                    const unsigned int partition_id
+                        = blockIdx.x * params.merge_mergepath_partition_config.block_size
+                          + threadIdx.x;
+
+                    if(partition_id >= merge_num_partitions)
+                    {
+                        return;
+                    }
+
+                    const unsigned int merged_tiles        = block / items_per_tile;
+                    const unsigned int target_merged_tiles = merged_tiles * 2;
+                    const unsigned int mask                = target_merged_tiles - 1;
+
+                    // id of the first tile in the current tile-group
+                    const unsigned int tilegroup_start_id = ~mask & partition_id;
+                    // id of the current tile in the current tile-group
+                    const unsigned int local_tile_id = mask & partition_id;
+
+                    // index of the first item in the current tile-group
+                    const OffsetT tilegroup_start
+                        = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
+
+                    const OffsetT keys1_beg = rocprim::min(size, tilegroup_start);
+                    const OffsetT keys1_end = rocprim::min(size, tilegroup_start + block);
+                    const OffsetT keys2_beg = keys1_end;
+                    const OffsetT keys2_end = rocprim::min(size, keys2_beg + block);
+
+                    const OffsetT partition_at
+                        = rocprim::min(keys2_end - keys1_beg,
+                                       static_cast<OffsetT>(local_tile_id) * items_per_tile);
+
+                    const OffsetT partition_diag
+                        = ::rocprim::detail::merge_path(keys_input_ + keys1_beg,
+                                                        keys_input_ + keys2_beg,
+                                                        keys1_end - keys1_beg,
+                                                        keys2_end - keys2_beg,
+                                                        partition_at,
+                                                        compare_function);
+
+                    d_merge_partitions[partition_id] = keys1_beg + partition_diag;
+                };
+
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
-                ROCPRIM_RETURN_ON_ERROR(launch_device_block_merge_mergepath_partition<config>(
-                    target_arch,
-                    keys_input_,
-                    size,
-                    merge_num_partitions,
-                    d_merge_partitions,
-                    compare_function,
-                    block,
-                    dim3(merge_partition_number_of_blocks),
-                    dim3(merge_partition_block_size),
-                    0,
-                    stream));
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<config,
+                                        decltype(device_block_merge_mergepath_partition_kernel),
+                                        merge_mergepath_partition_config_selector>(
+                        target_arch,
+                        device_block_merge_mergepath_partition_kernel,
+                        dim3(merge_partition_number_of_blocks),
+                        dim3(merge_partition_block_size),
+                        0,
+                        stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
                     "device_block_merge_mergepath_partition_kernel",
                     merge_num_partitions,
                     start);
 
                 if(debug_synchronous)
+                {
                     start = std::chrono::steady_clock::now();
-                ROCPRIM_RETURN_ON_ERROR(launch_device_block_merge_mergepath<config>(
-                    target_arch,
-                    keys_input_,
-                    keys_output_,
-                    values_input_,
-                    values_output_,
-                    size,
-                    block,
-                    merge_mergepath_number_of_blocks,
-                    compare_function,
-                    d_merge_partitions,
-                    vsmem,
-                    calculate_grid_dim(merge_mergepath_number_of_blocks,
-                                       merge_mergepath_block_size),
-                    dim3(merge_mergepath_block_size),
-                    0,
-                    stream));
+                }
+                auto device_block_merge_mergepath_kernel = [=](auto arch_config) mutable
+                {
+                    static constexpr merge_sort_block_merge_config_params params
+                        = decltype(arch_config)::params;
+
+                    using merge_impl
+                        = block_merge_impl<key_type,
+                                           value_type,
+                                           params.merge_mergepath_config.block_size,
+                                           params.merge_mergepath_config.items_per_thread>;
+
+                    using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
+                    ROCPRIM_SHARED_MEMORY
+                    typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+
+                    typename merge_impl::storage_type& storage
+                        = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
+
+                    // Core part of block mergepath kernel
+                    merge_impl().process_tile(keys_input_,
+                                              keys_output_,
+                                              values_input_,
+                                              values_output_,
+                                              size,
+                                              block,
+                                              merge_mergepath_number_of_blocks,
+                                              compare_function,
+                                              d_merge_partitions,
+                                              storage);
+                };
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<config,
+                                        decltype(device_block_merge_mergepath_kernel),
+                                        merge_mergepath_config_selector>(
+                        target_arch,
+                        device_block_merge_mergepath_kernel,
+                        calculate_grid_dim(merge_mergepath_number_of_blocks,
+                                           merge_mergepath_block_size),
+                        dim3(merge_mergepath_block_size),
+                        0,
+                        stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_mergepath_kernel",
                                                             size,
                                                             start);
@@ -442,23 +277,38 @@ inline hipError_t merge_sort_block_merge_impl(
             else
             {
                 if(debug_synchronous)
+                {
                     start = std::chrono::steady_clock::now();
+                }
                 // As this kernel is only called with small sizes, it is safe to use 32-bit integers
                 // for size and block.
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
+
+                auto device_block_merge_oddeven_kernel = [=](auto arch_config)
+                {
+                    static constexpr merge_sort_block_merge_config_params params
+                        = decltype(arch_config)::params;
+                    block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
+                                               params.merge_oddeven_config.items_per_thread>(
+                        keys_input_,
+                        keys_output_,
+                        values_input_,
+                        values_output_,
+                        static_cast<unsigned int>(size),
+                        static_cast<unsigned int>(block),
+                        compare_function);
+                };
                 ROCPRIM_RETURN_ON_ERROR(
-                    launch_device_block_merge_oddeven<config>(target_arch,
-                                                              keys_input_,
-                                                              keys_output_,
-                                                              values_input_,
-                                                              values_output_,
-                                                              static_cast<unsigned int>(size),
-                                                              static_cast<unsigned int>(block),
-                                                              compare_function,
-                                                              dim3(merge_oddeven_number_of_blocks),
-                                                              dim3(merge_oddeven_block_size),
-                                                              0,
-                                                              stream));
+                    execute_launch_plan<config,
+                                        decltype(device_block_merge_oddeven_kernel),
+                                        merge_oddeven_config_selector>(
+                        target_arch,
+                        device_block_merge_oddeven_kernel,
+                        dim3(merge_oddeven_number_of_blocks),
+                        dim3(merge_oddeven_block_size),
+                        0,
+                        stream));
+
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_oddeven_kernel",
                                                             size,
                                                             start);
@@ -653,22 +503,57 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
+    {
         start = std::chrono::steady_clock::now();
+    }
 
-    ROCPRIM_RETURN_ON_ERROR(launch_block_sort<config>(
+    auto block_sort_kernel = [=](auto arch_config) mutable
+    {
+        constexpr auto params = decltype(arch_config)::params;
+
+        constexpr unsigned int items_per_block
+            = params.kernel_config.block_size * params.kernel_config.items_per_thread;
+
+        const unsigned int flat_block_id = ::rocprim::flat_block_id();
+        if(flat_block_id >= sort_number_of_blocks)
+        {
+            return;
+        }
+
+        const size_t       block_offset = static_cast<size_t>(flat_block_id) * items_per_block;
+        const unsigned int valid_in_last_block = size - block_offset;
+        const bool         is_incomplete_block = flat_block_id == (size / items_per_block);
+
+        using sort_impl = block_sort_impl<key_type,
+                                          value_type,
+                                          params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread>;
+        using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
+
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+
+        typename sort_impl::storage_type& storage
+            = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
+
+        // Core part of the block sort kernel
+        sort_impl().sort(valid_in_last_block,
+                         is_incomplete_block,
+                         keys_input + block_offset,
+                         keys_output + block_offset,
+                         values_input + block_offset,
+                         values_output + block_offset,
+                         compare_function,
+                         storage);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(
         target_arch,
-        keys_input,
-        keys_output,
-        values_input,
-        values_output,
-        size,
-        sort_number_of_blocks,
-        compare_function,
-        vsmem,
+        block_sort_kernel,
         calculate_grid_dim(sort_number_of_blocks, params.kernel_config.block_size),
-        dim3(params.kernel_config.block_size),
+        params.kernel_config.block_size,
         0,
         stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     return hipSuccess;
