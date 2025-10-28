@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "client/RotatingBuffer.hpp"
+#include "CustomMatchers.hpp"
 #include <algorithm>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -34,16 +35,7 @@
 
 using namespace rocRoller;
 
-template <typename T>
-static std::vector<T> copyDeviceSpanToHost(std::span<T> dSpan)
-{
-    std::vector<T> h(dSpan.size());
-    // hipMemcpy expects void*; cast the device pointer accordingly
-    HIP_CHECK(hipMemcpy(h.data(), dSpan.data(), sizeof(T) * dSpan.size(), hipMemcpyDeviceToHost));
-    return h;
-}
-
-TEST_CASE("RotatingBuffer: Disabled rotation returns base pointer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Disabled rotation returns base pointer", "[gpu][utils]")
 {
     std::vector<float>    hostData(16, 1.0f);
     RotatingBuffer<float> buf(hostData, 0);
@@ -54,14 +46,10 @@ TEST_CASE("RotatingBuffer: Disabled rotation returns base pointer", "[RotatingBu
     REQUIRE(span1.data() == span2.data());
     REQUIRE(span1.size() == hostData.size());
 
-    auto h1 = copyDeviceSpanToHost(span1);
-    for(auto v : h1)
-    {
-        REQUIRE(v == 1.0f);
-    }
+    REQUIRE_THAT(span1.data(), HasDeviceVectorEqualTo(hostData));
 }
 
-TEST_CASE("RotatingBuffer: Matrix smaller than cache rotates correctly", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Matrix smaller than cache rotates correctly", "[gpu][utils]")
 {
     std::vector<int> hostData(4, 42);
     size_t           cacheBytes = 64;
@@ -77,16 +65,12 @@ TEST_CASE("RotatingBuffer: Matrix smaller than cache rotates correctly", "[Rotat
     // Rotated forward by numElems
     REQUIRE(span2.data() == span1.data() + 4);
 
-    auto h1 = copyDeviceSpanToHost(span1);
-    auto h2 = copyDeviceSpanToHost(span2);
-    for(int i = 0; i < 4; i++)
-    {
-        REQUIRE(h1[i] == 42);
-        REQUIRE(h2[i] == 42);
-    }
+    REQUIRE_THAT(span1.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(span2.data(), HasDeviceVectorEqualTo(hostData));
 }
 
-TEST_CASE("RotatingBuffer: Matrix larger than cache gracefully falls back to single buffer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Matrix larger than cache gracefully falls back to single buffer",
+          "[gpu][utils]")
 {
     std::vector<double> hostData(1024, 3.14);
     size_t              cacheBytes = 128; // smaller than one matrix
@@ -100,12 +84,10 @@ TEST_CASE("RotatingBuffer: Matrix larger than cache gracefully falls back to sin
     REQUIRE(span1.data() == span2.data());
     REQUIRE(span1.size() == hostData.size());
 
-    auto h1 = copyDeviceSpanToHost(span1);
-    for(double v : h1)
-        REQUIRE(v == 3.14);
+    REQUIRE_THAT(span1.data(), HasDeviceVectorEqualTo(hostData));
 }
 
-TEST_CASE("RotatingBuffer: Data integrity across rotations", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Data integrity across rotations", "[gpu][utils]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; i++)
@@ -117,38 +99,33 @@ TEST_CASE("RotatingBuffer: Data integrity across rotations", "[RotatingBuffer]")
     auto span1 = buf.next();
     auto span2 = buf.next(); // rotated
 
-    auto h1 = copyDeviceSpanToHost(span1);
-    auto h2 = copyDeviceSpanToHost(span2);
-    for(int i = 0; i < 8; i++)
-    {
-        REQUIRE(h1[i] == hostData[i]);
-        REQUIRE(h2[i] == hostData[i]); // copied data must match too
-    }
+    // copied data must match too
+    REQUIRE_THAT(span1.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(span2.data(), HasDeviceVectorEqualTo(hostData));
 }
 
-TEST_CASE("RotatingBuffer: Empty host data throws FatalError", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Empty host data throws FatalError", "[gpu][utils]")
 {
     std::vector<float> hostData;
     REQUIRE_THROWS_AS(RotatingBuffer<float>(hostData, 32), FatalError);
 }
 
-TEST_CASE("RotatingBuffer: Small cacheBytes triggers graceful fallback to full buffer", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Small cacheBytes triggers graceful fallback to full buffer",
+          "[gpu][utils]")
 {
     std::vector<int> hostData(8, 7);
     size_t           cacheBytes = sizeof(int) * 4; // too small for one full copy
 
     RotatingBuffer<int> buf(hostData, cacheBytes);
 
-    auto span = buf.next();
-
     // Should fall back to full allocation
+    auto span = buf.next();
     REQUIRE(span.size() == hostData.size());
 
-    auto h = copyDeviceSpanToHost(span);
-    REQUIRE(std::all_of(h.begin(), h.end(), [](int v) { return v == 7; }));
+    REQUIRE_THAT(span.data(), HasDeviceVectorEqualTo(hostData));
 }
 
-TEST_CASE("RotatingBuffer: Odd cache size falls back safely", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Odd cache size falls back safely", "[gpu][utils]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; i++)
@@ -166,21 +143,14 @@ TEST_CASE("RotatingBuffer: Odd cache size falls back safely", "[RotatingBuffer]"
     REQUIRE(span2.size() == 8);
     REQUIRE(span3.size() == 8);
 
-    auto h1 = copyDeviceSpanToHost(span1);
-    auto h2 = copyDeviceSpanToHost(span2);
-    auto h3 = copyDeviceSpanToHost(span3);
-
     // All values should remain consistent
-    for(int i = 0; i < 8; i++)
-    {
-        REQUIRE(h1[i] == hostData[i]);
-        REQUIRE(h2[i] == hostData[i]);
-        REQUIRE(h3[i] == hostData[i]);
-    }
+    REQUIRE_THAT(span1.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(span2.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(span3.data(), HasDeviceVectorEqualTo(hostData));
 }
 
 // Exact-fit cache (== one tensor): should not rotate; spans remain identical.
-TEST_CASE("RotatingBuffer: Exact-fit cache does not rotate", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Exact-fit cache does not rotate", "[gpu][utils]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; ++i)
@@ -196,13 +166,11 @@ TEST_CASE("RotatingBuffer: Exact-fit cache does not rotate", "[RotatingBuffer]")
     REQUIRE(s2.size() == hostData.size());
     REQUIRE(s2.data() == s1.data()); // no rotation
 
-    auto h1 = copyDeviceSpanToHost(s1);
-    for(int i = 0; i < 8; ++i)
-        REQUIRE(h1[i] == hostData[i]);
+    REQUIRE_THAT(s1.data(), HasDeviceVectorEqualTo(hostData));
 }
 
 // Multi-copy rotation cycles deterministically (3 copies): addresses should cycle 0->+N->+2N->0...
-TEST_CASE("RotatingBuffer: Multi-copy rotation cycles addresses deterministically", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Multi-copy rotation cycles addresses deterministically", "[gpu][utils]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; ++i)
@@ -214,7 +182,7 @@ TEST_CASE("RotatingBuffer: Multi-copy rotation cycles addresses deterministicall
 
     RotatingBuffer<int> buf(hostData, cacheBytes);
 
-    // Collect a few successive spans and check address cycle
+    // Collect a few successive spans and check address cyc
     auto s0 = buf.next(); // offset N
     auto s1 = buf.next(); // offset 2N
     auto s2 = buf.next(); // offset 0 (wrap)
@@ -241,33 +209,24 @@ TEST_CASE("RotatingBuffer: Multi-copy rotation cycles addresses deterministicall
         return -1;
     };
 
-    // Expected rotation order with pre-advance semantics: N, 2N, 0, N  -> indices {1,2,0,1}
     REQUIRE(idxOf(s0.data()) == 1);
     REQUIRE(idxOf(s1.data()) == 2);
     REQUIRE(idxOf(s2.data()) == 0);
     REQUIRE(idxOf(s3.data()) == 1);
 
-    auto h0 = copyDeviceSpanToHost(s0);
-    auto h1 = copyDeviceSpanToHost(s1);
-    auto h2 = copyDeviceSpanToHost(s2);
-    auto h3 = copyDeviceSpanToHost(s3);
-    for(int i = 0; i < N; ++i)
-    {
-        REQUIRE(h0[i] == hostData[i]);
-        REQUIRE(h1[i] == hostData[i]);
-        REQUIRE(h2[i] == hostData[i]);
-        REQUIRE(h3[i] == hostData[i]);
-    }
+    REQUIRE_THAT(s0.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(s1.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(s2.data(), HasDeviceVectorEqualTo(hostData));
+    REQUIRE_THAT(s3.data(), HasDeviceVectorEqualTo(hostData));
 }
 
 // Many iterations should never segfault (stress rotation & modulo logic)
-TEST_CASE("RotatingBuffer: Many rotations do not segfault and data remains stable", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Many rotations do not segfault and data remains stable", "[gpu][utils]")
 {
     std::vector<float> hostData(32);
     for(int i = 0; i < 32; ++i)
         hostData[i] = static_cast<float>(i);
 
-    // 5 copies -> plenty of rotation states
     const size_t          cacheBytes = 5 * hostData.size() * sizeof(float);
     RotatingBuffer<float> buf(hostData, cacheBytes);
 
@@ -276,14 +235,12 @@ TEST_CASE("RotatingBuffer: Many rotations do not segfault and data remains stabl
     {
         auto s = buf.next();
         REQUIRE(s.size() == hostData.size());
-        auto h = copyDeviceSpanToHost(s);
-        for(int i = 0; i < 32; ++i)
-            REQUIRE(h[i] == hostData[i]);
+        REQUIRE_THAT(s.data(), HasDeviceVectorEqualTo(hostData));
     }
 }
 
 // Alloc/free churn: ensure deleter (hipFree) path is exercised without faults or leaks
-TEST_CASE("RotatingBuffer: Allocator/deleter churn is safe", "[RotatingBuffer]")
+TEST_CASE("RotatingBuffer: Allocator/deleter churn is safe", "[gpu][utils]")
 {
     for(int rep = 0; rep < 64; ++rep)
     {
@@ -294,10 +251,8 @@ TEST_CASE("RotatingBuffer: Allocator/deleter churn is safe", "[RotatingBuffer]")
             RotatingBuffer<double> buf(hostData, cacheBytes);
             auto                   s = buf.next();
             REQUIRE(s.size() == hostData.size());
-            auto h = copyDeviceSpanToHost(s);
-            for(double v : h)
-                REQUIRE(v == 2.5);
-        } // buf goes out of scope -> hipFree via deleter runs
+            REQUIRE_THAT(s.data(), HasDeviceVectorEqualTo(hostData));
+        }
     }
     HIP_CHECK(hipDeviceSynchronize());
 }
