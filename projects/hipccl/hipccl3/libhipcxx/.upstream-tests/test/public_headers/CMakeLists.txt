@@ -57,11 +57,16 @@ function(libcudacxx_add_public_header_test header)
 
   # Create the default target for that file
   set(headertest_${header_name} verify_${header_name})
-  # NOTE(HIP/AMD): Barrier and PTX headers are skipped for AMD devices (no support as of June 2025).
+  # NOTE(HIP/AMD): Barrier and PTX headers are skipped for AMD devices (no support as of October 2025).
   if(header_name MATCHES "ptx.*")
     return()
   endif()
   if(headertest_src MATCHES "barrier.*")
+    return()
+  endif()
+  # NOTE(HIP/AMD): unsupported headers are skipped for AMD devices (no support as of October 2025).
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline" match "${header}")
+  if(match)
     return()
   endif()
   add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
