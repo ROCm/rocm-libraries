@@ -104,7 +104,8 @@ TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
     const auto* activAttr = node2.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttr, nullptr);
 
-    EXPECT_THROW(ConvFwdBiasActivParams(*convAttr, biasAttr, *activAttr, graph.getTensorMap()), hipdnn_plugin::HipdnnPluginException);
+    EXPECT_THROW(ConvFwdBiasActivParams(*convAttr, biasAttr, *activAttr, graph.getTensorMap()),
+                 hipdnn_plugin::HipdnnPluginException);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)

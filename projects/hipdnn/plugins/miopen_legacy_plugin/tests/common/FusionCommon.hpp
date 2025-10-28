@@ -15,7 +15,9 @@ struct ConvBiasActivTestCase
     bool doBias;
     test_activation_common::ActivTestCase activ;
 
-    ConvBiasActivTestCase(test_conv_common::ConvTestCase&& convLocal, bool doBiasLocal, test_activation_common::ActivTestCase&& activLocal)
+    ConvBiasActivTestCase(test_conv_common::ConvTestCase&& convLocal,
+                          bool doBiasLocal,
+                          test_activation_common::ActivTestCase&& activLocal)
         : conv(std::move(convLocal))
         , doBias(doBiasLocal)
         , activ(activLocal)

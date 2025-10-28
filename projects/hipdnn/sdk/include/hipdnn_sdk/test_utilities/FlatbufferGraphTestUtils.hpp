@@ -475,8 +475,8 @@ inline flatbuffers::FlatBufferBuilder
 
     // Virtual y_conv tensor
     const auto yConvTensorUid = tensorUid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, yConvTensorUid, "y_conv", dataType, &yStrides, &yDims, true));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, yConvTensorUid, "y_conv", dataType, &yStrides, &yDims, true));
 
     int64_t biasTensorUid;
     int64_t yBiasTensorUid;
@@ -486,12 +486,12 @@ inline flatbuffers::FlatBufferBuilder
         const auto biasStrides = generateStrides(biasDims, extractStrideOrder(yDims));
 
         biasTensorUid = tensorUid++;
-        tensorAttributes.push_back(
-            CreateTensorAttributesDirect(builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims));
         // Virtual y_bias tensor
         yBiasTensorUid = tensorUid++;
-        tensorAttributes.push_back(
-            CreateTensorAttributesDirect(builder, yBiasTensorUid, "y_bias", dataType, &yStrides, &yDims, true));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, yBiasTensorUid, "y_bias", dataType, &yStrides, &yDims, true));
     }
 
     const auto yTensorUid = tensorUid;
@@ -509,7 +509,8 @@ inline flatbuffers::FlatBufferBuilder
                                                                &convStrides,
                                                                &convDilation,
                                                                ConvMode::CROSS_CORRELATION);
-    nodes.push_back(CreateNodeDirect(builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(
+        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union()));
 
     if(doBias)
     {
@@ -523,7 +524,8 @@ inline flatbuffers::FlatBufferBuilder
                                                         biasTensorUid,
                                                         flatbuffers::nullopt,
                                                         yBiasTensorUid);
-        nodes.push_back(CreateNodeDirect(builder, "bias", NodeAttributes::PointwiseAttributes, biasAttributes.Union()));
+        nodes.push_back(CreateNodeDirect(
+            builder, "bias", NodeAttributes::PointwiseAttributes, biasAttributes.Union()));
     }
 
     auto activAttributes = CreatePointwiseAttributes(builder,
@@ -539,7 +541,8 @@ inline flatbuffers::FlatBufferBuilder
                                                      swishBeta,
                                                      eluAlpha,
                                                      softplusBeta);
-    nodes.push_back(CreateNodeDirect(builder, "activ", NodeAttributes::PointwiseAttributes, activAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(
+        builder, "activ", NodeAttributes::PointwiseAttributes, activAttributes.Union()));
 
     auto graphOffset = CreateGraphDirect(builder,
                                          "test",
