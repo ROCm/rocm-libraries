@@ -33,22 +33,7 @@ inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
     auto dims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.strides());
 
-    switch(attribute.data_type())
-    {
-    case hipdnn_sdk::data_objects::DataType::FLOAT:
-        return std::make_unique<utilities::Tensor<float>>(dims, strides);
-    case hipdnn_sdk::data_objects::DataType::HALF:
-        return std::make_unique<utilities::Tensor<half>>(dims, strides);
-    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
-        return std::make_unique<utilities::Tensor<hip_bfloat16>>(dims, strides);
-    case hipdnn_sdk::data_objects::DataType::DOUBLE:
-        return std::make_unique<utilities::Tensor<double>>(dims, strides);
-    case hipdnn_sdk::data_objects::DataType::UINT8:
-        return std::make_unique<utilities::Tensor<uint8_t>>(dims, strides);
-    case hipdnn_sdk::data_objects::DataType::INT32:
-        return std::make_unique<utilities::Tensor<int32_t>>(dims, strides);
-    default:
-        throw std::runtime_error("Unsupported data type for tensor");
-    }
+    return hipdnn_sdk::utilities::createTensor(attribute.data_type(), dims, strides);
 }
-}
+
+} // namespace hipdnn_sdk::test_utilities
