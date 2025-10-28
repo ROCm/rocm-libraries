@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,194 +21,213 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_sddmm_csc.hpp"
 
-#include <hipsparse.h>
+TEST_ROUTINE(sddmm_csc,
+             generic,
+             arg.M,
+             arg.N,
+             arg.K,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.transA,
+             arg.transB,
+             arg.orderA,
+             arg.orderB,
+             arg.baseC,
+             arg.sddmm_alg);
 
-struct alpha_beta
-{
-    double alpha;
-    double beta;
-};
+// #include "testing_sddmm_csc.hpp"
 
-typedef std::tuple<int,
-                   int,
-                   int,
-                   alpha_beta,
-                   hipsparseOperation_t,
-                   hipsparseOperation_t,
-                   hipsparseOrder_t,
-                   hipsparseOrder_t,
-                   hipsparseIndexBase_t,
-                   hipsparseSDDMMAlg_t>
-    sddmm_csc_tuple;
-typedef std::tuple<int,
-                   alpha_beta,
-                   hipsparseOperation_t,
-                   hipsparseOperation_t,
-                   hipsparseOrder_t,
-                   hipsparseOrder_t,
-                   hipsparseIndexBase_t,
-                   hipsparseSDDMMAlg_t,
-                   std::string>
-    sddmm_csc_bin_tuple;
+// #include <hipsparse.h>
 
-int sddmm_csc_M_range[] = {50};
-int sddmm_csc_N_range[] = {84};
-int sddmm_csc_K_range[] = {5};
+// struct alpha_beta
+// {
+//     double alpha;
+//     double beta;
+// };
 
-alpha_beta sddmm_csc_alpha_beta_range[] = {{2.0, 1.0}};
+// typedef std::tuple<int,
+//                    int,
+//                    int,
+//                    alpha_beta,
+//                    hipsparseOperation_t,
+//                    hipsparseOperation_t,
+//                    hipsparseOrder_t,
+//                    hipsparseOrder_t,
+//                    hipsparseIndexBase_t,
+//                    hipsparseSDDMMAlg_t>
+//     sddmm_csc_tuple;
+// typedef std::tuple<int,
+//                    alpha_beta,
+//                    hipsparseOperation_t,
+//                    hipsparseOperation_t,
+//                    hipsparseOrder_t,
+//                    hipsparseOrder_t,
+//                    hipsparseIndexBase_t,
+//                    hipsparseSDDMMAlg_t,
+//                    std::string>
+//     sddmm_csc_bin_tuple;
 
-hipsparseOperation_t sddmm_csc_transA_range[]
-    = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
-hipsparseOperation_t sddmm_csc_transB_range[]
-    = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
-hipsparseOrder_t     sddmm_csc_orderA_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW};
-hipsparseOrder_t     sddmm_csc_orderB_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW};
-hipsparseIndexBase_t sddmm_csc_idxbase_range[]
-    = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-hipsparseSDDMMAlg_t sddmm_csc_alg_range[] = {HIPSPARSE_SDDMM_ALG_DEFAULT};
+// int sddmm_csc_M_range[] = {50};
+// int sddmm_csc_N_range[] = {84};
+// int sddmm_csc_K_range[] = {5};
 
-std::string sddmm_csc_bin[] = {"nos1.bin", "nos3.bin", "nos5.bin", "nos7.bin", "shipsec1.bin"};
+// alpha_beta sddmm_csc_alpha_beta_range[] = {{2.0, 1.0}};
 
-class parameterized_sddmm_csc : public testing::TestWithParam<sddmm_csc_tuple>
-{
-protected:
-    parameterized_sddmm_csc() {}
-    virtual ~parameterized_sddmm_csc() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
+// hipsparseOperation_t sddmm_csc_transA_range[]
+//     = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
+// hipsparseOperation_t sddmm_csc_transB_range[]
+//     = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
+// hipsparseOrder_t     sddmm_csc_orderA_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW};
+// hipsparseOrder_t     sddmm_csc_orderB_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW};
+// hipsparseIndexBase_t sddmm_csc_idxbase_range[]
+//     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
+// hipsparseSDDMMAlg_t sddmm_csc_alg_range[] = {HIPSPARSE_SDDMM_ALG_DEFAULT};
 
-class parameterized_sddmm_csc_bin : public testing::TestWithParam<sddmm_csc_bin_tuple>
-{
-protected:
-    parameterized_sddmm_csc_bin() {}
-    virtual ~parameterized_sddmm_csc_bin() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
+// std::string sddmm_csc_bin[] = {"nos1.bin", "nos3.bin", "nos5.bin", "nos7.bin", "shipsec1.bin"};
 
-Arguments setup_sddmm_csc_arguments(sddmm_csc_tuple tup)
-{
-    Arguments arg;
-    arg.M         = std::get<0>(tup);
-    arg.N         = std::get<1>(tup);
-    arg.K         = std::get<2>(tup);
-    arg.alpha     = std::get<3>(tup).alpha;
-    arg.beta      = std::get<3>(tup).beta;
-    arg.transA    = std::get<4>(tup);
-    arg.transB    = std::get<5>(tup);
-    arg.orderA    = std::get<6>(tup);
-    arg.orderB    = std::get<7>(tup);
-    arg.baseA     = std::get<8>(tup);
-    arg.sddmm_alg = std::get<9>(tup);
-    arg.timing    = 0;
-    return arg;
-}
+// class parameterized_sddmm_csc : public testing::TestWithParam<sddmm_csc_tuple>
+// {
+// protected:
+//     parameterized_sddmm_csc() {}
+//     virtual ~parameterized_sddmm_csc() {}
+//     virtual void SetUp() {}
+//     virtual void TearDown() {}
+// };
 
-Arguments setup_sddmm_csc_arguments(sddmm_csc_bin_tuple tup)
-{
-    Arguments arg;
-    arg.M         = -99;
-    arg.N         = -99;
-    arg.K         = std::get<0>(tup);
-    arg.alpha     = std::get<1>(tup).alpha;
-    arg.beta      = std::get<1>(tup).beta;
-    arg.transA    = std::get<2>(tup);
-    arg.transB    = std::get<3>(tup);
-    arg.orderA    = std::get<4>(tup);
-    arg.orderB    = std::get<5>(tup);
-    arg.baseA     = std::get<6>(tup);
-    arg.sddmm_alg = std::get<7>(tup);
-    arg.timing    = 0;
+// class parameterized_sddmm_csc_bin : public testing::TestWithParam<sddmm_csc_bin_tuple>
+// {
+// protected:
+//     parameterized_sddmm_csc_bin() {}
+//     virtual ~parameterized_sddmm_csc_bin() {}
+//     virtual void SetUp() {}
+//     virtual void TearDown() {}
+// };
 
-    // Determine absolute path of test matrix
-    std::string bin_file = std::get<8>(tup);
+// Arguments setup_sddmm_csc_arguments(sddmm_csc_tuple tup)
+// {
+//     Arguments arg;
+//     arg.M         = std::get<0>(tup);
+//     arg.N         = std::get<1>(tup);
+//     arg.K         = std::get<2>(tup);
+//     arg.alpha     = std::get<3>(tup).alpha;
+//     arg.beta      = std::get<3>(tup).beta;
+//     arg.transA    = std::get<4>(tup);
+//     arg.transB    = std::get<5>(tup);
+//     arg.orderA    = std::get<6>(tup);
+//     arg.orderB    = std::get<7>(tup);
+//     arg.baseA     = std::get<8>(tup);
+//     arg.sddmm_alg = std::get<9>(tup);
+//     arg.timing    = 0;
+//     return arg;
+// }
 
-    // Matrices are stored at the same path in matrices directory
-    arg.set_filename(get_filename(bin_file));
+// Arguments setup_sddmm_csc_arguments(sddmm_csc_bin_tuple tup)
+// {
+//     Arguments arg;
+//     arg.M         = -99;
+//     arg.N         = -99;
+//     arg.K         = std::get<0>(tup);
+//     arg.alpha     = std::get<1>(tup).alpha;
+//     arg.beta      = std::get<1>(tup).beta;
+//     arg.transA    = std::get<2>(tup);
+//     arg.transB    = std::get<3>(tup);
+//     arg.orderA    = std::get<4>(tup);
+//     arg.orderB    = std::get<5>(tup);
+//     arg.baseA     = std::get<6>(tup);
+//     arg.sddmm_alg = std::get<7>(tup);
+//     arg.timing    = 0;
 
-    return arg;
-}
+//     // Determine absolute path of test matrix
+//     std::string bin_file = std::get<8>(tup);
 
-// CSC format not supported in cusparse
-#if(!defined(CUDART_VERSION))
-TEST(sddmm_csc_bad_arg, sddmm_csc_float)
-{
-    testing_sddmm_csc_bad_arg();
-}
+//     // Matrices are stored at the same path in matrices directory
+//     arg.set_filename(get_filename(bin_file));
 
-TEST_P(parameterized_sddmm_csc, sddmm_csc_i32_float)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+//     return arg;
+// }
 
-    hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+// // CSC format not supported in cusparse
+// #if(!defined(CUDART_VERSION))
+// TEST(sddmm_csc_bad_arg, sddmm_csc_float)
+// {
+//     testing_sddmm_csc_bad_arg();
+// }
 
-TEST_P(parameterized_sddmm_csc, sddmm_csc_i64_double)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+// TEST_P(parameterized_sddmm_csc, sddmm_csc_i32_float)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, float>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_sddmm_csc, sddmm_csc_i32_float_complex)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+// TEST_P(parameterized_sddmm_csc, sddmm_csc_i64_double)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, hipComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, double>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_sddmm_csc, sddmm_csc_i64_double_complex)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+// TEST_P(parameterized_sddmm_csc, sddmm_csc_i32_float_complex)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, hipDoubleComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, hipComplex>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_sddmm_csc_bin, sddmm_csc_bin_i32_float)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+// TEST_P(parameterized_sddmm_csc, sddmm_csc_i64_double_complex)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, hipDoubleComplex>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-TEST_P(parameterized_sddmm_csc_bin, sddmm_csc_bin_i64_double)
-{
-    Arguments arg = setup_sddmm_csc_arguments(GetParam());
+// TEST_P(parameterized_sddmm_csc_bin, sddmm_csc_bin_i32_float)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
+//     hipsparseStatus_t status = testing_sddmm_csc<int32_t, int32_t, float>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
 
-INSTANTIATE_TEST_SUITE_P(sddmm_csc,
-                         parameterized_sddmm_csc,
-                         testing::Combine(testing::ValuesIn(sddmm_csc_M_range),
-                                          testing::ValuesIn(sddmm_csc_N_range),
-                                          testing::ValuesIn(sddmm_csc_K_range),
-                                          testing::ValuesIn(sddmm_csc_alpha_beta_range),
-                                          testing::ValuesIn(sddmm_csc_transA_range),
-                                          testing::ValuesIn(sddmm_csc_transB_range),
-                                          testing::ValuesIn(sddmm_csc_orderA_range),
-                                          testing::ValuesIn(sddmm_csc_orderB_range),
-                                          testing::ValuesIn(sddmm_csc_idxbase_range),
-                                          testing::ValuesIn(sddmm_csc_alg_range)));
+// TEST_P(parameterized_sddmm_csc_bin, sddmm_csc_bin_i64_double)
+// {
+//     Arguments arg = setup_sddmm_csc_arguments(GetParam());
 
-INSTANTIATE_TEST_SUITE_P(sddmm_csc_bin,
-                         parameterized_sddmm_csc_bin,
-                         testing::Combine(testing::ValuesIn(sddmm_csc_K_range),
-                                          testing::ValuesIn(sddmm_csc_alpha_beta_range),
-                                          testing::ValuesIn(sddmm_csc_transA_range),
-                                          testing::ValuesIn(sddmm_csc_transB_range),
-                                          testing::ValuesIn(sddmm_csc_orderA_range),
-                                          testing::ValuesIn(sddmm_csc_orderB_range),
-                                          testing::ValuesIn(sddmm_csc_idxbase_range),
-                                          testing::ValuesIn(sddmm_csc_alg_range),
-                                          testing::ValuesIn(sddmm_csc_bin)));
-#endif
+//     hipsparseStatus_t status = testing_sddmm_csc<int64_t, int64_t, double>(arg);
+//     EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+// }
+
+// INSTANTIATE_TEST_SUITE_P(sddmm_csc,
+//                          parameterized_sddmm_csc,
+//                          testing::Combine(testing::ValuesIn(sddmm_csc_M_range),
+//                                           testing::ValuesIn(sddmm_csc_N_range),
+//                                           testing::ValuesIn(sddmm_csc_K_range),
+//                                           testing::ValuesIn(sddmm_csc_alpha_beta_range),
+//                                           testing::ValuesIn(sddmm_csc_transA_range),
+//                                           testing::ValuesIn(sddmm_csc_transB_range),
+//                                           testing::ValuesIn(sddmm_csc_orderA_range),
+//                                           testing::ValuesIn(sddmm_csc_orderB_range),
+//                                           testing::ValuesIn(sddmm_csc_idxbase_range),
+//                                           testing::ValuesIn(sddmm_csc_alg_range)));
+
+// INSTANTIATE_TEST_SUITE_P(sddmm_csc_bin,
+//                          parameterized_sddmm_csc_bin,
+//                          testing::Combine(testing::ValuesIn(sddmm_csc_K_range),
+//                                           testing::ValuesIn(sddmm_csc_alpha_beta_range),
+//                                           testing::ValuesIn(sddmm_csc_transA_range),
+//                                           testing::ValuesIn(sddmm_csc_transB_range),
+//                                           testing::ValuesIn(sddmm_csc_orderA_range),
+//                                           testing::ValuesIn(sddmm_csc_orderB_range),
+//                                           testing::ValuesIn(sddmm_csc_idxbase_range),
+//                                           testing::ValuesIn(sddmm_csc_alg_range),
+//                                           testing::ValuesIn(sddmm_csc_bin)));
+// #endif

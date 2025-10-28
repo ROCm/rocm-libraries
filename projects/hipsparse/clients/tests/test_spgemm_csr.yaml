@@ -21,31 +21,46 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
 
-# extra
-include: test_axpby.yaml
-include: test_gather.yaml
-include: test_scatter.yaml
-include: test_sddmm_coo_aos.yaml
-include: test_sddmm_coo.yaml
-include: test_sddmm_csc.yaml
-include: test_sddmm_csr.yaml
-include: test_sparse_to_dense_coo.yaml
-include: test_sparse_to_dense_csc.yaml
-include: test_sparse_to_dense_csr.yaml
-include: test_spgemm_csr.yaml
-include: test_spgemmreuse_csr.yaml
-include: test_spmm_batched_coo.yaml
-include: test_spmm_batched_csc.yaml
-include: test_spmm_batched_csr.yaml
-include: test_spmm_coo.yaml
-include: test_spmm_csc.yaml
-include: test_spmm_csr.yaml
+
+Tests:
+- name: spgemm_csr_bad_arg
+  category: pre_checkin
+  function: spgemm_csr_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: spgemm_csr
+  category: quick
+  function: spgemm_csr
+  precision: *single_double_precisions_complex_real
+  M: [567, 1149]
+  K: [649, 2148]
+  alpha: [2.0]
+  alphai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
+
+- name: spgemm_csr
+  category: pre_checkin
+  function: spgemm_csr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  K: 1
+  alpha: [2.0]
+  alphai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
+  filename: [nos1,
+             nos2, 
+             nos3,
+             nos4, 
+             nos5,
+             nos6, 
+             nos7, 
+             bibd_22_8]

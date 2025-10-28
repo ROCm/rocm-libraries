@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_sddmm_coo_aos_bad_arg(void)
+template <typename T>
+void testing_sddmm_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;

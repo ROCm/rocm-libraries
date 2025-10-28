@@ -36,7 +36,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spgemm_csr_bad_arg(void)
+template <typename T>
+void testing_spgemm_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     int64_t              m         = 100;

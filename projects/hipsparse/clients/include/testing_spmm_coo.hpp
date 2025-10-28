@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_spmm_coo_bad_arg(void)
+template <typename T>
+void testing_spmm_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;
@@ -340,7 +341,7 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     //When using cusparse backend, cant pass nullptr for buffer to preprocess
     if(bufferSize == 0)
     {
@@ -352,14 +353,14 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // HIPSPARSE pointer mode host
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 #endif
 
     // HIPSPARSE pointer mode device
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));

@@ -218,7 +218,25 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_sctr.yaml
                          test_roti.yaml
                          test_gthr.yaml
-                         test_gthrz.yaml)
+                         test_gthrz.yaml
+                         test_axpby.yaml 
+                         test_gather.yaml 
+                         test_scatter.yaml
+                         test_sddmm_coo_aos.yaml
+                         test_sddmm_coo.yaml
+                         test_sddmm_csc.yaml
+                         test_sddmm_csr.yaml
+                         test_sparse_to_dense_coo.yaml
+                         test_sparse_to_dense_csc.yaml
+                         test_sparse_to_dense_csr.yaml
+                         test_spgemm_csr.yaml
+                         test_spgemmreuse_csr.yaml
+                         test_spmm_batched_coo.yaml
+                         test_spmm_batched_csc.yaml
+                         test_spmm_batched_csr.yaml
+                         test_spmm_coo.yaml
+                         test_spmm_csc.yaml
+                         test_spmm_csr.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
