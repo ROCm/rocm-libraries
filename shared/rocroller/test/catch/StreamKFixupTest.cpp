@@ -29,17 +29,18 @@
 
 #include "TestContext.hpp"
 
+#include <common/CommonGraphs.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
-
-#include <common/CommonGraphs.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
 {
     using namespace rocRoller;
     using namespace KernelGraph;
     using namespace ControlGraph;
+    using namespace CoordinateGraph;
 
     auto context = TestContext::ForTestDevice();
     auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
@@ -60,7 +61,8 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     //          LoadSGPR(flag[WG + forReceiveTileLoopCoord + 1])
     //      for XLoop and YLoop
     //          partialResult = LoadTiled(scratchAccTile[WG + forReceiveTileLoopCoord + 1])
-    //          fullyAccTile = Assign Add(localAccTile, partialResult)
+    //          fullyAccTile = Assign(localPartiallyAccTile)
+    //          fullyAccTile = Assign Add(fullyAccTile, partialResult)
     //          localAccTile = Assign(fullyAccTile)
     //          WaitZero()
     auto verifyStreamKReceiveTileLoop = [](rocRoller::KernelGraph::KernelGraph const& kgraph) {
@@ -104,19 +106,53 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
         CHECK(fixupXLoop.has_value());
         CHECK(fixupYLoop.has_value());
 
-        // verify this sequence chain: LoadTiled -> AssignAdd -> Assign
+        // verify this sequence chain: LoadTiled -> Assign -> AssignAdd -> Assign
         auto loadPartialResult
             = only(kgraph.control.getOutputNodeIndices<Body>(fixupYLoop.value()));
         CHECK(loadPartialResult.has_value());
-        std::cout << "LoadTiled tag: " << loadPartialResult.value() << std::endl;
         CHECK(kgraph.control.get<LoadTiled>(loadPartialResult.value()).has_value());
-        auto assignAdd
+        auto assignAccTile
             = only(kgraph.control.getOutputNodeIndices<Sequence>(loadPartialResult.value()));
+        CHECK(assignAccTile.has_value());
+        CHECK(kgraph.control.get<Assign>(assignAccTile.value()).has_value());
+        auto assignAdd = only(kgraph.control.getOutputNodeIndices<Sequence>(assignAccTile.value()));
         CHECK(assignAdd.has_value());
         CHECK(kgraph.control.get<Assign>(assignAdd.value()).has_value());
-        auto assignTile = only(kgraph.control.getOutputNodeIndices<Sequence>(assignAdd.value()));
-        CHECK(assignTile.has_value());
-        CHECK(kgraph.control.get<Assign>(assignTile.value()).has_value());
+        auto assignResultTile
+            = only(kgraph.control.getOutputNodeIndices<Sequence>(assignAdd.value()));
+        CHECK(assignResultTile.has_value());
+        CHECK(kgraph.control.get<Assign>(assignResultTile.value()).has_value());
+
+        // verify the mapper connection and expression
+        auto getTileTag = [&](int assignTag) -> int {
+            auto op = kgraph.control.getNode<Assign>(assignTag);
+            return std::get<Expression::DataFlowTag>(*op.expression).tag;
+        };
+        auto partialResultTileTag = kgraph.mapper.get<MacroTile>(loadPartialResult.value());
+        auto accTileTag           = getTileTag(assignAccTile.value());
+        auto assignAccTileDestTag = getDEST(kgraph, assignAccTile.value());
+        auto [assignAddLHSTag, assignAddLHSExpr]
+            = getBinaryLHS<Expression::Add>(kgraph, assignAdd.value());
+        auto [assignAddRHSTag, assignAddRHSExpr]
+            = getBinaryRHS<Expression::Add>(kgraph, assignAdd.value());
+        auto assignAddDest        = getDEST(kgraph, assignAdd.value());
+        auto resultTileTag        = getTileTag(assignResultTile.value());
+        auto assignResultTileDest = getDEST(kgraph, assignResultTile.value());
+
+        CHECK(assignResultTileDest == accTileTag);
+        CHECK(assignAccTileDestTag == resultTileTag);
+        CHECK(assignAddDest == resultTileTag);
+
+        CHECK((partialResultTileTag == assignAddLHSTag)
+              | (partialResultTileTag == assignAddRHSTag));
+        if(partialResultTileTag == assignAddLHSTag)
+        {
+            CHECK(assignAddRHSTag == resultTileTag);
+        }
+        if(partialResultTileTag == assignAddRHSTag)
+        {
+            CHECK(assignAddLHSTag == resultTileTag);
+        }
     };
 
     auto applyGraphTransforms

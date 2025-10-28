@@ -1014,11 +1014,10 @@ namespace GEMMDriverTest
     {
     };
 
-    class GEMMTestStreamKGPU
-        : public BaseGEMMContextFixture<std::tuple<StreamKMode, /* enable TwoTileStreamK */
-                                                   bool, /* ldsA */
-                                                   bool, /* ldsB */
-                                                   bool /* ldsD */>>
+    class GEMMTestStreamKGPU : public BaseGEMMContextFixture<std::tuple<StreamKMode,
+                                                                        bool, /* ldsA */
+                                                                        bool, /* ldsB */
+                                                                        bool /* ldsD */>>
     {
     };
 
@@ -1335,7 +1334,7 @@ namespace GEMMDriverTest
 
         auto numTilesM = 1;
         auto numTilesN = 2;
-        auto numTilesK = 297;
+        auto numTilesK = 317;
 
         gemm.m = numTilesM * gemm.macM;
         gemm.n = numTilesN * gemm.macN;
@@ -4201,12 +4200,12 @@ namespace GEMMDriverTest
     INSTANTIATE_TEST_SUITE_P(
         GEMMTestStreamK,
         GEMMTestStreamKGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(StreamKMode::Standard,
-                                                 StreamKMode::TwoTile,
-                                                 StreamKMode::TwoTileDPFirst), /* TwoTile */
-                               ::testing::Values(true, false), /* ldsA */
-                               ::testing::Values(true, false), /* ldsB */
-                               ::testing::Values(true, false))));
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(StreamKMode::Standard,
+                                                                StreamKMode::TwoTile,
+                                                                StreamKMode::TwoTileDPFirst),
+                                              ::testing::Values(true, false), /* ldsA */
+                                              ::testing::Values(true, false), /* ldsB */
+                                              ::testing::Values(true, false) /* ldsD */
+                                              )));
 }

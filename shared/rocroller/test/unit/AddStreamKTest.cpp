@@ -166,13 +166,13 @@ namespace AddStreamKTest
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        uint numTileM = 1;
-        uint numTileN = 2;
-        uint numTileK = 249;
+        uint numTileM = 57;
+        uint numTileN = 57;
+        uint numTileK = 57;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numWGs = 128;
+        uint numWGs = deviceProperties.multiProcessorCount;
 
         auto k = m_context->kernel();
 
@@ -532,6 +532,6 @@ namespace AddStreamKTest
 
     INSTANTIATE_TEST_SUITE_P(GPU_AddStreamKTest,
                              GPU_AddStreamKTest,
-                             ::testing::Combine(currentGPUISA(), ::testing::Values(false)));
+                             ::testing::Combine(currentGPUISA(), ::testing::Values(true, false)));
 
 }

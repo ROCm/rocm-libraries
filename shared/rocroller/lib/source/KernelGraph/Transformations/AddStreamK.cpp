@@ -218,14 +218,13 @@ namespace rocRoller
          * Returns tag of new Assign node.
          */
         int addFixup(KernelGraph& graph,
-                     int          accumMacTileTag,
                      int          partialMacTileTag,
                      int          destMacTileTag,
                      DataType     dataType,
                      uint         numVGPRs)
         {
             auto lhsExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{accumMacTileTag, Register::Type::Vector, dataType});
+                Expression::DataFlowTag{destMacTileTag, Register::Type::Vector, dataType});
             auto rhsExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, dataType});
 
@@ -507,7 +506,6 @@ namespace rocRoller
          *
          *     WaitZero()
          *     if receiveTileExpr:
-         *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *       for (i = 0; i < numFixupsExpr; i++)
          *          nextWG = WG + 1 + i
          *          Assert nextWG < numScratch
@@ -515,7 +513,9 @@ namespace rocRoller
          *          LoadSGPR(flag[nextWG])
          *          while flag[nextWG] == 0
          *          partiallyAccumulatedTile = LoadTiled()
+         *          fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *          fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
+         *          localPartiallyAccumulatedTile = Assign(fullyAccumulatedTile)
          *          WaitZero()
          *
          * Note this also update all subsequent references to
@@ -530,7 +530,6 @@ namespace rocRoller
                              int                                    accumulatorTileTag,
                              std::unordered_set<int> const&         usesAccumulatorTile,
                              DataType                               dataType,
-                             std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
                              ArgumentInfo const&                    argInfo,
                              int                                    forReceiveTileLoopOp,
@@ -604,18 +603,21 @@ namespace rocRoller
                 graph.coordinates.addElement(
                     PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(loadAddForY)});
 
-            // add fixup operations
-            auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
-            auto fixupTag                = addFixup(graph,
-                                     accumulatorTileTag,
-                                     scratchTileTag,
-                                     fullyAccumulatedTileTag,
-                                     dataType,
-                                     numRegisters);
+            // Assign accumulator tile to temporal vgpr tile
+            auto fullyAccumulatedTileTag  = graph.coordinates.addElement(MacroTile());
+            auto localAccumulatorTileExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{accumulatorTileTag, Register::Type::Vector, dataType});
+            auto assignAccTileOp = graph.control.addElement(
+                Assign{Register::Type::Vector, localAccumulatorTileExpr, numRegisters});
+            graph.mapper.connect(assignAccTileOp, fullyAccumulatedTileTag, NaryArgument::DEST);
+            graph.control.addElement(Sequence(), {loadTileTag}, {assignAccTileOp});
 
-            graph.control.addElement(Sequence(), {loadTileTag}, {fixupTag});
+            // Fixup
+            auto fixupTag
+                = addFixup(graph, scratchTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
+            graph.control.addElement(Sequence(), {assignAccTileOp}, {fixupTag});
 
-            // assign fixup result to local accumulator tile
+            // Assign fixup result to accumulator tile
             auto fullyAccumulatedTileExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{fullyAccumulatedTileTag, Register::Type::Vector, dataType});
             auto assignFixupResult = graph.control.addElement(
@@ -1125,7 +1127,7 @@ namespace rocRoller
 
                 // Add send
                 sendInfo = sendTile(graph,
-                                    // if WG does not work on the first AccumTile, then sendTile
+                                    // Send tile if WG does not work on the first AccumTile
                                     accumTileIdxStart > zero,
                                     storeConnections,
                                     flagsScratchTag,
@@ -1137,7 +1139,7 @@ namespace rocRoller
                 // Add receive
                 receiveInfo = receiveTile(
                     graph,
-                    // if WG does not work on the last AccumTile and work on the first AccumTile, then receive tile
+                    // Receive tile if WG does not work on the last AccumTile and work on the first AccumTile
                     accumTileIdxEnd < (numAccumTiles - one) && accumTileIdxStart == zero,
                     numRemainPartialResults,
                     scratchTileInfo.load,
@@ -1146,7 +1148,6 @@ namespace rocRoller
                     accumInfo.accumulatorTile,
                     accumInfo.usesAccumulatorTile,
                     accumInfo.accumulatorVarType.dataType,
-                    epilogueOperations,
                     loopInfo,
                     argInfo,
                     forReceiveTileLoopOp,
@@ -1156,9 +1157,6 @@ namespace rocRoller
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
-
-                graph.control.addElement(
-                    Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
             else
             {
@@ -1174,9 +1172,8 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {sendInfo.preWaitZero}, {sendInfo.sendCond});
                 graph.control.addElement(
                     Sequence(), {receiveInfo.preWaitZero}, {receiveInfo.receiveCond});
-                graph.control.addElement(
-                    Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
+            graph.control.addElement(Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
 
             //
             // Add definitions to the Scope
@@ -1273,40 +1270,10 @@ namespace rocRoller
             // Make sure receive happens before other operations after
             // the accumulator loop.
             //
-            AssertFatal(epilogueOperations.size() <= 1, ShowValue(epilogueOperations.size()));
             for(auto tag : epilogueOperations)
             {
                 graph.control.addElement(Body(), {postAccumulationCond}, {tag});
             }
-
-            // std::cout << "re-attach epilogue" << std::endl;
-
-            // auto epilogueYLoop = only(graph.control.findNodes(
-            //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
-            // // auto epilogueXLoop = only(graph.control.findNodes(
-            // //     epilogueOperations, makeFindLoopPredicate(graph, rocRoller::XLOOP)));
-            // AssertFatal(epilogueOperations.size() <= 1, ShowValue(epilogueOperations.size()));
-
-            // if (epilogueYLoop.has_value())
-            // {
-            // for(auto tag : graph.control.getNeighbours<GD::Downstream>(epilogueYLoop.value()))
-            // {
-            //     auto maybeBody = graph.control.get<Body>(tag);
-            //     if(maybeBody)
-            //     {
-            //         auto epilogueBody = only(graph.control.getNeighbours<GD::Downstream>(tag));
-            //         AssertFatal(epilogueBody.has_value());
-            //         graph.control.addElement(Body(), {postAccumulationCond}, {epilogueBody.value()});
-            //         graph.control.deleteElement(tag);
-            //     }
-            // }
-            // }
-
-            // if (epilogueOperations.size() == 1)
-            // {
-            //     std::cout << "remove XLoop and Yloop for epilogue" << std::endl;
-            //     purgeNodeAndChildren(graph, epilogueOperations[0]);
-            // }
         }
 
         ArgumentInfo setupArguments(ContextPtr             context,
