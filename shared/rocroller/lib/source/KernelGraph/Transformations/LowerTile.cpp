@@ -1320,7 +1320,12 @@ namespace rocRoller
             if(!useSwappedAccess)
                 std::swap(thrTileM, thrTileN);
 
-            const auto memoryType   = direct2LDS ? MemoryType::WAVE_Direct2LDS : MemoryType::VGPR;
+            auto memoryType{MemoryType::VGPR};
+            if(macTile.memoryType == MemoryType::WAVE_Direct2LDS)
+            {
+                memoryType = macTile.memoryType;
+            }
+
             auto       internalTile = MacroTile(sizes, memoryType, {thrTileM, thrTileN});
             internalTile.layoutType = macTile.layoutType;
             if(splitStore)

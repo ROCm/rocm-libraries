@@ -96,7 +96,8 @@ namespace rocRoller::KernelGraph
                   bool         isStorePartOfDirect2LDSOp)
     {
         auto op = graph.control.getElement(opTag);
-        if(isOperation<LoadLDSTile>(op) || isOperation<StoreLDSTile>(op)
+        if(not(isOperation<LoadTiled>(op) || isOperation<StoreTiled>(op)
+               || isOperation<LoadTileDirect2LDS>(op))
            || isStorePartOfDirect2LDSOp)
             return -1;
 
