@@ -148,7 +148,17 @@ struct ParallelTensorFunctorDynamic
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
                 {
-                    func(getNdIndices(workIdx));
+                    if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>>)
+                    {
+                        if(!func(getNdIndices(workIdx)))
+                        {
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        func(getNdIndices(workIdx));
+                    }
                 }
             };
             threads[threadIdx] = JoinableThread(threadFunc);

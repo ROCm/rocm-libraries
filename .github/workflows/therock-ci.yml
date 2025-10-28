@@ -1,8 +1,6 @@
 name: TheRock CI
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   push:
     branches:
       - develop
@@ -17,6 +15,7 @@ on:
       projects:
         type: string
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
+  workflow_call:
 
 permissions:
   contents: read

@@ -1,9 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
-
 set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
 set(CMAKE_PREFIX_PATH "${ROCM_PATH}" CACHE PATH "Search path for ROCm packages")
 
