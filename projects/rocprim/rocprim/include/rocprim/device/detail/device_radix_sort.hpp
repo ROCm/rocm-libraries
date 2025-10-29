@@ -1264,6 +1264,7 @@ struct onesweep_iteration_helper
         }
 
         unsigned int digits[ItemsPerThread];
+        // Unrolling loop will result in bad vgpr usages.
         ROCPRIM_NO_UNROLL
         for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NKey);
             ++j, x += (BlockSize * NKey))
@@ -1359,6 +1360,7 @@ struct onesweep_iteration_helper
             }
 
             // And scatter the values to global memory.
+            // Unrolling loop will result in bad vgpr usages.
             ROCPRIM_NO_UNROLL
             for(unsigned int j = 0, x = 0; j < rocprim::detail::ceiling_div(ItemsPerThread, NValue);
                 ++j, x += (BlockSize * NValue))
@@ -1377,11 +1379,10 @@ struct onesweep_iteration_helper
                     }
                     else
                     {
+                        // No branching, writes to unused LDS memory space.
                         int offset = ranks[i] - x;
-                        offset     = offset >= 0 && offset < static_cast<int>(BlockSize * NValue)
-                                         ? offset
-                                         : BlockSize * NValue;
-
+                        offset
+                            = rocprim::min(static_cast<unsigned int>(offset), BlockSize * NValue);
                         storage.ordered_block_values[offset] = v_pack::create(values[i]);
                     }
                 }
