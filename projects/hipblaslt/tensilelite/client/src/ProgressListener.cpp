@@ -118,10 +118,10 @@ namespace TensileLite
 
         void ProgressListener::postProblem() {}
 
-        void ProgressListener::preSolution(ContractionSolution const& solution)
+        void ProgressListener::preSolution(ContractionSolution* const solution)
         {
-            m_reporter->report(ResultKey::SolutionName, solution.name());
-            m_reporter->report(ResultKey::SolutionIndex, solution.index);
+            m_reporter->report(ResultKey::SolutionName, solution->name());
+            m_reporter->report(ResultKey::SolutionIndex, solution->index);
         }
 
         void ProgressListener::postSolution() {}

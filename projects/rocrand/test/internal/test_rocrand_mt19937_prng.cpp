@@ -755,14 +755,23 @@ TYPED_TEST(mt19937_generator_engine_tests, subsequence_test)
     unsigned int* d_engines{};
     HIP_CHECK(hipMalloc(&d_engines, generator_count * state_size * sizeof(unsigned int)));
 
+    rocrand_impl::host::target_arch target_arch;
+    HIP_CHECK(rocrand_impl::host::get_device_arch(0, target_arch));
+
     // dummy config provider, kernel just needs to verify the amount of generators for the actual call
     using ConfigProvider = default_config_provider<ROCRAND_RNG_PSEUDO_MT19937>;
+    auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+    {
+        rocrand_impl::host::
+            jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false, arch>(
+                args...);
+    };
 
     rocrand_status status = rocrand_impl::system::device_system::template launch<
-        rocrand_impl::host::
-            jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false>,
         rocrand_impl::host::static_block_size_config_provider<
-            generator_t::jump_ahead_thread_count>>(dim3(generator_count),
+            generator_t::jump_ahead_thread_count>>(jump_ahead_mt19937_kernel,
+                                                   target_arch,
+                                                   dim3(generator_count),
                                                    dim3(generator_t::jump_ahead_thread_count),
                                                    0,
                                                    0,
@@ -1174,12 +1183,20 @@ TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_test)
         ROCRAND_ORDERING_PSEUDO_DEFAULT,
         [&](auto is_dynamic)
         {
-            rocrand_status status = rocrand_impl::system::device_system::template launch<
+            rocrand_impl::host::target_arch target_arch;
+            HIP_CHECK(rocrand_impl::host::get_device_arch(0, target_arch));
+            auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
                 rocrand_impl::host::jump_ahead_mt19937<generator_t::jump_ahead_thread_count,
                                                        ConfigProvider,
-                                                       is_dynamic>,
+                                                       is_dynamic,
+                                                       arch>(args...);
+            };
+            rocrand_status status = rocrand_impl::system::device_system::template launch<
                 rocrand_impl::host::static_block_size_config_provider<
                     generator_t::jump_ahead_thread_count>>(
+                jump_ahead_mt19937_kernel,
+                target_arch,
                 dim3(generator_count),
                 dim3(generator_t::jump_ahead_thread_count),
                 0,
