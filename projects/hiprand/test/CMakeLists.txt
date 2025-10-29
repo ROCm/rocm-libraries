@@ -82,9 +82,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${CMAKE_BINARY_DIR}/coverage-report/profraw/hiprand-coverage_*.profraw -o ${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
-    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -object ${CMAKE_BINARY_DIR}/test/test_hiprand_api -object ${CMAKE_BINARY_DIR}/test/test_hiprand_cpp_wrapper -object ${CMAKE_BINARY_DIR}/test/test_hiprand_kernel -object ${CMAKE_BINARY_DIR}/test/test_hiprand_linkage -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
-    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -object ${CMAKE_BINARY_DIR}/test/test_hiprand_api -object ${CMAKE_BINARY_DIR}/test/test_hiprand_cpp_wrapper -object ${CMAKE_BINARY_DIR}/test/test_hiprand_kernel -object ${CMAKE_BINARY_DIR}/test/test_hiprand_linkage -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=html -output-dir=${CMAKE_BINARY_DIR}/coverage-report
-    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -object ${CMAKE_BINARY_DIR}/test/test_hiprand_api -object ${CMAKE_BINARY_DIR}/test/test_hiprand_cpp_wrapper -object ${CMAKE_BINARY_DIR}/test/test_hiprand_kernel -object ${CMAKE_BINARY_DIR}/test/test_hiprand_linkage -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=lcov > ${CMAKE_BINARY_DIR}/coverage-report/coverage.info
+    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=html -output-dir=${CMAKE_BINARY_DIR}/coverage-report
+    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${CMAKE_BINARY_DIR}/coverage-report/hiprand.profdata -format=lcov > ${CMAKE_BINARY_DIR}/coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
