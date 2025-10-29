@@ -608,6 +608,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
@@ -721,6 +722,7 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
