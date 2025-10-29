@@ -47,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 2ce80a87dab4d6d82d1a3baf9b8b566f28801816 # 2025-10-17 commit
+          ref: 6ecc2af91fc8a4271a949005d7404bd13278c005 # 2025-10-23 commit
 
       - name: Install python deps
         run: |
@@ -132,7 +132,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
             --upload
 

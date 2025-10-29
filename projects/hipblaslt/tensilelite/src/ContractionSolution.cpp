@@ -1015,21 +1015,28 @@ namespace TensileLite
             // Runtime selection for WGM and WGMXCC
             if(pAMDGPU->skDynamicWGM == 1)
             {
-                hip::HipAMDGPU const* hipAMDGPU
-                    = dynamic_cast<hip::HipAMDGPU const*>(hardware);
-                auto sizes = problem.problemSizes();
-                if(sizes.size() >= 4)
-                {
-                    defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                            sizes[0],
-                                                            sizes[1],
-                                                            sizes[3],
-                                                            sizes[2],
-                                                            sizeMapping.macroTile.x,
-                                                            sizeMapping.macroTile.y,
-                                                            sizeMapping.depthU,
-                                                            false);
-                    defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
+                int32_t c_wgm = 0;
+                uint32_t c_wgmxcc = 0;
+                // Try to find cached WGM and WGMXCC
+                std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
+
+                if(!c_wgm && !c_wgmxcc)
+                { // Did not find values in cache
+                    hip::HipAMDGPU const* hipAMDGPU
+                        = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+                    auto sizes = problem.problemSizes();
+                    if(sizes.size() >= 4)
+                    {
+                        defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
+                                                                    sizes[0],
+                                                                    sizes[1],
+                                                                    sizes[3],
+                                                                    sizes[2],
+                                                                    sizeMapping.macroTile.x,
+                                                                    sizeMapping.macroTile.y,
+                                                                    sizeMapping.depthU,
+                                                                    false);
+                        defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
                                                                 sizes[0],
                                                                 sizes[1],
                                                                 sizes[3],
@@ -1037,7 +1044,17 @@ namespace TensileLite
                                                                 sizeMapping.macroTile.x,
                                                                 sizeMapping.macroTile.y,
                                                                 sizeMapping.depthU,
+                                                                defaultWGMXCC,
                                                                 false);
+                        // Add to cache only if dynamically calculated.
+                        paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
+                        if(Debug::Instance().printPropertyEvaluation())
+                            std::cout << "Dynamic WGM "<< defaultWGM << ", WGMXCC " << defaultWGMXCC << std::endl;
+                    }
+                }
+                else {
+                    defaultWGM = c_wgm;
+                    defaultWGMXCC = c_wgmxcc;
                 }
             }
 
@@ -1056,7 +1073,6 @@ namespace TensileLite
             // WGMXCC should be in this range: [1, 2, 3, ..., 63]
             assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
         }
-
         return std::make_pair(defaultWGM, defaultWGMXCC);
     }
 
@@ -3259,7 +3275,8 @@ namespace TensileLite
                                                    sizeMapping.CUOccupancy,
                                                    *(hipAMDGPU->analyticalHardware),
                                                    pAMDGPU->skDynamicGrid,
-                                                   reductionStrat);
+                                                   reductionStrat,
+                                                   pAMDGPU->skMaxCUs);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.

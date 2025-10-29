@@ -26772,8 +26772,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 1
-    NonTemporalB: 6
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 1
     NonTemporalD: 0
     NonTemporalE: 0

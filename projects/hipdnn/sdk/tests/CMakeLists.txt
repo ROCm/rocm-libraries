@@ -35,6 +35,7 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestScopedDirectory.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
     test_utilities/TestSeeds.cpp
+    test_utilities/TestVectorLoggingUtils.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
