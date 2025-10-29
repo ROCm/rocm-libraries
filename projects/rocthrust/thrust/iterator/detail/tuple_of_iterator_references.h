@@ -157,8 +157,7 @@ _THRUST_STD_NAMESPACE_BEGIN
 THRUST_NAMESPACE_BEGIN
 #endif
 
-// 'libhipcxx' implementation is incomplete so we ignore this for now
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Ts>
 struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
 {};
@@ -186,6 +185,7 @@ THRUST_NAMESPACE_END
 #endif
 
 // structured bindings support
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 namespace std
 {
 
@@ -196,11 +196,12 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
     : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#else
+#  else
     : ::thrust::tuple_element<Id, ::thrust::tuple<Ts...>>
-#endif
+#  endif
 {};
 
 } // namespace std
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC

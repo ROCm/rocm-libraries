@@ -30,7 +30,7 @@ TESTS_DEFINE(IsPartitionedVectorTests, VectorSignedIntegerTestsParams);
 template <typename T>
 struct is_even
 {
-  __host__ __device__ bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -39,38 +39,30 @@ struct is_even
 TYPED_TEST(IsPartitionedVectorTests, TestIsPartitionedSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(4);
-  v[0] = 1;
-  v[1] = 1;
-  v[2] = 1;
-  v[3] = 0;
+  Vector v{1, 1, 1, 0};
 
   // empty partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), thrust::identity<T>()));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), ::internal::identity{}));
 
   // one element true partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, thrust::identity<T>()));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, ::internal::identity{}));
 
   // just true partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, thrust::identity<T>()));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, ::internal::identity{}));
 
   // both true & false partitions
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), thrust::identity<T>()));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
 
   // one element false partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), thrust::identity<T>()));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), ::internal::identity{}));
 
-  v[0] = 1;
-  v[1] = 0;
-  v[2] = 1;
-  v[3] = 1;
+  v = {1, 0, 1, 1};
 
   // not partitioned
-  ASSERT_EQ_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), thrust::identity<T>()));
+  ASSERT_EQ_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
 }
 
 TYPED_TEST(IsPartitionedVectorTests, TestIsPartitioned)
@@ -100,7 +92,7 @@ TYPED_TEST(IsPartitionedVectorTests, TestIsPartitioned)
 }
 
 template <typename InputIterator, typename Predicate>
-__host__ __device__ bool is_partitioned(my_system& system, InputIterator, InputIterator, Predicate)
+bool is_partitioned(my_system& system, InputIterator /*first*/, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return false;
@@ -119,7 +111,7 @@ TEST(IsPartitionedTests, TestIsPartitionedDispatchExplicit)
 }
 
 template <typename InputIterator, typename Predicate>
-__host__ __device__ bool is_partitioned(my_tag, InputIterator first, InputIterator, Predicate)
+bool is_partitioned(my_tag, InputIterator first, InputIterator, Predicate)
 {
   *first = 13;
   return false;

@@ -76,6 +76,6 @@ namespace rocRoller
                                         Register::ValuePtr arg,
                                         Expression::BitwiseNegate const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "BitwiseNegateGenerator";
     };
 }

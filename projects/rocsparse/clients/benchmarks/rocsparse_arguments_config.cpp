@@ -95,8 +95,10 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->sddmm_alg            = rocsparse_sddmm_alg_default;
         this->spmv_alg             = rocsparse_spmv_alg_default;
         this->spsv_alg             = rocsparse_spsv_alg_default;
+        this->sptrsv_alg           = rocsparse_sptrsv_alg_default;
         this->spitsv_alg           = rocsparse_spitsv_alg_default;
         this->spsm_alg             = rocsparse_spsm_alg_default;
+        this->sptrsm_alg           = rocsparse_sptrsm_alg_default;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
         this->spgeam_alg           = rocsparse_spgeam_alg_default;
@@ -424,7 +426,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
 
     ("spmv_alg",
       value<rocsparse_int>(&this->b_spmv_alg)->default_value(rocsparse_spmv_alg_default),
-      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7 (default:0)")
+      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7, CSR nnzsplit: 8 (default:0)")
 
     ("itilu0_alg",
       value<rocsparse_int>(&this->b_itilu0_alg)->default_value(rocsparse_itilu0_alg_default),
@@ -516,7 +518,8 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
        && this->b_spmv_alg != rocsparse_spmv_alg_ell
        && this->b_spmv_alg != rocsparse_spmv_alg_coo_atomic
        && this->b_spmv_alg != rocsparse_spmv_alg_bsr
-       && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb)
+       && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb
+       && this->b_spmv_alg != rocsparse_spmv_alg_csr_nnzsplit)
     {
         std::cerr << "Invalid value for --spmv_alg" << std::endl;
         return -1;

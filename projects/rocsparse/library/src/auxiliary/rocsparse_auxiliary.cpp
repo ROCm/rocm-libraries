@@ -1305,6 +1305,14 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
     {
@@ -1374,74 +1382,12 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
 
-    rocsparse_indextype index_type_J = rocsparse_indextype_u16;
-
-    if(src->bsrsv_upper_info != nullptr)
-    {
-        index_type_J = src->bsrsv_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsv_upper_info, src->bsrsv_upper_info);
-    }
-
-    if(src->bsrsv_lower_info != nullptr)
-    {
-        index_type_J = src->bsrsv_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsv_lower_info, src->bsrsv_lower_info);
-    }
-
-    if(src->bsrsvt_upper_info != nullptr)
-    {
-        index_type_J = src->bsrsvt_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsvt_upper_info, src->bsrsvt_upper_info);
-    }
-
-    if(src->bsrsvt_lower_info != nullptr)
-    {
-        index_type_J = src->bsrsvt_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsvt_lower_info, src->bsrsvt_lower_info);
-    }
-
-    if(src->bsric0_info != nullptr)
-    {
-        index_type_J = src->bsric0_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsric0_info, src->bsric0_info);
-    }
-
-    if(src->bsrilu0_info != nullptr)
-    {
-        index_type_J = src->bsrilu0_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrilu0_info, src->bsrilu0_info);
-    }
-
-    if(src->bsrsm_upper_info != nullptr)
-    {
-        index_type_J = src->bsrsm_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsm_upper_info, src->bsrsm_upper_info);
-    }
-
-    if(src->bsrsm_lower_info != nullptr)
-    {
-        index_type_J = src->bsrsm_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsm_lower_info, src->bsrsm_lower_info);
-    }
-
-    if(src->bsrsmt_upper_info != nullptr)
-    {
-        index_type_J = src->bsrsmt_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsmt_upper_info, src->bsrsmt_upper_info);
-    }
-
-    if(src->bsrsmt_lower_info != nullptr)
-    {
-        index_type_J = src->bsrsmt_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->bsrsmt_lower_info, src->bsrsmt_lower_info);
-    }
+    dest->duplicate_trdata(src, 0);
 
     rocsparse_csrmv_info src_csrmv_info  = src->get_csrmv_info();
     rocsparse_csrmv_info dest_csrmv_info = dest->get_csrmv_info();
     if(src_csrmv_info != nullptr)
     {
-        index_type_J = src_csrmv_info->index_type_J;
-
         if(dest_csrmv_info == nullptr)
         {
             dest_csrmv_info = new _rocsparse_csrmv_info();
@@ -1451,58 +1397,17 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(dest_csrmv_info, src_csrmv_info));
     }
 
-    if(src->csric0_info != nullptr)
+    rocsparse_bsrmv_info src_bsrmv_info  = src->get_bsrmv_info();
+    rocsparse_bsrmv_info dest_bsrmv_info = dest->get_bsrmv_info();
+    if(src_bsrmv_info != nullptr)
     {
-        index_type_J = src->csric0_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csric0_info, src->csric0_info);
-    }
+        if(dest_bsrmv_info == nullptr)
+        {
+            dest_bsrmv_info = new _rocsparse_bsrmv_info();
+            dest->set_bsrmv_info(dest_bsrmv_info);
+        }
 
-    if(src->csrilu0_info != nullptr)
-    {
-        index_type_J = src->csrilu0_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrilu0_info, src->csrilu0_info);
-    }
-
-    if(src->csrsv_upper_info != nullptr)
-    {
-        index_type_J = src->csrsv_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsv_upper_info, src->csrsv_upper_info);
-    }
-
-    if(src->csrsv_lower_info != nullptr)
-    {
-        index_type_J = src->csrsv_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsv_lower_info, src->csrsv_lower_info);
-    }
-
-    if(src->csrsvt_upper_info != nullptr)
-    {
-        index_type_J = src->csrsvt_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsvt_upper_info, src->csrsvt_upper_info);
-    }
-
-    if(src->csrsm_upper_info != nullptr)
-    {
-        index_type_J = src->csrsm_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsm_upper_info, src->csrsm_upper_info);
-    }
-
-    if(src->csrsm_lower_info != nullptr)
-    {
-        index_type_J = src->csrsm_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsm_lower_info, src->csrsm_lower_info);
-    }
-
-    if(src->csrsmt_upper_info != nullptr)
-    {
-        index_type_J = src->csrsmt_upper_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsmt_upper_info, src->csrsmt_upper_info);
-    }
-
-    if(src->csrsmt_lower_info != nullptr)
-    {
-        index_type_J = src->csrsmt_lower_info->get_index_indextype();
-        rocsparse::trm_info_t::copy(&dest->csrsmt_lower_info, src->csrsmt_lower_info);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_bsrmv_info(dest_bsrmv_info, src_bsrmv_info));
     }
 
     if(src->csrgemm_info != nullptr)
@@ -1519,34 +1424,10 @@ try
     {
         if(dest->csritsv_info == nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csritsv_info(&dest->csritsv_info));
+            dest->csritsv_info = new _rocsparse_csritsv_info();
         }
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::copy_csritsv_info(dest->csritsv_info, src->csritsv_info));
-    }
-
-    if(src->zero_pivot != nullptr)
-    {
-        // zero pivot for csrsv, csrsm, csrilu0, csric0
-        const size_t J_size = rocsparse::indextype_sizeof(index_type_J);
-        if(dest->zero_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->zero_pivot, J_size));
-        }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->zero_pivot, src->zero_pivot, J_size, hipMemcpyDeviceToDevice));
-    }
-
-    if(src->singular_pivot != nullptr)
-    {
-        // singular pivot for csric0
-        const size_t J_size = rocsparse::indextype_sizeof(index_type_J);
-        if(dest->singular_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->singular_pivot, J_size));
-        }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->singular_pivot, src->singular_pivot, J_size, hipMemcpyDeviceToDevice));
+        hipStream_t default_stream{};
+        dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
 
     dest->boost_enable   = src->boost_enable;
@@ -4983,6 +4864,13 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
+
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
 
     // Clean up row pointer array
     if(descr->csr_row_ptr_C != nullptr)

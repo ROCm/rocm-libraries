@@ -33,7 +33,7 @@
 #endif
 
 #define MIOPEN_USE_AMDGCN 0
-#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X)
+#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X || MIO_BN_GFX115X)
 #undef MIOPEN_USE_AMDGCN
 #define MIOPEN_USE_AMDGCN 1
 #endif
@@ -307,7 +307,6 @@ MIOpenBatchNormBwdSpatial(const __global _FLOAT* __restrict x_in,
     _FLOAT_ACCUM db         = (_FLOAT_ACCUM)0.;
     _FLOAT_ACCUM ds         = (_FLOAT_ACCUM)0.;
     _FLOAT_PREC xhat        = (_FLOAT_PREC)0.;
-    _FLOAT_PREC dyvalue     = (_FLOAT_PREC)0.;
 
 #if(MIO_BN_USESAVED == 1)
     __local _FLOAT_PREC lmean, lvar;

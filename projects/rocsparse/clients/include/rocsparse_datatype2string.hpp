@@ -365,6 +365,8 @@ constexpr auto rocsparse_spmvalg2string(rocsparse_spmv_alg alg)
         return "cooatomic";
     case rocsparse_spmv_alg_csr_lrb:
         return "csrlrb";
+    case rocsparse_spmv_alg_csr_nnzsplit:
+        return "csrnnzsplit";
     }
     return "invalid";
 }
@@ -374,6 +376,16 @@ constexpr auto rocsparse_spsvalg2string(rocsparse_spsv_alg alg)
     switch(alg)
     {
     case rocsparse_spsv_alg_default:
+        return "default";
+    }
+    return "invalid";
+}
+
+constexpr auto rocsparse_sptrsvalg2string(rocsparse_sptrsv_alg alg)
+{
+    switch(alg)
+    {
+    case rocsparse_sptrsv_alg_default:
         return "default";
     }
     return "invalid";
@@ -394,6 +406,16 @@ constexpr auto rocsparse_spsmalg2string(rocsparse_spsm_alg alg)
     switch(alg)
     {
     case rocsparse_spsm_alg_default:
+        return "default";
+    }
+    return "invalid";
+}
+
+constexpr auto rocsparse_sptrsmalg2string(rocsparse_sptrsm_alg alg)
+{
+    switch(alg)
+    {
+    case rocsparse_sptrsm_alg_default:
         return "default";
     }
     return "invalid";

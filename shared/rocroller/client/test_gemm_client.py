@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
-import pytest
 import subprocess
-import yaml
-
 from dataclasses import dataclass
+
+import pytest
+import yaml
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -246,17 +246,16 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 types:
   trans_A: N
   trans_B: N
@@ -275,6 +274,7 @@ types:
   scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 matchMemoryAccess: true
 loadLDSScale_A: false
 loadLDSScale_B: false
@@ -304,17 +304,16 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -338,6 +337,7 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 
@@ -361,17 +361,16 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -395,6 +394,7 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 

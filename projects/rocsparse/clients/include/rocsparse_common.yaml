@@ -161,10 +161,15 @@ Datatypes:
         rocsparse_spmv_alg_coo_atomic: 5
         rocsparse_spmv_alg_bsr: 6
         rocsparse_spmv_alg_csr_lrb: 7
+        rocsparse_spmv_alg_csr_nnzsplit: 8
   - rocsparse_spsv_alg:
       bases: [c_int ]
       attr:
         rocsparse_spsv_alg_default: 0
+  - rocsparse_sptrsv_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_sptrsv_alg_default: 0
   - rocsparse_spitsv_alg:
       bases: [c_int ]
       attr:
@@ -173,6 +178,10 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_spsm_alg_default: 0
+  - rocsparse_sptrsm_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_sptrsm_alg_default: 0
   - rocsparse_spmm_alg:
       bases: [c_int ]
       attr:
@@ -423,21 +432,29 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
          rocsparse_spmv_alg_ell,
          rocsparse_spmv_alg_coo_atomic,
          rocsparse_spmv_alg_bsr,
-         rocsparse_spmv_alg_csr_lrb]
+         rocsparse_spmv_alg_csr_lrb,
+         rocsparse_spmv_alg_csr_nnzsplit]
 
 All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
         [rocsparse_spmv_alg_csr_adaptive,
          rocsparse_spmv_alg_csr_rowsplit,
-         rocsparse_spmv_alg_csr_lrb]
+         rocsparse_spmv_alg_csr_lrb,
+         rocsparse_spmv_alg_csr_nnzsplit]
 
 All rocsparse_spsv_alg: &all_rocsparse_spsv_alg
         [rocsparse_spsv_alg_default]
+
+All rocsparse_sptrsv_alg: &all_rocsparse_sptrsv_alg
+        [rocsparse_sptrsv_alg_default]
 
 All rocsparse_spitsv_alg: &all_rocsparse_spitsv_alg
         [rocsparse_spitsv_alg_default]
 
 All rocsparse_spsm_alg: &all_rocsparse_spsm_alg
         [rocsparse_spsm_alg_default]
+
+All rocsparse_sptrsm_alg: &all_rocsparse_sptrsm_alg
+        [rocsparse_sptrsm_alg_default]
 
 All rocsparse_spmm_alg: &all_rocsparse_spmm_alg
         [rocsparse_spmm_alg_default,
@@ -540,8 +557,10 @@ Arguments:
   - sddmm_alg: rocsparse_sddmm_alg
   - spmv_alg: rocsparse_spmv_alg
   - spsv_alg: rocsparse_spsv_alg
+  - sptrsv_alg: rocsparse_sptrsv_alg
   - spitsv_alg: rocsparse_spitsv_alg
   - spsm_alg: rocsparse_spsm_alg
+  - sptrsm_alg: rocsparse_sptrsm_alg
   - spmm_alg: rocsparse_spmm_alg
   - spgemm_alg: rocsparse_spgemm_alg
   - spgeam_alg: rocsparse_spgeam_alg
@@ -688,8 +707,10 @@ Defaults:
   sddmm_alg: rocsparse_sddmm_alg_default
   spmv_alg: rocsparse_spmv_alg_default
   spsv_alg: rocsparse_spsv_alg_default
+  sptrsv_alg: rocsparse_sptrsv_alg_default
   spitsv_alg: rocsparse_spitsv_alg_default
   spsm_alg: rocsparse_spsm_alg_default
+  sptrsm_alg: rocsparse_sptrsm_alg_default
   spmm_alg: rocsparse_spmm_alg_default
   spgemm_alg: rocsparse_spgemm_alg_default
   spgeam_alg: rocsparse_spgeam_alg_default

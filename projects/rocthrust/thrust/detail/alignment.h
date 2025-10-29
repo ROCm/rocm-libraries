@@ -29,19 +29,12 @@
 #  pragma system_header
 #endif // no system header
 
+#include _THRUST_STD_INCLUDE(cstddef) // For `std::size_t` and `std::max_align_t`.
 #include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/cmath>
-#  else
-#    include <hip/cmath>
-#  endif
-#endif
-
-#include <cstddef> // For `std::size_t` and `std::max_align_t`.
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(cmath)
+#else
 #  include <rocprim/detail/various.hpp>
 #endif
 
@@ -60,7 +53,7 @@ using alignment_of = _THRUST_STD::alignment_of<T>;
 /// type whose alignment requirement is a divisor of `Align`.
 ///
 /// The behavior is undefined if `Align` is not a power of 2.
-template <std::size_t Align>
+template <_THRUST_STD::size_t Align>
 struct aligned_type
 {
   struct alignas(Align) type
@@ -85,14 +78,10 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
   return reinterpret_cast<T>(reinterpret_cast<void*>(u));
 }
 
-THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
+THRUST_HOST_DEVICE inline _THRUST_STD::size_t aligned_storage_size(_THRUST_STD::size_t n, _THRUST_STD::size_t align)
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return ::cuda::ceil_div(n, align) * align;
-#  else
-  return ::hip::ceil_div(n, align) * align;
-#  endif
+  return _THRUST_LIBCXX::ceil_div(n, align) * align;
 #else
   return ::rocprim::detail::ceiling_div(n, align) * align;
 #endif

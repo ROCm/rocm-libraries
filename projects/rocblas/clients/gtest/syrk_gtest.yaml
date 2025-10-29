@@ -303,4 +303,5 @@ Tests:
   stride_scale: 1
   devices: 4
   repeatability_check: true
+
 ...

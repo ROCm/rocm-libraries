@@ -27,6 +27,13 @@
 
 rocsparse::trm_info_t::~trm_info_t()
 {
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_map));
     this->row_map = nullptr;
 
@@ -188,17 +195,6 @@ void rocsparse::trm_info_t::set_offset_indextype(const rocsparse_indextype value
 void rocsparse::trm_info_t::set_index_indextype(const rocsparse_indextype value)
 {
     this->index_type_J = value;
-}
-
-void rocsparse::trm_info_t::recreate(rocsparse::trm_info_t** const dp_that)
-{
-    if(dp_that[0] != nullptr)
-    {
-        delete dp_that[0];
-        dp_that[0] = nullptr;
-    }
-
-    dp_that[0] = new rocsparse::trm_info_t();
 }
 
 void rocsparse::trm_info_t::destroy(rocsparse::trm_info_t* const p_that)

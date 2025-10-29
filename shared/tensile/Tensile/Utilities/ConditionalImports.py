@@ -22,7 +22,7 @@ except ImportError:
     from yaml import SafeLoader as yamlLoader
 
 try:
-    from yaml import CSafeDumper as yamlDumper 
+    from yaml import CSafeDumper as yamlDumper
 except ImportError:
     from yaml import SafeDumper as yamlDumper
 

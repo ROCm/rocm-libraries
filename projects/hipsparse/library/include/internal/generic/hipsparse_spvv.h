@@ -30,13 +30,13 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the 
+*  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the
 *  inner dot product of a sparse vector with a dense vector:
 *  \f[
 *    \text{result} := op(x) \cdot y,
 *  \f]
 *
-*  \p hipsparseSpVV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpVV for a complete 
+*  \p hipsparseSpVV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpVV for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -52,7 +52,7 @@ extern "C" {
 *  @param[in]
 *  computeType         floating point precision for the SpVV computation.
 *  @param[out]
-*  pBufferSizeInBytes  number of bytes of the temporary storage buffer. 
+*  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p pBufferSizeInBytes
@@ -108,12 +108,12 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *      }
 *  \endcode
 *
-*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the 
-*  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by 
-*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate 
-*  the buffer. 
+*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the
+*  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by
+*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate
+*  the buffer.
 *
-*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$ and compute types for the scalar \f$result\f$.
 *
 *  \par Uniform Precisions:
@@ -158,90 +158,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *               supported.
 *
 *  \par Example
-*  \code{.c}
-*    // Number of non-zeros of the sparse vector
-*    int nnz = 3;
-*
-*    // Size of sparse and dense vector
-*    int size = 9;
-*
-*    // Sparse index vector
-*    std::vector<int> hxInd = {0, 3, 5};
-*
-*    // Sparse value vector
-*    std::vector<float> hxVal = {1.0f, 2.0f, 3.0f};
-*
-*    // Dense vector
-*    std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // Offload data to device
-*    int* dxInd;
-*    float* dxVal;
-*    float* dy;
-*    hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*    hipMalloc((void**)&dy, sizeof(float) * size);
-*
-*    hipMemcpy(dxInd, hxInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dxVal, hxVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse vector X
-*    hipsparseSpVecDescr_t vecX;
-*    hipsparseCreateSpVec(&vecX,
-*                        size,
-*                        nnz,
-*                        dxInd,
-*                        dxVal,
-*                        HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO,
-*                        HIP_R_32F);
-*
-*    // Create dense vector Y
-*    hipsparseDnVecDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, size, dy, HIP_R_32F);
-*
-*    // Obtain buffer size
-*    float hresult = 0.0f;
-*    size_t buffer_size;
-*    hipsparseSpVV_bufferSize(handle,
-*                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*                vecX,
-*                vecY,
-*                &hresult,
-*                HIP_R_32F,
-*                &buffer_size);
-*
-*    void* temp_buffer;
-*    hipMalloc(&temp_buffer, buffer_size);
-*
-*    // SpVV
-*    hipsparseSpVV(handle,
-*                HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*                vecX,
-*                vecY,
-*                &hresult,
-*                HIP_R_32F,
-*                temp_buffer);
-*
-*    hipDeviceSynchronize();
-*
-*    std::cout << "hresult: " << hresult << std::endl;
-*
-*    // Clear hipSPARSE
-*    hipsparseDestroySpVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dxInd);
-*    hipFree(dxVal);
-*    hipFree(dy);
-*    hipFree(temp_buffer);
-*  \endcode
+*  \snippet example_hipsparse_spvv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

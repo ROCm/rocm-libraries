@@ -26,8 +26,8 @@
 #include <iterator>
 #include <type_traits>
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 
@@ -43,34 +43,24 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config, unsigned int ActiveChannels, class Counter>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
-                          const fixed_array<size_t, ActiveChannels> bins)
-{
-    static constexpr histogram_config_params params = device_params<Config>();
-
-    init_histogram<params.histogram_config.block_size, ActiveChannels>(histogram, bins);
-}
-
-template<class Config,
+template<class ArchConfig,
          unsigned int Channels,
          unsigned int ActiveChannels,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    histogram_shared_kernel(SampleIterator                                   samples,
-                            unsigned int                                     columns,
-                            unsigned int                                     rows,
-                            unsigned int                                     row_stride,
-                            unsigned int                                     rows_per_block,
-                            unsigned int                                     shared_histograms,
-                            fixed_array<Counter*, ActiveChannels>            histogram,
-                            const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            const fixed_array<size_t, ActiveChannels>        bins)
+ROCPRIM_DEVICE
+void histogram_shared_kernel_impl(SampleIterator                        samples,
+                                  unsigned int                          columns,
+                                  unsigned int                          rows,
+                                  unsigned int                          row_stride,
+                                  unsigned int                          rows_per_block,
+                                  unsigned int                          shared_histograms,
+                                  fixed_array<Counter*, ActiveChannels> histogram,
+                                  const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                                  const fixed_array<size_t, ActiveChannels>        bins)
 {
-    static constexpr histogram_config_params params = device_params<Config>();
+    static constexpr histogram_config_params params = ArchConfig::params;
 
 // Temporary fix: issue with dynamic shared memory on windows.
 #ifndef _WIN32
@@ -94,69 +84,101 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                                      block_histogram);
 }
 
-template<class Config,
-         unsigned int Channels,
+template<unsigned int Channels,
          unsigned int ActiveChannels,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    histogram_global_kernel(SampleIterator                                   samples,
-                            unsigned int                                     columns,
-                            unsigned int                                     row_stride,
-                            fixed_array<Counter*, ActiveChannels>            histogram,
-                            const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            const fixed_array<size_t, ActiveChannels>        bins_bits)
+struct HistogramSharedOp
 {
-    static constexpr histogram_config_params params = device_params<Config>();
+    SampleIterator                             samples;
+    unsigned int                               columns;
+    unsigned int                               rows;
+    unsigned int                               row_stride;
+    fixed_array<Counter*, ActiveChannels>      histogram;
+    fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op;
+    fixed_array<size_t, ActiveChannels>        bins;
 
-    histogram_global<params.histogram_config.block_size,
-                     params.histogram_config.items_per_thread,
-                     Channels,
-                     ActiveChannels>(samples,
-                                     columns,
-                                     row_stride,
-                                     histogram,
-                                     sample_to_bin_op,
-                                     bins_bits);
-}
+    unsigned int rows_per_block    = 0;
+    unsigned int shared_histograms = 0;
+
+    template<class ArchConfig>
+    ROCPRIM_DEVICE
+    inline void
+        operator()(ArchConfig) const
+    {
+        histogram_shared_kernel_impl<ArchConfig,
+                                     Channels,
+                                     ActiveChannels,
+                                     SampleIterator,
+                                     Counter,
+                                     SampleToBinOp>(samples,
+                                                    columns,
+                                                    rows,
+                                                    row_stride,
+                                                    rows_per_block,
+                                                    shared_histograms,
+                                                    histogram,
+                                                    sample_to_bin_op,
+                                                    bins);
+    }
+};
+
+template<typename Kernel>
+struct histogram_launch_plan
+{
+    using kernel_type = void (*)(Kernel);
+
+    kernel_type kernel;
+    Kernel      device_callback;
+
+    unsigned int shared_impl_histograms = 0;
+    unsigned int max_grid_size          = 0;
+
+    void launch(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) const
+    {
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel), grid, block, shmem, stream, device_callback);
+    }
+};
 
 template<class Config,
-         unsigned int Channels,
-         unsigned int ActiveChannels,
-         class SampleIterator,
-         class Counter,
-         class SampleToBinOp>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
-                                         .histogram_global_config.block_size) void
-    histogram_private_global_kernel(SampleIterator                             samples,
-                                    unsigned int                               columns,
-                                    unsigned int                               rows,
-                                    unsigned int                               row_stride,
-                                    fixed_array<Counter*, ActiveChannels>      histogram,
-                                    fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                                    fixed_array<size_t, ActiveChannels>        bins_bits,
-                                    fixed_array<size_t, ActiveChannels>        bins,
-                                    Counter*                                   private_histograms,
-                                    unsigned int                               virtual_max_blocks,
-                                    unsigned int*                              block_id_count)
+         class Kernel,
+         template<typename, rocprim::detail::target_arch>
+         class LaunchSelector>
+auto make_histogram_launch_plan(rocprim::detail::target_arch arch, Kernel kernel)
+    -> histogram_launch_plan<Kernel>
 {
-    static constexpr histogram_config_params params = device_params<Config>();
+    histogram_launch_plan<Kernel> plan{nullptr, std::move(kernel), 0u, 0u};
 
-    histogram_private_global<params.histogram_global_config.block_size,
-                             params.histogram_global_config.items_per_thread,
-                             Channels,
-                             ActiveChannels>(samples,
-                                             columns,
-                                             rows,
-                                             row_stride,
-                                             histogram,
-                                             sample_to_bin_op,
-                                             bins_bits,
-                                             bins,
-                                             private_histograms,
-                                             virtual_max_blocks,
-                                             block_id_count);
+    bool found = false;
+
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            constexpr auto Arch = decltype(arch_tag)::value;
+            if(Arch != arch || found)
+                return;
+
+            plan.kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
+
+            constexpr auto params = Config::template architecture_config<Arch>::params;
+
+            plan.shared_impl_histograms = params.shared_impl_histograms;
+            plan.max_grid_size          = params.max_grid_size;
+
+            found = true;
+        });
+    if(!found)
+    {
+        constexpr auto Arch = rocprim::detail::target_arch::unknown;
+
+        plan.kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
+
+        constexpr auto params       = Config::template architecture_config<Arch>::params;
+        plan.shared_impl_histograms = params.shared_impl_histograms;
+        plan.max_grid_size          = params.max_grid_size;
+    }
+    return plan;
 }
 
 template<unsigned int Channels,
@@ -182,9 +204,12 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     using config = wrapped_histogram_config<Config, sample_type, Channels, ActiveChannels>;
 
     detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    const histogram_config_params params = dispatch_target_arch<config>(target_arch);
+    hipError_t          result = host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    const histogram_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size           = params.histogram_config.block_size;
     const unsigned int items_per_thread     = params.histogram_config.items_per_thread;
@@ -299,13 +324,25 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     {
         start = std::chrono::steady_clock::now();
     }
-    init_histogram_kernel<config, ActiveChannels>
-        <<<dim3(::rocprim::detail::ceiling_div(max_bins, block_size)),
-           dim3(block_size),
-           0,
-           stream>>>(fixed_array<Counter*, ActiveChannels>(histogram),
-                     fixed_array<size_t, ActiveChannels>(bins));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
+
+    auto init_histogram_kernel
+        = [hist       = fixed_array<Counter*, ActiveChannels>(histogram),
+           bin_counts = fixed_array<size_t, ActiveChannels>(bins)](auto arch_config)
+    {
+        static constexpr histogram_config_params params = decltype(arch_config)::params;
+        init_histogram<params.histogram_config.block_size, ActiveChannels>(hist, bin_counts);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(
+        execute_launch_plan<config, decltype(init_histogram_kernel), histogram_config_selector>(
+            target_arch,
+            init_histogram_kernel,
+            ::rocprim::detail::ceiling_div(max_bins, block_size),
+            block_size,
+            0,
+            stream));
+
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram_kernel", max_bins, start);
 
     if(columns == 0 || rows == 0)
     {
@@ -318,12 +355,21 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         {
             start = std::chrono::steady_clock::now();
         }
-        auto kernel = HIP_KERNEL_NAME(histogram_shared_kernel<config,
-                                                              Channels,
-                                                              ActiveChannels,
-                                                              SampleIterator,
-                                                              Counter,
-                                                              SampleToBinOp>);
+
+        HistogramSharedOp<Channels, ActiveChannels, SampleIterator, Counter, SampleToBinOp> op{
+            samples,
+            columns,
+            rows,
+            row_stride,
+            fixed_array<Counter*, ActiveChannels>(histogram),
+            fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+            fixed_array<size_t, ActiveChannels>(bins),
+            0,
+            0};
+
+        auto plan = make_histogram_launch_plan<config, decltype(op), histogram_config_selector>(
+            target_arch,
+            op);
 
         const size_t block_histogram_bytes = total_shared_bins * sizeof(unsigned int);
 
@@ -333,14 +379,14 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         // memory usage
         unsigned int chosen_shared_histograms = 0;
         int          max_blocks_per_mp        = 0;
-        for(unsigned int n = params.shared_impl_histograms; n >= 1; n--)
+        for(unsigned int n = plan.shared_impl_histograms; n >= 1; n--)
         {
             int blocks_per_mp;
-            ROCPRIM_RETURN_ON_ERROR(
-                hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_mp,
-                                                             kernel,
-                                                             block_size,
-                                                             n * block_histogram_bytes));
+            ROCPRIM_RETURN_ON_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                &blocks_per_mp,
+                reinterpret_cast<const void*>(plan.kernel),
+                block_size,
+                n * block_histogram_bytes));
 
             if(blocks_per_mp > max_blocks_per_mp)
             {
@@ -350,11 +396,11 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         }
 
         // Choose minimum grid size needed to achieve the best occupancy
-        int        min_grid_size, max_block_size;
+        int min_grid_size, max_block_size;
         ROCPRIM_RETURN_ON_ERROR(
             hipOccupancyMaxPotentialBlockSize(&min_grid_size,
                                               &max_block_size,
-                                              kernel,
+                                              reinterpret_cast<const void*>(plan.kernel),
                                               chosen_shared_histograms * block_histogram_bytes,
                                               int(block_size)));
 
@@ -365,18 +411,15 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         grid_size.x = std::min(chosen_grid_size, blocks_x);
         grid_size.y = std::min(rows, ::rocprim::detail::ceiling_div(chosen_grid_size, grid_size.x));
         const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
-        kernel<<<grid_size,
-                 dim3(block_size, 1),
-                 chosen_shared_histograms * block_histogram_bytes,
-                 stream>>>(samples,
-                           columns,
-                           rows,
-                           row_stride,
-                           rows_per_block,
-                           chosen_shared_histograms,
-                           fixed_array<Counter*, ActiveChannels>(histogram),
-                           fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                           fixed_array<size_t, ActiveChannels>(bins));
+
+        plan.device_callback.shared_histograms = chosen_shared_histograms;
+        plan.device_callback.rows_per_block    = rows_per_block;
+
+        plan.launch(grid_size,
+                    dim3(block_size, 1),
+                    chosen_shared_histograms * block_histogram_bytes,
+                    stream);
+
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_shared",
                                                     grid_size.x * grid_size.y * block_size,
                                                     start);
@@ -391,22 +434,49 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            histogram_private_global_kernel<config, Channels, ActiveChannels>
-                <<<dim3(global_histogram_grid_size),
-                   dim3(params.histogram_global_config.block_size),
-                   0,
-                   stream>>>(samples,
-                             columns,
-                             rows,
-                             row_stride,
-                             fixed_array<Counter*, ActiveChannels>(histogram),
-                             fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                             fixed_array<size_t, ActiveChannels>(bins_bits),
-                             fixed_array<size_t, ActiveChannels>(bins),
-                             private_histograms,
-                             virtual_max_blocks,
-                             block_id_count);
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_private_global",
+
+            auto histogram_private_global_kernel
+                = [samples,
+                   columns,
+                   rows,
+                   row_stride,
+                   hist     = fixed_array<Counter*, ActiveChannels>(histogram),
+                   ops      = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                   bits     = fixed_array<size_t, ActiveChannels>(bins_bits),
+                   bins_fix = fixed_array<size_t, ActiveChannels>(bins),
+                   private_histograms,
+                   virtual_max_blocks,
+                   block_id_count](auto arch_config)
+            {
+                static constexpr histogram_config_params params = decltype(arch_config)::params;
+
+                histogram_private_global<params.histogram_global_config.block_size,
+                                         params.histogram_global_config.items_per_thread,
+                                         Channels,
+                                         ActiveChannels>(samples,
+                                                         columns,
+                                                         rows,
+                                                         row_stride,
+                                                         hist,
+                                                         ops,
+                                                         bits,
+                                                         bins_fix,
+                                                         private_histograms,
+                                                         virtual_max_blocks,
+                                                         block_id_count);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config,
+                                                        decltype(histogram_private_global_kernel),
+                                                        histogram_global_config_selector>(
+                target_arch,
+                histogram_private_global_kernel,
+                dim3(global_histogram_grid_size),
+                dim3(params.histogram_global_config.block_size),
+                0,
+                stream));
+
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_private_global_kernel",
                                                         blocks_x * block_size * rows,
                                                         start);
         }
@@ -416,15 +486,31 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            histogram_global_kernel<config, Channels, ActiveChannels>
-                <<<dim3(blocks_x, rows), dim3(block_size, 1), 0, stream>>>(
-                    samples,
-                    columns,
-                    row_stride,
-                    fixed_array<Counter*, ActiveChannels>(histogram),
-                    fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                    fixed_array<size_t, ActiveChannels>(bins_bits));
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global",
+            auto histogram_global_kernel
+                = [samples,
+                   columns,
+                   row_stride,
+                   hist = fixed_array<Counter*, ActiveChannels>(histogram),
+                   ops  = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                   bits = fixed_array<size_t, ActiveChannels>(bins_bits)](auto arch_config)
+            {
+                static constexpr histogram_config_params params = decltype(arch_config)::params;
+                histogram_global<params.histogram_config.block_size,
+                                 params.histogram_config.items_per_thread,
+                                 Channels,
+                                 ActiveChannels>(samples, columns, row_stride, hist, ops, bits);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config,
+                                    decltype(histogram_global_kernel),
+                                    histogram_config_selector>(target_arch,
+                                                               histogram_global_kernel,
+                                                               dim3(blocks_x, rows),
+                                                               dim3(block_size, 1),
+                                                               0,
+                                                               stream));
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global_kernel",
                                                         blocks_x * block_size * rows,
                                                         start);
         }
@@ -529,8 +615,6 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
                                                             debug_synchronous);
 }
 
-
-
 } // namespace detail
 
 /// \brief Computes a histogram from a sequence of samples using equal-width bins.
@@ -542,7 +626,7 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -645,7 +729,7 @@ inline hipError_t histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -756,7 +840,7 @@ inline hipError_t histogram_even(void*          temporary_storage,
 ///
 /// \tparam Channels number of channels interleaved in the input samples.
 /// \tparam ActiveChannels number of channels being used for computing histograms.
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -875,7 +959,7 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 ///
 /// \tparam Channels number of channels interleaved in the input samples.
 /// \tparam ActiveChannels number of channels being used for computing histograms.
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -989,7 +1073,7 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -1086,7 +1170,7 @@ inline hipError_t histogram_range(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -1192,7 +1276,7 @@ inline hipError_t histogram_range(void*          temporary_storage,
 ///
 /// \tparam Channels number of channels interleaved in the input samples.
 /// \tparam ActiveChannels number of channels being used for computing histograms.
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.
@@ -1306,7 +1390,7 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
 ///
 /// \tparam Channels number of channels interleaved in the input samples.
 /// \tparam ActiveChannels number of channels being used for computing histograms.
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter integer type for histogram bin counters.

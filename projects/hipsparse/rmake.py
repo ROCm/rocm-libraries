@@ -58,6 +58,8 @@ def parse_args():
                         help='Set specific rocm-dev version')
     parser.add_argument(      '--cpu_ref_lib', type=str, required=False, default = "blis",
                         help='Specify library to use for CPU reference code in testing (blis or lapack)')
+    parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
+                        help='Build only clients with a pre-built library')
     # rocsparse
     parser.add_argument('-b', '--rocsparse', dest='rocsparse_version', type=str, required=False, default="",
                         help='Set a specific rocSPARSE vesrion (optional)')
@@ -118,7 +120,7 @@ def config_cmd():
         # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
         raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
         rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
-       
+
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}" )
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
@@ -189,6 +191,9 @@ def config_cmd():
 
     cmake_options.append( f"-DROCSPARSE_PATH={args.rocsparse_path}")
 
+    if args.clients_only:
+        cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )
+
     if args.cmake_dargs:
         for i in args.cmake_dargs:
           cmake_options.append( f"-D{i}" )
@@ -244,4 +249,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

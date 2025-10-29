@@ -64,9 +64,12 @@ static std::string rocsparse_parse_yaml(const std::string& yaml, const char* inc
 
     fs::path tmpname = fs::temp_directory_path() / uniquestr;
 
-    auto        exepath       = rocsparse_exepath();
+    auto gentestpath = rocsparse_gentestpath();
+    auto datapath    = rocsparse_datapath();
+
     const char* matrices_path = rocsparse_clients_matrices_dir_get(false);
-    auto        cmd           = exepath + "rocsparse_gentest.py ";
+    auto        cmd           = "python " + gentestpath + "rocsparse_gentest.py ";
+
     if(include_path != nullptr)
     {
         cmd += " -I ";
@@ -82,7 +85,8 @@ static std::string rocsparse_parse_yaml(const std::string& yaml, const char* inc
         cmd += " -m ";
         cmd += matrices_path;
     }
-    cmd += " --template " + exepath + "rocsparse_template.yaml -o " + tmpname.string() + " " + yaml;
+    cmd += " --template " + datapath + "rocsparse_template.yaml -o " + tmpname.string() + " "
+           + yaml;
 
     std::cerr << cmd << std::endl;
 
@@ -103,9 +107,12 @@ static std::string rocsparse_parse_yaml(const std::string& yaml, const char* inc
         perror("Cannot open temporary file");
         exit(EXIT_FAILURE);
     }
-    auto        exepath       = rocsparse_exepath();
+
+    auto gentestpath = rocsparse_gentestpath();
+    auto datapath    = rocsparse_datapath();
+
     const char* matrices_path = rocsparse_clients_matrices_dir_get(false);
-    auto        cmd           = exepath + "rocsparse_gentest.py ";
+    auto        cmd           = gentestpath + "rocsparse_gentest.py ";
     if(include_path != nullptr)
     {
         cmd += " -I ";
@@ -122,7 +129,7 @@ static std::string rocsparse_parse_yaml(const std::string& yaml, const char* inc
         cmd += matrices_path;
     }
 
-    cmd += " --template " + exepath + "rocsparse_template.yaml -o " + tmp + " " + yaml;
+    cmd += " --template " + datapath + "rocsparse_template.yaml -o " + tmp + " " + yaml;
 
     std::cerr << cmd << std::endl;
 
@@ -213,8 +220,10 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
         {
             include_path = argv[++i];
         }
-        else if(!strcmp(argv[i], "--data") || (yaml |= !strcmp(argv[i], "--yaml")))
+        else if(!strcmp(argv[i], "--data") || !strcmp(argv[i], "--yaml"))
         {
+            yaml = true;
+
             if(filename != "")
             {
                 std::cerr << "Only one of the --yaml and --data options may be specified"

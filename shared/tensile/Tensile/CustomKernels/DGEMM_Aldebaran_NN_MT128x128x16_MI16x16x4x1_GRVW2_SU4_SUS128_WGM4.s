@@ -300,219 +300,219 @@ DGEMM_Aldebaran_NN_MT128x128x16_MI16x16x4x1_GRVW2_SU4_SUS128_WGM4:
 .endm
 
 .macro _v_cmpx_lt_i16 dst, src0, src1=
-   v_cmpx_lt_i16 \dst, \src0, \src1 
+   v_cmpx_lt_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_i32 dst, src0, src1=
-   v_cmpx_lt_i32 \dst, \src0, \src1 
+   v_cmpx_lt_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_i64 dst, src0, src1=
-   v_cmpx_lt_i64 \dst, \src0, \src1 
+   v_cmpx_lt_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u16 dst, src0, src1=
-   v_cmpx_lt_u16 \dst, \src0, \src1 
+   v_cmpx_lt_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u32 dst, src0, src1=
-   v_cmpx_lt_u32 \dst, \src0, \src1 
+   v_cmpx_lt_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u64 dst, src0, src1=
-   v_cmpx_lt_u64 \dst, \src0, \src1 
+   v_cmpx_lt_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i16 dst, src0, src1=
-   v_cmpx_eq_i16 \dst, \src0, \src1 
+   v_cmpx_eq_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i32 dst, src0, src1=
-   v_cmpx_eq_i32 \dst, \src0, \src1 
+   v_cmpx_eq_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i64 dst, src0, src1=
-   v_cmpx_eq_i64 \dst, \src0, \src1 
+   v_cmpx_eq_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u16 dst, src0, src1=
-   v_cmpx_eq_u16 \dst, \src0, \src1 
+   v_cmpx_eq_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u32 dst, src0, src1=
-   v_cmpx_eq_u32 \dst, \src0, \src1 
+   v_cmpx_eq_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u64 dst, src0, src1=
-   v_cmpx_eq_u64 \dst, \src0, \src1 
+   v_cmpx_eq_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i16 dst, src0, src1=
-   v_cmpx_le_i16 \dst, \src0, \src1 
+   v_cmpx_le_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i32 dst, src0, src1=
-   v_cmpx_le_i32 \dst, \src0, \src1 
+   v_cmpx_le_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i64 dst, src0, src1=
-   v_cmpx_le_i64 \dst, \src0, \src1 
+   v_cmpx_le_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u16 dst, src0, src1=
-   v_cmpx_le_u16 \dst, \src0, \src1 
+   v_cmpx_le_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u32 dst, src0, src1=
-   v_cmpx_le_u32 \dst, \src0, \src1 
+   v_cmpx_le_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u64 dst, src0, src1=
-   v_cmpx_le_u64 \dst, \src0, \src1 
+   v_cmpx_le_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i16 dst, src0, src1=
-   v_cmpx_gt_i16 \dst, \src0, \src1 
+   v_cmpx_gt_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i32 dst, src0, src1=
-   v_cmpx_gt_i32 \dst, \src0, \src1 
+   v_cmpx_gt_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i64 dst, src0, src1=
-   v_cmpx_gt_i64 \dst, \src0, \src1 
+   v_cmpx_gt_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u16 dst, src0, src1=
-   v_cmpx_gt_u16 \dst, \src0, \src1 
+   v_cmpx_gt_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u32 dst, src0, src1=
-   v_cmpx_gt_u32 \dst, \src0, \src1 
+   v_cmpx_gt_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u64 dst, src0, src1=
-   v_cmpx_gt_u64 \dst, \src0, \src1 
+   v_cmpx_gt_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i16 dst, src0, src1=
-   v_cmpx_ne_i16 \dst, \src0, \src1 
+   v_cmpx_ne_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i32 dst, src0, src1=
-   v_cmpx_ne_i32 \dst, \src0, \src1 
+   v_cmpx_ne_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i64 dst, src0, src1=
-   v_cmpx_ne_i64 \dst, \src0, \src1 
+   v_cmpx_ne_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u16 dst, src0, src1=
-   v_cmpx_ne_u16 \dst, \src0, \src1 
+   v_cmpx_ne_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u32 dst, src0, src1=
-   v_cmpx_ne_u32 \dst, \src0, \src1 
+   v_cmpx_ne_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u64 dst, src0, src1=
-   v_cmpx_ne_u64 \dst, \src0, \src1 
+   v_cmpx_ne_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i16 dst, src0, src1=
-   v_cmpx_lg_i16 \dst, \src0, \src1 
+   v_cmpx_lg_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i32 dst, src0, src1=
-   v_cmpx_lg_i32 \dst, \src0, \src1 
+   v_cmpx_lg_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i64 dst, src0, src1=
-   v_cmpx_lg_i64 \dst, \src0, \src1 
+   v_cmpx_lg_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u16 dst, src0, src1=
-   v_cmpx_lg_u16 \dst, \src0, \src1 
+   v_cmpx_lg_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u32 dst, src0, src1=
-   v_cmpx_lg_u32 \dst, \src0, \src1 
+   v_cmpx_lg_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u64 dst, src0, src1=
-   v_cmpx_lg_u64 \dst, \src0, \src1 
+   v_cmpx_lg_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i16 dst, src0, src1=
-   v_cmpx_ge_i16 \dst, \src0, \src1 
+   v_cmpx_ge_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i32 dst, src0, src1=
-   v_cmpx_ge_i32 \dst, \src0, \src1 
+   v_cmpx_ge_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i64 dst, src0, src1=
-   v_cmpx_ge_i64 \dst, \src0, \src1 
+   v_cmpx_ge_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u16 dst, src0, src1=
-   v_cmpx_ge_u16 \dst, \src0, \src1 
+   v_cmpx_ge_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u32 dst, src0, src1=
-   v_cmpx_ge_u32 \dst, \src0, \src1 
+   v_cmpx_ge_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u64 dst, src0, src1=
-   v_cmpx_ge_u64 \dst, \src0, \src1 
+   v_cmpx_ge_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i16 dst, src0, src1=
-   v_cmpx_o_i16 \dst, \src0, \src1 
+   v_cmpx_o_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i32 dst, src0, src1=
-   v_cmpx_o_i32 \dst, \src0, \src1 
+   v_cmpx_o_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i64 dst, src0, src1=
-   v_cmpx_o_i64 \dst, \src0, \src1 
+   v_cmpx_o_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u16 dst, src0, src1=
-   v_cmpx_o_u16 \dst, \src0, \src1 
+   v_cmpx_o_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u32 dst, src0, src1=
-   v_cmpx_o_u32 \dst, \src0, \src1 
+   v_cmpx_o_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u64 dst, src0, src1=
-   v_cmpx_o_u64 \dst, \src0, \src1 
+   v_cmpx_o_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i16 dst, src0, src1=
-   v_cmpx_u_i16 \dst, \src0, \src1 
+   v_cmpx_u_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i32 dst, src0, src1=
-   v_cmpx_u_i32 \dst, \src0, \src1 
+   v_cmpx_u_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i64 dst, src0, src1=
-   v_cmpx_u_i64 \dst, \src0, \src1 
+   v_cmpx_u_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u16 dst, src0, src1=
-   v_cmpx_u_u16 \dst, \src0, \src1 
+   v_cmpx_u_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u32 dst, src0, src1=
-   v_cmpx_u_u32 \dst, \src0, \src1 
+   v_cmpx_u_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u64 dst, src0, src1=
-   v_cmpx_u_u64 \dst, \src0, \src1 
+   v_cmpx_u_u64 \dst, \src0, \src1
 .endm
 .macro _v_mac_f32 c:req, a:req, b:req
     v_mac_f32 \c, \a, \b
@@ -676,32 +676,32 @@ v_lshlrev_b32 v[\vgprAddr+0], 0x3, v[\vgprAddr+0]  // offset *= bytes/element
 /* Dynamic Scalar Divide: vQuotient=vDividend/vDivisor; vRemainder=vDividend%vDivisor; */
 /******************************************/
 .macro DYNAMIC_VECTOR_DIVIDE vQuotient vRemainder vDividend vDivisor vTmp0 vTmp1 sTmp
-v_cvt_f32_u32 v[\vQuotient], v[\vDivisor]          // 
-v_rcp_f32 v[\vQuotient], v[\vQuotient]             // 
-v_mul_f32 v[\vQuotient], 0x4f800000, v[\vQuotient] // 
-v_cvt_u32_f32 v[\vQuotient], v[\vQuotient]         // 
-v_mul_lo_u32 v[\vRemainder], v[\vDivisor], v[\vQuotient] // 
-v_mul_hi_u32 v[\vTmp0], v[\vDivisor], v[\vQuotient] // 
-_v_sub_co_u32 v[\vTmp1], vcc, 0x0, v[\vRemainder]  // 
-v_cmp_ne_i32 s[\sTmp:\sTmp+1], 0x0, v[\vTmp0]      // 
-v_cndmask_b32 v[\vRemainder], v[\vTmp1], v[\vRemainder], s[\sTmp:\sTmp+1] // 
-v_mul_hi_u32 v[\vRemainder], v[\vRemainder], v[\vQuotient] // 
-_v_sub_co_u32 v[\vTmp0], vcc, v[\vQuotient], v[\vRemainder] // 
-_v_add_co_u32 v[\vQuotient], vcc, v[\vQuotient], v[\vRemainder] // 
-v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vTmp0], s[\sTmp:\sTmp+1] // 
-v_mul_hi_u32 v[\vQuotient], v[\vQuotient], v[\vDividend] // 
-v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] // 
-_v_sub_co_u32 v[\vTmp0], vcc, v[\vDividend], v[\vRemainder] // 
-v_cmp_ge_u32 s[\sTmp:\sTmp+1], v[\vDividend], v[\vRemainder] // 
-_v_add_co_u32 v[\vRemainder], vcc, 0x1, v[\vQuotient] // 
-_v_add_co_u32 v[\vTmp1], vcc, -1, v[\vQuotient]    // 
-v_cmp_le_u32 vcc, v[\vDivisor], v[\vTmp0]          // 
-s_and_b64 vcc, s[\sTmp:\sTmp+1], vcc               // 
-v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vRemainder], vcc // 
-v_cndmask_b32 v[\vQuotient], v[\vTmp1], v[\vQuotient], s[\sTmp:\sTmp+1] // 
-v_cmp_ne_i32 vcc, 0x0, v[\vDivisor]                // 
+v_cvt_f32_u32 v[\vQuotient], v[\vDivisor]          //
+v_rcp_f32 v[\vQuotient], v[\vQuotient]             //
+v_mul_f32 v[\vQuotient], 0x4f800000, v[\vQuotient] //
+v_cvt_u32_f32 v[\vQuotient], v[\vQuotient]         //
+v_mul_lo_u32 v[\vRemainder], v[\vDivisor], v[\vQuotient] //
+v_mul_hi_u32 v[\vTmp0], v[\vDivisor], v[\vQuotient] //
+_v_sub_co_u32 v[\vTmp1], vcc, 0x0, v[\vRemainder]  //
+v_cmp_ne_i32 s[\sTmp:\sTmp+1], 0x0, v[\vTmp0]      //
+v_cndmask_b32 v[\vRemainder], v[\vTmp1], v[\vRemainder], s[\sTmp:\sTmp+1] //
+v_mul_hi_u32 v[\vRemainder], v[\vRemainder], v[\vQuotient] //
+_v_sub_co_u32 v[\vTmp0], vcc, v[\vQuotient], v[\vRemainder] //
+_v_add_co_u32 v[\vQuotient], vcc, v[\vQuotient], v[\vRemainder] //
+v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vTmp0], s[\sTmp:\sTmp+1] //
+v_mul_hi_u32 v[\vQuotient], v[\vQuotient], v[\vDividend] //
+v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] //
+_v_sub_co_u32 v[\vTmp0], vcc, v[\vDividend], v[\vRemainder] //
+v_cmp_ge_u32 s[\sTmp:\sTmp+1], v[\vDividend], v[\vRemainder] //
+_v_add_co_u32 v[\vRemainder], vcc, 0x1, v[\vQuotient] //
+_v_add_co_u32 v[\vTmp1], vcc, -1, v[\vQuotient]    //
+v_cmp_le_u32 vcc, v[\vDivisor], v[\vTmp0]          //
+s_and_b64 vcc, s[\sTmp:\sTmp+1], vcc               //
+v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vRemainder], vcc //
+v_cndmask_b32 v[\vQuotient], v[\vTmp1], v[\vQuotient], s[\sTmp:\sTmp+1] //
+v_cmp_ne_i32 vcc, 0x0, v[\vDivisor]                //
 v_cndmask_b32 v[\vQuotient], -1, v[\vQuotient], vcc // final result
-v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] // 
+v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] //
 _v_sub_co_u32 v[\vRemainder], vcc, v[\vDividend], v[\vRemainder] // final result
 .endm
 
@@ -716,9 +716,9 @@ s_mov_b32 m0, 0x9000                               // LDS clamp at 36864 bytes
 v_mov_b32 v[vgprSerial], v0                        // thread serial id
 
 /* Load Kernel Args */
-s_load_dwordx16 s[24:39], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x0 // 
-s_load_dwordx16 s[48:63], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x40 // 
-s_load_dwordx2 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x80 // 
+s_load_dwordx16 s[24:39], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x0 //
+s_load_dwordx16 s[48:63], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x40 //
+s_load_dwordx2 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x80 //
 s_waitcnt lgkmcnt(0)                               // wait for 160 bytes of kern args
 s_mov_b32 s44, s36
 s_mov_b32 s45, s37
@@ -816,8 +816,8 @@ s_sub_u32 s69, s[sgprWorkGroup1], s69              // WorkGroup1=remainder
 s_mul_i32 s69, s69, s[sgprNumWorkGroups0]          // (wg1 % WGM)*nwg0
 s_add_u32 s69, s69, s[sgprWorkGroup0]              // wgSerial = wg0 + (wg1 % WGM)*nwg0
 s_cmp_ge_u32 s68, s[sgprNumFullBlocks]             // blockId >= numFullBlocks ?
-s_cmov_b32 s71, s[sgprMagicNumberWgmRemainder1]    // 
-s_cselect_b32 s70, s[sgprWgmRemainder1], 4         // 
+s_cmov_b32 s71, s[sgprMagicNumberWgmRemainder1]    //
+s_cselect_b32 s70, s[sgprWgmRemainder1], 4         //
 s_mul_hi_u32 s3, s69, s71                          // s_magic mul
 s_mul_i32 s2, s69, s71                             // s_magic mul
 s_lshr_b64 s[2:3], s[2:3], 31                      // sMagicDiv
@@ -1126,16 +1126,16 @@ s_cmov_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0]    // Move shadow to real if we 
 /* End setupNewTile, isPap=False             */
 /******************************************/
 
-ShadowInitStart_9: // 
+ShadowInitStart_9: //
 
 s_mov_b32 s[sgprSrdD+0], s[sgprAddressD+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdD+1], s[sgprAddressD+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdD+2], 0x80000000                // 
+s_mov_b32 s[sgprSrdD+2], 0x80000000                //
 s_mov_b32 s[sgprSrdD+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 s_mov_b32 s[sgprSrdC+0], s[sgprAddressC+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdC+1], s[sgprAddressC+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdC+2], 0x80000000                // 
+s_mov_b32 s[sgprSrdC+2], 0x80000000                //
 s_mov_b32 s[sgprSrdC+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 
@@ -1347,7 +1347,7 @@ buffer_load_dwordx4 v[vgprValuA_X0_I1+4:vgprValuA_X0_I1+4+3], v[vgprGlobalReadOf
 buffer_load_dwordx4 v[vgprValuA_X0_I1+8:vgprValuA_X0_I1+8+3], v[vgprGlobalReadOffsetA+2], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 0_0_2_0
 buffer_load_dwordx4 v[vgprValuA_X0_I1+12:vgprValuA_X0_I1+12+3], v[vgprGlobalReadOffsetA+3], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 0_0_3_0
 
-label_0012:                                        // 
+label_0012:                                        //
 
 s_waitcnt lgkmcnt(0)                               // lgkmcnt=0 vmcnt=-10prefetch wait for local write
 
@@ -1471,8 +1471,8 @@ v_mfma_f64_16x16x4f64 v[96:103], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0
 v_mfma_f64_16x16x4f64 v[104:111], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0+1], v[vgprValuA_X0_I0+2+0+0:vgprValuA_X0_I0+2+0+0+1], v[104:111]
 /*  mfmaIndex:14  */
 /* 1 LDS buffer: read-sync-write */
-s_waitcnt lgkmcnt(0)                               // 
-s_barrier                                          // 
+s_waitcnt lgkmcnt(0)                               //
+s_barrier                                          //
 /* localReadsVacancy: letencyLeft 5 */
 v_mfma_f64_16x16x4f64 v[112:119], v[vgprValuB_X0_I0+28+0+0:vgprValuB_X0_I0+28+0+0+1], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+1], v[112:119]
 /*  mfmaIndex:15  */
@@ -1742,8 +1742,8 @@ v_mfma_f64_16x16x4f64 v[96:103], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0
 v_mfma_f64_16x16x4f64 v[104:111], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0+1], v[vgprValuA_X0_I1+2+0+0:vgprValuA_X0_I1+2+0+0+1], v[104:111]
 /*  mfmaIndex:14  */
 /* 1 LDS buffer: read-sync-write */
-s_waitcnt lgkmcnt(0)                               // 
-s_barrier                                          // 
+s_waitcnt lgkmcnt(0)                               //
+s_barrier                                          //
 /* localReadsVacancy: letencyLeft 5 */
 v_mfma_f64_16x16x4f64 v[112:119], v[vgprValuB_X0_I0+28+0+0:vgprValuB_X0_I0+28+0+0+1], v[vgprValuA_X0_I1+0+0+0:vgprValuA_X0_I1+0+0+0+1], v[112:119]
 /*  mfmaIndex:15  */
@@ -2039,8 +2039,8 @@ v_mfma_f64_16x16x4f64 v[0:7], v[vgprValuB_X0_I0+0+2+0:vgprValuB_X0_I0+0+2+0+1], 
 /*  mfmaIndex:17  */
 /* localReadsVacancy: letencyLeft 5 */
 /* 1 LDS buffer: read-sync-write */
-s_waitcnt lgkmcnt(0)                               // 
-s_barrier                                          // 
+s_waitcnt lgkmcnt(0)                               //
+s_barrier                                          //
 v_mfma_f64_16x16x4f64 v[8:15], v[vgprValuB_X0_I0+0+2+0:vgprValuB_X0_I0+0+2+0+1], v[vgprValuA_X1_I0+2+0+0:vgprValuA_X1_I0+2+0+0+1], v[8:15]
 /*  mfmaIndex:18  */
 v_mfma_f64_16x16x4f64 v[16:23], v[vgprValuB_X0_I0+4+2+0:vgprValuB_X0_I0+4+2+0+1], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+1], v[16:23]
@@ -2201,7 +2201,7 @@ label_0014:
 /******************************************/
 
 s_mov_b32 s68, s[sgprBeta+0]                       // tmp = Beta[0]
-s_or_b32 s68, s[sgprBeta+1], s68                   // tmp |= Beta[1] 
+s_or_b32 s68, s[sgprBeta+1], s68                   // tmp |= Beta[1]
 s_cmpk_eq_u32 s68, 0x0                             // Beta == 0
 s_cbranch_scc0 OptNLL_End_16                       // Branch if Beta is not zero
 
@@ -2211,13 +2211,13 @@ s_cmp_eq_u64 s[sgprAlpha:sgprAlpha+1], s[68:69]    // Alpha == 1.0 ?
 s_cbranch_scc0 OptNLL_End_16                       // branch if alpha != 1
 
 s_and_b32 s68, 127, s[sgprSizeI]                   // s68 = s[sgprSizeI] % 128
-s_add_u32 s69, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s69, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s69                // wg0 >= nwg0-1 ?
 s_cselect_b32 s68, s68, 0                          // set rMT0
 s_cmpk_gt_u32 s68, 0x0                             // rMT0 > 0
 s_cbranch_scc1 OptNLL_End_16                       // jump if edges required
 s_and_b32 s68, 127, s[sgprSizeJ]                   // s68 = s[sgprSizeJ] % 128
-s_add_u32 s69, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s69, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s69                // wg1 >= nwg1-1
 s_cselect_b32 s68, s68, 0                          // set rMT1
 s_cmpk_gt_u32 s68, 0x0                             // rMT1 > 0
@@ -3440,7 +3440,7 @@ s_cbranch_scc1 SkipTailLoopL_7                     // skip to end of tail loop b
 
 /* remove stagger offsets for tail loop */
 
-s_sub_i32 s68, 3, s[sgprStaggerUIter]              // 
+s_sub_i32 s68, 3, s[sgprStaggerUIter]              //
 s_mul_hi_i32 s69, s68, s[sgprGlobalReadIncsA+0]    // start offset S in bytes
 s_mul_i32 s68, s68, s[sgprGlobalReadIncsA+0]       // start offset S in bytes
 s_sub_u32 s68, s68, s[sgprWrapUA]                  // S - WrapU
@@ -3452,7 +3452,7 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s69 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cmov_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0]    // Move shadow to real if we are within 2^32
 
-s_sub_i32 s68, 3, s[sgprStaggerUIter]              // 
+s_sub_i32 s68, 3, s[sgprStaggerUIter]              //
 s_mul_hi_i32 s69, s68, s[sgprGlobalReadIncsB+0]    // start offset S in bytes
 s_mul_i32 s68, s68, s[sgprGlobalReadIncsB+0]       // start offset S in bytes
 s_sub_u32 s68, s68, s[sgprWrapUB]                  // S - WrapU
@@ -3720,7 +3720,7 @@ s_cbranch_scc0 label_0029                                // done shifting
 
 /* shift vector components d0 */
 
-v_mov_b32 v131, s[sgprWorkGroup0]                  // 
+v_mov_b32 v131, s[sgprWorkGroup0]                  //
 v_mul_i32_i24 v131, -0x80, v131                    // wg*MT
 _v_add_co_u32 v131, vcc, s[sgprSizesFree+0], v131  // wgMT = Size - wg*MT
 v_mov_b32 v132, 0x80                               // MT
@@ -3736,7 +3736,7 @@ v_cndmask_b32 v131, v132, v131, s[64:65]           // wgMT = (wgMT < MT) ? wgMT 
 /* mbReg: which mb block need to shift, mb(matrixInstCoal(16) * VectorWidth(2)) */
 v_lshrrev_b32 v132, 5, v131                        // v132 = v131 / 32
 v_lshlrev_b32 v134, 0x0, v133                      // v134 = v133 * 1
-_v_sub_u32 v132, v132, v134                        // 
+_v_sub_u32 v132, v132, v134                        //
 
 /* gbReg: glvw block id */
 v_lshrrev_b32 v134, 1, v131                        // v134 = v131 / 2
@@ -3748,7 +3748,7 @@ v_lshlrev_b32 v135, 0x1, v135                      // v135 = v135 * 2
 v_lshrrev_b32 v135, 1, v135                        // v135 = v135 / 2
 v_lshlrev_b32 v133, 0x4, v133                      // v133 = v133 * 16
 _v_add_co_u32 v135, vcc, v133, v135                // tgbReg = (tid_coal * continOut) / GLVW
-_v_sub_u32 v134, v134, v135                        // 
+_v_sub_u32 v134, v134, v135                        //
 
 /* vwReg: glvw in which vw block? */
 v_and_b32 v133, 1, v131                            // permute register between threads
@@ -3764,152 +3764,152 @@ s_branch label_0029                                // no shifting
 /* shift d0 r=1                           */
 /******************************************/
 label_0026:
-v_cmp_eq_u32 vcc, v132, 0x0                        // 
+v_cmp_eq_u32 vcc, v132, 0x0                        //
 s_cbranch_vccnz label_0027                         // branch to shift d0 r1 mb0
 
 /******************************************/
 /* shift d0 r=1 mb=0                      */
 /******************************************/
-label_0027: // r1 mb0 
-v_cmp_eq_u32 vcc, v133, 0x0                        // 
+label_0027: // r1 mb0
+v_cmp_eq_u32 vcc, v133, 0x0                        //
 s_cbranch_vccnz label_0028                         // branch to shift d0 r1 mb0 vw0
 
 /******************************************/
 /* shift d0 r=1 mb=0 vw0                  */
 /******************************************/
-label_0028: // r1 mb0 vw0 
-s_mov_b32 s64, 0                                   // 
+label_0028: // r1 mb0 vw0
+s_mov_b32 s64, 0                                   //
 v_cmpx_eq_u32 s[64:65], v134, s64                  // is thread in edge glvw region
 v_and_b32 v128, 63, v[vgprSerial]                  // permute register between threads
 v_lshlrev_b32 v128, 2, v128                        // permute register between threads
 v_mov_b32 v135, v8                                 // glvw 1 mb 0 tt1 0 r 0
-v_mov_b32 v0, v135                                 // 
+v_mov_b32 v0, v135                                 //
 v_mov_b32 v135, v9                                 // glvw 1 mb 0 tt1 0 r 1
-v_mov_b32 v1, v135                                 // 
+v_mov_b32 v1, v135                                 //
 v_mov_b32 v135, v10                                // glvw 1 mb 0 tt1 1 r 0
-v_mov_b32 v2, v135                                 // 
+v_mov_b32 v2, v135                                 //
 v_mov_b32 v135, v11                                // glvw 1 mb 0 tt1 1 r 1
-v_mov_b32 v3, v135                                 // 
+v_mov_b32 v3, v135                                 //
 v_mov_b32 v135, v12                                // glvw 1 mb 0 tt1 2 r 0
-v_mov_b32 v4, v135                                 // 
+v_mov_b32 v4, v135                                 //
 v_mov_b32 v135, v13                                // glvw 1 mb 0 tt1 2 r 1
-v_mov_b32 v5, v135                                 // 
+v_mov_b32 v5, v135                                 //
 v_mov_b32 v135, v14                                // glvw 1 mb 0 tt1 3 r 0
-v_mov_b32 v6, v135                                 // 
+v_mov_b32 v6, v135                                 //
 v_mov_b32 v135, v15                                // glvw 1 mb 0 tt1 3 r 1
-v_mov_b32 v7, v135                                 // 
+v_mov_b32 v7, v135                                 //
 v_mov_b32 v135, v24                                // glvw 1 mb 0 tt1 4 r 0
-v_mov_b32 v16, v135                                // 
+v_mov_b32 v16, v135                                //
 v_mov_b32 v135, v25                                // glvw 1 mb 0 tt1 4 r 1
-v_mov_b32 v17, v135                                // 
+v_mov_b32 v17, v135                                //
 v_mov_b32 v135, v26                                // glvw 1 mb 0 tt1 5 r 0
-v_mov_b32 v18, v135                                // 
+v_mov_b32 v18, v135                                //
 v_mov_b32 v135, v27                                // glvw 1 mb 0 tt1 5 r 1
-v_mov_b32 v19, v135                                // 
+v_mov_b32 v19, v135                                //
 v_mov_b32 v135, v28                                // glvw 1 mb 0 tt1 6 r 0
-v_mov_b32 v20, v135                                // 
+v_mov_b32 v20, v135                                //
 v_mov_b32 v135, v29                                // glvw 1 mb 0 tt1 6 r 1
-v_mov_b32 v21, v135                                // 
+v_mov_b32 v21, v135                                //
 v_mov_b32 v135, v30                                // glvw 1 mb 0 tt1 7 r 0
-v_mov_b32 v22, v135                                // 
+v_mov_b32 v22, v135                                //
 v_mov_b32 v135, v31                                // glvw 1 mb 0 tt1 7 r 1
-v_mov_b32 v23, v135                                // 
+v_mov_b32 v23, v135                                //
 v_mov_b32 v135, v40                                // glvw 1 mb 0 tt1 8 r 0
-v_mov_b32 v32, v135                                // 
+v_mov_b32 v32, v135                                //
 v_mov_b32 v135, v41                                // glvw 1 mb 0 tt1 8 r 1
-v_mov_b32 v33, v135                                // 
+v_mov_b32 v33, v135                                //
 v_mov_b32 v135, v42                                // glvw 1 mb 0 tt1 9 r 0
-v_mov_b32 v34, v135                                // 
+v_mov_b32 v34, v135                                //
 v_mov_b32 v135, v43                                // glvw 1 mb 0 tt1 9 r 1
-v_mov_b32 v35, v135                                // 
+v_mov_b32 v35, v135                                //
 v_mov_b32 v135, v44                                // glvw 1 mb 0 tt1 10 r 0
-v_mov_b32 v36, v135                                // 
+v_mov_b32 v36, v135                                //
 v_mov_b32 v135, v45                                // glvw 1 mb 0 tt1 10 r 1
-v_mov_b32 v37, v135                                // 
+v_mov_b32 v37, v135                                //
 v_mov_b32 v135, v46                                // glvw 1 mb 0 tt1 11 r 0
-v_mov_b32 v38, v135                                // 
+v_mov_b32 v38, v135                                //
 v_mov_b32 v135, v47                                // glvw 1 mb 0 tt1 11 r 1
-v_mov_b32 v39, v135                                // 
+v_mov_b32 v39, v135                                //
 v_mov_b32 v135, v56                                // glvw 1 mb 0 tt1 12 r 0
-v_mov_b32 v48, v135                                // 
+v_mov_b32 v48, v135                                //
 v_mov_b32 v135, v57                                // glvw 1 mb 0 tt1 12 r 1
-v_mov_b32 v49, v135                                // 
+v_mov_b32 v49, v135                                //
 v_mov_b32 v135, v58                                // glvw 1 mb 0 tt1 13 r 0
-v_mov_b32 v50, v135                                // 
+v_mov_b32 v50, v135                                //
 v_mov_b32 v135, v59                                // glvw 1 mb 0 tt1 13 r 1
-v_mov_b32 v51, v135                                // 
+v_mov_b32 v51, v135                                //
 v_mov_b32 v135, v60                                // glvw 1 mb 0 tt1 14 r 0
-v_mov_b32 v52, v135                                // 
+v_mov_b32 v52, v135                                //
 v_mov_b32 v135, v61                                // glvw 1 mb 0 tt1 14 r 1
-v_mov_b32 v53, v135                                // 
+v_mov_b32 v53, v135                                //
 v_mov_b32 v135, v62                                // glvw 1 mb 0 tt1 15 r 0
-v_mov_b32 v54, v135                                // 
+v_mov_b32 v54, v135                                //
 v_mov_b32 v135, v63                                // glvw 1 mb 0 tt1 15 r 1
-v_mov_b32 v55, v135                                // 
+v_mov_b32 v55, v135                                //
 v_mov_b32 v135, v72                                // glvw 1 mb 0 tt1 16 r 0
-v_mov_b32 v64, v135                                // 
+v_mov_b32 v64, v135                                //
 v_mov_b32 v135, v73                                // glvw 1 mb 0 tt1 16 r 1
-v_mov_b32 v65, v135                                // 
+v_mov_b32 v65, v135                                //
 v_mov_b32 v135, v74                                // glvw 1 mb 0 tt1 17 r 0
-v_mov_b32 v66, v135                                // 
+v_mov_b32 v66, v135                                //
 v_mov_b32 v135, v75                                // glvw 1 mb 0 tt1 17 r 1
-v_mov_b32 v67, v135                                // 
+v_mov_b32 v67, v135                                //
 v_mov_b32 v135, v76                                // glvw 1 mb 0 tt1 18 r 0
-v_mov_b32 v68, v135                                // 
+v_mov_b32 v68, v135                                //
 v_mov_b32 v135, v77                                // glvw 1 mb 0 tt1 18 r 1
-v_mov_b32 v69, v135                                // 
+v_mov_b32 v69, v135                                //
 v_mov_b32 v135, v78                                // glvw 1 mb 0 tt1 19 r 0
-v_mov_b32 v70, v135                                // 
+v_mov_b32 v70, v135                                //
 v_mov_b32 v135, v79                                // glvw 1 mb 0 tt1 19 r 1
-v_mov_b32 v71, v135                                // 
+v_mov_b32 v71, v135                                //
 v_mov_b32 v135, v88                                // glvw 1 mb 0 tt1 20 r 0
-v_mov_b32 v80, v135                                // 
+v_mov_b32 v80, v135                                //
 v_mov_b32 v135, v89                                // glvw 1 mb 0 tt1 20 r 1
-v_mov_b32 v81, v135                                // 
+v_mov_b32 v81, v135                                //
 v_mov_b32 v135, v90                                // glvw 1 mb 0 tt1 21 r 0
-v_mov_b32 v82, v135                                // 
+v_mov_b32 v82, v135                                //
 v_mov_b32 v135, v91                                // glvw 1 mb 0 tt1 21 r 1
-v_mov_b32 v83, v135                                // 
+v_mov_b32 v83, v135                                //
 v_mov_b32 v135, v92                                // glvw 1 mb 0 tt1 22 r 0
-v_mov_b32 v84, v135                                // 
+v_mov_b32 v84, v135                                //
 v_mov_b32 v135, v93                                // glvw 1 mb 0 tt1 22 r 1
-v_mov_b32 v85, v135                                // 
+v_mov_b32 v85, v135                                //
 v_mov_b32 v135, v94                                // glvw 1 mb 0 tt1 23 r 0
-v_mov_b32 v86, v135                                // 
+v_mov_b32 v86, v135                                //
 v_mov_b32 v135, v95                                // glvw 1 mb 0 tt1 23 r 1
-v_mov_b32 v87, v135                                // 
+v_mov_b32 v87, v135                                //
 v_mov_b32 v135, v104                               // glvw 1 mb 0 tt1 24 r 0
-v_mov_b32 v96, v135                                // 
+v_mov_b32 v96, v135                                //
 v_mov_b32 v135, v105                               // glvw 1 mb 0 tt1 24 r 1
-v_mov_b32 v97, v135                                // 
+v_mov_b32 v97, v135                                //
 v_mov_b32 v135, v106                               // glvw 1 mb 0 tt1 25 r 0
-v_mov_b32 v98, v135                                // 
+v_mov_b32 v98, v135                                //
 v_mov_b32 v135, v107                               // glvw 1 mb 0 tt1 25 r 1
-v_mov_b32 v99, v135                                // 
+v_mov_b32 v99, v135                                //
 v_mov_b32 v135, v108                               // glvw 1 mb 0 tt1 26 r 0
-v_mov_b32 v100, v135                               // 
+v_mov_b32 v100, v135                               //
 v_mov_b32 v135, v109                               // glvw 1 mb 0 tt1 26 r 1
-v_mov_b32 v101, v135                               // 
+v_mov_b32 v101, v135                               //
 v_mov_b32 v135, v110                               // glvw 1 mb 0 tt1 27 r 0
-v_mov_b32 v102, v135                               // 
+v_mov_b32 v102, v135                               //
 v_mov_b32 v135, v111                               // glvw 1 mb 0 tt1 27 r 1
-v_mov_b32 v103, v135                               // 
+v_mov_b32 v103, v135                               //
 v_mov_b32 v135, v120                               // glvw 1 mb 0 tt1 28 r 0
-v_mov_b32 v112, v135                               // 
+v_mov_b32 v112, v135                               //
 v_mov_b32 v135, v121                               // glvw 1 mb 0 tt1 28 r 1
-v_mov_b32 v113, v135                               // 
+v_mov_b32 v113, v135                               //
 v_mov_b32 v135, v122                               // glvw 1 mb 0 tt1 29 r 0
-v_mov_b32 v114, v135                               // 
+v_mov_b32 v114, v135                               //
 v_mov_b32 v135, v123                               // glvw 1 mb 0 tt1 29 r 1
-v_mov_b32 v115, v135                               // 
+v_mov_b32 v115, v135                               //
 v_mov_b32 v135, v124                               // glvw 1 mb 0 tt1 30 r 0
-v_mov_b32 v116, v135                               // 
+v_mov_b32 v116, v135                               //
 v_mov_b32 v135, v125                               // glvw 1 mb 0 tt1 30 r 1
-v_mov_b32 v117, v135                               // 
+v_mov_b32 v117, v135                               //
 v_mov_b32 v135, v126                               // glvw 1 mb 0 tt1 31 r 0
-v_mov_b32 v118, v135                               // 
+v_mov_b32 v118, v135                               //
 v_mov_b32 v135, v127                               // glvw 1 mb 0 tt1 31 r 1
-v_mov_b32 v119, v135                               // 
+v_mov_b32 v119, v135                               //
 s_mov_b64 s[64:65], 0xFFFFFFFFFFFFFFFF             // to restore all threads active
 s_or_saveexec_b64 vcc, s[64:65]                    // all threads active
 s_branch label_0029                                // done shifting
@@ -3943,18 +3943,18 @@ v_add_u32 v129, s63, v129                          // coord 1 = (tid0%MI_m) + wa
 /* not-LocalSplitU: global write */
 
 s_mov_b32 s64, s[sgprBeta+0]                       // tmp = Beta[0]
-s_or_b32 s64, s[sgprBeta+1], s64                   // tmp |= Beta[1] 
+s_or_b32 s64, s[sgprBeta+1], s64                   // tmp |= Beta[1]
 s_cmpk_eq_u32 s64, 0x0                             // Beta == 0
 s_cbranch_scc0 GW_Beta_46                          // Branch if Beta is not zero
 
 s_and_b32 s64, 127, s[sgprSizeI]                   // s64 = s[sgprSizeI] % 128
-s_add_u32 s65, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s65, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s65                // wg0 >= nwg0-1 ?
 s_cselect_b32 s64, s64, 0                          // set rMT0
 s_cmpk_gt_u32 s64, 0x0                             // rMT0 > 0
 s_cbranch_scc1 GW_B0_E1_37                         // jump if edges required
 s_and_b32 s64, 127, s[sgprSizeJ]                   // s64 = s[sgprSizeJ] % 128
-s_add_u32 s65, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s65, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s65                // wg1 >= nwg1-1
 s_cselect_b32 s64, s64, 0                          // set rMT1
 s_cmpk_gt_u32 s64, 0x0                             // rMT1 > 0
@@ -6392,13 +6392,13 @@ s_nop 0                                            // 1 wait state required when
 s_branch label_GW_End_45                           // jump to end
 GW_Beta_46:
 s_and_b32 s64, 127, s[sgprSizeI]                   // s64 = s[sgprSizeI] % 128
-s_add_u32 s65, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s65, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s65                // wg0 >= nwg0-1 ?
 s_cselect_b32 s64, s64, 0                          // set rMT0
 s_cmpk_gt_u32 s64, 0x0                             // rMT0 > 0
 s_cbranch_scc1 GW_B1_E1_44                         // jump if edges required
 s_and_b32 s64, 127, s[sgprSizeJ]                   // s64 = s[sgprSizeJ] % 128
-s_add_u32 s65, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s65, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s65                // wg1 >= nwg1-1
 s_cselect_b32 s64, s64, 0                          // set rMT1
 s_cmpk_gt_u32 s64, 0x0                             // rMT1 > 0
@@ -10823,5 +10823,3 @@ label_GW_End_45:
 
 label_0047:  /// KernelEnd
 s_endpgm                                           // Kernel End
-
-

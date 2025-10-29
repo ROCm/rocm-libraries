@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseSgtsv2_bufferSizeExt returns the size of the temporary storage buffer
-*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary 
+*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note
@@ -161,6 +161,9 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
 *              \p du, \p B or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*  \par Example
+*  \snippet example_hipsparse_gtsv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

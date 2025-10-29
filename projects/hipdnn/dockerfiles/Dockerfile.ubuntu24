@@ -1,0 +1,191 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Build type selection - must be declared before first use in FROM
+ARG BUILD_TYPE=prebuilt
+
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
+
+RUN apt-get update && apt-get install -y \
+    git \
+    gdb \
+    gfortran \
+    git-lfs \
+    ninja-build \
+    cmake \
+    g++ \
+    pkg-config \
+    xxd \
+    patchelf \
+    automake \
+    python3-venv \
+    python3-dev \
+    libegl1-mesa-dev \
+    curl \
+    unzip \
+    patchelf \
+    libtool \
+    python3-pip \
+    vim \
+    rsync \
+    ca-certificates \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# Prebuilt stage - downloads and extracts tarball
+#
+# Example build command for default tarball build (gfx94X, 7.0.0rc20250909): 
+# docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
+#
+# Example build command for overriding tarball build args (gfx950, 7.0.0rc20250908):
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:fullbuild .
+# ============================================================================
+FROM base AS install_therock_prebuilt
+
+ARG THEROCK_ASIC=gfx94X
+ARG THEROCK_GIT_TAG=7.0.0rc20250909
+ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz
+
+RUN mkdir -p /opt/rocm
+WORKDIR /tmp
+
+RUN wget https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
+RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+
+# ============================================================================
+# Build from source stage - clones and builds TheRock
+#
+# Example build command for default source build (default branch, gfx90a):
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
+#
+# Example build command for overriding ASIC and git hash:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t hipdnn:custom_source_build .
+#
+# Build mode options:
+# - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
+# - When using "Preset", specify the preset with THEROCK_BUILD_PRESET
+# - When using "Debug" or "Release", standard CMake build types are used
+#
+# Note: When THEROCK_BUILD_MODE=Preset, the THEROCK_BUILD_PRESET value is used.
+#       When THEROCK_BUILD_MODE=Debug/Release, THEROCK_BUILD_PRESET is ignored.
+#
+# Build parallelism:
+# - BUILD_JOBS controls the number of parallel build jobs
+# - Default is 0, which means use all available CPU cores
+#
+# Example build command for Debug build with 4 cores:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t hipdnn:debug .
+#
+# Example build command with custom TheRock preset:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t hipdnn:custom-preset .
+# ============================================================================
+FROM base AS install_therock_fullbuild
+
+ARG THEROCK_ASIC=gfx90a
+ARG THEROCK_GIT_HASH=default
+ARG THEROCK_BUILD_MODE=Release
+ARG THEROCK_BUILD_PRESET=linux-release-package
+ARG BUILD_JOBS=0
+
+RUN git config --global user.email "docker@build.local" && \
+    git config --global user.name "Docker Build"
+
+RUN git clone https://github.com/ROCm/TheRock.git
+
+WORKDIR /TheRock
+
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch; \
+        git checkout $THEROCK_GIT_HASH; \
+    else \
+        echo "Using default branch"; \
+    fi
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install -r requirements.txt
+
+RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
+    git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
+    python ./build_tools/fetch_sources.py
+
+RUN mkdir build
+WORKDIR /TheRock/build
+
+RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
+        echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
+        cmake .. \
+            --preset=$THEROCK_BUILD_PRESET \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    else \
+        echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
+        cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_MIOPEN=ON \
+            -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    fi
+
+RUN if [ "$BUILD_JOBS" = "0" ]; then \
+        cmake --build .; \
+    else \
+        echo "Building with $BUILD_JOBS parallel jobs"; \
+        cmake --build . -j$BUILD_JOBS; \
+    fi && \
+    cmake --install .
+
+# ============================================================================
+# Select which build stage to use
+# ============================================================================
+FROM install_therock_$BUILD_TYPE AS install_therock
+
+# ============================================================================
+# Common hipDNN development environment
+# ============================================================================
+FROM base AS hipdnn
+
+COPY --from=install_therock /opt/rocm /opt/rocm
+
+# Install explicit version of tools that are supported for hipDNN development
+# (clang-format, clang-tidy, llvm)
+RUN apt-get update && apt-get install -y \
+    clang-format-18 \
+    clang-tidy-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+
+RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+
+# Set up update-alternatives for all LLVM tools
+RUN for tool in /usr/bin/llvm*-20; do \
+        if [ -f "$tool" ]; then \
+            base=$(basename "$tool" -20); \
+            update-alternatives --install "/usr/bin/$base" "$base" "$tool" 100; \
+            echo "Set alternative for $base -> $tool"; \
+        fi \
+    done
+
+ENV HIP_PLATFORM=amd
+ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV CMAKE_GENERATOR="Ninja"
+
+WORKDIR /workspace

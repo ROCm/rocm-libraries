@@ -924,9 +924,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                           std::vector<gpubuf>&  ibuffer,
+                           std::vector<void*>&   pibuffer,
+                           std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -1006,8 +1007,9 @@ public:
     }
 
     // call the hipFFT APIs to gather the data back from the multiple GPUs
-    virtual void multi_gpu_finalize(std::vector<gpubuf>& obuffer,
-                                    std::vector<void*>&  pobuffer) override
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                                    std::vector<gpubuf>&  obuffer,
+                                    std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -1233,7 +1235,7 @@ private:
             // the plan wasn't created first
             const size_t num_values_to_check
                 = plan == INVALID_PLAN_HANDLE ? 1 : worksize_estimate.size();
-            for(auto idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
+            for(size_t idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
             {
                 ret = worksize_estimate[idx] != absurd_init_worksize_estimate
                           ? HIPFFT_SUCCESS
@@ -1265,7 +1267,7 @@ private:
         if(externally_managed_workareas.size() < get_num_used_gpus())
             externally_managed_workareas.resize(get_num_used_gpus());
         std::vector<void*> workareas(get_num_used_gpus(), nullptr);
-        for(auto workarea_idx = 0; workarea_idx < get_num_used_gpus(); workarea_idx++)
+        for(size_t workarea_idx = 0; workarea_idx < get_num_used_gpus(); workarea_idx++)
         {
             const auto req_size = req_workarea_sizes[workarea_idx];
             auto&      buf      = externally_managed_workareas[workarea_idx];
@@ -1549,12 +1551,14 @@ private:
     hipfftResult_t create_make_plan_Nd()
     {
         auto ret = create_with_pre_make();
+
         if(ret != HIPFFT_SUCCESS)
             return ret;
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
         switch(dim())
         {
         case 1:
@@ -1581,10 +1585,11 @@ private:
         if(ret != HIPFFT_SUCCESS)
             return ret;
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
-        auto    layout_args  = make_valid_layout_args_for_plan_many<int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+        auto                layout_args  = make_valid_layout_args_for_plan_many<int>();
         return hipfftMakePlanMany(plan,
                                   dim(),
                                   int_length.data(),
@@ -1606,10 +1611,11 @@ private:
             return ret;
 
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
-        auto    layout_args  = make_valid_layout_args_for_plan_many<long long int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+        auto                layout_args  = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftMakePlanMany64(plan,
                                     dim(),
                                     ll_length.data(),
@@ -1654,11 +1660,12 @@ private:
             return ret;
 
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr  = is_preventing_auto_allocation_at_generation()
-                                    ? nullptr
-                                    : auto_allocated_worksizes.data();
-        auto    executionType = get_xt_api_execution_type();
-        auto    layout_args   = make_valid_layout_args_for_plan_many<long long int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr  = is_preventing_auto_allocation_at_generation()
+                                                ? tmp_worksize.data()
+                                                : auto_allocated_worksizes.data();
+        auto                executionType = get_xt_api_execution_type();
+        auto                layout_args   = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftXtMakePlanMany(plan,
                                     dim(),
                                     ll_length.data(),

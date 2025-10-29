@@ -1,0 +1,658 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  #MinimumRequiredVersion: 4.14.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  RotatingBufferSize: 512
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  PrintSolutionRejectionReason: True
+  DisableAsmComments : True
+
+BenchmarkProblems:
+  ########################################
+  # BBS NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+          - Exact: [8192, 4096, 1, 2048]
+        - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 6, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+        - LDSTrInst: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+        - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 4, 16,  4,1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [0]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['b']
+
+  ########################################
+  # HHS NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 6, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+        - LDSTrInst: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+
+  ########################################
+  # BBS TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+          - Range: [[613], [612], [1], [1, 1, 64]]
+          - Exact: [8192, 4096, 1, 2048]
+        - BiasTypeArgs: ['b']
+
+  ########################################
+  # HHS TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+
+  ########################################
+  # BBS TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+          - Range: [[613], [612], [1], [1, 1, 64]]
+          - Exact: [8192, 4096, 1, 2048]
+        - BiasTypeArgs: ['b']
+
+  ########################################
+  # HHS TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+
+  ########################################
+  # F8BS TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+
+      #UseBias: 1
+      #BiasDataTypeList: [s,b]
+      #UseScaleAlphaVec: 1
+      #UseScaleAB: Scalar
+      #Activation: true
+      #ActivationType: hipblaslt_all
+      #ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,128, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [32] #[-1]
+        - LdsPadB: [32] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[17, 235, 750], [2, 127, 400], [1], [4, 4, 400]]
+          - Range: [[613], [612], [1], [1, 1, 128]]
+        #- BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,128, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [32] #[-1]
+        - LdsPadB: [32] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 4096, 1, 2048]
+        #- BiasTypeArgs: ['b']
+
+  ########################################
+  # BBS NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+          - Range: [[613], [612], [1], [1, 1, 128]]
+        - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 4096, 1, 2048]
+        - BiasTypeArgs: ['b']
+
+  ########################################
+  # HHS NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16,32, 1,  1, 8, 8,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [8] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]

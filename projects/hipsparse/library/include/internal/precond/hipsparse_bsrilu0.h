@@ -32,9 +32,9 @@ extern "C" {
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
- *  structural or numerical zero has been found during \ref hipsparseSbsrilu02_analysis 
- *  "hipsparseXbsrilu02_analysis()" or \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()" 
- *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, 
+ *  structural or numerical zero has been found during \ref hipsparseSbsrilu02_analysis
+ *  "hipsparseXbsrilu02_analysis()" or \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()"
+ *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position,
  *  using same index base as the BSR matrix.
  *
  *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -132,14 +132,14 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsrilu02_bufferSize returns the size of the temporary storage buffer
- *  in bytes that is required by \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()" 
- *  and \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()". The temporary storage buffer must be 
+ *  in bytes that is required by \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()"
+ *  and \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()". The temporary storage buffer must be
  *  allocated by the user.
  *
  *  @param[in]
  *  handle             handle to the hipsparse library context queue.
  *  @param[in]
- *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW 
+ *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
  *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
  *  mb                 number of block rows in the sparse BSR matrix.
@@ -166,8 +166,8 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
  *                     and hipsparseZbsrilu02().
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
- *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
+ *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or
  *              \p pBufferSizeInBytes pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -232,8 +232,8 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
- *  \p hipsparseXbsrilu02_analysis performs the analysis step for \ref hipsparseSbsrilu02 
- *  "hipsparseXbsrilu02()". It is expected that this function will be executed only once 
+ *  \p hipsparseXbsrilu02_analysis performs the analysis step for \ref hipsparseSbsrilu02
+ *  "hipsparseXbsrilu02()". It is expected that this function will be executed only once
  *  for a given matrix.
  *
  *  \note
@@ -271,8 +271,8 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
  *  pBuffer          temporary storage buffer allocated by the user.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
- *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or \p pBuffer pointer 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
+ *              \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or \p pBuffer pointer
  *              is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -350,17 +350,17 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *    A \approx LU
  *  \f]
  *
- *  Computing the above incomplete LU factorization requires three steps to complete. First, 
- *  the user determines the size of the required temporary storage buffer by calling 
- *  \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". Once this buffer size 
- *  has been determined, the user allocates the buffer and passes it to 
- *  \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()". This will perform analysis on 
- *  the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsrilu02 to perform the 
- *  actual factorization. The calculation of the buffer size and the analysis of the sparse matrix 
- *  only need to be performed once for a given sparsity pattern while the factorization can be 
- *  repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls to 
+ *  Computing the above incomplete LU factorization requires three steps to complete. First,
+ *  the user determines the size of the required temporary storage buffer by calling
+ *  \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". Once this buffer size
+ *  has been determined, the user allocates the buffer and passes it to
+ *  \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()". This will perform analysis on
+ *  the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsrilu02 to perform the
+ *  actual factorization. The calculation of the buffer size and the analysis of the sparse matrix
+ *  only need to be performed once for a given sparsity pattern while the factorization can be
+ *  repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls to
  *  \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()" are complete, the temporary buffer can be deallocated.
- *  
+ *
  *  \p hipsparseXbsrilu02 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref hipsparseXbsrilu02_zeroPivot().
  *
@@ -396,12 +396,15 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *  pBuffer            temporary storage buffer allocated by the user.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrSortedValA_valM, \p bsrSortedRowPtrA or \p bsrSortedColIndA pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ * 
+ *  \par Example
+ *  \snippet example_hipsparse_bsrilu02.cpp doc example
  */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

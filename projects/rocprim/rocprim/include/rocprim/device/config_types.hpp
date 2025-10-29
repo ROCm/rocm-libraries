@@ -24,12 +24,14 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 #include <cassert>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../intrinsics/arch.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
@@ -153,11 +155,7 @@ struct fallback_block_size
 
 template<class Config, class Default>
 using default_or_custom_config =
-    typename std::conditional<
-        std::is_same<Config, default_config>::value,
-        Default,
-        Config
-    >::type;
+    typename std::conditional<std::is_same<Config, default_config>::value, Default, Config>::type;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 enum class target_arch : unsigned int
@@ -170,6 +168,7 @@ enum class target_arch : unsigned int
     gfx908  = 908,
     gfx90a  = 910,
     gfx942  = 942,
+    gfx950  = 950,
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
@@ -181,7 +180,7 @@ enum class target_arch : unsigned int
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
- *
+ * 
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
@@ -204,32 +203,36 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
     return i == n && *lhs == '\0';
 }
 
+constexpr const char* target_names[] = {"gfx803",
+                                        "gfx900",
+                                        "gfx906",
+                                        "gfx908",
+                                        "gfx90a",
+                                        "gfx942",
+                                        "gfx950",
+                                        "gfx1030",
+                                        "gfx1100",
+                                        "gfx1102",
+                                        "gfx1200",
+                                        "gfx1201"};
+
+constexpr target_arch target_architectures[] = {
+    target_arch::gfx803,
+    target_arch::gfx900,
+    target_arch::gfx906,
+    target_arch::gfx908,
+    target_arch::gfx90a,
+    target_arch::gfx942,
+    target_arch::gfx950,
+    target_arch::gfx1030,
+    target_arch::gfx1100,
+    target_arch::gfx1102,
+    target_arch::gfx1200,
+    target_arch::gfx1201,
+};
+
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    constexpr const char* target_names[]         = {"gfx803",
-                                                    "gfx900",
-                                                    "gfx906",
-                                                    "gfx908",
-                                                    "gfx90a",
-                                                    "gfx942",
-                                                    "gfx1030",
-                                                    "gfx1100",
-                                                    "gfx1102",
-                                                    "gfx1200",
-                                                    "gfx1201"};
-    constexpr target_arch target_architectures[] = {
-        target_arch::gfx803,
-        target_arch::gfx900,
-        target_arch::gfx906,
-        target_arch::gfx908,
-        target_arch::gfx90a,
-        target_arch::gfx942,
-        target_arch::gfx1030,
-        target_arch::gfx1100,
-        target_arch::gfx1102,
-        target_arch::gfx1200,
-        target_arch::gfx1201,
-    };
     static_assert(sizeof(target_names) / sizeof(target_names[0])
                       == sizeof(target_architectures) / sizeof(target_architectures[0]),
                   "target_names and target_architectures should have the same number of elements");
@@ -245,12 +248,48 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     return target_arch::unknown;
 }
 
+template<class F, std::size_t... Is>
+constexpr void for_each_arch_impl(F&& f, std::index_sequence<Is...>)
+{
+    (f(std::integral_constant<target_arch, target_architectures[Is]>{}), ...);
+}
+
+template<class F>
+constexpr void for_each_arch(F&& f)
+{
+    for_each_arch_impl(std::forward<F>(f),
+                       std::make_index_sequence<std::size(target_architectures)>{});
+}
+
+constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_arch)
+{
+    switch(target_arch)
+    {
+        case target_arch::unknown: return arch::wavefront::get_target();
+        case target_arch::gfx803: return arch::wavefront::target::size64;
+        case target_arch::gfx900: return arch::wavefront::target::size64;
+        case target_arch::gfx906: return arch::wavefront::target::size64;
+        case target_arch::gfx908: return arch::wavefront::target::size64;
+        case target_arch::gfx90a: return arch::wavefront::target::size64;
+        case target_arch::gfx942: return arch::wavefront::target::size64;
+        case target_arch::gfx950: return arch::wavefront::target::size64;
+        case target_arch::gfx1030: return arch::wavefront::target::size32;
+        case target_arch::gfx1100: return arch::wavefront::target::size32;
+        case target_arch::gfx1102: return arch::wavefront::target::size32;
+        case target_arch::gfx1200: return arch::wavefront::target::size32;
+        case target_arch::gfx1201: return arch::wavefront::target::size32;
+
+        // Unreachable
+        case target_arch::invalid: return arch::wavefront::target::dynamic;
+    }
+}
+
 /**
  * \brief Get the current architecture in device compilation.
- *
+ * 
  * This function will always return `unknown` when called from the host, host could should instead
  * call host_target_arch to query the current device from the HIP API.
- *
+ * 
  * \return target_arch the architecture currently being compiled for on the device.
  */
 constexpr target_arch device_target_arch()
@@ -264,82 +303,228 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
-template<class Config>
-auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
+template<typename Config, target_arch Arch>
+struct default_config_selector
 {
-#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
-    switch(target_arch)
-    {
-
-        case target_arch::unknown:
-            return Config::template architecture_config<target_arch::unknown>::params;
-        case target_arch::gfx803:
-            return Config::template architecture_config<target_arch::gfx803>::params;
-        case target_arch::gfx900:
-            return Config::template architecture_config<target_arch::gfx900>::params;
-        case target_arch::gfx906:
-            return Config::template architecture_config<target_arch::gfx906>::params;
-        case target_arch::gfx908:
-            return Config::template architecture_config<target_arch::gfx908>::params;
-        case target_arch::gfx90a:
-            return Config::template architecture_config<target_arch::gfx90a>::params;
-        case target_arch::gfx942:
-            return Config::template architecture_config<target_arch::gfx942>::params;
-        case target_arch::gfx1030:
-            return Config::template architecture_config<target_arch::gfx1030>::params;
-        case target_arch::gfx1100:
-            return Config::template architecture_config<target_arch::gfx1100>::params;
-        case target_arch::gfx1102:
-            return Config::template architecture_config<target_arch::gfx1102>::params;
-        case target_arch::gfx1200:
-            return Config::template architecture_config<target_arch::gfx1200>::params;
-        case target_arch::gfx1201:
-            return Config::template architecture_config<target_arch::gfx1201>::params;
-        case target_arch::invalid:
-            assert(false && "Invalid target architecture selected at runtime.");
-    }
-#endif
-    return Config::template architecture_config<target_arch::unknown>::params;
-}
-
-// Wrapper that forces a Conf to use the params for ForcedArch.
-template<target_arch ForcedArch, class Conf, class PartitionConfigParams>
-struct force_arch_config
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr PartitionConfigParams params
-            = Conf::template architecture_config<ForcedArch>::params;
-    };
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.kernel_config.block_size;
 };
 
-template<typename F>
-inline hipError_t generic_dispatch_target_arch(detail::target_arch target_arch, F&& f)
+template<typename Config, target_arch Arch>
+struct non_blev_batch_memcpy_config_selector
 {
-    using ta = detail::target_arch;
+    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
+                                                   .non_blev_batch_memcpy_kernel_config.block_size;
+};
 
-    switch(target_arch)
+template<typename Config, target_arch Arch>
+struct blev_batch_memcpy_config_selector
+{
+    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
+                                                   .blev_batch_memcpy_kernel_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct histogram_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct histogram_global_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram_global_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct merge_oddeven_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.merge_oddeven_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct merge_mergepath_partition_config_selector
+{
+    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
+                                                   .merge_mergepath_partition_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct merge_mergepath_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct radix_sort_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct radix_sort_onesweep_histogram_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct radix_sort_onesweep_sort_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.sort.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct segmented_radix_sort_warp_sort_small_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_small;
+};
+
+template<typename Config, target_arch Arch>
+struct segmented_radix_sort_warp_sort_meduim_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_medium;
+};
+
+template<class Config, target_arch Arch>
+struct target_config
+{
+    constexpr static auto params    = Config::template architecture_config<Arch>::params;
+    constexpr static auto wavefront = arch_wavefront_size(Arch);
+    constexpr static auto arch      = Arch;
+};
+
+// trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
+// By instantiating this template once per supported `target_arch`,the correct tuned config
+// will be derived from the template.
+template<typename Config,
+         target_arch Arch,
+         class Kernel,
+         template<typename, target_arch>
+         class LaunchSelector>
+ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
+void trampoline_kernel(Kernel kernel)
+{
+    using ArchConfig = target_config<Config, Arch>;
+
+#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
+    if constexpr(Arch == device_target_arch())
+#endif
     {
-        case ta::unknown: return f.template operator()<ta::unknown>();
-        case ta::gfx803: return f.template operator()<ta::gfx803>();
-        case ta::gfx900: return f.template operator()<ta::gfx900>();
-        case ta::gfx906: return f.template operator()<ta::gfx906>();
-        case ta::gfx908: return f.template operator()<ta::gfx908>();
-        case ta::gfx90a: return f.template operator()<ta::gfx90a>();
-        case ta::gfx942: return f.template operator()<ta::gfx942>();
-        case ta::gfx1030: return f.template operator()<ta::gfx1030>();
-        case ta::gfx1100: return f.template operator()<ta::gfx1100>();
-        case ta::gfx1102: return f.template operator()<ta::gfx1102>();
-        case ta::gfx1200: return f.template operator()<ta::gfx1200>();
-        case ta::gfx1201: return f.template operator()<ta::gfx1201>();
-        case ta::invalid:
-            assert(false && "Invalid target architecture");
-            return hipErrorInvalidValue;
+        kernel(ArchConfig{});
+    }
+}
+
+template<typename Kernel>
+struct launch_plan
+{
+    using kernel_type = void (*)(Kernel);
+    kernel_type kernel;
+    Kernel      device_callback;
+
+    void launch(dim3 grid_size, dim3 block_size, size_t shared_mem, hipStream_t stream) const
+    {
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel),
+                           grid_size,
+                           block_size,
+                           shared_mem,
+                           stream,
+                           device_callback);
+    }
+};
+
+template<class Config,
+         class Kernel,
+         template<typename, target_arch> class LaunchSelector = default_config_selector>
+auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
+{
+    std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
+
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            if(arch_tag != arch || tuned_kernel)
+                return;
+
+            tuned_kernel = trampoline_kernel<Config, arch_tag, Kernel, LaunchSelector>;
+        });
+
+    if(!tuned_kernel)
+    {
+        tuned_kernel = trampoline_kernel<Config, target_arch::unknown, Kernel, LaunchSelector>;
     }
 
-    assert(false && "Unhandled target_arch.");
-    return hipErrorInvalidValue;
+    return {tuned_kernel.value(), kernel};
+}
+
+// Host-side helper running at run-time, picking the trampoline_kernel whose template
+// argument `Arch` matches the actual GPU we are executing on.
+template<class Config,
+         class Kernel,
+         template<typename, target_arch> class LaunchSelector = default_config_selector>
+hipError_t execute_launch_plan(target_arch arch,
+                               Kernel      kernel,
+                               dim3        grid_size,
+                               dim3        block_size,
+                               size_t      shmem,
+                               hipStream_t stream)
+{
+    const auto launch_plan = make_launch_plan<Config, Kernel, LaunchSelector>(arch, kernel);
+    launch_plan.launch(grid_size, block_size, shmem, stream);
+    return hipGetLastError();
+}
+
+#ifdef ROCPRIM_EXPERIMENTAL_SPIRV
+template<class Config, bool ForceUnknownArch = true>
+#else
+template<class Config, bool ForceUnknownArch = false>
+#endif
+auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
+{
+    if constexpr(!ForceUnknownArch)
+    {
+        switch(target_arch)
+        {
+
+            case target_arch::unknown:
+                return Config::template architecture_config<target_arch::unknown>::params;
+            case target_arch::gfx803:
+                return Config::template architecture_config<target_arch::gfx803>::params;
+            case target_arch::gfx900:
+                return Config::template architecture_config<target_arch::gfx900>::params;
+            case target_arch::gfx906:
+                return Config::template architecture_config<target_arch::gfx906>::params;
+            case target_arch::gfx908:
+                return Config::template architecture_config<target_arch::gfx908>::params;
+            case target_arch::gfx90a:
+                return Config::template architecture_config<target_arch::gfx90a>::params;
+            case target_arch::gfx942:
+                return Config::template architecture_config<target_arch::gfx942>::params;
+            case target_arch::gfx950:
+                return Config::template architecture_config<target_arch::gfx950>::params;
+            case target_arch::gfx1030:
+                return Config::template architecture_config<target_arch::gfx1030>::params;
+            case target_arch::gfx1100:
+                return Config::template architecture_config<target_arch::gfx1100>::params;
+            case target_arch::gfx1102:
+                return Config::template architecture_config<target_arch::gfx1102>::params;
+            case target_arch::gfx1200:
+                return Config::template architecture_config<target_arch::gfx1200>::params;
+            case target_arch::gfx1201:
+                return Config::template architecture_config<target_arch::gfx1201>::params;
+            case target_arch::invalid:
+                assert(false && "Invalid target architecture selected at runtime.");
+        }
+    }
+    return Config::template architecture_config<target_arch::unknown>::params;
 }
 
 template<typename Config>
@@ -401,7 +586,7 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
     const bool is_legacy_stream = false;
 #endif
 
-    if (stream == default_stream || stream == hipStreamPerThread || is_legacy_stream)
+    if(stream == default_stream || stream == hipStreamPerThread || is_legacy_stream)
     {
         const hipError_t result = hipGetDevice(&device_id);
         if(result != hipSuccess)
@@ -466,7 +651,8 @@ inline hipError_t host_warp_size(const int device_id, unsigned int& warp_size)
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.
-ROCPRIM_HOST inline hipError_t host_warp_size(const hipStream_t stream, unsigned int& warp_size)
+ROCPRIM_HOST
+inline hipError_t host_warp_size(const hipStream_t stream, unsigned int& warp_size)
 {
     int        hip_device;
     hipError_t success = detail::get_device_from_stream(stream, hip_device);

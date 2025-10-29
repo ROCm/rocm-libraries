@@ -49,15 +49,15 @@ hipsparseStatus_t hipsparseSpSM_destroyDescr(hipsparseSpSMDescr_t descr);
 #endif
 
 /*! \ingroup generic_module
-*  \details 
-*  \p hipsparseSpSM_bufferSize computes the size of the required user allocated buffer needed when solving the 
+*  \details
+*  \p hipsparseSpSM_bufferSize computes the size of the required user allocated buffer needed when solving the
 *  triangular linear system:
 *  \f[
 *    op(A) \cdot C := \alpha \cdot op(B),
 *  \f]
 *  where \f$op(A)\f$ is a square sparse matrix in CSR or COO storage format, \f$B\f$ and \f$C\f$ are dense matrices.
 *
-*  \p hipsparseSpSM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpSM_solve 
+*  \p hipsparseSpSM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpSM_solve
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -118,15 +118,15 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
 #endif
 
 /*! \ingroup generic_module
-*  \details 
-*  \p hipsparseSpSM_analysis performs the required analysis needed when solving the 
+*  \details
+*  \p hipsparseSpSM_analysis performs the required analysis needed when solving the
 *  triangular linear system:
 *  \f[
 *    op(A) \cdot C := \alpha \cdot op(B),
 *  \f]
 *  where \f$A\f$ is a sparse matrix in CSR or COO storage format, \f$B\f$ and \f$C\f$ are dense vectors.
 *
-*  \p hipsparseSpSM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpSM_solve 
+*  \p hipsparseSpSM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpSM_solve
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -216,25 +216,25 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  and where \f$C\f$ is the dense solution matrix and \f$B\f$ is the dense right-hand side matrix. Both \f$B\f$
 *  and \f$C\f$ can be in row or column order.
 *
-*  Performing the above operation requires three steps. First, the user calls \ref hipsparseSpSM_bufferSize in order to 
-*  determine the size of the required temporary storage buffer. The user then allocates this buffer and calls 
-*  \ref hipsparseSpSM_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes 
-*  the computation by calling \p hipsparseSpSM_solve. The buffer size and analysis routines only need to be called once 
-*  for a given sparse matrix \f$op(A)\f$ while the computation can be called repeatedly with different \f$B\f$ and \f$C\f$ 
+*  Performing the above operation requires three steps. First, the user calls \ref hipsparseSpSM_bufferSize in order to
+*  determine the size of the required temporary storage buffer. The user then allocates this buffer and calls
+*  \ref hipsparseSpSM_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
+*  the computation by calling \p hipsparseSpSM_solve. The buffer size and analysis routines only need to be called once
+*  for a given sparse matrix \f$op(A)\f$ while the computation can be called repeatedly with different \f$B\f$ and \f$C\f$
 *  matrices. Once all calls to \p hipsparseSpSM_solve are complete, the temporary buffer can be deallocated.
 *
-*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
-*  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels 
-*  solve the system assuming the matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This 
-*  means that if the matrix \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column 
-*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data may be performed 
-*  to get them into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies 
-*  and/or transposing of data may be performed to get them back into the user arrays. For best performance and smallest required 
-*  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column 
-*  order if \f$B\f$ is being transposed). 
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
+*  row order and \f$C\f$ is column order and vice versa). When running on an AMD system with the rocSPARSE backend, the kernels
+*  solve the system assuming the matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This
+*  means that if the matrix \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column
+*  order as this is equivalent to being in row order), then internally memory copies and/or transposing of data may be performed
+*  to get them into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies
+*  and/or transposing of data may be performed to get them back into the user arrays. For best performance and smallest required
+*  temporary storage buffers on an AMD system, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column
+*  order if \f$B\f$ is being transposed).
 *
-*  \p hipsparseSpSM_solve supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions for storing the 
-*  row pointer and column indices arrays of the sparse matrices. \p hipsparseSpSM_solve supports the following data types for 
+*  \p hipsparseSpSM_solve supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions for storing the
+*  row pointer and column indices arrays of the sparse matrices. \p hipsparseSpSM_solve supports the following data types for
 *  \f$op(A)\f$, \f$op(B)\f$, \f$C\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
@@ -277,160 +277,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *               currently not supported.
 *
 *  \par Example
-*  \code{.c}
-*    //     1 0 0 0
-*    // A = 4 2 0 0
-*    //     0 3 7 0
-*    //     0 0 0 1
-*    int m   = 4;
-*    int n   = 2;
-*
-*    std::vector<int> hcsr_row_ptr = {0, 1, 3, 5, 6};
-*    std::vector<int> hcsr_col_ind = {0, 0, 1, 1, 2, 3};
-*    std::vector<float> hcsr_val   = {1, 4, 2, 3, 7, 1};
-*    std::vector<float> hB(m * n);
-*    std::vector<float> hC(m * n);
-*
-*    for(int i = 0; i < n; i++)
-*    {
-*        for(int j = 0; j < m; j++)
-*        {
-*            hB[m * i + j] = static_cast<float>(i + 1);
-*        }
-*    }
-*
-*    // Scalar alpha
-*    float alpha = 1.0f;
-*
-*    int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
-*
-*    // Offload data to device
-*    int* dcsr_row_ptr;
-*    int* dcsr_col_ind;
-*    float* dcsr_val;
-*    float* dB;
-*    float* dC;
-*    hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*    hipMalloc((void**)&dB, sizeof(float) * m * n);
-*    hipMalloc((void**)&dC, sizeof(float) * m * n);
-*
-*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dB, hB.data(), sizeof(float) * m * n, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t     handle;
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseDnMatDescr_t matB;
-*    hipsparseDnMatDescr_t matC;
-*
-*    hipsparseIndexType_t row_idx_type = HIPSPARSE_INDEX_32I;
-*    hipsparseIndexType_t col_idx_type = HIPSPARSE_INDEX_32I;
-*    hipDataType  dataType = HIP_R_32F;
-*    hipDataType  computeType = HIP_R_32F;
-*    hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*    hipsparseOperation_t transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse matrix A
-*    hipsparseCreateCsr(&matA,
-*                        m,
-*                        m,
-*                        nnz,
-*                        dcsr_row_ptr,
-*                        dcsr_col_ind,
-*                        dcsr_val,
-*                        row_idx_type,
-*                        col_idx_type,
-*                        idxBase,
-*                        dataType);
-*
-*    // Create dense matrix B
-*    hipsparseCreateDnMat(&matB,
-*                        m,
-*                        n,
-*                        m,
-*                        dB,
-*                        dataType,
-*                        HIPSPARSE_ORDER_COLUMN);
-*
-*    // Create dense matrix C
-*    hipsparseCreateDnMat(&matC,
-*                        m,
-*                        n,
-*                        m,
-*                        dC,
-*                        dataType,
-*                        HIPSPARSE_ORDER_COLUMN);
-*
-*    hipsparseSpSMDescr_t descr;
-*    hipsparseSpSM_createDescr(&descr);
-*
-*    // Call SpSM to get buffer size
-*    size_t buffer_size;
-*    hipsparseSpSM_bufferSize(handle,
-*                transA,
-*                transB,
-*                &alpha,
-*                matA,
-*                matB,
-*                matC,
-*                computeType,
-*                HIPSPARSE_SPSM_ALG_DEFAULT,
-*                descr,
-*                &buffer_size);
-*
-*    void* temp_buffer;
-*    hipMalloc((void**)&temp_buffer, buffer_size);
-*
-*    // Call SpSM to perform analysis
-*    hipsparseSpSM_analysis(handle,
-*                transA,
-*                transB,
-*                &alpha,
-*                matA,
-*                matB,
-*                matC,
-*                computeType,
-*                HIPSPARSE_SPSM_ALG_DEFAULT,
-*                descr,
-*                temp_buffer);
-*
-*    // Call SpSM to perform computation
-*    hipsparseSpSM_solve(handle,
-*                transA,
-*                transB,
-*                &alpha,
-*                matA,
-*                matB,
-*                matC,
-*                computeType,
-*                HIPSPARSE_SPSM_ALG_DEFAULT,
-*                descr,
-*                temp_buffer);
-*
-*    // Copy result back to host
-*    hipMemcpy(hC.data(), dC, sizeof(float) * m * n, hipMemcpyDeviceToHost);
-*
-*    // Clear hipSPARSE
-*    hipsparseSpSM_destroyDescr(descr);
-*    hipsparseDestroyMatDescr(matA);
-*    hipsparseDestroyDnMat(matB);
-*    hipsparseDestroyDnMat(matC);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dcsr_row_ptr);
-*    hipFree(dcsr_col_ind);
-*    hipFree(dcsr_val);
-*    hipFree(dB);
-*    hipFree(dC);
-*    hipFree(temp_buffer);
-*  \endcode
+*  \snippet example_hipsparse_spsm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

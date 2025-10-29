@@ -242,9 +242,6 @@ namespace TensileLite
                     if(problem.groupedGemm())
                         ret = ret && (problem.groupedGemmCount() <= 16);
 
-                    ret = ret && (problem.c().strides()[1] == problem.freeSizeA(0));
-                    ret = ret && (problem.d().strides()[1] == problem.freeSizeA(0));
-
                     return ret;
                 }
 
@@ -1914,6 +1911,37 @@ namespace TensileLite
                 }
             };
 
+            struct RangeMatching
+                : public Predicate_CRTP<RangeMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                RangeMatching() = default;
+
+                static std::string Type()
+                {
+                    return "RangeMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << rv << ": " << this->type() << std::endl;
+                    return rv;
+                }
+            };
+
+
             struct FreeSizeMatching
                 : public Predicate_CRTP<FreeSizeMatching, ContractionProblemGemm>
             {
@@ -2733,11 +2761,14 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
+                    // If XCC == -1, we automatically set it to the number XCCs.
+                    // In this case, no predicate is needed.
+                    if(value[0] == -1)
+                        return true;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
@@ -2746,6 +2777,8 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    if(value[0] == -1)
+                        return true;
                     size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,

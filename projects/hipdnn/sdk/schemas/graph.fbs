@@ -1,0 +1,34 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "data_types.fbs";
+include "tensor_attributes.fbs";
+include "batchnorm_attributes.fbs";
+include "batchnorm_backward_attributes.fbs";
+include "batchnorm_inference_attributes.fbs";
+include "convolution_fwd_attributes.fbs";
+include "convolution_bwd_attributes.fbs";
+include "convolution_wrw_attributes.fbs";
+include "pointwise_attributes.fbs";
+
+namespace hipdnn_sdk.data_objects;
+
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes}
+
+table Node {
+	name: string;
+	attributes: NodeAttributes;
+}
+
+// Hipdnn expects tha the serialized graph is sorted in topological order, has no cycles,
+// and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
+table Graph {
+	name: string;
+	compute_type: DataType;
+	intermediate_type: DataType;
+	io_type: DataType;
+	tensors: [TensorAttributes];
+	nodes: [Node];
+}
+
+root_type Graph;

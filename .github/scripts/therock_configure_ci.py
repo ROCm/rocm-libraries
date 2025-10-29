@@ -9,13 +9,17 @@ import fnmatch
 import json
 import logging
 import subprocess
+from pathlib import Path
 import sys
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
 from typing import Mapping, Optional, Iterable
 import os
+from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
+from config_loader import load_repo_config
 
 logging.basicConfig(level=logging.INFO)
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def set_github_output(d: Mapping[str, str]):
@@ -31,7 +35,7 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-        
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -82,9 +86,22 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
 
+def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
+    repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
+    config = load_repo_config(str(repo_config_path))
+    valid_prefixes = get_valid_prefixes(config)
+    matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
+    return matched_subtrees
+
+
 def retrieve_projects(args):
-    if args.get("is_pull_request"):
-        subtrees = args.get("input_subtrees").split("\n")
+    # For pushes and pull_requests, we only want to test changed projects
+    base_ref = args.get("base_ref")
+    modified_paths = get_modified_paths(base_ref)
+    subtrees = get_changed_path_projects(modified_paths)
+    
+    # by default, we select full tests
+    test_type = "full"
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
@@ -92,36 +109,28 @@ def retrieve_projects(args):
         else:
             subtrees = args.get("input_projects").split()
 
-    # If a push event to develop happens, we run tests on all subtrees
-    if args.get("is_push"):
+    # If .github/*/therock* were changed for a push or pull request, run all subtrees
+    if args.get("is_push") or args.get("is_pull_request"):
+        related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
+        if related_to_therock_ci:
+            subtrees = list(subtree_to_project_map.keys())
+            test_type = "smoke"
+            
+    # for nightly runs, run everything with full tests
+    if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
 
-    # If .github/*/therock* were changed, run all subtrees
-    base_ref = args.get("base_ref")
-    modified_paths = get_modified_paths(base_ref)
-    print("modified_paths (max 200):", modified_paths[:200])
-    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
-    if related_to_therock_ci:
-        subtrees = list(subtree_to_project_map.keys())
+    project_to_run = collect_projects_to_run(subtrees)
 
-    projects = set()
-    # collect the associated subtree to project
-    for subtree in subtrees:
-        if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
-
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
-    project_to_run = []
-    for project in projects:
-        if project in project_map:
-            project_to_run.append(project_map.get(project))
-
-    return project_to_run
+    return project_to_run, test_type
 
 
 def run(args):
-    project_to_run = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run)})
+    project_to_run, test_type = retrieve_projects(args)
+    set_github_output({
+        "projects": json.dumps(project_to_run),
+        "test_type": test_type
+    })
 
 
 if __name__ == "__main__":
@@ -130,9 +139,7 @@ if __name__ == "__main__":
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
-
-    input_subtrees = os.getenv("SUBTREES", "")
-    args["input_subtrees"] = input_subtrees
+    args["is_nightly"] = github_event_name == "schedule"
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects

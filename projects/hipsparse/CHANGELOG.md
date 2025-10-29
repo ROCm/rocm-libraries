@@ -3,10 +3,28 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## hipSPARSE for ROCm 7.1.0 (Unreleased)
+## (Unreleased) hipSPARSE 4.2.0
 
 ### Added
 
+* Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
+
+### Resolved issues
+
+* Fixed a memory leak in `hipsparseCreate` functions.
+
+## hipSPARSE 4.1.0 for ROCm 7.1.0
+
+### Added
+
+* Added brain half float mixed precision to `hipsparseAxpby` where X and Y use bfloat16 and result and the compute type use float.
+* Added brain half float mixed precision to `hipsparseSpVV` where X and Y use bfloat16 and result and the compute type use float.
+* Added brain half float mixed precision to `hipsparseSpMV` where A and X use bfloat16 and Y and the compute type use float.
+* Added brain half float mixed precision to `hipsparseSpMM` where A and B use bfloat16 and C and the compute type use float.
+* Added brain half float mixed precision to `hipsparseSDDMM` where A and B use bfloat16 and C and the compute type use float.
+* Added brain half float mixed precision to `hipsparseSDDMM` where A and B and C use bfloat16 and the compute type use float.
+* Added half float mixed precision to `hipsparseSDDMM` where A and B and C use float16 and the compute type use float.
+* Added brain half float uniform precision to `hipsparseScatter` and `hipsparseGather` routines.
 * Added documentation for installing and building hipSPARSE on Microsoft Windows.
 
 ## hipSPARSE 4.0.1 for ROCm 7.0.0
@@ -14,14 +32,14 @@ Documentation for hipSPARSE is available at
 ### Added
 
 * Add the `int8`, `int32`, and `float16` data types to `hipDataTypeToHCCDataType` so that sparse matrix descriptors can be used with them.
-* Adds half float mixed precision to `hipsparseAxpby` where X and Y use float16 and result and the compute type use float
-* Adds half float mixed precision to `hipsparseSpVV` where X and Y use float16 and result and the compute type use float
-* Adds half float mixed precision to `hipsparseSpMM` where A and B use float16 and C and the compute type use float
-* Adds half float mixed precision to `hipsparseSDDMM` where A and B use float16 and C and the compute type use float
-* Adds half float uniform precision to `hipsparseScatter` and `hipsparseGather` routines
-* Adds half float uniform precision to `hipsparseSDDMM` routine
+* Added half float mixed precision to `hipsparseAxpby` where X and Y use float16 and result and the compute type use float.
+* Added half float mixed precision to `hipsparseSpVV` where X and Y use float16 and result and the compute type use float.
+* Added half float mixed precision to `hipsparseSpMM` where A and B use float16 and C and the compute type use float.
+* Added half float mixed precision to `hipsparseSDDMM` where A and B use float16 and C and the compute type use float.
+* Added half float uniform precision to `hipsparseScatter` and `hipsparseGather` routines.
+* Added half float uniform precision to `hipsparseSDDMM` routine.
 * Add `int8` precision to `hipsparseCsr2cscEx2` routine.
-* Add the `almalinux` OS name to correct the gfortran dependency
+* Add the `almalinux` OS name to correct the gfortran dependency.
 
 ### Changed
 
@@ -93,7 +111,7 @@ Documentation for hipSPARSE is available at
 
 ### Optimizations
 
-* Improved user manual 
+* Improved user manual
 * Improved contribution guidelines
 
 ### Known issues

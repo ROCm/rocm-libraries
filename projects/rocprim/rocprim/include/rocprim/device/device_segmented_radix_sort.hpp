@@ -27,13 +27,13 @@
 #include <utility>
 #include <vector>
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "config_types.hpp"
 
-#include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../intrinsics.hpp"
 #include "../types.hpp"
 
 #include "../block/block_load.hpp"
@@ -50,161 +50,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetIterator>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void segmented_sort_kernel(
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    iterations,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit)
-{
-    segmented_sort<Config, Descending>(keys_input,
-                                       keys_tmp,
-                                       keys_output,
-                                       values_input,
-                                       values_tmp,
-                                       values_output,
-                                       to_output,
-                                       begin_offsets,
-                                       end_offsets,
-                                       iterations,
-                                       begin_bit,
-                                       end_bit);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
-    device_params<Config>()
-        .kernel_config
-        .block_size) void
-    segmented_sort_large_kernel(
-        KeysInputIterator                                               keys_input,
-        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-        KeysOutputIterator                                              keys_output,
-        ValuesInputIterator                                             values_input,
-        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-        ValuesOutputIterator                                            values_output,
-        bool                                                            to_output,
-        SegmentIndexIterator                                            segment_indices,
-        OffsetIterator                                                  begin_offsets,
-        OffsetIterator                                                  end_offsets,
-        unsigned int                                                    iterations,
-        unsigned int                                                    begin_bit,
-        unsigned int                                                    end_bit)
-{
-    segmented_sort_large<Config, Descending>(keys_input,
-                                             keys_tmp,
-                                             keys_output,
-                                             values_input,
-                                             values_tmp,
-                                             values_output,
-                                             to_output,
-                                             segment_indices,
-                                             begin_offsets,
-                                             end_offsets,
-                                             iterations,
-                                             begin_bit,
-                                             end_bit);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
-    device_params<Config>()
-        .warp_sort_config
-        .block_size_small) void
-    segmented_sort_small_kernel(
-        KeysInputIterator                                               keys_input,
-        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-        KeysOutputIterator                                              keys_output,
-        ValuesInputIterator                                             values_input,
-        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-        ValuesOutputIterator                                            values_output,
-        bool                                                            to_output,
-        unsigned int                                                    num_segments,
-        SegmentIndexIterator                                            segment_indices,
-        OffsetIterator                                                  begin_offsets,
-        OffsetIterator                                                  end_offsets,
-        unsigned int                                                    begin_bit,
-        unsigned int                                                    end_bit)
-{
-    segmented_sort_small<Config, Descending>(
-        keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-        to_output, num_segments, segment_indices,
-        begin_offsets, end_offsets,
-        begin_bit, end_bit
-    );
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
-    device_params<Config>()
-        .warp_sort_config
-        .block_size_medium) void
-    segmented_sort_medium_kernel(
-        KeysInputIterator                                               keys_input,
-        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-        KeysOutputIterator                                              keys_output,
-        ValuesInputIterator                                             values_input,
-        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-        ValuesOutputIterator                                            values_output,
-        bool                                                            to_output,
-        unsigned int                                                    num_segments,
-        SegmentIndexIterator                                            segment_indices,
-        OffsetIterator                                                  begin_offsets,
-        OffsetIterator                                                  end_offsets,
-        unsigned int                                                    begin_bit,
-        unsigned int                                                    end_bit)
-{
-    segmented_sort_medium<Config, Descending>(keys_input,
-                                              keys_tmp,
-                                              keys_output,
-                                              values_input,
-                                              values_tmp,
-                                              values_output,
-                                              to_output,
-                                              num_segments,
-                                              segment_indices,
-                                              begin_offsets,
-                                              end_offsets,
-                                              begin_bit,
-                                              end_bit);
-}
 
 struct Partitioner
 {
@@ -265,47 +110,45 @@ struct Partitioner
     }
 };
 
-template<
-    class Config,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_impl(void * temporary_storage,
-                                     size_t& storage_size,
-                                     KeysInputIterator keys_input,
-                                     typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                                     KeysOutputIterator keys_output,
-                                     ValuesInputIterator values_input,
-                                     typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                                     ValuesOutputIterator values_output,
-                                     unsigned int size,
-                                     bool& is_result_in_output,
-                                     unsigned int segments,
-                                     OffsetIterator begin_offsets,
-                                     OffsetIterator end_offsets,
-                                     unsigned int begin_bit,
-                                     unsigned int end_bit,
-                                     hipStream_t stream,
-                                     bool debug_synchronous)
+template<class Config,
+         bool Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetIterator>
+inline hipError_t segmented_radix_sort_impl(
+    void*                                                           temporary_storage,
+    size_t&                                                         storage_size,
+    KeysInputIterator                                               keys_input,
+    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
+    KeysOutputIterator                                              keys_output,
+    ValuesInputIterator                                             values_input,
+    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+    ValuesOutputIterator                                            values_output,
+    unsigned int                                                    size,
+    bool&                                                           is_result_in_output,
+    unsigned int                                                    segments,
+    OffsetIterator                                                  begin_offsets,
+    OffsetIterator                                                  end_offsets,
+    unsigned int                                                    begin_bit,
+    unsigned int                                                    end_bit,
+    hipStream_t                                                     stream,
+    bool                                                            debug_synchronous)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using segment_index_type = unsigned int;
+    using key_type               = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type             = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    using segment_index_type     = unsigned int;
     using segment_index_iterator = counting_iterator<segment_index_type>;
 
     static_assert(
-        std::is_same<key_type, typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
-        "KeysInputIterator and KeysOutputIterator must have the same value_type"
-    );
+        std::is_same<key_type,
+                     typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
+        "KeysInputIterator and KeysOutputIterator must have the same value_type");
     static_assert(
-        std::is_same<value_type, typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
-        "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
-    );
+        std::is_same<value_type,
+                     typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
+        "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
 
     using config = wrapped_segmented_radix_sort_config<Config, key_type, value_type>;
 
@@ -317,7 +160,7 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
     }
 
     const detail::segmented_radix_sort_config_params params
-        = detail::dispatch_target_arch<config>(target_arch);
+        = detail::dispatch_target_arch<config, false>(target_arch);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
     const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
@@ -343,7 +186,8 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
     };
     const auto medium_segment_selector = [=](const unsigned int segment_index) mutable -> bool
     {
-        const unsigned int segment_length = end_offsets[segment_index] - begin_offsets[segment_index];
+        const unsigned int segment_length
+            = end_offsets[segment_index] - begin_offsets[segment_index];
         return segment_length > max_small_segment_length;
     };
 
@@ -486,25 +330,35 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         if(large_segment_count > 0)
         {
             std::chrono::steady_clock::time_point start;
-            if(debug_synchronous) start = std::chrono::steady_clock::now();
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_large_kernel<config, Descending>),
-                               dim3(large_segment_count),
-                               dim3(params.kernel_config.block_size),
-                               0,
-                               stream,
-                               keys_input,
-                               keys_tmp,
-                               keys_output,
-                               values_input,
-                               values_tmp,
-                               values_output,
-                               to_output,
-                               large_segment_indices_output,
-                               begin_offsets,
-                               end_offsets,
-                               iterations,
-                               begin_bit,
-                               end_bit);
+            if(debug_synchronous)
+            {
+                start = std::chrono::steady_clock::now();
+            }
+            auto segmented_sort_large_kernel = [=](auto arch_config)
+            {
+                segmented_sort_large<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    to_output,
+                    large_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    iterations,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config>(target_arch,
+                                            segmented_sort_large_kernel,
+                                            dim3(large_segment_count),
+                                            dim3(params.kernel_config.block_size),
+                                            0,
+                                            stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:large_segments",
                                                         large_segment_count,
                                                         start);
@@ -515,53 +369,78 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                 = ::rocprim::detail::ceiling_div(medium_segment_count, medium_segments_per_block);
             std::chrono::steady_clock::time_point start;
             if(debug_synchronous)
+            {
                 start = std::chrono::steady_clock::now();
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_medium_kernel<config, Descending>),
-                               dim3(medium_segment_grid_size),
-                               dim3(params.warp_sort_config.block_size_medium),
-                               0,
-                               stream,
-                               keys_input,
-                               keys_tmp,
-                               keys_output,
-                               values_input,
-                               values_tmp,
-                               values_output,
-                               is_result_in_output,
-                               medium_segment_count,
-                               medium_segment_indices_output,
-                               begin_offsets,
-                               end_offsets,
-                               begin_bit,
-                               end_bit);
+            }
+            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            {
+                segmented_sort_medium<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    is_result_in_output,
+                    medium_segment_count,
+                    medium_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config,
+                                    decltype(segmented_sort_medium_kernel),
+                                    segmented_radix_sort_warp_sort_meduim_config_selector>(
+                    target_arch,
+                    segmented_sort_medium_kernel,
+                    dim3(medium_segment_grid_size),
+                    dim3(params.warp_sort_config.block_size_medium),
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:medium_segments",
                                                         medium_segment_count,
                                                         start);
         }
         if(small_segment_count > 0)
         {
-            const auto small_segment_grid_size = ::rocprim::detail::ceiling_div(small_segment_count,
-                                                                                small_segments_per_block);
+            const auto small_segment_grid_size
+                = ::rocprim::detail::ceiling_div(small_segment_count, small_segments_per_block);
             std::chrono::steady_clock::time_point start;
-            if(debug_synchronous) start = std::chrono::steady_clock::now();
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_small_kernel<config, Descending>),
-                               dim3(small_segment_grid_size),
-                               dim3(params.warp_sort_config.block_size_small),
-                               0,
-                               stream,
-                               keys_input,
-                               keys_tmp,
-                               keys_output,
-                               values_input,
-                               values_tmp,
-                               values_output,
-                               is_result_in_output,
-                               small_segment_count,
-                               small_segment_indices_output,
-                               begin_offsets,
-                               end_offsets,
-                               begin_bit,
-                               end_bit);
+            if(debug_synchronous)
+            {
+                start = std::chrono::steady_clock::now();
+            }
+            auto segmented_sort_small_kernel = [=](auto arch_config)
+            {
+                segmented_sort_small<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    is_result_in_output,
+                    small_segment_count,
+                    small_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config,
+                                    decltype(segmented_sort_small_kernel),
+                                    segmented_radix_sort_warp_sort_small_config_selector>(
+                    target_arch,
+                    segmented_sort_small_kernel,
+                    dim3(small_segment_grid_size),
+                    dim3(params.warp_sort_config.block_size_small),
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:small_segments",
                                                         small_segment_count,
                                                         start);
@@ -570,30 +449,36 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
     else
     {
         std::chrono::steady_clock::time_point start;
-        if(debug_synchronous) start = std::chrono::steady_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_kernel<config, Descending>),
-                           dim3(segments),
-                           dim3(params.kernel_config.block_size),
-                           0,
-                           stream,
-                           keys_input,
-                           keys_tmp,
-                           keys_output,
-                           values_input,
-                           values_tmp,
-                           values_output,
-                           to_output,
-                           begin_offsets,
-                           end_offsets,
-                           iterations,
-                           begin_bit,
-                           end_bit);
+        if(debug_synchronous)
+        {
+            start = std::chrono::steady_clock::now();
+        }
+        auto segmented_sort_kernel = [=](auto arch_config)
+        {
+            segmented_sort<decltype(arch_config), Descending>(keys_input,
+                                                              keys_tmp,
+                                                              keys_output,
+                                                              values_input,
+                                                              values_tmp,
+                                                              values_output,
+                                                              to_output,
+                                                              begin_offsets,
+                                                              end_offsets,
+                                                              iterations,
+                                                              begin_bit,
+                                                              end_bit);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                            segmented_sort_kernel,
+                                                            dim3(segments),
+                                                            dim3(params.kernel_config.block_size),
+                                                            0,
+                                                            stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start);
     }
     return hipSuccess;
 }
-
-
 
 } // end namespace detail
 
@@ -691,38 +576,43 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 /// // keys_output: [0.3, 0.6, 0.65, 0.08, 0.2, 0.4, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class OffsetIterator,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t segmented_radix_sort_keys(void * temporary_storage,
-                                     size_t& storage_size,
-                                     KeysInputIterator keys_input,
-                                     KeysOutputIterator keys_output,
-                                     unsigned int size,
-                                     unsigned int segments,
-                                     OffsetIterator begin_offsets,
-                                     OffsetIterator end_offsets,
-                                     unsigned int begin_bit = 0,
-                                     unsigned int end_bit = 8 * sizeof(Key),
-                                     hipStream_t stream = 0,
-                                     bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class OffsetIterator,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+inline hipError_t segmented_radix_sort_keys(void*              temporary_storage,
+                                            size_t&            storage_size,
+                                            KeysInputIterator  keys_input,
+                                            KeysOutputIterator keys_output,
+                                            unsigned int       size,
+                                            unsigned int       segments,
+                                            OffsetIterator     begin_offsets,
+                                            OffsetIterator     end_offsets,
+                                            unsigned int       begin_bit         = 0,
+                                            unsigned int       end_bit           = 8 * sizeof(Key),
+                                            hipStream_t        stream            = 0,
+                                            bool               debug_synchronous = false)
 {
-    empty_type * values = nullptr;
-    bool ignored;
-    return detail::segmented_radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values, nullptr, values,
-        size, ignored,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    empty_type* values = nullptr;
+    bool        ignored;
+    return detail::segmented_radix_sort_impl<Config, false>(temporary_storage,
+                                                            storage_size,
+                                                            keys_input,
+                                                            nullptr,
+                                                            keys_output,
+                                                            values,
+                                                            nullptr,
+                                                            values,
+                                                            size,
+                                                            ignored,
+                                                            segments,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            begin_bit,
+                                                            end_bit,
+                                                            stream,
+                                                            debug_synchronous);
 }
 
 /// \brief Parallel descending radix sort primitive for device level.
@@ -819,38 +709,43 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// // keys_output: [6, 3, 5, 8, 7, 4, 2, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class OffsetIterator,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
-                                          size_t& storage_size,
-                                          KeysInputIterator keys_input,
-                                          KeysOutputIterator keys_output,
-                                          unsigned int size,
-                                          unsigned int segments,
-                                          OffsetIterator begin_offsets,
-                                          OffsetIterator end_offsets,
-                                          unsigned int begin_bit = 0,
-                                          unsigned int end_bit = 8 * sizeof(Key),
-                                          hipStream_t stream = 0,
-                                          bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class OffsetIterator,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+inline hipError_t segmented_radix_sort_keys_desc(void*              temporary_storage,
+                                                 size_t&            storage_size,
+                                                 KeysInputIterator  keys_input,
+                                                 KeysOutputIterator keys_output,
+                                                 unsigned int       size,
+                                                 unsigned int       segments,
+                                                 OffsetIterator     begin_offsets,
+                                                 OffsetIterator     end_offsets,
+                                                 unsigned int       begin_bit = 0,
+                                                 unsigned int       end_bit   = 8 * sizeof(Key),
+                                                 hipStream_t        stream    = 0,
+                                                 bool               debug_synchronous = false)
 {
-    empty_type * values = nullptr;
-    bool ignored;
-    return detail::segmented_radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values, nullptr, values,
-        size, ignored,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    empty_type* values = nullptr;
+    bool        ignored;
+    return detail::segmented_radix_sort_impl<Config, true>(temporary_storage,
+                                                           storage_size,
+                                                           keys_input,
+                                                           nullptr,
+                                                           keys_output,
+                                                           values,
+                                                           nullptr,
+                                                           values,
+                                                           size,
+                                                           ignored,
+                                                           segments,
+                                                           begin_offsets,
+                                                           end_offsets,
+                                                           begin_bit,
+                                                           end_bit,
+                                                           stream,
+                                                           debug_synchronous);
 }
 
 /// \brief Parallel ascending radix sort-by-key primitive for device level.
@@ -963,41 +858,46 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// // values_output: [2, -5, -4, -1, -2, 3, 7, -8]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t segmented_radix_sort_pairs(void * temporary_storage,
-                                      size_t& storage_size,
-                                      KeysInputIterator keys_input,
-                                      KeysOutputIterator keys_output,
-                                      ValuesInputIterator values_input,
-                                      ValuesOutputIterator values_output,
-                                      unsigned int size,
-                                      unsigned int segments,
-                                      OffsetIterator begin_offsets,
-                                      OffsetIterator end_offsets,
-                                      unsigned int begin_bit = 0,
-                                      unsigned int end_bit = 8 * sizeof(Key),
-                                      hipStream_t stream = 0,
-                                      bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetIterator,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+inline hipError_t segmented_radix_sort_pairs(void*                temporary_storage,
+                                             size_t&              storage_size,
+                                             KeysInputIterator    keys_input,
+                                             KeysOutputIterator   keys_output,
+                                             ValuesInputIterator  values_input,
+                                             ValuesOutputIterator values_output,
+                                             unsigned int         size,
+                                             unsigned int         segments,
+                                             OffsetIterator       begin_offsets,
+                                             OffsetIterator       end_offsets,
+                                             unsigned int         begin_bit = 0,
+                                             unsigned int         end_bit   = 8 * sizeof(Key),
+                                             hipStream_t          stream    = 0,
+                                             bool                 debug_synchronous = false)
 {
     bool ignored;
-    return detail::segmented_radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values_input, nullptr, values_output,
-        size, ignored,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    return detail::segmented_radix_sort_impl<Config, false>(temporary_storage,
+                                                            storage_size,
+                                                            keys_input,
+                                                            nullptr,
+                                                            keys_output,
+                                                            values_input,
+                                                            nullptr,
+                                                            values_output,
+                                                            size,
+                                                            ignored,
+                                                            segments,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            begin_bit,
+                                                            end_bit,
+                                                            stream,
+                                                            debug_synchronous);
 }
 
 /// \brief Parallel descending radix sort-by-key primitive for device level.
@@ -1107,41 +1007,46 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// // values_output: [-5, 2, -4, -8, 7, 3, -1, -2]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
-                                           size_t& storage_size,
-                                           KeysInputIterator keys_input,
-                                           KeysOutputIterator keys_output,
-                                           ValuesInputIterator values_input,
-                                           ValuesOutputIterator values_output,
-                                           unsigned int size,
-                                           unsigned int segments,
-                                           OffsetIterator begin_offsets,
-                                           OffsetIterator end_offsets,
-                                           unsigned int begin_bit = 0,
-                                           unsigned int end_bit = 8 * sizeof(Key),
-                                           hipStream_t stream = 0,
-                                           bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetIterator,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+inline hipError_t segmented_radix_sort_pairs_desc(void*                temporary_storage,
+                                                  size_t&              storage_size,
+                                                  KeysInputIterator    keys_input,
+                                                  KeysOutputIterator   keys_output,
+                                                  ValuesInputIterator  values_input,
+                                                  ValuesOutputIterator values_output,
+                                                  unsigned int         size,
+                                                  unsigned int         segments,
+                                                  OffsetIterator       begin_offsets,
+                                                  OffsetIterator       end_offsets,
+                                                  unsigned int         begin_bit = 0,
+                                                  unsigned int         end_bit   = 8 * sizeof(Key),
+                                                  hipStream_t          stream    = 0,
+                                                  bool                 debug_synchronous = false)
 {
     bool ignored;
-    return detail::segmented_radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values_input, nullptr, values_output,
-        size, ignored,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    return detail::segmented_radix_sort_impl<Config, true>(temporary_storage,
+                                                           storage_size,
+                                                           keys_input,
+                                                           nullptr,
+                                                           keys_output,
+                                                           values_input,
+                                                           nullptr,
+                                                           values_output,
+                                                           size,
+                                                           ignored,
+                                                           segments,
+                                                           begin_offsets,
+                                                           end_offsets,
+                                                           begin_bit,
+                                                           end_bit,
+                                                           stream,
+                                                           debug_synchronous);
 }
 
 /// \brief Parallel ascending radix sort primitive for device level.
@@ -1242,35 +1147,38 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// // keys.current(): [0.3, 0.6, 0.65, 0.08, 0.2, 0.4, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_keys(void * temporary_storage,
-                                     size_t& storage_size,
-                                     double_buffer<Key>& keys,
-                                     unsigned int size,
-                                     unsigned int segments,
-                                     OffsetIterator begin_offsets,
-                                     OffsetIterator end_offsets,
-                                     unsigned int begin_bit = 0,
-                                     unsigned int end_bit = 8 * sizeof(Key),
-                                     hipStream_t stream = 0,
-                                     bool debug_synchronous = false)
+template<class Config = default_config, class Key, class OffsetIterator>
+inline hipError_t segmented_radix_sort_keys(void*               temporary_storage,
+                                            size_t&             storage_size,
+                                            double_buffer<Key>& keys,
+                                            unsigned int        size,
+                                            unsigned int        segments,
+                                            OffsetIterator      begin_offsets,
+                                            OffsetIterator      end_offsets,
+                                            unsigned int        begin_bit         = 0,
+                                            unsigned int        end_bit           = 8 * sizeof(Key),
+                                            hipStream_t         stream            = 0,
+                                            bool                debug_synchronous = false)
 {
-    empty_type * values = nullptr;
-    bool is_result_in_output;
-    hipError_t error = detail::segmented_radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values, values, values,
-        size, is_result_in_output,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::segmented_radix_sort_impl<Config, false>(temporary_storage,
+                                                                        storage_size,
+                                                                        keys.current(),
+                                                                        keys.current(),
+                                                                        keys.alternate(),
+                                                                        values,
+                                                                        values,
+                                                                        values,
+                                                                        size,
+                                                                        is_result_in_output,
+                                                                        segments,
+                                                                        begin_offsets,
+                                                                        end_offsets,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        debug_synchronous);
     if(temporary_storage != nullptr && is_result_in_output)
     {
         keys.swap();
@@ -1376,35 +1284,38 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// // keys.current(): [6, 3, 5, 8, 7, 4, 2, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
-                                          size_t& storage_size,
-                                          double_buffer<Key>& keys,
-                                          unsigned int size,
-                                          unsigned int segments,
-                                          OffsetIterator begin_offsets,
-                                          OffsetIterator end_offsets,
-                                          unsigned int begin_bit = 0,
-                                          unsigned int end_bit = 8 * sizeof(Key),
-                                          hipStream_t stream = 0,
-                                          bool debug_synchronous = false)
+template<class Config = default_config, class Key, class OffsetIterator>
+inline hipError_t segmented_radix_sort_keys_desc(void*               temporary_storage,
+                                                 size_t&             storage_size,
+                                                 double_buffer<Key>& keys,
+                                                 unsigned int        size,
+                                                 unsigned int        segments,
+                                                 OffsetIterator      begin_offsets,
+                                                 OffsetIterator      end_offsets,
+                                                 unsigned int        begin_bit = 0,
+                                                 unsigned int        end_bit   = 8 * sizeof(Key),
+                                                 hipStream_t         stream    = 0,
+                                                 bool                debug_synchronous = false)
 {
-    empty_type * values = nullptr;
-    bool is_result_in_output;
-    hipError_t error = detail::segmented_radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values, values, values,
-        size, is_result_in_output,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::segmented_radix_sort_impl<Config, true>(temporary_storage,
+                                                                       storage_size,
+                                                                       keys.current(),
+                                                                       keys.current(),
+                                                                       keys.alternate(),
+                                                                       values,
+                                                                       values,
+                                                                       values,
+                                                                       size,
+                                                                       is_result_in_output,
+                                                                       segments,
+                                                                       begin_offsets,
+                                                                       end_offsets,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream,
+                                                                       debug_synchronous);
     if(temporary_storage != nullptr && is_result_in_output)
     {
         keys.swap();
@@ -1524,36 +1435,38 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// // values.current(): [2, -5, -4, -1, -2, 3, 7, -8]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Value,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_pairs(void * temporary_storage,
-                                      size_t& storage_size,
-                                      double_buffer<Key>& keys,
-                                      double_buffer<Value>& values,
-                                      unsigned int size,
-                                      unsigned int segments,
-                                      OffsetIterator begin_offsets,
-                                      OffsetIterator end_offsets,
-                                      unsigned int begin_bit = 0,
-                                      unsigned int end_bit = 8 * sizeof(Key),
-                                      hipStream_t stream = 0,
-                                      bool debug_synchronous = false)
+template<class Config = default_config, class Key, class Value, class OffsetIterator>
+inline hipError_t segmented_radix_sort_pairs(void*                 temporary_storage,
+                                             size_t&               storage_size,
+                                             double_buffer<Key>&   keys,
+                                             double_buffer<Value>& values,
+                                             unsigned int          size,
+                                             unsigned int          segments,
+                                             OffsetIterator        begin_offsets,
+                                             OffsetIterator        end_offsets,
+                                             unsigned int          begin_bit = 0,
+                                             unsigned int          end_bit   = 8 * sizeof(Key),
+                                             hipStream_t           stream    = 0,
+                                             bool                  debug_synchronous = false)
 {
-    bool is_result_in_output;
-    hipError_t error = detail::segmented_radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values.current(), values.current(), values.alternate(),
-        size, is_result_in_output,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    bool       is_result_in_output;
+    hipError_t error = detail::segmented_radix_sort_impl<Config, false>(temporary_storage,
+                                                                        storage_size,
+                                                                        keys.current(),
+                                                                        keys.current(),
+                                                                        keys.alternate(),
+                                                                        values.current(),
+                                                                        values.current(),
+                                                                        values.alternate(),
+                                                                        size,
+                                                                        is_result_in_output,
+                                                                        segments,
+                                                                        begin_offsets,
+                                                                        end_offsets,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        debug_synchronous);
     if(temporary_storage != nullptr && is_result_in_output)
     {
         keys.swap();
@@ -1668,36 +1581,38 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// // values.current(): [-5, 2, -4, -8, 7, 3, -1, -2]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Value,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
-                                           size_t& storage_size,
-                                           double_buffer<Key>& keys,
-                                           double_buffer<Value>& values,
-                                           unsigned int size,
-                                           unsigned int segments,
-                                           OffsetIterator begin_offsets,
-                                           OffsetIterator end_offsets,
-                                           unsigned int begin_bit = 0,
-                                           unsigned int end_bit = 8 * sizeof(Key),
-                                           hipStream_t stream = 0,
-                                           bool debug_synchronous = false)
+template<class Config = default_config, class Key, class Value, class OffsetIterator>
+inline hipError_t segmented_radix_sort_pairs_desc(void*                 temporary_storage,
+                                                  size_t&               storage_size,
+                                                  double_buffer<Key>&   keys,
+                                                  double_buffer<Value>& values,
+                                                  unsigned int          size,
+                                                  unsigned int          segments,
+                                                  OffsetIterator        begin_offsets,
+                                                  OffsetIterator        end_offsets,
+                                                  unsigned int          begin_bit = 0,
+                                                  unsigned int          end_bit   = 8 * sizeof(Key),
+                                                  hipStream_t           stream    = 0,
+                                                  bool                  debug_synchronous = false)
 {
-    bool is_result_in_output;
-    hipError_t error = detail::segmented_radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values.current(), values.current(), values.alternate(),
-        size, is_result_in_output,
-        segments, begin_offsets, end_offsets,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    bool       is_result_in_output;
+    hipError_t error = detail::segmented_radix_sort_impl<Config, true>(temporary_storage,
+                                                                       storage_size,
+                                                                       keys.current(),
+                                                                       keys.current(),
+                                                                       keys.alternate(),
+                                                                       values.current(),
+                                                                       values.current(),
+                                                                       values.alternate(),
+                                                                       size,
+                                                                       is_result_in_output,
+                                                                       segments,
+                                                                       begin_offsets,
+                                                                       end_offsets,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream,
+                                                                       debug_synchronous);
     if(temporary_storage != nullptr && is_result_in_output)
     {
         keys.swap();
