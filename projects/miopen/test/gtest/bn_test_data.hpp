@@ -146,6 +146,7 @@ inline std::vector<BN2DTestCase> Network2DLarge()
 template <>
 inline std::vector<BN3DTestCase> Network3DSerialCase()
 {
+    // clang-format off
     return {
         // TODO: fix numeric issues before re-enabling large test
 #ifndef WORKAROUND_SWDEV_549725
@@ -153,6 +154,7 @@ inline std::vector<BN3DTestCase> Network3DSerialCase()
 #endif
         {2, 128, 16, 128, 128, miopen::batchnorm::Direction::Backward, 0, 1},
     };
+    // clang-format on
 }
 
 template <>
