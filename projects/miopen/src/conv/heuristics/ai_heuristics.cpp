@@ -37,6 +37,8 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/env.hpp>
 
+#include <any>
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
 // 3D AI heuristics - now declared properly in header

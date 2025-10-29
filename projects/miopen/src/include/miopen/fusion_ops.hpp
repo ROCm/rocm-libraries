@@ -27,8 +27,8 @@
 #ifndef MIOPEN_GUARD_MLOPEN_FUSION_OPS_HPP
 #define MIOPEN_GUARD_MLOPEN_FUSION_OPS_HPP
 
-#include <ostream>
 #include <any>
+#include <ostream>
 
 namespace miopen {
 

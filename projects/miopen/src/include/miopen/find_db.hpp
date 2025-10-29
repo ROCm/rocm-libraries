@@ -92,14 +92,17 @@ public:
                    const TProblemDescription& problem,
                    const std::string& path_suffix = "",
                    is_immediate_t<TTestDb>        = 0)
-        : path(debug::testing_find_db_path_override() ? *debug::testing_find_db_path_override()
-                                                      : GetUserPath(handle, path_suffix)),
-          installed_path(debug::testing_find_db_path_override()
-                             ? *debug::testing_find_db_path_override()
+        // NOLINTBEGIN (bugprone-unchecked-optional-access)
+        : path(debug::testing_find_db_path_override().has_value()
+                   ? debug::testing_find_db_path_override().value()
+                   : GetUserPath(handle, path_suffix)),
+          installed_path(debug::testing_find_db_path_override().has_value()
+                             ? debug::testing_find_db_path_override().value()
                              : GetInstalledPath(handle, path_suffix)),
           db(construct_db(debug::testing_find_db_enabled &&
                               !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
                           DbTimer<TDb>{DbKinds::FindDb, installed_path, path}))
+    // NOLINTEND (bugprone-unchecked-optional-access)
     {
         if(!db)
             return;
@@ -113,8 +116,10 @@ public:
                    const TProblemDescription& problem,
                    const std::string& path_suffix = "",
                    is_find_t<TTestDb>             = 0)
-        : path(debug::testing_find_db_path_override() ? *debug::testing_find_db_path_override()
-                                                      : GetUserPath(handle, path_suffix)),
+        // NOLINTBEGIN (bugprone-unchecked-optional-access)
+        : path(debug::testing_find_db_path_override().has_value()
+                   ? debug::testing_find_db_path_override().value()
+                   : GetUserPath(handle, path_suffix)),
 #if MIOPEN_DISABLE_USERDB
           db(std::optional<DbTimer<TDb>>{DbKinds::FindDb})
 #else
@@ -122,6 +127,7 @@ public:
                               !env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB),
                           DbTimer<TDb>{DbKinds::FindDb, path, false}))
 #endif
+    // NOLINTEND (bugprone-unchecked-optional-access)
     {
         if(!db)
             return;
@@ -138,10 +144,12 @@ public:
             MIOPEN_LOG_E("Failed to store record to find-db at <" << path << ">");
     }
 
-    auto begin() const { return content->As<FindDbData>().begin(); }
-    auto begin() { return content->As<FindDbData>().begin(); }
-    auto end() const { return content->As<FindDbData>().end(); }
-    auto end() { return content->As<FindDbData>().end(); }
+    // NOLINTBEGIN (bugprone-unchecked-optional-access)
+    auto begin() const { return content.value().As<FindDbData>().begin(); }
+    auto begin() { return content.value().As<FindDbData>().begin(); }
+    auto end() const { return content.value().As<FindDbData>().end(); }
+    auto end() { return content.value().As<FindDbData>().end(); }
+    // NOLINTEND (bugprone-unchecked-optional-access)
     bool empty() const { return !content.has_value(); }
 
     template <class TProblemDescription>

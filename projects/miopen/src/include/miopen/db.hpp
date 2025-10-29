@@ -30,8 +30,6 @@
 #include <miopen/rank.hpp>
 #include <miopen/filesystem.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
-
 #include <chrono>
 #include <optional>
 #include <string>

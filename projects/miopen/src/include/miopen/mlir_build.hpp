@@ -29,7 +29,6 @@
 #include <miopen/config.h>
 #if MIOPEN_USE_MLIR
 
-#include <optional>
 #include <string>
 #include <vector>
 

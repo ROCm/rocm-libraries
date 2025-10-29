@@ -59,8 +59,9 @@ bool ConvAsm5x10u2v2f1::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false;
 
     const std::string name = ctx.GetStream().GetDeviceName();
     const bool device_is_gfx8_9_no_xnack =

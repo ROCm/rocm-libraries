@@ -28,6 +28,7 @@
 #include <miopen/target_properties.hpp>
 
 #include <map>
+#include <optional>
 #include <string>
 
 #define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.

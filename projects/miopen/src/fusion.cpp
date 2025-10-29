@@ -23,8 +23,6 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <array>
-#include <cassert>
 #include <miopen/batch_norm.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/fusion_plan.hpp>
@@ -40,10 +38,14 @@
 #include <miopen/conv/solver_finders.hpp>
 #include <miopen/driver_arguments.hpp>
 
-#include <ostream>
-#include <algorithm>
-#include <string>
 #include <half/half.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <optional>
+#include <ostream>
+#include <string>
 
 #define MIOPEN_CHECK(x)          \
     if(x != miopenStatusSuccess) \

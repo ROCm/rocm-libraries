@@ -670,8 +670,9 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
 
     const auto name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx9") || StartsWith(name, "gfx10") || StartsWith(name, "gfx11")))

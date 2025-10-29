@@ -26,6 +26,7 @@
 #pragma once
 
 #include <miopen/db.hpp>
+#include <miopen/db_record.hpp>
 #include <miopen/lock_file.hpp>
 
 #include <any>

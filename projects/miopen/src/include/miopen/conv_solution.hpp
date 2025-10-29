@@ -31,6 +31,7 @@
 #include <miopen/kernel_info.hpp>
 #include <miopen/invoker.hpp>
 
+#include <ostream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -67,7 +68,6 @@ struct ConvSolution
     ConvSolution(miopenStatus_t status_ = miopenStatusSuccess)
         : status(status_),
           solver_id("<unknown>"),
-          invoker_factory(std::nullopt),
           workspace_sz(0),
           grp_tile1(-1),
           grp_tile0(-1),

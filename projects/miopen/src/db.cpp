@@ -209,7 +209,7 @@ std::optional<DbRecord> PlainTextDb::FindRecordUnsafe(const std::string& key, Re
         return record;
     }
     // Record was not found
-    return std::nullopt;
+    return {};
 }
 
 static void Copy(std::istream& from, std::ostream& to, std::streamoff count)

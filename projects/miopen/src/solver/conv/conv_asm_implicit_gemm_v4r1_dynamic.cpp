@@ -324,8 +324,10 @@ bool ConvAsmImplicitGemmV4R1DynamicFwd::IsApplicable(const ExecutionContext& ctx
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
+
     auto tunables = GetImplicitGemmV4R1DynamicTunables();
     return !std::none_of(tunables.begin(), tunables.end(), [&](auto tunable) {
         return tunable.IsValid(ctx, problem);
@@ -371,8 +373,10 @@ bool ConvAsmImplicitGemmV4R1DynamicFwd_1x1::IsApplicable(const ExecutionContext&
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
+
     auto tunables = GetImplicitGemmV4R1DynamicTunables();
     return !std::none_of(tunables.begin(), tunables.end(), [&](auto tunable) {
         return tunable.IsValid(ctx, problem);

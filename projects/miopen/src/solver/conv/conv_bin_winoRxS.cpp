@@ -33,8 +33,6 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/tensors.hpp>
 
-#include <boost/any.hpp>
-
 /// Global switch
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_RXS)
 /// Sub-switches for testing/debugging
@@ -250,8 +248,9 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
 
     const auto name = ctx.GetStream().GetDeviceName();
     const bool fp16 = problem.IsFp16();

@@ -23,11 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <any>
 #include <cassert>
+
 #include <miopen/fusion.hpp>
 #include <miopen/logger.hpp>
 
-#include <any>
 
 namespace miopen {
 std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)

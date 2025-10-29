@@ -1554,8 +1554,9 @@ bool ConvAsmImplicitGemmGTCDynamicFwdXdlops::IsApplicable(const ExecutionContext
 #endif
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false;
 
     bool isValid;
     std::tie(isValid, std::ignore, std::ignore, std::ignore, std::ignore) =

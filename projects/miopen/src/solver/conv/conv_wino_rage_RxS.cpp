@@ -84,9 +84,10 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     if(!(devName == "gfx942"))
         return false;
 
-    const auto& targetProperties = ctx.GetStream().GetTargetProperties();
-    if(targetProperties.Xnack() && *targetProperties.Xnack())
-        return false;
+    const auto& target = ctx.GetStream().GetTargetProperties();
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
 
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;

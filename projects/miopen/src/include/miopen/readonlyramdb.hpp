@@ -29,10 +29,10 @@
 #include <miopen/db_record.hpp>
 #include <miopen/filesystem.hpp>
 
-#include <unordered_map>
+#include <optional>
 #include <string>
 #include <sstream>
-#include <optional>
+#include <unordered_map>
 
 namespace miopen {
 

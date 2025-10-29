@@ -499,8 +499,9 @@ bool ConvAsmBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false;
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false;
 
     if(!problem.IsLayoutDefault())
         return false;

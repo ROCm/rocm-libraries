@@ -36,6 +36,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <sstream>
 
 namespace miopen {

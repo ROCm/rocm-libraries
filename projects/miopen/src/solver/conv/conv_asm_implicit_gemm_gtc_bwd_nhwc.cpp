@@ -1012,8 +1012,9 @@ bool ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC::IsApplicable(
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
-        return false; // NOLINT (readability-simplify-boolean-expr)
+    if(const auto xnack = target.Xnack(); xnack.has_value())
+        if(*xnack)
+            return false; // NOLINT (readability-simplify-boolean-expr)
 
     if(0 ==
        igemm_split_batch_size(ProblemInterpreter::GetInputHeightHi(problem),

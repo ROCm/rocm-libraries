@@ -201,7 +201,10 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
     auto db           = MakeConvDbGetter(ctx);
     auto solution     = solver.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
     auto& handle      = ctx.GetStream();
-    auto invoker = handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    // NOLINTBEGIN (bugprone-unchecked-optional-access)
+    auto invoker =
+        handle.PrepareInvoker(solution.invoker_factory.value(), solution.construction_params);
+    // NOLINTEND (bugprone-unchecked-optional-access)
     const auto algo = AlgorithmName{solver_id.GetAlgo(problem.GetDirection())};
 
     handle.RegisterInvoker(invoker, config, solver_id.ToString(), algo);
