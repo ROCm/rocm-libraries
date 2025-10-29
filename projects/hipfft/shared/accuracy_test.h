@@ -247,7 +247,7 @@ inline void execute_gpu_fft(Tparams&              params,
 
     if(params.run_callbacks)
     {
-        auto add_load_cb = [&](void* ibuffer) {
+        auto add_load_cb = [&]() {
             void* load_cb_host
                 = get_load_callback_host(params.itype, params.precision, round_trip_inverse);
 
@@ -302,8 +302,20 @@ inline void execute_gpu_fft(Tparams&              params,
 
         if(params.ifields.empty())
         {
-            // load cb for current HIP device
-            add_load_cb(pibuffer.front());
+            // for library-decomposed multi-GPU, one cb for each device
+            if(params.multiGPU > 1)
+            {
+                for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+                {
+                    rocfft_scoped_device dev(i);
+                    add_load_cb();
+                }
+            }
+            else
+            {
+                // load cb for current HIP device
+                add_load_cb();
+            }
         }
         else
         {
@@ -311,11 +323,11 @@ inline void execute_gpu_fft(Tparams&              params,
             {
                 // load cb for this brick's device
                 rocfft_scoped_device dev(params.ifields.front().bricks[i].device);
-                add_load_cb(pibuffer[i]);
+                add_load_cb();
             }
         }
 
-        auto add_store_cb = [&](void* obuffer) {
+        auto add_store_cb = [&]() {
             void* store_cb_host
                 = get_store_callback_host(params.otype, params.precision, round_trip_inverse);
 
@@ -372,8 +384,20 @@ inline void execute_gpu_fft(Tparams&              params,
 
         if(params.ofields.empty())
         {
-            // store cb for current HIP device
-            add_store_cb(pobuffer.front());
+            // for library-decomposed multi-GPU, one cb for each device
+            if(params.multiGPU > 1)
+            {
+                for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+                {
+                    rocfft_scoped_device dev(i);
+                    add_store_cb();
+                }
+            }
+            else
+            {
+                // store cb for current HIP device
+                add_store_cb();
+            }
         }
         else
         {
@@ -381,7 +405,7 @@ inline void execute_gpu_fft(Tparams&              params,
             {
                 // store cb for this brick's device
                 rocfft_scoped_device dev(params.ofields.front().bricks[i].device);
-                add_store_cb(pobuffer[i]);
+                add_store_cb();
             }
         }
 
