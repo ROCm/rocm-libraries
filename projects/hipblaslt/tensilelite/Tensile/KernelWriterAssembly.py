@@ -615,23 +615,17 @@ class KernelWriterAssembly(KernelWriter):
     # (we reclaim them to use as temps, typically for execmasks)
     # Mostly impacts flat kernels and GSU edge since these need SGPR
     # for conditionals
-    if kernel["enableTDMA"] or kernel["enableTDMA"]:
-      module.add(self.defineSgpr("tdmGroup3", 4, 4))
-
     if kernel["enableTDMA"]:
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
-      module.add(self.defineSgpr("tdmAGroup2", 4, 4))
 
     if kernel["enableTDMB"]:
       if prod(kernel["MIWaveGroup"]) > 1:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
-        module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        module.add(self.defineSgpr("tdmBGroup2", 4, 4))
 
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
@@ -9939,14 +9933,14 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      imod.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", "tdmAGroup2", "tdmGroup3"))
+      imod.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
       return imod
 
     if tc == "B" and kernel["enableTDMB"]:
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", "tdmBGroup2", "tdmGroup3"))
+        imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
       return imod
 
     # sizeK % LOCAL_DEPTHU
@@ -16471,9 +16465,8 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
-      if idx < 3:
-        return f"tdm{tc}Group{idx}"
-      return f"tdmGroup{idx}"
+      assert idx < 2
+      return f"tdm{tc}Group{idx}"
 
     def strideRefName() -> str:
       return f"Stride{tc}{tileChar}"
@@ -16492,7 +16485,7 @@ class KernelWriterAssembly(KernelWriter):
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
 
-    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), descSgprName(2), descSgprName(3)))
+    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
 
@@ -16521,9 +16514,8 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
-      if idx < 3:
-        return f"tdm{tc}Group{idx}"
-      return f"tdmGroup{idx}"
+      assert idx < 2
+      return f"tdm{tc}Group{idx}"
 
     def strideRefName() -> str:
       return f"Stride{tc}{tileChar}"
@@ -16544,7 +16536,7 @@ class KernelWriterAssembly(KernelWriter):
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
 
-    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), descSgprName(2), descSgprName(3)))
+    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
 
