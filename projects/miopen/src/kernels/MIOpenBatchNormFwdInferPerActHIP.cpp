@@ -53,8 +53,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                             unsigned int hwStride,
                                             unsigned int batchStride)
 {
-    unsigned int tidx = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int tidy = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
+    unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
 
     // decide vector sizes based on problem layout
     unsigned int vecSizeX, vecSizeY;
@@ -113,7 +113,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
         {
             inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = fma(pscale[i], inhat[i], pbias[i]);
+            inhat[i] = pscale[i] * inhat[i] + pbias[i];
             value[i] = CVT_ACCUM2FLOAT(inhat[i]);
         }
 
