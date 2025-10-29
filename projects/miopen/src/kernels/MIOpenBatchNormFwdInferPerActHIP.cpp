@@ -57,17 +57,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
 
     // decide vector sizes based on problem layout
-    unsigned int vecSizeX, vecSizeY;
-    if constexpr(MIO_LAYOUT_NHWC)
-    {
-        vecSizeX = MIO_BN_VEC_SIZE;
-        vecSizeY = 1;
-    }
-    else // NCHW layout
-    {
-        vecSizeX = 1;
-        vecSizeY = MIO_BN_VEC_SIZE;
-    }
+    constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
+    constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
     if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw)
