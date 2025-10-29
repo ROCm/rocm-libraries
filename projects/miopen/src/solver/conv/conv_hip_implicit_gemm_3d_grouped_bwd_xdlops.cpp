@@ -448,6 +448,19 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
                 [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
                 return FillValidKernelsByAlphaBeta<T>(problem);
             };
+            // Validation lambda for AI-predicted kernel + split_k combinations
+            // Note: This solver currently doesn't use split_k (always 0), but validation
+            // infrastructure is in place for future split_k support
+            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
+                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
+                    return false;
+                
+                // TODO: Add split_k validation when split_k support is implemented
+                // For now, accept any split_k value (typically 0 for this solver)
+                (void)split_k_value;
+                return true;
+            };
+
             return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
                                                                         problem,
                                                                         valid_kernels,
@@ -455,7 +468,8 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
                                                                         split_k,
                                                                         kernel_id,
                                                                         fill_valid_kernels,
-                                                                        solver_name);
+                                                                        solver_name,
+                                                                        is_kernel_split_k_valid);
         };
         switch(problem.GetInDataType())
         {

@@ -322,8 +322,16 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
-        ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
+    auto [ai_success, result] =
+        miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
+                                                                 problem,
+                                                                 valid_kernels,
+                                                                 index,
+                                                                 split_k,
+                                                                 kernel_id,
+                                                                 fill_valid_kernels,
+                                                                 solver_name,
+                                                                 AcceptAllCombinations);
 
     ASSERT_TRUE(ai_success);
     ASSERT_FALSE(kernel_id.empty());
@@ -340,8 +348,16 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
 
-    auto [ai_success, result] = miopen::solver::conv::RunParameterPredictionModel<float>(
-        ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
+    auto [ai_success, result] =
+        miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
+                                                                 problem,
+                                                                 valid_kernels,
+                                                                 index,
+                                                                 split_k,
+                                                                 kernel_id,
+                                                                 empty_kernels,
+                                                                 solver_name,
+                                                                 AcceptAllCombinations);
 
     ASSERT_FALSE(ai_success);
     ASSERT_TRUE(kernel_id.empty());

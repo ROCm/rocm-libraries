@@ -51,37 +51,11 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
                                                   std::vector<std::vector<std::string>>& kernels);
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
-// Main template implementation
-// Version with default validation (accept all)
-template <typename DataType>
-std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel(
-    const miopen::ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem,
-    std::vector<std::string>& valid_kernels,
-    int& index,
-    int& split_k,
-    std::string& kernel_id,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-        fill_valid_kernels,
-    std::string solver_name)
-{
-    // Default validation: accept all combinations
-    auto default_validation = [](int, int) { return true; };
 
-    // Call the version with validation
-    return RunParameterPredictionModel<DataType>(ctx,
-                                                 problem,
-                                                 valid_kernels,
-                                                 index,
-                                                 split_k,
-                                                 kernel_id,
-                                                 fill_valid_kernels,
-                                                 solver_name,
-                                                 default_validation);
-}
+// Default validation function: accepts all kernel/split_k combinations
+inline constexpr auto AcceptAllCombinations = [](int, int) { return true; };
 
-// Version with custom validation function
+// Main template implementation with validation function
 template <typename DataType, typename ValidationFunc>
 std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
 RunParameterPredictionModel(
