@@ -188,5 +188,5 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // Validate results
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor.memory(), yTensor.memory()));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
 }

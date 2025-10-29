@@ -88,7 +88,7 @@ struct ConvTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
     {
-        using namespace hipdnn_sdk::test_utilities;
+        using namespace hipdnn_sdk::utilities;
 
         ss << "(x:";
         vecToStream(ss, tc.xDims);

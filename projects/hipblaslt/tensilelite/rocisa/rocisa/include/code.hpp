@@ -608,6 +608,55 @@ namespace rocisa
         }
     };
 
+    struct ValueEndif : public Item
+    {
+        std::string comment;
+
+        ValueEndif(const std::string& comment = "")
+            : Item("ValueEndif")
+            , comment(comment)
+        {
+        }
+
+        std::string toString() const override
+        {
+            return formatStr(
+                false, ".endif", comment, rocIsa::getInstance().getOutputOptions().outputNoComment);
+        }
+    };
+
+    struct ValueIf : public Item
+    {
+        std::string value;
+
+        ValueIf(const std::string& value)
+            : Item("ValueIf")
+            , value(value)
+        {
+        }
+
+        std::string toString() const override
+        {
+            return ".if " + value + "\n";
+        }
+    };
+
+    struct ValueElseIf : public Item
+    {
+        std::string value;
+
+        ValueElseIf(const std::string& value)
+            : Item("ValueElseIf")
+            , value(value)
+        {
+        }
+
+        std::string toString() const override
+        {
+            return ".elseif " + value + "\n";
+        }
+    };
+
     struct Macro : public Item
     {
         std::vector<std::shared_ptr<Item>> itemList;
@@ -635,7 +684,8 @@ namespace rocisa
         {
             // This is a workaround
             if(dynamic_cast<Instruction*>(item.get()) || dynamic_cast<Module*>(item.get())
-               || dynamic_cast<TextBlock*>(item.get()))
+               || dynamic_cast<TextBlock*>(item.get()) || dynamic_cast<ValueIf*>(item.get())
+               || dynamic_cast<ValueEndif*>(item.get()) || dynamic_cast<ValueElseIf*>(item.get()))
             {
                 item->parent = this;
                 itemList.push_back(item);
@@ -728,39 +778,6 @@ namespace rocisa
             , footer(other.footer ? std::dynamic_pointer_cast<Module>(other.footer->clone())
                                   : nullptr)
         {
-        }
-    };
-
-    struct ValueEndif : public Item
-    {
-        std::string comment;
-
-        ValueEndif(const std::string& comment = "")
-            : Item("ValueEndif")
-            , comment(comment)
-        {
-        }
-
-        std::string toString() const override
-        {
-            return formatStr(
-                false, ".endif", comment, rocIsa::getInstance().getOutputOptions().outputNoComment);
-        }
-    };
-
-    struct ValueIf : public Item
-    {
-        int value;
-
-        ValueIf(int value)
-            : Item("ValueIf")
-            , value(value)
-        {
-        }
-
-        std::string toString() const override
-        {
-            return ".if " + std::to_string(value);
         }
     };
 
