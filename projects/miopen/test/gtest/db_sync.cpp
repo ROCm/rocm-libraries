@@ -363,8 +363,7 @@ void GetPerfDbVals(const fs::path& filename,
     const auto& perf_db =
         miopen::ReadonlyRamDb::GetCached(miopen::DbKinds::PerfDb, filename.string(), true);
     const auto& perf_db_map = perf_db.GetCacheMap();
-    auto& perf_db_rw =
-        miopen::RamDb::GetCached(miopen::DbKinds::PerfDb, filename.string(), false);
+    auto& perf_db_rw = miopen::RamDb::GetCached(miopen::DbKinds::PerfDb, filename.string(), false);
 
     std::ostringstream ss;
     conv::ProblemDescription::VisitAll(problem_config, [&](auto&& value, auto&&) {
@@ -395,7 +394,8 @@ void GetPerfDbVals(const fs::path& filename,
             }
             else
             {
-                EXPECT_TRUE(vals.count(id) == 0) << "Duplicate ID in perf DB: " << id << "; key: " << key;
+                EXPECT_TRUE(vals.count(id) == 0)
+                    << "Duplicate ID in perf DB: " << id << "; key: " << key;
             }
 
             vals.emplace(id, cfg);
