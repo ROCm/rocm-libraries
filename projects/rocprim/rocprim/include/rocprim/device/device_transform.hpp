@@ -46,36 +46,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool IsPointer,
-         class ResultType,
-         class InputIt,
-         class OutputIt,
-         class UnaryOp>
-inline hipError_t launch_transform(detail::target_arch arch,
-                                   InputIt             in,
-                                   OutputIt            out,
-                                   size_t              n,
-                                   UnaryOp             op,
-                                   dim3                grid,
-                                   dim3                block,
-                                   size_t              shmem,
-                                   hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        constexpr auto params = decltype(arch_config)::params;
-
-        detail::transform_kernel_impl<IsPointer,
-                                      params.kernel_config.block_size,
-                                      params.kernel_config.items_per_thread,
-                                      params.load_type,
-                                      ResultType>(in, n, out, op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<bool IsPointer,
          class Config,
          class InputIterator,
@@ -139,16 +109,26 @@ inline hipError_t transform_impl(InputIterator     input,
         {
             start = std::chrono::steady_clock::now();
         }
+        auto transform_kernel = [=](auto arch_config)
+        {
+            constexpr auto params = decltype(arch_config)::params;
 
-        ROCPRIM_RETURN_ON_ERROR(launch_transform<config, IsPointer, result_type>(target_arch,
-                                                                                 input + offset,
-                                                                                 output + offset,
-                                                                                 current_size,
-                                                                                 transform_op,
-                                                                                 current_blocks,
-                                                                                 block_size,
-                                                                                 0,
-                                                                                 stream));
+            detail::transform_kernel_impl<IsPointer,
+                                          params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread,
+                                          params.load_type,
+                                          result_type>(input + offset,
+                                                       current_size,
+                                                       output + offset,
+                                                       transform_op);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                            transform_kernel,
+                                                            current_blocks,
+                                                            block_size,
+                                                            0,
+                                                            stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 
