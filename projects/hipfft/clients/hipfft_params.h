@@ -536,6 +536,25 @@ public:
         }
     }
 
+    // Return the number of expected callback entries for supplied
+    // fields.
+    static size_t expected_callback_count(const std::vector<fft_field>& fields, size_t multiGPU)
+    {
+        // if library-decomposed multi-GPU transform is being done,
+        // then we need that many callback entries
+        if(multiGPU > 1)
+            return multiGPU;
+
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+        return std::accumulate(fields.begin(),
+                               fields.end(),
+                               static_cast<size_t>(0),
+                               [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
+    }
     fft_status set_callbacks(std::vector<void*>* load_cb_func,
                              std::vector<void*>* load_cb_data,
                              std::vector<void*>* store_cb_func,
@@ -547,6 +566,13 @@ public:
         {
             if(!hipfft_transform_type)
                 throw std::runtime_error("callbacks require a valid hipfftType");
+
+            auto expected_load_cb_count  = expected_callback_count(ifields, multiGPU);
+            auto expected_store_cb_count = expected_callback_count(ofields, multiGPU);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
 
             hipfftXtCallbackType load_type  = HIPFFT_CB_UNDEFINED;
             hipfftXtCallbackType store_type = HIPFFT_CB_UNDEFINED;
