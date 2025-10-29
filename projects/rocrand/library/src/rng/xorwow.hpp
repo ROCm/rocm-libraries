@@ -44,15 +44,17 @@ namespace rocrand_impl::host
 
 typedef ::rocrand_device::xorwow_engine xorwow_device_engine;
 
-__host__ __device__ inline void init_xorwow_engines(dim3 block_idx,
-                                                    dim3 thread_idx,
-                                                    dim3 /*grid_dim*/,
-                                                    dim3                  block_dim,
-                                                    xorwow_device_engine* engines,
-                                                    const unsigned int    start_engine_id,
-                                                    const unsigned int    engines_size,
-                                                    unsigned long long    seed,
-                                                    unsigned long long    offset)
+template<host::target_arch>
+__host__ __device__
+inline void init_xorwow_engines(dim3 block_idx,
+                                dim3 thread_idx,
+                                dim3 /*grid_dim*/,
+                                dim3                  block_dim,
+                                xorwow_device_engine* engines,
+                                const unsigned int    start_engine_id,
+                                const unsigned int    engines_size,
+                                unsigned long long    seed,
+                                unsigned long long    offset)
 {
     const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
     if(engine_id < engines_size)
@@ -62,20 +64,25 @@ __host__ __device__ inline void init_xorwow_engines(dim3 block_idx,
     }
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_xorwow(dim3 block_idx,
-                                         dim3 thread_idx,
-                                         dim3 grid_dim,
-                                         dim3 /*block_dim*/,
-                                         xorwow_device_engine* engines,
-                                         const unsigned int    start_engine_id,
-                                         T*                    data,
-                                         const size_t          n,
-                                         Distribution          distribution)
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_xorwow(dim3 block_idx,
+                     dim3 thread_idx,
+                     dim3 grid_dim,
+                     dim3 /*block_dim*/,
+                     xorwow_device_engine* engines,
+                     const unsigned int    start_engine_id,
+                     T*                    data,
+                     const size_t          n,
+                     Distribution          distribution)
 {
-    static_assert(is_single_tile_config<ConfigProvider, T>(IsDynamic),
+    static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                   "This kernel should only be used with single tile configs");
-    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T>(IsDynamic);
+    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
     constexpr unsigned int input_width  = Distribution::input_width;
     constexpr unsigned int output_width = Distribution::output_width;
 
@@ -294,6 +301,13 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         m_start_engine_id = m_offset % m_engines_size;
 
         if(m_engines != nullptr)
@@ -309,8 +323,12 @@ public:
         constexpr unsigned int init_threads = ROCRAND_DEFAULT_MAX_BLOCK_SIZE;
         const unsigned int     init_blocks  = (m_engines_size + init_threads - 1) / init_threads;
 
-        status = system_type::template launch<init_xorwow_engines,
-                                              static_block_size_config_provider<init_threads>>(
+        auto init_xorwow_engines_kernel
+            = [&](auto arch, auto... args) { init_xorwow_engines<arch>(args...); };
+
+        status = system_type::template launch<static_block_size_config_provider<init_threads>>(
+            init_xorwow_engines_kernel,
+            target_arch,
             dim3(init_blocks),
             dim3(init_threads),
             0,
@@ -357,25 +375,34 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
-        status
-            = dynamic_dispatch(m_order,
-                               [&, this](auto is_dynamic)
-                               {
-                                   return system_type::template launch<
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
 
-                                       generate_xorwow<ConfigProvider, is_dynamic, T, Distribution>,
-                                       ConfigProvider,
-                                       T,
-                                       is_dynamic>(dim3(config.blocks),
-                                                   dim3(config.threads),
-                                                   0,
-                                                   m_stream,
-                                                   m_engines,
-                                                   m_start_engine_id,
-                                                   data,
-                                                   data_size,
-                                                   distribution);
-                               });
+        status = dynamic_dispatch(
+            m_order,
+            [&, this](auto is_dynamic)
+            {
+                auto generate_xorwow_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_xorwow<ConfigProvider, is_dynamic, T, Distribution, arch>(args...);
+                };
+                return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                    generate_xorwow_kernel,
+                    target_arch,
+                    dim3(config.blocks),
+                    dim3(config.threads),
+                    0,
+                    m_stream,
+                    m_engines,
+                    m_start_engine_id,
+                    data,
+                    data_size,
+                    distribution);
+            });
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)
