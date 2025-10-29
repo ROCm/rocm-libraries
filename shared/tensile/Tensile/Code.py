@@ -411,7 +411,7 @@ class  MacInst (Inst):
 
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = globalParameters["CurrentISA"]
+       self.version = kernel["ISA"]
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx

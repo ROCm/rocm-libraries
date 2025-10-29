@@ -191,10 +191,18 @@ def parseLibraryLogicData(data, srcFile="?"):
         data["Fp16AltImplRound"] = False
 
     if "ArchitectureName" not in data:
+<<<<<<< HEAD
         raise ValueError(f"{data['ArchitectureName']} does not match not found")
     elif data["ArchitectureName"] not in architectureMap:
         raise ValueError(f"{data['ArchitectureName']} does not match a valid architecture." \
             f" Review item 2 of the library logic file {srcFile}.")
+=======
+        raise ValueError("'ArchitectureName' not found in logic file data" \
+            f" Review the library logic file {srcFile}.")
+    elif data["ArchitectureName"] not in architectureMap:
+        raise ValueError(f"{data['ArchitectureName']} is not a supported architecture." \
+            f" Review the library logic file {srcFile}.")
+>>>>>>> d3f2cb531524ccc9281b87237d454e56ad1de113
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
@@ -253,8 +261,13 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["IsAPU"] = None
 
     if architectureMap[rv["ArchitectureName"]] != rv["ScheduleName"]:
+<<<<<<< HEAD
         raise ValueError(f"Architecture mismatch {rv['ArchitectureName']} does not match " \
             f" {rv['ScheduleName']}. Review items 1 & 2 of the library logic file {srcFile}.")
+=======
+        raise ValueError(f"Architecture mismatch: {rv['ArchitectureName']} does not match " \
+            f" {rv['ScheduleName']}. Review the library logic file {srcFile}.")
+>>>>>>> d3f2cb531524ccc9281b87237d454e56ad1de113
 
     rv["ExactLogic"] = data[7]
     # data[8] previously contained range logic, which has been retired
