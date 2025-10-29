@@ -182,6 +182,10 @@ namespace rocRoller
             explicit FastArithmetic(ContextPtr);
 
             ExpressionPtr operator()(ExpressionPtr) const;
+            std::vector<std::function<ExpressionPtr(ExpressionPtr)>> getTransforms() const;
+            ExpressionPtr                                            applyTransforms(
+                                                           ExpressionPtr,
+                                                           const std::vector<std::function<ExpressionPtr(ExpressionPtr)>>&) const;
 
         private:
             ContextPtr m_context;

@@ -430,6 +430,66 @@ TEST_CASE("FastArithmetic includes translate time evaluation",
     CHECK_THAT(fastArith(c * zero), IdenticalTo(literal(0.f)));
 }
 
+TEST_CASE("FastArithmetic pipeline properly simplifies expressions",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using Expression::literal;
+    auto context = TestContext::ForDefaultTarget();
+
+    Expression::FastArithmetic fastArith(context.get());
+    auto                       transforms = fastArith.getTransforms();
+
+    auto isSimplify = [](const auto& transform) {
+        auto* func
+            = transform.template target<Expression::ExpressionPtr (*)(Expression::ExpressionPtr)>();
+        return func && *func == Expression::simplify;
+    };
+
+    // Create a version with extra simplifies after each non-simplify transform
+    std::vector<std::function<Expression::ExpressionPtr(Expression::ExpressionPtr)>>
+        transformsExtraSimplify;
+    for(const auto& transform : transforms)
+    {
+        transformsExtraSimplify.push_back(transform);
+        if(!isSimplify(transform))
+            transformsExtraSimplify.push_back(Expression::simplify);
+    }
+
+    // Create a version with only one simplify
+    std::vector<std::function<Expression::ExpressionPtr(Expression::ExpressionPtr)>>
+         transformsOneSimplify;
+    bool hasSimplify = false;
+    for(const auto& transform : transforms)
+    {
+        if(isSimplify(transform))
+        {
+            if(hasSimplify)
+                continue;
+
+            hasSimplify = true;
+        }
+        transformsOneSimplify.push_back(transform);
+    }
+
+    auto tag83 = Expression::dataFlowTag(83, Register::Type::Vector, DataType::UInt32);
+    auto expr  = (tag83 % literal(4)) * literal(32);
+    expr       = (tag83 / literal(4)) * literal(128u) + expr;
+    expr       = expr * literal(4u);
+    expr       = expr / literal(8u);
+    expr       = expr + literal(0u);
+    expr       = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+    expr       = Expression::convert(DataType::UInt32, expr);
+
+    // One simplify is not enough
+    CHECK(!Expression::identical(fastArith.applyTransforms(expr, transforms),
+                                 fastArith.applyTransforms(expr, transformsOneSimplify)));
+
+    // There are enough simplifies
+    CHECK_THAT(fastArith.applyTransforms(expr, transforms),
+               IdenticalTo(fastArith.applyTransforms(expr, transformsExtraSimplify)));
+}
+
 TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 {
     using namespace rocRoller;
