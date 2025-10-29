@@ -39246,8 +39246,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 1
-    NonTemporalB: 2
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 2
     NonTemporalD: 1
     NonTemporalE: 0
@@ -39708,8 +39708,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 1
-    NonTemporalB: 5
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 2
     NonTemporalD: 1
     NonTemporalE: 0

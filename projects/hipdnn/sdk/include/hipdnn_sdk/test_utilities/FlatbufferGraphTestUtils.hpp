@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
@@ -435,6 +437,204 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
     builder.Finish(graph);
 
     return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    createValidConvFwdBiasActivGraph(const std::vector<int64_t>& xDims,
+                                     const std::vector<int64_t>& xStrides,
+                                     const std::vector<int64_t>& wDims,
+                                     const std::vector<int64_t>& wStrides,
+                                     const std::vector<int64_t>& yDims,
+                                     const std::vector<int64_t>& yStrides,
+                                     const std::vector<int64_t>& convPrePadding,
+                                     const std::vector<int64_t>& convPostPadding,
+                                     const std::vector<int64_t>& convStrides,
+                                     const std::vector<int64_t>& convDilation,
+                                     bool doBias,
+                                     PointwiseMode activMode,
+                                     std::optional<float> reluLowerClip,
+                                     std::optional<float> reluUpperClip,
+                                     std::optional<float> reluLowerClipSlope,
+                                     std::optional<float> swishBeta,
+                                     std::optional<float> eluAlpha,
+                                     std::optional<float> softplusBeta,
+                                     DataType dataType)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+    int64_t tensorUid = 1;
+
+    const auto xTensorUid = tensorUid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, xTensorUid, "x", dataType, &xStrides, &xDims));
+
+    const auto wTensorUid = tensorUid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, wTensorUid, "w", dataType, &wStrides, &wDims));
+
+    // Virtual y_conv tensor
+    const auto yConvTensorUid = tensorUid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, yConvTensorUid, "y_conv", dataType, &yStrides, &yDims, true));
+
+    int64_t biasTensorUid;
+    int64_t yBiasTensorUid;
+    if(doBias)
+    {
+        const auto biasDims = getDerivedShape(yDims);
+        const auto biasStrides = generateStrides(biasDims, extractStrideOrder(yDims));
+
+        biasTensorUid = tensorUid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, biasTensorUid, "bias", dataType, &biasStrides, &biasDims));
+        // Virtual y_bias tensor
+        yBiasTensorUid = tensorUid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, yBiasTensorUid, "y_bias", dataType, &yStrides, &yDims, true));
+    }
+
+    const auto yTensorUid = tensorUid;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, yTensorUid, "y", dataType, &yStrides, &yDims));
+
+    std::vector<::flatbuffers::Offset<Node>> nodes;
+
+    auto convAttributes = CreateConvolutionFwdAttributesDirect(builder,
+                                                               xTensorUid,
+                                                               wTensorUid,
+                                                               yConvTensorUid,
+                                                               &convPrePadding,
+                                                               &convPostPadding,
+                                                               &convStrides,
+                                                               &convDilation,
+                                                               ConvMode::CROSS_CORRELATION);
+    nodes.push_back(CreateNodeDirect(
+        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union()));
+
+    if(doBias)
+    {
+        auto biasAttributes = CreatePointwiseAttributes(builder,
+                                                        PointwiseMode::ADD,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt,
+                                                        yConvTensorUid,
+                                                        biasTensorUid,
+                                                        flatbuffers::nullopt,
+                                                        yBiasTensorUid);
+        nodes.push_back(CreateNodeDirect(
+            builder, "bias", NodeAttributes::PointwiseAttributes, biasAttributes.Union()));
+    }
+
+    auto activAttributes = CreatePointwiseAttributes(builder,
+                                                     activMode,
+                                                     reluLowerClip,
+                                                     reluUpperClip,
+                                                     reluLowerClipSlope,
+                                                     flatbuffers::nullopt,
+                                                     doBias ? yBiasTensorUid : yConvTensorUid,
+                                                     flatbuffers::nullopt,
+                                                     flatbuffers::nullopt,
+                                                     yTensorUid,
+                                                     swishBeta,
+                                                     eluAlpha,
+                                                     softplusBeta);
+    nodes.push_back(CreateNodeDirect(
+        builder, "activ", NodeAttributes::PointwiseAttributes, activAttributes.Union()));
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    createValidConvFwdActivGraph(const std::vector<int64_t>& xDims = {4, 4, 4, 4},
+                                 const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
+                                 const std::vector<int64_t>& wDims = {4, 4, 1, 1},
+                                 const std::vector<int64_t>& wStrides = {4, 1, 1, 1},
+                                 const std::vector<int64_t>& yDims = {4, 4, 4, 4},
+                                 const std::vector<int64_t>& yStrides = {64, 16, 4, 1},
+                                 const std::vector<int64_t>& convPrePadding = {0, 0},
+                                 const std::vector<int64_t>& convPostPadding = {0, 0},
+                                 const std::vector<int64_t>& convStrides = {1, 1},
+                                 const std::vector<int64_t>& convDilation = {1, 1},
+                                 PointwiseMode activMode = PointwiseMode::RELU_FWD,
+                                 std::optional<float> reluLowerClip = std::nullopt,
+                                 std::optional<float> reluUpperClip = std::nullopt,
+                                 std::optional<float> reluLowerClipSlope = std::nullopt,
+                                 std::optional<float> swishBeta = std::nullopt,
+                                 std::optional<float> eluAlpha = std::nullopt,
+                                 std::optional<float> softplusBeta = std::nullopt,
+                                 DataType dataType = DataType::FLOAT)
+{
+    return createValidConvFwdBiasActivGraph(xDims,
+                                            xStrides,
+                                            wDims,
+                                            wStrides,
+                                            yDims,
+                                            yStrides,
+                                            convPrePadding,
+                                            convPostPadding,
+                                            convStrides,
+                                            convDilation,
+                                            false,
+                                            activMode,
+                                            reluLowerClip,
+                                            reluUpperClip,
+                                            reluLowerClipSlope,
+                                            swishBeta,
+                                            eluAlpha,
+                                            softplusBeta,
+                                            dataType);
+}
+
+inline flatbuffers::FlatBufferBuilder
+    createValidConvFwdBiasActivGraph(const std::vector<int64_t>& xDims = {4, 4, 4, 4},
+                                     const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
+                                     const std::vector<int64_t>& wDims = {4, 4, 1, 1},
+                                     const std::vector<int64_t>& wStrides = {4, 1, 1, 1},
+                                     const std::vector<int64_t>& yDims = {4, 4, 4, 4},
+                                     const std::vector<int64_t>& yStrides = {64, 16, 4, 1},
+                                     const std::vector<int64_t>& convPrePadding = {0, 0},
+                                     const std::vector<int64_t>& convPostPadding = {0, 0},
+                                     const std::vector<int64_t>& convStrides = {1, 1},
+                                     const std::vector<int64_t>& convDilation = {1, 1},
+                                     PointwiseMode activMode = PointwiseMode::RELU_FWD,
+                                     std::optional<float> reluLowerClip = std::nullopt,
+                                     std::optional<float> reluUpperClip = std::nullopt,
+                                     std::optional<float> reluLowerClipSlope = std::nullopt,
+                                     std::optional<float> swishBeta = std::nullopt,
+                                     std::optional<float> eluAlpha = std::nullopt,
+                                     std::optional<float> softplusBeta = std::nullopt,
+                                     DataType dataType = DataType::FLOAT)
+{
+    return createValidConvFwdBiasActivGraph(xDims,
+                                            xStrides,
+                                            wDims,
+                                            wStrides,
+                                            yDims,
+                                            yStrides,
+                                            convPrePadding,
+                                            convPostPadding,
+                                            convStrides,
+                                            convDilation,
+                                            true,
+                                            activMode,
+                                            reluLowerClip,
+                                            reluUpperClip,
+                                            reluLowerClipSlope,
+                                            swishBeta,
+                                            eluAlpha,
+                                            softplusBeta,
+                                            dataType);
 }
 
 inline hipdnnPluginConstData_t

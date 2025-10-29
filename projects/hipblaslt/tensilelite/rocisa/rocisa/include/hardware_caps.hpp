@@ -69,16 +69,17 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     return true;
 }
 
-inline int getMaxCnt(const IsaVersion& isaVersion,
+inline int getMaxCnt(const IsaVersion&  isaVersion,
                      const std::string& assemblerPath,
                      const std::string& prefix,
                      const std::string& suffix,
-                     bool isDebug)
+                     bool               isDebug)
 {
     for(int p = 64; p > 1; p >>= 1)
     {
         // Try ( pow(2) - 1 ) from high to low
-        if(tryAssembler(isaVersion, assemblerPath, prefix + std::to_string(p - 1) + suffix, isDebug))
+        if(tryAssembler(
+               isaVersion, assemblerPath, prefix + std::to_string(p - 1) + suffix, isDebug))
             return p - 1;
     }
     return 0;
@@ -117,7 +118,9 @@ inline std::map<std::string, int>
         = tryAssembler(isaVersion, assemblerPath, "v_lshl_or_b32 v47, v36, 0x2, v34", isDebug);
     rv["HasSMulHi"]
         = tryAssembler(isaVersion, assemblerPath, "s_mul_hi_u32 s47, s36, s34", isDebug);
-
+    rv["HasScalarStore"]
+        = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
+          || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
@@ -276,6 +279,35 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, glc",
                           isDebug);
+    rv["HasSC0Modifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, sc0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, sc0",
+                          isDebug);
+    rv["HasDLCModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, dlc",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, dlc",
+                          isDebug);
+    rv["HasSCOPEModifier"]
+        = tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, scope:SCOPE_DEV",
+              isDebug)
+          || tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, scope:SCOPE_DEV",
+              isDebug);
     rv["HasMUBUFConst"] = tryAssembler(isaVersion,
                                        assemblerPath,
                                        "buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
@@ -303,18 +335,19 @@ inline std::map<std::string, int>
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
 
-    rv["SeparateVscnt"] = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
+    rv["SeparateVscnt"]
+        = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
 
     rv["SeparateLGKMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_dscnt 0", isDebug)
-                        && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
+                            && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
 
     rv["SeparateVMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_loadcnt 0", isDebug)
-                        && tryAssembler(isaVersion, assemblerPath, "s_wait_storecnt 0", isDebug);
+                          && tryAssembler(isaVersion, assemblerPath, "s_wait_storecnt 0", isDebug);
 
     if(rv["SeparateVMcnt"])
     {
         // s_wait_loadcnt accept 16 bits immediate, but only use the lowest 6 bits are used, can't use tryAssembler
-        rv["MaxLoadcnt"]  = 63;
+        rv["MaxLoadcnt"] = 63;
         // s_wait_storecnt accept 16 bits immediate, but only use the lowest 6 bits are used, can't use tryAssembler
         rv["MaxStorecnt"] = 63;
     }

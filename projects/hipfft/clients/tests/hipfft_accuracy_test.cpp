@@ -536,7 +536,7 @@ void* get_store_callback_host(fft_array_type otype,
 // implement result scaling as a store callback, as rocFFT tests do
 void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output)
 {
-    if(!params.run_callbacks && params.scale_factor == 1.0)
+    if(!params.run_callbacks)
         return;
 
     callback_test_data cbdata;
@@ -560,10 +560,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -576,10 +573,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -592,10 +586,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -605,61 +596,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
     case fft_array_type_complex_planar:
     case fft_array_type_hermitian_planar:
     {
-        // planar wouldn't run callbacks, but we could still want scaling
-        switch(params.precision)
-        {
-        case fft_precision_half:
-        {
-            const size_t elem_size = sizeof(std::complex<rocfft_fp16>);
-            for(auto& buf : output)
-            {
-                const size_t num_elems = buf.size() / elem_size;
-
-                auto output_begin = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(buf.data());
-                for(size_t i = 0; i < num_elems; ++i)
-                {
-                    auto& element = output_begin[i];
-                    if(params.scale_factor != 1.0)
-                        element = element * params.scale_factor;
-                }
-            }
-            break;
-        }
-        case fft_precision_single:
-        {
-            const size_t elem_size = sizeof(std::complex<float>);
-            for(auto& buf : output)
-            {
-                const size_t num_elems = buf.size() / elem_size;
-
-                auto output_begin = reinterpret_cast<rocfft_complex<float>*>(buf.data());
-                for(size_t i = 0; i < num_elems; ++i)
-                {
-                    auto& element = output_begin[i];
-                    if(params.scale_factor != 1.0)
-                        element = element * params.scale_factor;
-                }
-            }
-            break;
-        }
-        case fft_precision_double:
-        {
-            const size_t elem_size = sizeof(std::complex<double>);
-            for(auto& buf : output)
-            {
-                const size_t num_elems = buf.size() / elem_size;
-
-                auto output_begin = reinterpret_cast<rocfft_complex<double>*>(buf.data());
-                for(size_t i = 0; i < num_elems; ++i)
-                {
-                    auto& element = output_begin[i];
-                    if(params.scale_factor != 1.0)
-                        element = element * params.scale_factor;
-                }
-            }
-            break;
-        }
-        }
+        throw std::runtime_error("planar callbacks are not supported");
     }
     break;
     case fft_array_type_real:
@@ -675,10 +612,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -691,10 +625,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -707,10 +638,7 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
             for(size_t i = 0; i < num_elems; ++i)
             {
                 auto& element = output_begin[i];
-                if(params.scale_factor != 1.0)
-                    element = element * params.scale_factor;
-                if(params.run_callbacks)
-                    store_callback(output_begin, i, element, &cbdata, nullptr);
+                store_callback(output_begin, i, element, &cbdata, nullptr);
             }
             break;
         }
@@ -842,60 +770,8 @@ void* get_load_callback_host(fft_array_type itype,
 }
 void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input) {}
 
-// implement result scaling as a store callback, as rocFFT tests do
-void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output)
-{
-    if(params.scale_factor == 1.0)
-        return;
-    switch(params.precision)
-    {
-    case fft_precision_half:
-    {
-        const size_t elem_size = sizeof(rocfft_fp16);
-        for(auto& buf : output)
-        {
-            const size_t num_elems    = buf.size() / elem_size;
-            auto         output_begin = reinterpret_cast<rocfft_fp16*>(buf.data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                element       = static_cast<double>(element) * params.scale_factor;
-            }
-        }
-        break;
-    }
-    case fft_precision_single:
-    {
-        const size_t elem_size = sizeof(float);
-        for(auto& buf : output)
-        {
-            const size_t num_elems    = buf.size() / elem_size;
-            auto         output_begin = reinterpret_cast<float*>(buf.data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                element       = element * params.scale_factor;
-            }
-        }
-        break;
-    }
-    case fft_precision_double:
-    {
-        const size_t elem_size = sizeof(double);
-        for(auto& buf : output)
-        {
-            const size_t num_elems    = buf.size() / elem_size;
-            auto         output_begin = reinterpret_cast<double*>(buf.data());
-            for(size_t i = 0; i < num_elems; ++i)
-            {
-                auto& element = output_begin[i];
-                element       = element * params.scale_factor;
-            }
-        }
-        break;
-    }
-    }
-}
+void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output) {}
+
 void* get_store_callback_host(fft_array_type otype,
                               fft_precision  precision,
                               bool           round_trip_inverse = false)

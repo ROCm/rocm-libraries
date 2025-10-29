@@ -355,7 +355,7 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
+    KernelNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
     LDSTrInst: false
     LSCA: 32
     LSCB: 64
@@ -460,7 +460,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM32_WGMXCCn1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM32_WGMXCCn1_WGMXCCGn1
     SourceSwap: 0
     StaggerU: 0
     StaggerUMapping: 0
@@ -2896,7 +2896,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -3791,8 +3791,8 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
-    NonTemporalB: 4
+    NonTemporalA: 0
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -4015,7 +4015,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -4463,7 +4463,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -4688,7 +4688,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -4912,7 +4912,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -5135,7 +5135,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -5583,7 +5583,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
@@ -6032,7 +6032,7 @@
     NonDTLTailLoopB: false
     NonTemporal: -1
     NonTemporalA: 0
-    NonTemporalB: 4
+    NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
     NonTemporalE: 0
@@ -6255,7 +6255,7 @@
     NonDTLTailLoopA: false
     NonDTLTailLoopB: false
     NonTemporal: -1
-    NonTemporalA: 4
+    NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 4
     NonTemporalD: 4
