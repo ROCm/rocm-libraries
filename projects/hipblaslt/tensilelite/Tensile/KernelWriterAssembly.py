@@ -624,9 +624,14 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmAGroup2", 4, 4))
 
     if kernel["enableTDMB"]:
-      module.add(self.defineSgpr("tdmBGroup0", 4, 4))
-      module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-      module.add(self.defineSgpr("tdmBGroup2", 4, 4))
+      if prod(kernel["MIWaveGroup"]) > 1:
+        module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
+        module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
+        module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
+      else:
+        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
+        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        module.add(self.defineSgpr("tdmBGroup2", 4, 4))
 
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
@@ -9011,6 +9016,17 @@ class KernelWriterAssembly(KernelWriter):
 
   def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex):
     imod = Module("globalReadIncrementAB")
+    tdmA: bool = kernel["enableTDMA"]
+    tdmB: bool = kernel["enableTDMB"]
+    numWaves: int = prod(kernel["MIWaveGroup"])
+
+    #TDM Wave Separated
+    if tdmA and tdmB and tPA and tPB and numWaves > 1:
+      #TODO: TDM refactor, empty module is not required
+      incCodeA = imod.add(Module("globalReadIncrementA"))
+      incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB))
+      incCodeB = imod.add(Module("globalReadIncrementB"))
+      return imod
 
     incCodeA = imod.add(Module("globalReadIncrementA"))
     if tPA != None:
@@ -9927,8 +9943,10 @@ class KernelWriterAssembly(KernelWriter):
       return imod
 
     if tc == "B" and kernel["enableTDMB"]:
-      comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", "tdmBGroup2", "tdmGroup3"))
+      #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
+      if prod(kernel["MIWaveGroup"]) == 1:
+        comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+        imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", "tdmBGroup2", "tdmGroup3"))
       return imod
 
     # sizeK % LOCAL_DEPTHU
@@ -16495,16 +16513,130 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName()))
     return mod
 
+  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    tc: str = tP['tensorChar']
+    ti: int = tP["idx"]
+    tileChar: str = tP["tileChar"]
+    mod = Module(f"Init TDM Descriptor {tc}")
+
+    def descSgprName(idx: int) -> str:
+      if idx < 3:
+        return f"tdm{tc}Group{idx}"
+      return f"tdmGroup{idx}"
+
+    def strideRefName() -> str:
+      return f"Stride{tc}{tileChar}"
+
+    def sizeRefName(idx: int) -> str:
+      idxChar= INDEX_CHARS[idx]
+      return f"Size{idxChar}"
+
+    dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
+    mt: int = kernel[f"MacroTile{ti}"]
+    du: int = kernel["DepthU"]
+    sizeTile0, sizeTile1 = du, mt
+    bpe: int = int(tP["bpeGR"])
+    #TODO: temp hack
+    numWaves: int = prod(kernel["MIWaveGroup"])
+    numComp: int = numWaves // 2
+    assert numComp & (numComp - 1) == 0
+    wavelen: int = kernel["WavefrontSize"]
+    ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
+
+    mod.add(comp.initOperands(descSgprName(0), descSgprName(1), descSgprName(2), descSgprName(3)))
+    mod.add(comp.setDataType(dtype, descSgprName(1)))
+    mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+
+    #TODO: currently TN only
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // numComp"))
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numComp * bpe * du, "woffset = wId * mt // numComp * bpe * du"))
+      mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
+      mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+
+    mod.add(comp.setIterationEnabled(descSgprName(1), False))
+    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self))
+    mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self))
+    mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp, self))
+    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName()))
+    return mod
+
+  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    #TODO: TDM implement
+    mod = Module("TDM Init Wave Separated")
+    tdmInitLblA = Label("TDMInitA", "")
+    tdmInitLblB = Label("TDMInitB", "")
+    tdmInitLblEnd = Label("TDMInitEnd", "")
+    mod.add(tdmInitLblA)
+
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      wavelen: int = kernel["WavefrontSize"]
+      waveIdSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+      mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
+
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA))
+    mod.add(SBranch(tdmInitLblEnd.getLabelName()))
+    mod.add(tdmInitLblB)
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB))
+    mod.add(tdmInitLblEnd)
+    return mod
+
   def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
+
+  def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    #TODO: TDM implement
+    mod = Module("TDM Global Offset Wave Separated")
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    tdmGlobalOffsetLblA = Label("TDMGlobalOffsetA", "")
+    tdmGlobalOffsetLblB = Label("TDMGlobalOffsetB", "")
+    tdmGlobalOffsetLblEnd = Label("TDMGlobalOffsetEnd", "")
+    mod.add(tdmGlobalOffsetLblA)
+
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      wavelen: int = kernel["WavefrontSize"]
+      waveIdSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+      mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
+
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, "AddressA"))
+    mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
+    mod.add(tdmGlobalOffsetLblB)
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, "AddressB"))
+    mod.add(tdmGlobalOffsetLblEnd)
+    return mod
 
   def tdmIncrementAB(self, kernel, tP) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     mod = Module("TDM increment")
     mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", f"GlobalReadIncs{tc}"))
+    return mod
+
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    #TODO: TDM replace by universal tdm group sgpr
+    tc: str = tPA['tensorChar']
+    mod = Module("TDMGlobalIncrementsWaveSeparated")
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      wavelen: int = kernel["WavefrontSize"]
+      waveIdSgprIdx: int = tmpSgprRes.idx
+      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+      mod.add(SCSelectB32(sgpr(waveIdSgprIdx), sgpr("GlobalReadIncsB"), sgpr("GlobalReadIncsA")))
+      mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", waveIdSgprIdx))
     return mod
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):

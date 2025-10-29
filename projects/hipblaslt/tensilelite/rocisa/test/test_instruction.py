@@ -189,7 +189,32 @@ def test_instruction_tdm():
     except ValueError as e:
         pass
 
+def test_instruction_tdm_2_sgprs():
+    from rocisa.instruction import TensorLoadToLds
+    from rocisa.container import sgpr
+    inst = TensorLoadToLds(
+        group0=sgpr(0, 4),
+        group1=sgpr(0, 8),
+        group2=None,
+        group3=None,
+        comment=""
+    )
+    assert str(inst) == "tensor_load_to_lds s[0:3], s[0:7]\n"
+
+    try:
+        TensorLoadToLds(
+            group0=vgpr(0, 4),
+            group1=sgpr(0, 8),
+            group2=None,
+            group3=None,
+            comment=""
+        )
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        pass
+
 if __name__ == "__main__":
     test_instruction_common()
     test_instruction_cvt()
     test_instruction_tdm()
+    test_instruction_tdm_2_sgprs()

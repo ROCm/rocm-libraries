@@ -1848,6 +1848,10 @@ class Solution(collections.abc.Mapping):
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
 
+    if tdmInst not in (0, 3):
+      reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
+      return
+
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
