@@ -77,8 +77,11 @@ def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420)
     }
 }
 
-//launch develop branch nightly jobs
-CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 0 * * * % RUN_NIGHTLY_TESTS=true;NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_GFX90A=true;TARGET_GFX942=true''' : ""
+//launch develop branch nightly jobs 
+CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX90A=true;TARGET_GFX942=true''' : ""
+
+//launch non-critical hardware nightly jobs
+NONCRITICAL_HW_CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 1 * * * % NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false''' : ""
 
 pipeline {
     agent none
@@ -90,6 +93,7 @@ pipeline {
     }
     triggers{
         parameterizedCron(CRON_SETTINGS)
+        parameterizedCron(NONCRITICAL_HW_CRON_SETTINGS)
     }
     parameters {
         booleanParam(
