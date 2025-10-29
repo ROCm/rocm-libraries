@@ -1006,7 +1006,7 @@ pipeline {
                 stage('Dbsync gfx908') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_GFX908 && params.NONCRITICAL_HW_NIGHTLY }
+                        expression { params.TARGET_GFX908 && params.DBSYNC_TEST }
                     }
                     options {
                         retry(2)
@@ -1024,7 +1024,7 @@ pipeline {
                 stage('Bf16 Hip Install All gfx908') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_GFX908 && params.NONCRITICAL_HW_NIGHTLY }
+                        expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
                     }
                     options {
                         retry(2)
@@ -1042,7 +1042,7 @@ pipeline {
                 stage('Fp16 Hip All Install gfx908') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_GFX908 && params.NONCRITICAL_HW_NIGHTLY }
+                        expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
                     }
                     options {
                         retry(2)
@@ -1060,7 +1060,7 @@ pipeline {
                 stage('Fp32 Hip All gfx908') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_GFX908 && params.NONCRITICAL_HW_NIGHTLY }
+                        expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
                     }
                     options {
                         retry(2)
@@ -1079,7 +1079,7 @@ pipeline {
                 stage('Bf16 Hip All Install gfx115X') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 && params.NONCRITICAL_HW_NIGHTLY}
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
                     }
                     options {
                         retry(2)
@@ -1100,7 +1100,7 @@ pipeline {
                 stage('Fp16 Hip All Install gfx115X') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 && params.NONCRITICAL_HW_NIGHTLY}
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
                     }
                     options {
                         retry(2)
@@ -1122,7 +1122,7 @@ pipeline {
                 stage('Fp32 Hip All Install gfx115X') {
                     when {
                         beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 && params.NONCRITICAL_HW_NIGHTLY}
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
                     }
                     options {
                         retry(2)
