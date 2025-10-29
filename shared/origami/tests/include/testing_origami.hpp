@@ -643,7 +643,7 @@ void BestWGM(const origami::hardware_t& hardware,
                         false);
 
     EXPECT_GT(best_wgm_large_tile, best_wgm_small_tile);
-    EXPECT_NE(best_wgm_large_tile, best_wgm_nonsquare);
+    EXPECT_NE(best_wgm_large_tile, best_wgm_nonsquare_tile);
 }
 
 void UtilsTFlopsFromLatency(size_t M, size_t N, size_t K, double latency_cycles, double clock_GHz)
