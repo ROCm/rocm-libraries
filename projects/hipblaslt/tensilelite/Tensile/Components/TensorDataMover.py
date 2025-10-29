@@ -52,6 +52,47 @@ class TensorDataMoverLoad(TensorDataMover):
             mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
             #TODO: support strided batch
             #TODO: support GSU
+            #TODO: support stagger U
+        return mod
+
+    def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str) -> Module:
+        #TODO here we assume TN
+        mod = Module()
+        tc: str = tp["tensorChar"]
+        tIdx: int = 0 if tp["isA"] else 1
+        bpe: int = int(tp["bpeGR"])
+        assert bpe > 0, "bpe must > 0"
+        sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[tp['idx']]}"
+        sgprWorkgroupName: str = f"WorkGroup{tIdx}"
+        vgprThreadIdName: str = "Serial"
+        #TODO: temp hack
+        numWaves: int = prod(kernel["MIWaveGroup"])
+        assert numWaves > 1
+        wavelen: int = kernel["WavefrontSize"]
+        mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
+
+        mod.addComment(f"TDM wave separated calc start addr of {tc}")
+
+        with writer.allocTmpSgpr(3) as tmpSgprRes:
+            numComp: int = numWaves // 2
+            assert numComp & (numComp - 1) == 0, "numComp must be power of 2"
+            tmpSgprIdx = tmpSgprRes.idx
+            waveOffsetSgprIdx = tmpSgprRes.idx + 2
+            mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
+            mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprStrideName), mt * bpe, f"stride * MT({mt}) * bpe({bpe})"))
+            mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
+            #add wave offset
+            mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
+            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), f"wCompId = fTid // wavelen({wavelen}) // numComp({numComp})"))
+            # mod.add(SAndB32(sgpr(waveOffsetSgprIdx), numComp - 1, sgpr(waveOffsetSgprIdx), f"wCompId = wId % numComp({numComp})"))
+            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numComp * bpe, f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe})"))
+            mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
+            mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
+            mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
+            mod.add(SAddCU32(sgpr(f"{sgprAddr}+1"), sgpr(tmpSgprIdx+1), sgpr(f"{sgprAddr}+1"), "+= baseAddr(hi)"))
+            #TODO: support strided batch
+            #TODO: support GSU
+            #TODO: support stagger U
         return mod
 
     def issueLoad(self, group0: int | str, group1: int | str, group2: int | str, group3: int | str) -> Module:

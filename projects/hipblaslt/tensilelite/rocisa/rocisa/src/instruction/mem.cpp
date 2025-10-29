@@ -1524,8 +1524,8 @@ void mem_inst(nb::module_ m_mem)
                       const std::string&>(),
              nb::arg("group0"),
              nb::arg("group1"),
-             nb::arg("group2"),
-             nb::arg("group3"),
+             nb::arg("group2").none(),
+             nb::arg("group3").none(),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);

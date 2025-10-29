@@ -2952,7 +2952,11 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            return {group0, group1, group2, group3};
+            if (group2 && group3) {
+                return {group0, group1, group2, group3};
+            }
+
+            return {group0, group1};
         }
 
         std::string getArgStr() const
