@@ -369,23 +369,23 @@ TEST_P(GPU_bn_activ_infer_per_act_FP16, PortTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_activ_infer_spatial_FP32,
-                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs<float>(
-                                              miopenBNSpatial, miopenTensorNCHW))));
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_activ_infer_per_act_FP32,
-                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs<float>(
-                                              miopenBNPerActivation, miopenTensorNCHW))));
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_bn_activ_infer_spatial_FP16,
-                         testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                                          testing::ValuesIn(BNInferTestConfigs<half_float::half>(
-                                              miopenBNSpatial, miopenTensorNCHW))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_activ_infer_spatial_FP32,
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_activ_infer_per_act_FP32,
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_bn_activ_infer_spatial_FP16,
+    testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial))));
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_bn_activ_infer_per_act_FP16,
                          testing::Combine(testing::ValuesIn(ActivationConfigs()),
                                           testing::ValuesIn(BNInferTestConfigs<half_float::half>(
-                                              miopenBNPerActivation, miopenTensorNCHW))));
+                                              miopenBNPerActivation))));

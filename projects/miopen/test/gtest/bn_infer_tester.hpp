@@ -24,113 +24,9 @@
  *
  *******************************************************************************/
 
-#pragma once
-
-#include <gtest/gtest.h>
-#include <miopen/miopen.h>
-#include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
-
-#include "tensor_util.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
+#include "na.hpp"
 #include "perf_helper.hpp"
-
-struct BNInferTestCase
-{
-    size_t N;
-    size_t C;
-    size_t H;
-    size_t W;
-    miopenTensorLayout_t layout;
-    miopenBatchNormMode_t mode;
-    bool save;
-    bool keepRunning;
-
-    friend std::ostream& operator<<(std::ostream& ss, const BNInferTestCase& tc)
-    {
-        return ss << "(N: " << tc.N << " C:" << tc.C << " H:" << tc.H << " W:" << tc.W
-                  << " layout: " << tc.layout << " mode: " << tc.mode << " save: " << tc.save
-                  << " keepRunning: " << tc.keepRunning;
-    }
-
-    std::vector<size_t> GetInput()
-    {
-        if(layout == miopenTensorNCHW)
-        {
-            return {N, C, H, W};
-        }
-        else
-        {
-            return {N, H, W, C};
-        }
-    };
-};
-
-template <class T, class Tref, class U, class V = U>
-void batchNormSpatialHostInferenceNHWC(const tensor<T>& input,
-                                       tensor<Tref>& output,
-                                       const tensor<U>& scale,
-                                       const tensor<U>& bias,
-                                       double epsilon,
-                                       const tensor<V>& estimatedMean,
-                                       const tensor<V>& estimatedVariance)
-{
-    int n_batches, height, width, channels;
-    std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
-
-    miopen::par_for(channels, 1, [&](int cidx) {
-        for(int row = 0; row < height; row++)
-        {
-            V mean        = estimatedMean(0, row, 0, 0);
-            V variance    = estimatedVariance(0, row, 0, 0);
-            double invVar = 1.0 / sqrt(variance + epsilon);
-            for(int column = 0; column < width; column++)
-            {
-                for(int bidx = 0; bidx < n_batches; bidx++)
-                {
-                    double elemStd = static_cast<double>(input(bidx, row, column, cidx)) - mean;
-                    double inhat   = elemStd * invVar;
-                    output(bidx, row, column, cidx) =
-                        static_cast<T>(scale(0, row, 0, 0) * inhat + bias(0, row, 0, 0));
-                }
-            }
-        }
-    });
-}
-
-template <class T, class U, class V, class Tref>
-void batchNormPerActivHostInferenceNHWC(const tensor<T>& input,
-                                        tensor<Tref>& output,
-                                        const tensor<U>& scale,
-                                        const tensor<U>& bias,
-                                        double epsilon,
-                                        const tensor<V>& estimatedMean,
-                                        const tensor<V>& estimatedVariance)
-{
-    int n_batches, height, width, channels;
-    std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
-
-    miopen::par_for(channels, 1, [&](int cidx) {
-        for(int row = 0; row < height; row++)
-        {
-            for(int column = 0; column < width; column++)
-            {
-                double mean       = estimatedMean(0, row, column, cidx);
-                double variance   = estimatedVariance(0, row, column, cidx);
-                double elemInvVar = 1.0 / sqrt(variance + epsilon);
-                for(int bidx = 0; bidx < n_batches; bidx++)
-                {
-                    double elemStd = input(bidx, row, column, cidx) - mean;
-                    double inhat   = elemStd * elemInvVar;
-                    output(bidx, row, column, cidx) =
-                        scale(0, row, column, cidx) * inhat + bias(0, row, column, cidx);
-                }
-            }
-        }
-    });
-}
 
 template <typename XDataType,
           typename YDataType,
@@ -139,7 +35,7 @@ template <typename XDataType,
           typename MeanVarDataType,
           miopenTensorLayout_t TensorLayout>
 struct BatchNormInferTester
-    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNInferTestCase>>
+    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNTestCase>>
 {
     void SetUp() override
     {
@@ -193,37 +89,13 @@ struct BatchNormInferTester
     { // Run the CPU implementation
         if(bn_config.mode == miopenBNPerActivation)
         {
-            if(input.desc.GetLayout_t() == miopenTensorNHWC)
-            {
-                batchNormPerActivHostInferenceNHWC(
-                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
-            }
-            else if(input.desc.GetLayout_t() == miopenTensorNCHW)
-            {
-                batchNormPerActivHostInference(
-                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
-            }
-            else
-            {
-                throw std::runtime_error("Unsupported tensor layout for BN inference.");
-            }
+            batchNormPerActivHostInference(
+                input, ref_out, scale, shift, epsilon, estMean, estVariance);
         }
         else
         {
-            if(input.desc.GetLayout_t() == miopenTensorNHWC)
-            {
-                batchNormSpatialHostInferenceNHWC(
-                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
-            }
-            else if(input.desc.GetLayout_t() == miopenTensorNCHW)
-            {
-                batchNormSpatialHostInference(
-                    input, ref_out, scale, shift, epsilon, estMean, estVariance);
-            }
-            else
-            {
-                throw std::runtime_error("Unsupported tensor layout for BN inference.");
-            }
+            batchNormSpatialHostInference(
+                input, ref_out, scale, shift, epsilon, estMean, estVariance);
         }
         activationHostInfer(
             activ_mode, activ_gamma, activ_beta, activ_alpha, ref_out.data, ref_out.data);
@@ -289,7 +161,7 @@ struct BatchNormInferTester
         }
     }
 
-    BNInferTestCase bn_config; // Holds the test configuration
+    BNTestCase bn_config;      // Holds the test configuration
     tensor<XDataType> input;   // Input tensor
     tensor<YDataType> output;  // Output tensor from GPU
     tensor<YDataType> ref_out; // Reference output tensor
@@ -313,10 +185,9 @@ struct BatchNormInferTester
 };
 
 template <typename T>
-std::vector<BNInferTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode,
-                                                miopenTensorLayout_t layout)
+std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
 {
-    // create an array of input tensor shapes (in NCHW layout) to test
+    // create an array of input tensor shapes to test
     int shapes_to_test[10][4] = {// from resnet50
                                  {64, 128, 56, 56},
                                  {64, 2048, 7, 7},
@@ -329,12 +200,18 @@ std::vector<BNInferTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode,
                                  {64, 64, 112, 112},
                                  {64, 64, 56, 56}};
 
-    // return a vector of BNInferTestCase objects created using the above shapes
-    std::vector<BNInferTestCase> test_cases;
+    // return a vector of BNTestCase objects created using the above shapes
+    std::vector<BNTestCase> test_cases;
     for(auto& shape : shapes_to_test)
     {
-        test_cases.push_back(
-            BNInferTestCase{shape[0], shape[1], shape[2], shape[3], layout, mode, 0, 0});
+        test_cases.push_back(BNTestCase{shape[0],
+                                        shape[1],
+                                        shape[2],
+                                        shape[3],
+                                        mode,
+                                        miopen::batchnorm::Direction::ForwardInference,
+                                        0,
+                                        0});
     }
 
     return test_cases;
