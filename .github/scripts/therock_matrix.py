@@ -6,6 +6,7 @@ subtree_to_project_map = {
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
     "projects/hipcub": "prim",
+    "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
     "projects/hiprand": "rand",
     "projects/hipsolver": "solver",
@@ -44,6 +45,10 @@ project_map = {
     "fft": {
         "cmake_options": "-DTHEROCK_ENABLE_FFT=ON",
         "project_to_test": "hipfft, rocfft",
+    },
+    "hipdnn": {
+        "cmake_options": "-DTHEROCK_ENABLE_HIPDNN=ON",
+        "project_to_test": "hipdnn",
     }
 }
 
