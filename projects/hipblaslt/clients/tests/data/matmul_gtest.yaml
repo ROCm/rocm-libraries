@@ -416,6 +416,16 @@ Tests:
     - { M:  960, N: 1024, K: 1024 }
     - { M: 1024, N: 1024, K: 1024 }
 
+- name: matmul_k0
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: 4
+  N: 4
+  K: 0
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+
 #OCP F8
 - name: matmul_f8_bf8_dst_fp32
   category: pre_checkin
