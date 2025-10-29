@@ -157,6 +157,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     buildBatchnormFwdInferenceGraph(hipdnn_sdk::data_objects::DataType inputDataType,
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+                                    hipdnn_sdk::data_objects::DataType computeDataType,
                                     const std::vector<int64_t>& dims,
                                     const TensorLayout& layout,
                                     bool isOutputVirtual = false)
@@ -204,6 +205,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     hipdnn_frontend::graph::BatchnormInferenceAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_inference");
+    bnAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
 
     auto yTensorAttr = graph->batchnorm_inference(
         xTensorAttr, meanTensorAttr, varianceTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
