@@ -44,16 +44,17 @@
 namespace rocrand_impl::host
 {
 
-template<class Engine>
-__host__ __device__ void init_engines_mrg(dim3               block_idx,
-                                          dim3               thread_idx,
-                                          dim3               grid_dim,
-                                          dim3               block_dim,
-                                          Engine*            engines,
-                                          const unsigned int start_engine_id,
-                                          const unsigned int engines_size,
-                                          unsigned long long seed,
-                                          unsigned long long offset)
+template<class Engine, host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__
+void init_engines_mrg(dim3               block_idx,
+                      dim3               thread_idx,
+                      dim3               grid_dim,
+                      dim3               block_dim,
+                      Engine*            engines,
+                      const unsigned int start_engine_id,
+                      const unsigned int engines_size,
+                      unsigned long long seed,
+                      unsigned long long offset)
 {
     (void)grid_dim;
     const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
@@ -64,20 +65,26 @@ __host__ __device__ void init_engines_mrg(dim3               block_idx,
     }
 }
 
-template<class ConfigProvider, bool IsDynamic, class Engine, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_mrg(dim3 block_idx,
-                                      dim3 thread_idx,
-                                      dim3 grid_dim,
-                                      dim3 /*block_dim*/,
-                                      Engine*            engines,
-                                      const unsigned int start_engine_id,
-                                      T*                 data,
-                                      const size_t       n,
-                                      Distribution       distribution)
+template<class ConfigProvider,
+         bool IsDynamic,
+         class Engine,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_mrg(dim3 block_idx,
+                  dim3 thread_idx,
+                  dim3 grid_dim,
+                  dim3 /*block_dim*/,
+                  Engine*            engines,
+                  const unsigned int start_engine_id,
+                  T*                 data,
+                  const size_t       n,
+                  Distribution       distribution)
 {
-    static_assert(is_single_tile_config<ConfigProvider, T>(IsDynamic),
+    static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                   "This kernel should only be used with single tile configs");
-    constexpr unsigned int block_size   = get_block_size<ConfigProvider, T>(IsDynamic);
+    constexpr unsigned int block_size   = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
     constexpr unsigned int input_width  = Distribution::input_width;
     constexpr unsigned int output_width = Distribution::output_width;
 
@@ -297,6 +304,13 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         m_start_engine_id = m_offset % m_engines_size;
 
         if(m_engines != nullptr)
@@ -312,8 +326,12 @@ public:
         constexpr unsigned int init_threads = ROCRAND_DEFAULT_MAX_BLOCK_SIZE;
         const unsigned int     init_blocks  = (m_engines_size + init_threads - 1) / init_threads;
 
-        status = system_type::template launch<init_engines_mrg<engine_type>,
-                                              static_block_size_config_provider<init_threads>>(
+        auto init_engines_mrg_kernel
+            = [&](auto arch, auto... args) { init_engines_mrg<engine_type, arch>(args...); };
+
+        status = system_type::template launch<static_block_size_config_provider<init_threads>>(
+            init_engines_mrg_kernel,
+            target_arch,
             dim3(init_blocks),
             dim3(init_threads),
             0,
@@ -359,23 +377,34 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         status = dynamic_dispatch(
             m_order,
             [&, this](auto is_dynamic)
             {
-                return system_type::template launch<
-                    generate_mrg<ConfigProvider, is_dynamic, engine_type, T, Distribution>,
-                    ConfigProvider,
-                    T,
-                    is_dynamic>(dim3(config.blocks),
-                                dim3(config.threads),
-                                0,
-                                m_stream,
-                                m_engines,
-                                m_start_engine_id,
-                                data,
-                                data_size,
-                                distribution);
+                auto generate_mrg_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_mrg<ConfigProvider, is_dynamic, engine_type, T, Distribution, arch>(
+                        args...);
+                };
+                return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                    generate_mrg_kernel,
+                    target_arch,
+                    dim3(config.blocks),
+                    dim3(config.threads),
+                    0,
+                    m_stream,
+                    m_engines,
+                    m_start_engine_id,
+                    data,
+                    data_size,
+                    distribution);
             });
 
         // Check kernel status
