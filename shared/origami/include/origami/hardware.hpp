@@ -675,6 +675,12 @@ namespace origami
             return heuristicsEnvVar;
         }
 
+        static bool is_wgm_prediction_enabled()
+        {
+            static bool wgmPredictionEnvVar = read_wgm_prediction_env_var(); //Used to cache the read.
+            return wgmPredictionEnvVar;
+        }
+
         void log_debug(const std::string& key, const std::string& value) const
         {
             debug_info[key] = value;
@@ -742,6 +748,13 @@ namespace origami
         {
             const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
             return !(env && std::string(env) == "0");
+        }
+
+        // Helper function to read the heuristics environment variable
+        static bool read_wgm_prediction_env_var()
+        {
+            const char* env = std::getenv("ANALYTICAL_GEMM_WGM_PREDICTION");
+            return env && std::string(env) == "1";
         }
     };
 } // namespace origami
