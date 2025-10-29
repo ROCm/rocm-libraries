@@ -79,7 +79,7 @@ bool checkNumericsImpl(
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
     const size_t threadsPerBlock = 256;
-    const size_t numBlocks       = handle.GetMaxHardwareComputeUnits() * 6;
+    const size_t numBlocks       = handle.GetMaxHardwareComputeUnits() * 64;
     const int computeStats       = (mode & CheckNumerics::ComputeStats);
     // TODO - some constants we should get from the device:
     std::string program_name      = "MIOpenCheckNumerics.cpp";
