@@ -46,6 +46,11 @@ function(add_relative_test test_name test_target)
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    if(BUILD_CODE_COVERAGE)
+        set_tests_properties(${test_name} PROPERTIES
+            ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hiprand-coverage_%m.profraw"
+        )
+    endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
 endfunction()
 
