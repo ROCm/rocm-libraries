@@ -1005,8 +1005,7 @@ private:
         };
         try
         {
-            std::hash<std::string> hasher;
-            auto                   can_be_int = [](ptrdiff_t val) {
+            auto can_be_int = [](ptrdiff_t val) {
                 return val >= std::numeric_limits<int>::lowest()
                        && val <= std::numeric_limits<int>::max();
             };
@@ -1038,9 +1037,12 @@ private:
                 if(!can_be_int(strides.back()))
                     throw strides_are_not_nembed_compatible();
 
+                elem_stride = strides.back();
+#ifdef __HIP_PLATFORM_AMD__
                 // use nullptr as nembed for default nembed ~half of the time
                 // in order to guarantee testing thereof
-                elem_stride = strides.back();
+                // NOTE: cuFFTW does not accept nullptr for default io_nembed
+                std::hash<std::string> hasher;
                 if(std::equal(
                        strides.begin(),
                        strides.end(),
@@ -1052,6 +1054,7 @@ private:
                     nembed.clear();
                 }
                 else
+#endif
                 {
                     nembed.resize(strides.size());
                     for(auto nembed_dim = nembed.size(); nembed_dim-- > 0;)
