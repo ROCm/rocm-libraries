@@ -22,7 +22,7 @@
 
 # Tests
 
-set(PROFILE_DIR "${PROFILE_DIR}")
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
