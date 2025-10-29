@@ -526,8 +526,11 @@ inline flatbuffers::FlatBufferBuilder
                                                                &convStrides,
                                                                &convDilation,
                                                                ConvMode::CROSS_CORRELATION);
-    nodes.push_back(CreateNodeDirect(
-        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "conv_fwd",
+                                     DataType::UNSET,
+                                     NodeAttributes::ConvolutionFwdAttributes,
+                                     convAttributes.Union()));
 
     if(doBias)
     {
@@ -541,8 +544,11 @@ inline flatbuffers::FlatBufferBuilder
                                                         biasTensorUid,
                                                         flatbuffers::nullopt,
                                                         yBiasTensorUid);
-        nodes.push_back(CreateNodeDirect(
-            builder, "bias", NodeAttributes::PointwiseAttributes, biasAttributes.Union()));
+        nodes.push_back(CreateNodeDirect(builder,
+                                         "bias",
+                                         DataType::UNSET,
+                                         NodeAttributes::PointwiseAttributes,
+                                         biasAttributes.Union()));
     }
 
     auto activAttributes = CreatePointwiseAttributes(builder,
@@ -558,8 +564,11 @@ inline flatbuffers::FlatBufferBuilder
                                                      swishBeta,
                                                      eluAlpha,
                                                      softplusBeta);
-    nodes.push_back(CreateNodeDirect(
-        builder, "activ", NodeAttributes::PointwiseAttributes, activAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "activ",
+                                     DataType::UNSET,
+                                     NodeAttributes::PointwiseAttributes,
+                                     activAttributes.Union()));
 
     auto graphOffset = CreateGraphDirect(builder,
                                          "test",
