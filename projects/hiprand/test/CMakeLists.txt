@@ -88,9 +88,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hiprand-coverage_*.profraw -o ${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
-    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
+    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
+    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
