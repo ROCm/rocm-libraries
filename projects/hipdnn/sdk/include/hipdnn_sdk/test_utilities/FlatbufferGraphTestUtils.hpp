@@ -198,7 +198,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     std::vector<int64_t> derivedDims = getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
 
-    // Input tensors
+    // inputs
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
@@ -220,7 +220,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 6, "dy", inputDataType, &strides, &dims));
 
-    // Output tensors
+    // output tensors
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "dx", inputDataType, &strides, &dims));
 
@@ -230,7 +230,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 9, "dbias", intermediateDataType, &derivedStrides, &derivedDims));
 
-    // Virtual intermediate tensors
+    // virtual tensors
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 10, "BN_Y", inputDataType, &strides, &dims, true)); // is_virtual = true
 
@@ -260,13 +260,13 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
-        0.0f, // relu_lower_clip
-        0.0f, // relu_upper_clip
-        0.0f, // relu_lower_clip_slope
-        flatbuffers::Optional<int64_t>(), // axis_tensor_uid
+        std::nullopt, // relu_lower_clip
+        std::nullopt, // relu_upper_clip
+        std::nullopt, // relu_lower_clip_slope
+        flatbuffers::nullopt, // axis_tensor_uid
         10, // in_0_tensor_uid (BN_Y)
-        6, // in_1_tensor_uid (dy)
-        flatbuffers::Optional<int64_t>(), // in_2_tensor_uid
+        flatbuffers::Optional<int64_t>(6), // in_1_tensor_uid (dy)
+        flatbuffers::nullopt, // in_2_tensor_uid
         11 // out_0_tensor_uid (DX_drelu - virtual)
     );
 
@@ -301,8 +301,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    DataType::FLOAT,
-                                                                   DataType::HALF,
-                                                                   DataType::BFLOAT16,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
                                                                    &tensorAttributes,
                                                                    &nodes);
     builder.Finish(graphOffset);
