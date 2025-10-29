@@ -369,7 +369,6 @@ namespace rocRoller
                 }
             }
 
-            // ------------------------------
             // Change the loop increment calculation
             // Multiply the increment amount by the unroll amount
             // Find the ForLoopIcrement calculation
@@ -383,7 +382,6 @@ namespace rocRoller
             loopIncrementOp.expression = newAddExpr;
             graph.control.setElement(*loopIncrement, loopIncrementOp);
 
-            // ------------------------------
             // Add a setCoordinate node in between the original ForLoopOp and the loop bodies
             // Delete edges between original ForLoopOp and original loop body
             for(auto const& child : graph.control.getNeighbours<GD::Downstream>(tag))
@@ -407,7 +405,7 @@ namespace rocRoller
                     {
                         auto pendingOp        = op;
                         auto [required, path] = findAllRequiredCoordinates(op, graph);
-                        if(path.count(unrollDimension) > 0)
+                        if(path.contains(unrollDimension))
                         {
                             if(!hasExistingSetCoordinate(graph, op, coordValue, unrollDimension))
                             {
@@ -442,7 +440,6 @@ namespace rocRoller
                 return rv;
             };
 
-            // ------------------------------
             // Create duplicates of the loop body and populate the sequentialOperations
             // data structure. sequentialOperations is a map that uses a coordinate with
             // a loop carried dependency as a key and contains a vector of vectors
@@ -538,48 +535,42 @@ namespace rocRoller
             }
         }
 
-        // ---------------------------------
         // Add Unroll dimension to the coordinates graph and return it.
         int UnrollLoops::createUnrollDimension(KernelGraph& graph,
                                                int          forLoopDimension,
                                                int          unrollAmount)
         {
-            if(m_unrolledLoopDimensions.count(forLoopDimension) > 0)
-            {
+            if(m_unrolledLoopDimensions.contains(forLoopDimension))
                 return m_unrolledLoopDimensions[forLoopDimension];
-            }
-            else
+
+            // Find all incoming PassThrough edges to the ForLoop dimension and replace
+            // them with a Split edge with an Unroll dimension.
+            auto forLoopLocation = graph.coordinates.getLocation(forLoopDimension);
+            int  unrollDimension = graph.coordinates.addElement(Unroll(unrollAmount));
+            for(auto const& input : forLoopLocation.incoming)
             {
-                // Find all incoming PassThrough edges to the ForLoop dimension and replace
-                // them with a Split edge with an Unroll dimension.
-                auto forLoopLocation = graph.coordinates.getLocation(forLoopDimension);
-                int  unrollDimension = graph.coordinates.addElement(Unroll(unrollAmount));
-                for(auto const& input : forLoopLocation.incoming)
+                if(isEdge<PassThrough>(graph.coordinates.getEdge(input)))
                 {
-                    if(isEdge<PassThrough>(graph.coordinates.getEdge(input)))
-                    {
-                        int parent = *graph.coordinates.getNeighbours<GD::Upstream>(input).begin();
-                        graph.coordinates.addElement(
-                            Split(), {parent}, {forLoopDimension, unrollDimension});
-                        graph.coordinates.deleteElement(input);
-                    }
+                    int parent = *graph.coordinates.getNeighbours<GD::Upstream>(input).begin();
+                    graph.coordinates.addElement(
+                        Split(), {parent}, {forLoopDimension, unrollDimension});
+                    graph.coordinates.deleteElement(input);
                 }
-                // Find all outgoing PassThrough edges from the ForLoop dimension and replace
-                // them with a Join edge with an Unroll dimension.
-                for(auto const& output : forLoopLocation.outgoing)
-                {
-                    if(isEdge<PassThrough>(graph.coordinates.getEdge(output)))
-                    {
-                        int child
-                            = *graph.coordinates.getNeighbours<GD::Downstream>(output).begin();
-                        graph.coordinates.addElement(
-                            Join(), {forLoopDimension, unrollDimension}, {child});
-                        graph.coordinates.deleteElement(output);
-                    }
-                }
-                m_unrolledLoopDimensions[forLoopDimension] = unrollDimension;
-                return unrollDimension;
             }
+            // Find all outgoing PassThrough edges from the ForLoop dimension and replace
+            // them with a Join edge with an Unroll dimension.
+            for(auto const& output : forLoopLocation.outgoing)
+            {
+                if(isEdge<PassThrough>(graph.coordinates.getEdge(output)))
+                {
+                    int child = *graph.coordinates.getNeighbours<GD::Downstream>(output).begin();
+                    graph.coordinates.addElement(
+                        Join(), {forLoopDimension, unrollDimension}, {child});
+                    graph.coordinates.deleteElement(output);
+                }
+            }
+            m_unrolledLoopDimensions[forLoopDimension] = unrollDimension;
+            return unrollDimension;
         }
 
         /**
@@ -714,24 +705,44 @@ namespace rocRoller
             }
 
             {
-                // Set the value of the unroll dimension to 0 for the tail loop.
-                // This SetCoord will contain the tail loop and so it's how we
-                // ensure the tail loop happens immediately after the original loop
-                // and before any other operations that were sequenced after the
-                // original loop.
+                // Add SetCoordinate for the loop size for the tail loop.
                 auto setCoordK = graph.control.addElement(SetCoordinate(loopSizeRoundedDown));
                 graph.mapper.connect<ForLoop>(setCoordK, forLoopDimension);
-                auto setCoord = graph.control.addElement(SetCoordinate(Expression::literal(0u)));
-                graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                graph.control.chain<Body>(setCoordK, setCoord, tailLoop);
-                // We are just adding more sequence edges and leaving the cleanup
-                // for the Simplify graph transformation.
+                // Connect it to the tail loop via a Body edge.
+                graph.control.chain<Body>(setCoordK, tailLoop);
+                // Connect the parent loop's Sequence children as Sequence children of the
+                // new SetCoordinate. This ensures that the tail loop is before the
+                // original Sequence children to the parent loop.
                 for(auto node : graph.control.getOutputNodeIndices<Sequence>(loop))
                 {
-                    graph.control.chain<Sequence>(setCoord, node);
+                    graph.control.chain<Sequence>(setCoordK, node);
                 }
-                // The tail loop comes after the main loop.
                 graph.control.chain<Sequence>(loop, setCoordK);
+            }
+
+            auto const coordValue = 0u;
+            auto const bodies
+                = graph.control.getOutputNodeIndices<Body>(tailLoop).to<std::vector>();
+            for(auto const body : bodies)
+            {
+                for(auto const op : findComputeIndexCandidates(graph, body))
+                {
+                    auto [_, path] = findAllRequiredCoordinates(op, graph);
+                    if(path.contains(unrollDimension))
+                    {
+                        if(!hasExistingSetCoordinate(graph, op, coordValue, unrollDimension))
+                        {
+                            auto setCoord = replaceWith(graph,
+                                                        op,
+                                                        graph.control.addElement(SetCoordinate(
+                                                            Expression::literal(coordValue))),
+                                                        false);
+                            graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                            graph.mapper.connect<Unroll>(op, unrollDimension, 2);
+                            graph.control.chain<Body>(setCoord, op);
+                        }
+                    }
+                }
             }
 
             return tailLoop;
