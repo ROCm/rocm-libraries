@@ -66,22 +66,24 @@ else()
     endif()
 endif()
 
-# Default installation path
-if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
-
-project ( MIOpen C CXX )
+project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CTest)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_PREFIX_PATH ${PROJECT_SOURCE_DIR}/cmake)
+# Default installation path
+if(WIN32)
+    set(CMAKE_INSTALL_PREFIX $ENV{HIP_PATH})
+else()
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
+endif()
 
 find_package(Threads REQUIRED)
-find_package(ROCM 0.7.3 REQUIRED PATHS /opt/rocm)
 
+find_package(ROCmCMakeBuildTools)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
 include(ROCMSetupVersion)
@@ -116,8 +118,8 @@ endif()
 set(MIOPEN_LOG_FUNC_TIME_ENABLE Off CACHE BOOL "")
 set(MIOPEN_ENABLE_SQLITE_BACKOFF On CACHE BOOL "")
 
-option( BUILD_DEV "Build for development only" OFF)
-option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
+option(BUILD_DEV "Build for development only" OFF)
+option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen" OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 
@@ -126,7 +128,7 @@ if(MIOPEN_INCBIN)
     enable_language(ASM)
 endif()
 
-option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
+option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" ON)
 message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
 
 # Strip symbols for release
@@ -137,7 +139,6 @@ endif()
 
 rocm_setup_version(VERSION 3.5.1)
 
-list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 include(TargetFlags)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -174,9 +175,9 @@ message( STATUS "MIOPEN_OFFLINE_COMPILER_PATHS_V2: ${MIOPEN_OFFLINE_COMPILER_PAT
 # Embedded Build Configuration
 set(MIOPEN_EMBED_DB "" CACHE STRING "Semi-colon separated list of architecture to embed on-disk DBs in the binary. Example gfx906_60;gfx900_56")
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" Off)
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" Off)
 else()
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" ${MIOPEN_EMBED_BUILD})
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" ${MIOPEN_EMBED_BUILD})
 endif()
 set(MIOPEN_BINCACHE_PATH "" CACHE STRING "URL or path containing binary cache files to embed")
 option(MIOPEN_EMBED_BINCACHE "Embed Binary Cache or KDB" Off)
@@ -204,13 +205,12 @@ endif()
 
 set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
-set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
-    OpenCL HIP HIPOC HIPNOGPU)
-    
+set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS OpenCL HIP HIPOC HIPNOGPU )
+
 # On Windows, internal symbols are only exported when BUILD_TESTING=true. As a result, building driver with BUILD_TESTING=false will result in failure.
-set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))  
+set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
-message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
+message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}")
 
 # OpenCL 1.2
 if( MIOPEN_BACKEND STREQUAL "OpenCL")
@@ -493,21 +493,17 @@ if(MIOPEN_USE_HIPRTC)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
 
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-set(BOOST_COMPONENTS filesystem)
-if(MIOPEN_BUILD_DRIVER)
-    # boost core is a header only component that can't be found by find_package
-    # list(APPEND BOOST_COMPONENTS core)
-endif()
-
+if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
 # The FindBoost module has been removed since CMake 3.30. Use the Boost 1.83 configuration file instead.
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
+  find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
+  add_definitions(-DBOOST_ALL_NO_LIB=1)
+  option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
+endif()
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
-option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
+option(MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
 if(WIN32)
     set( DATA_INSTALL_DIR bin )
