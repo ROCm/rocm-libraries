@@ -627,6 +627,9 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
 
+    if kernel["enableTDMA"] and kernel["enableTDMB"]:
+      module.add(self.defineSgpr("tdmIncs", 1))
+
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
       if not kernel["enableTDMA"]:
@@ -16621,14 +16624,18 @@ class KernelWriterAssembly(KernelWriter):
     #TODO: TDM replace by universal tdm group sgpr
     tc: str = tPA['tensorChar']
     mod = Module("TDMGlobalIncrementsWaveSeparated")
-    with self.allocTmpSgpr(1) as tmpSgprRes:
-      wavelen: int = kernel["WavefrontSize"]
-      waveIdSgprIdx: int = tmpSgprRes.idx
-      mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-      mod.add(SCSelectB32(sgpr(waveIdSgprIdx), sgpr("GlobalReadIncsB"), sgpr("GlobalReadIncsA")))
-      mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", waveIdSgprIdx))
+    mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", "tdmIncs"))
+    return mod
+
+  def tdmSetupIncrementWaveSeparated(self, kernel) -> Module:
+    mod = Module()
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    wavelen: int = kernel["WavefrontSize"]
+    mod.add(VReadfirstlaneB32(sgpr("tdmIncs"), vgpr("Serial"), "first tId"))
+    mod.add(SLShiftRightB32(sgpr("tdmIncs"), ceil(log2(wavelen)), sgpr("tdmIncs"), "wId=fTid // wavelen"))
+    mod.add(SBitcmp1B32(sgpr("tdmIncs"), 0, "Check parity of wId"))
+    #TODO: should not directly use GRIA and GRIB
+    mod.add(SCSelectB32(sgpr("tdmIncs"), sgpr("GlobalReadIncsB"), sgpr("GlobalReadIncsA")))
     return mod
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):

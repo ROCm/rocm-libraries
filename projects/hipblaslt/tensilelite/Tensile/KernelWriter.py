@@ -2639,6 +2639,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.setupNewTile(self, kernel, tensorParametersA, tensorParametersB, tPM))
 
+    #TODO: TDM wave separated
+    if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+      module.add(self.tdmSetupIncrementWaveSeparated(kernel))
+
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
 
     ###########################################################################
@@ -8341,6 +8345,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmSetupIncrementWaveSeparated(self, kernel) -> Module:
     assert False, "Should be overrided"
 
 ##############################################################################
