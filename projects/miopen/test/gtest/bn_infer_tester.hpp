@@ -80,7 +80,7 @@ void batchNormSpatialHostInferenceNHWC(const tensor<T>& input,
     int n_batches, height, width, channels;
     std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
 
-    par_for(channels, 1, [&](int cidx) {
+    miopen::par_for(channels, 1, [&](int cidx) {
         for(int row = 0; row < height; row++)
         {
             V mean        = estimatedMean(0, row, 0, 0);
@@ -112,7 +112,7 @@ void batchNormPerActivHostInferenceNHWC(const tensor<T>& input,
     int n_batches, height, width, channels;
     std::tie(n_batches, height, width, channels) = miopen::tien<4>(input.desc.GetLengths());
 
-    par_for(channels, 1, [&](int cidx) {
+    miopen::par_for(channels, 1, [&](int cidx) {
         for(int row = 0; row < height; row++)
         {
             for(int column = 0; column < width; column++)
