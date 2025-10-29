@@ -122,6 +122,11 @@ public:
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {

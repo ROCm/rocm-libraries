@@ -95,12 +95,17 @@ public:
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
-    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-    static void runBatchnormTrainTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-                                      hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-                                      bool useOptionalTensors = false)
+    template <typename InputType,
+              typename ScaleBiasType,
+              typename MeanVarianceType,
+              typename ComputeType>
+    static void runBatchnormTrainTest(bool useOptionalTensors = false)
     {
+        auto inputDataType = nativeTypeToDataType<InputType>();
+        auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+        auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
+        auto computeDataType = nativeTypeToDataType<ComputeType>();
+
         std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW, useOptionalTensors);
@@ -109,6 +114,7 @@ public:
                                                    inputDataType,
                                                    scaleBiasDataType,
                                                    meanVarianceDataType,
+                                                   computeDataType,
                                                    useOptionalTensors);
 
         auto& graph = std::get<0>(graphTuple);
@@ -221,23 +227,20 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float>(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float, float>();
 
-    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float>(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, true);
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float, float>(true);
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half>(
-        DataType::HALF, DataType::HALF, DataType::HALF);
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half, half>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
-        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+    TestCpuReferenceGraphExecutor::
+        runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, ConvolutionFwdAllFloats)
