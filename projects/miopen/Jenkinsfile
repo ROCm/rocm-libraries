@@ -93,7 +93,7 @@ pipeline {
     }
     triggers{
         parameterizedCron(CRON_SETTINGS)
-        parameterizedCron(NONCRITICAL_HW_CRON_SETTINGS)
+        parameterizedCronNonCritical(NONCRITICAL_HW_CRON_SETTINGS)
     }
     parameters {
         booleanParam(
