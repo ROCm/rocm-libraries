@@ -53,14 +53,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                         const FLOAT_ACCUM* __restrict estimatedMean,
                                         const FLOAT_ACCUM* __restrict estimatedVariance)
 {
-    unsigned int tidx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     // skip execution for out-of-bound threads
     if(tidx >= MIOPEN_SBN_BOUNDS)
     {
         return;
     }
 
-    unsigned int tidy = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
 
     unsigned int c_i      = tidy;
     unsigned int hw_i     = tidx;
@@ -90,7 +90,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-            bnRes[i] = fma(pscale, (CVT_FLOAT2ACCUM(data[i]) - pmean) * invVariance, pbias);
+            bnRes[i] = pscale * (CVT_FLOAT2ACCUM(data[i]) - pmean) * invVariance + pbias;
         }
         ActivationFunction(
             actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
@@ -118,7 +118,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                        const FLOAT_ACCUM* __restrict estimatedMean,
                                        const FLOAT_ACCUM* __restrict estimatedVariance)
 {
-    unsigned int tidx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     // skip execution for out-of-bound threads
     if(tidx >= MIOPEN_SBN_BOUNDS)
     {
@@ -166,7 +166,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
             bnRes[i] =
-                fma(pscale[i], (CVT_FLOAT2ACCUM(data[i]) - pmean[i]) * invVariance[i], pbias[i]);
+                pscale[i] * (CVT_FLOAT2ACCUM(data[i]) - pmean[i]) * invVariance[i] + pbias[i];
         }
         ActivationFunction(
             actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));
