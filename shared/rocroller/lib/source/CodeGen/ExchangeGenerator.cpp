@@ -27,15 +27,17 @@ namespace rocRoller
         Generator<Instruction>
             ExchangeGenerator::genExchange(int tag, Exchange const& exchange, Transformer coords)
         {
-            auto [waveTileTag, waveTile]   = m_graph->getDimension<WaveTile>(tag);
-            auto [macTileTag, macTile]     = m_graph->getDimension<MacroTile>(tag);
-            auto [vgprTag, vgprDim]        = m_graph->getDimension<VGPR>(tag);
-            auto [simdIndexTag, simdIndex] = m_graph->getDimension<Adhoc>(tag, 1);
-            auto oMacTileTag               = m_graph->mapper.get(tag, NaryArgument::DEST);
+            auto [waveTileTag, waveTile]      = m_graph->getDimension<WaveTile>(tag);
+            auto [macTileTag, macTile]        = m_graph->getDimension<MacroTile>(tag);
+            auto [vgprTag, vgprDim]           = m_graph->getDimension<VGPR>(tag);
+            auto [vgprIndexTag, vgprIndexDim] = m_graph->getDimension<VGPRBlockIndex>(tag);
+            auto [simdIndexTag, simdIndex]    = m_graph->getDimension<Adhoc>(tag, 1);
+            auto oMacTileTag                  = m_graph->mapper.get(tag, NaryArgument::DEST);
 
             const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
-            Expression::ExpressionPtr waveTileExpr, simdIndexExpr, vgprExpr, expectedExpr;
+            Expression::ExpressionPtr waveTileExpr, simdIndexExpr, vgprExpr, vgprIndexExpr,
+                expectedExpr;
 
             {
                 auto [required, path]
@@ -51,6 +53,7 @@ namespace rocRoller
                 waveTileExpr = coords.reverse({waveTileTag})[0];
             }
 
+            if(waveTile.sizes[0] == 64)
             {
                 auto [required, path]
                     = findRequiredCoordinates(vgprTag, Graph::Direction::Downstream, *m_graph);

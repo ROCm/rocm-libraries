@@ -94,10 +94,13 @@ namespace PermLanesTest
 
         auto user1 = kgraph.coordinates.addElement(
             User("result", std::make_shared<Expression::Expression>((size_t)MN * K)));
-        auto odim0 = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
-        auto odim1 = kgraph.coordinates.addElement(SubDimension(1, exprK, unit));
-        auto mactile1
-            = kgraph.coordinates.addElement(MacroTile({macMN, macK}, MemoryType::VGPR, {1, 4}));
+        auto odim0    = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
+        auto odim1    = kgraph.coordinates.addElement(SubDimension(1, exprK, unit));
+        auto mactile1 = kgraph.coordinates.addElement(MacroTile({macMN, macK},
+                                                                LayoutType::MATRIX_A,
+                                                                {waveMN, waveMN, waveK, waveB},
+                                                                MemoryType::WAVE_SWIZZLE,
+                                                                {miMN, miMN, miK, miB}));
         kgraph.coordinates.addElement(DestructMacroTile(), {mactile1}, {odim0, odim1});
         kgraph.coordinates.addElement(Join(), {odim0, odim1}, {user1});
         kgraph.coordinates.addElement(DataFlow(), {mactile1}, {user1});
@@ -173,7 +176,6 @@ namespace PermLanesTest
         int nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
         int nVGPRIndex    = nSIMDIndex;
         int nVGPRBlock    = nSIMDBlock;
-        std::cout << nSIMDIndex << std::endl;
 
         // clang-format off
         for(int wave      = 0;      wave < nWaves; wave++)
@@ -189,11 +191,25 @@ namespace PermLanesTest
                         + simdBlock * nVGPRBlock * nVGPRIndex
                         + vgprBlock * nVGPRIndex + vgprIndex;
 
-            auto resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+            auto resultIdx = aIdx;
+
+            if(waveMN == 64)
+            {
+                resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + (vgprBlock * nVGPRIndex + vgprIndex) * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + simdBlock * nVGPRBlock * nVGPRIndex
                         + simdIndex;
+            }
+            else if(waveMN == 32)
+            {
+                resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprBlock * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRIndex
+                        + simdIndex;
+            }
 
             ASSERT_EQ(a[aIdx], result[resultIdx]);
         }
@@ -206,8 +222,11 @@ namespace PermLanesTest
                                      static_cast<size_t>(nSIMDIndex),
                                      static_cast<size_t>(nWaves)};
 
-        TensorDescriptor src(DataType::E8M0, sizes);
-        auto dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
+        TensorDescriptor src(DataType::E8M0, sizes), dst;
+        if(waveMN == 64)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
+        if(waveMN == 32)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 2, 1, 3, 0, 5});
 
         auto a_reordered = shuffleDims(a, dst, src);
         EXPECT_EQ(a_reordered, result);
