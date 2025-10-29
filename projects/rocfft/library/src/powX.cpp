@@ -525,11 +525,12 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
 // Internal plan executor.
 // For in-place transforms, in_buffer == out_buffer.
-void TransformPowX(const ExecPlan&       execPlan,
-                   void*                 in_buffer[],
-                   void*                 out_buffer[],
-                   rocfft_execution_info info,
-                   size_t                multiPlanIdx)
+void TransformPowX(const ExecPlan&                       execPlan,
+                   void*                                 in_buffer[],
+                   void*                                 out_buffer[],
+                   rocfft_execution_info                 info,
+                   size_t                                multiPlanIdx,
+                   const std::vector<device_callback_t>& callbacks)
 {
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
 
@@ -556,13 +557,22 @@ void TransformPowX(const ExecPlan&       execPlan,
     TreeNode* store_node            = nullptr;
     std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
 
-    load_node->callbacks.load_cb_fn        = info->callbacks.load_cb_fn;
-    load_node->callbacks.load_cb_data      = info->callbacks.load_cb_data;
-    load_node->callbacks.load_cb_lds_bytes = info->callbacks.load_cb_lds_bytes;
+    if(execPlan.location.device < static_cast<int>(callbacks.size()))
+    {
+        if(execPlan.rootPlan->loadOps)
+        {
+            load_node->callbacks.load_cb_fn        = callbacks[execPlan.location.device].load_fn;
+            load_node->callbacks.load_cb_data      = callbacks[execPlan.location.device].load_data;
+            load_node->callbacks.load_cb_lds_bytes = info->load_cb_lds_bytes;
+        }
 
-    store_node->callbacks.store_cb_fn        = info->callbacks.store_cb_fn;
-    store_node->callbacks.store_cb_data      = info->callbacks.store_cb_data;
-    store_node->callbacks.store_cb_lds_bytes = info->callbacks.store_cb_lds_bytes;
+        if(execPlan.rootPlan->storeOps)
+        {
+            store_node->callbacks.store_cb_fn   = callbacks[execPlan.location.device].store_fn;
+            store_node->callbacks.store_cb_data = callbacks[execPlan.location.device].store_data;
+            store_node->callbacks.store_cb_lds_bytes = info->store_cb_lds_bytes;
+        }
+    }
 
     for(size_t i = 0; i < execPlan.execSeq.size(); i++)
     {
