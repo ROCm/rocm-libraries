@@ -42,7 +42,8 @@ TEST(TestBatchnormBwdParams, HandlesMissingOptionalTensors)
 {
     // Create a valid batchnorm graph and remove mean/variance from tensor map
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph(
-        {1, 1, 1, 1}, {1, 1, 1, 1}, false);
+        {1, 1, 1, 1}, {1, 1, 1, 1}, false // Set has_optional_attributes to false
+    );
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
@@ -172,7 +173,7 @@ TEST(TestBatchnormBwdParams, ThrowsWhenPointwiseMissingIn1TensorUid)
                                            *malformedPointwiseAttrs,
                                            *batchnormInfAttrs,
                                            validGraph.getTensorMap()),
-                 std::runtime_error);
+                 hipdnn_plugin::HipdnnPluginException);
 }
 
 TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)

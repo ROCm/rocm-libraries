@@ -43,32 +43,7 @@ struct BatchnormTestCase
     }
 };
 
-inline std::vector<BatchnormTestCase> getBatchnormTestCases4D()
-{
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
-
-    return {
-        {{1, 3, 5, 5}, seed},
-        {{2, 3, 14, 14}, seed},
-        {{2, 3, 1, 1}, seed},
-        {{32, 1, 14, 14}, seed},
-        {{32, 3, 1, 14}, seed},
-        {{32, 3, 14, 1}, seed},
-        {{64, 64, 112, 112}, seed},
-        {{64, 512, 14, 14}, seed},
-    };
-}
-
-inline std::vector<BatchnormTestCase> getBatchnormTestCases5D()
-{
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
-
-    return {
-        {{2, 3, 3, 1, 1}, seed},
-        {{16, 3, 8, 14, 14}, seed},
-    };
-}
-
+// This is used for operation tests
 inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()
 {
     unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();

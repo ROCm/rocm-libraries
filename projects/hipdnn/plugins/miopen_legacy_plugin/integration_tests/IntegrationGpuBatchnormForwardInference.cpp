@@ -100,7 +100,7 @@ protected:
         yTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         yTensorAttr->set_output(true);
 
-        this->registerValidator(yTensorAttr, static_cast<float>(tolerance));
+        this->registerValidator(yTensorAttr, tolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
     }
