@@ -41,7 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename T>
+template <typename I, typename J, typename T>
 void testing_spmm_csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
@@ -201,7 +201,7 @@ hipsparseStatus_t testing_spmm_csc(Arguments argus)
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseOrder_t     orderC   = argus.orderC;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMMAlg_t   alg      = static_cast<hipsparseSpMMAlg_t>(argus.spmm_alg);
+    hipsparseSpMMAlg_t   alg      = argus.spmm_alg;
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))
@@ -332,7 +332,7 @@ hipsparseStatus_t testing_spmm_csc(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     //When using cusparse backend, cant pass nullptr for buffer to preprocess
     if(bufferSize == 0)
     {
@@ -344,14 +344,14 @@ hipsparseStatus_t testing_spmm_csc(Arguments argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // HIPSPARSE pointer mode host
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 #endif
 
     // HIPSPARSE pointer mode device
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
     CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));

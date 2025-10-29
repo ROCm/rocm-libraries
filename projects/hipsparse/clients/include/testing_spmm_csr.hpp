@@ -41,7 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename T>
+template <typename I, typename J, typename T>
 void testing_spmm_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
@@ -203,7 +203,7 @@ hipsparseStatus_t testing_spmm_csr(Arguments argus)
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseOrder_t     orderC   = argus.orderC;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMMAlg_t   alg      = static_cast<hipsparseSpMMAlg_t>(argus.spmm_alg);
+    hipsparseSpMMAlg_t   alg      = argus.spmm_alg;
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))

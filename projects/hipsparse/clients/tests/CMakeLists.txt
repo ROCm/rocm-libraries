@@ -212,20 +212,32 @@ set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
-set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml 
-                         test_doti.yaml 
+set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
+                         test_doti.yaml
                          test_dotci.yaml
                          test_sctr.yaml
                          test_roti.yaml
                          test_gthr.yaml
                          test_gthrz.yaml
-                         test_axpby.yaml 
-                         test_gather.yaml 
+
+                         test_bsrmv.yaml
+                         test_csrmv.yaml
+                         test_bsrsv2.yaml
+                         test_csrsv2.yaml
+                         test_gemvi.yaml
+                         test_hybmv.yaml
+                         
+                         test_axpby.yaml
+                         test_rot.yaml
+                         test_gather.yaml
                          test_scatter.yaml
                          test_sddmm_coo_aos.yaml
                          test_sddmm_coo.yaml
                          test_sddmm_csc.yaml
                          test_sddmm_csr.yaml
+                         test_dense_to_sparse_coo.yaml
+                         test_dense_to_sparse_csc.yaml
+                         test_dense_to_sparse_csr.yaml
                          test_sparse_to_dense_coo.yaml
                          test_sparse_to_dense_csc.yaml
                          test_sparse_to_dense_csr.yaml
@@ -236,7 +248,15 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_spmm_batched_csr.yaml
                          test_spmm_coo.yaml
                          test_spmm_csc.yaml
-                         test_spmm_csr.yaml)
+                         test_spmm_csr.yaml
+                         test_spmv_coo_aos.yaml
+                         test_spmv_coo.yaml
+                         test_spmv_csr.yaml
+                         test_spsv_coo.yaml
+                         test_spsv_csr.yaml
+                         test_spsm_coo.yaml
+                         test_spsm_csr.yaml
+                         test_spvv.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")

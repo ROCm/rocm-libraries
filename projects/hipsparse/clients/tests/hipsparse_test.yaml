@@ -30,14 +30,26 @@ include: test_sctr.yaml
 include: test_gthr.yaml
 include: test_gthrz.yaml
 
-# extra
+#level2
+include: test_bsrmv.yaml
+include: test_bsrsv2.yaml
+include: test_csrmv.yaml
+include: test_csrsv2.yaml
+include: test_gemvi.yaml
+include: test_hybmv.yaml
+
+# generic
 include: test_axpby.yaml
 include: test_gather.yaml
 include: test_scatter.yaml
+include: test_rot.yaml
 include: test_sddmm_coo_aos.yaml
 include: test_sddmm_coo.yaml
 include: test_sddmm_csc.yaml
 include: test_sddmm_csr.yaml
+include: test_dense_to_sparse_coo.yaml
+include: test_dense_to_sparse_csc.yaml
+include: test_dense_to_sparse_csr.yaml
 include: test_sparse_to_dense_coo.yaml
 include: test_sparse_to_dense_csc.yaml
 include: test_sparse_to_dense_csr.yaml
@@ -49,3 +61,11 @@ include: test_spmm_batched_csr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
+include: test_spmv_coo_aos.yaml
+include: test_spmv_coo.yaml
+include: test_spmv_csr.yaml
+include: test_spsv_coo.yaml
+include: test_spsv_csr.yaml
+include: test_spsm_coo.yaml
+include: test_spsm_csr.yaml
+include: test_spvv.yaml

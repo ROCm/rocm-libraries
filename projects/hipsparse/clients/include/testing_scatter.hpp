@@ -38,7 +38,7 @@
 
 using namespace hipsparse_test;
 
-template <typename T>
+template <typename I, typename T>
 void testing_scatter_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)

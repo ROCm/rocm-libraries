@@ -51,6 +51,82 @@ std::string hipsparse_exepath();
 /*! \brief Return path where the test data file (hipsparse_test.data) is located */
 std::string hipsparse_datapath();
 
+inline void missing_file_error_message(const char* filename)
+{
+    std::cerr << "#" << std::endl;
+    std::cerr << "# error:" << std::endl;
+    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# What could be the reason of this error: " << std::endl;
+    std::cerr << "# You are running the testing application and it expects to find the file "
+                 "at the specified location. This means that either you did not download the test "
+                 "matrices, or you did not specify the location of the folder containing your "
+                 "files. If you want to specify the location of the folder containing your files, "
+                 "then you will find the needed information with 'hipsparse-test --help'."
+                 "If you need to download matrices, then a cmake script "
+                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
+              << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr
+        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
+        << std::endl;
+    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
+    std::cerr << "# (or        'export "
+                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
+              << std::endl;
+    std::cerr << "#" << std::endl;
+}
+
+static const char* s_hipsparse_clients_matrices_dir = nullptr;
+
+inline const char* get_hipsparse_clients_matrices_dir()
+{
+    return s_hipsparse_clients_matrices_dir;
+}
+
+inline std::string get_filename(const std::string& matrix_filename)
+{
+    std::string matrix_filename_with_ext = matrix_filename;
+
+    // Check if file already has extension, keep it, otherwise add .bin extension
+    size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
+    if(last_dot_pos == std::string::npos || last_dot_pos == 0)
+    {
+        matrix_filename_with_ext += ".bin";
+    }
+
+    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
+    if(matrices_dir == nullptr)
+    {
+        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
+    }
+
+    std::string r;
+    if(matrices_dir != nullptr)
+    {
+        r = std::string(matrices_dir) + "/" + matrix_filename_with_ext;
+    }
+    else
+    {
+        r = hipsparse_exepath() + "../matrices/" + matrix_filename_with_ext;
+    }
+
+    FILE* tmpf = fopen(r.c_str(), "r");
+    if(!tmpf)
+    {
+        missing_file_error_message(r.c_str());
+        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+    }
+    else
+    {
+        fclose(tmpf);
+    }
+    return r;
+}
+
 /*!\file
  * \brief provide data initialization and timing utilities.
  */
@@ -1070,7 +1146,7 @@ bool generate_csr_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1098,11 +1174,19 @@ bool generate_csr_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               csr_col_ind,
+                               csr_val,
+                               idx_base)
                == 0)
             {
                 return true;
@@ -1112,7 +1196,7 @@ bool generate_csr_matrix(const std::string    filename,
         {
             int64_t        nnz_count;
             std::vector<J> coo_row_ind;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -1160,7 +1244,7 @@ bool generate_coo_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1175,12 +1259,20 @@ bool generate_coo_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               coo_col_ind,
+                               coo_val,
+                               idx_base)
                == 0)
             {
                 coo_row_ind.resize(nnz);
@@ -1201,7 +1293,7 @@ bool generate_coo_matrix(const std::string    filename,
         else if(extension == "mtx")
         {
             int64_t nnz_count;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -2805,11 +2897,11 @@ void host_csrmm(J                    M,
                 const J*             csr_col_ind_A,
                 const T*             csr_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     orderB,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     orderC,
                 hipsparseIndexBase_t base,
                 bool                 force_conj_A)
@@ -2826,15 +2918,15 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                I row_begin = csr_row_ptr_A[i] - base;
-                I row_end   = csr_row_ptr_A[i + 1] - base;
-                J idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
+                I       row_begin = csr_row_ptr_A[i] - base;
+                I       row_end   = csr_row_ptr_A[i + 1] - base;
+                int64_t idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
 
                 T sum = make_DataType<T>(0);
 
                 for(I k = row_begin; k < row_end; ++k)
                 {
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
                        || (transB == HIPSPARSE_OPERATION_TRANSPOSE && orderB != HIPSPARSE_ORDER_COL)
@@ -2870,8 +2962,8 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                J idx_C  = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
-                C[idx_C] = testing_mult(beta, C[idx_C]);
+                int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                C[idx_C]      = testing_mult(beta, C[idx_C]);
             }
         }
 
@@ -2887,7 +2979,7 @@ void host_csrmm(J                    M,
                     J col = csr_col_ind_A[k] - base;
                     T val = testing_conj(csr_val_A[k], conj_A);
 
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
 
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
@@ -2902,7 +2994,7 @@ void host_csrmm(J                    M,
                         idx_B = (j + i * ldb);
                     }
 
-                    J idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
                     C[idx_C]
                         = C[idx_C]
@@ -2918,8 +3010,8 @@ void host_csrmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        J                    offsets_batch_stride_A,
-                        I                    columns_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              columns_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -2927,15 +3019,15 @@ void host_csrmm_batched(J                    M,
                         const J*             csr_col_ind_A,
                         const T*             csr_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base,
                         bool                 force_conj_A)
@@ -3034,11 +3126,11 @@ void host_cscmm(J                    M,
                 const J*             csc_row_ind_A,
                 const T*             csc_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3115,8 +3207,8 @@ void host_cscmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        I                    offsets_batch_stride_A,
-                        I                    rows_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              rows_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3124,15 +3216,15 @@ void host_cscmm_batched(J                    M,
                         const J*             csc_row_ind_A,
                         const T*             csc_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -3237,11 +3329,11 @@ void host_coomm(I                    M,
                 const I*             coo_col_ind_A,
                 const T*             coo_val_A,
                 const T*             B,
-                I                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                I                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3257,7 +3349,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < M; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3274,9 +3366,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, coo_val_A[i]);
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3301,7 +3393,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < K; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3318,9 +3410,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, testing_conj(coo_val_A[i], conj_A));
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3344,7 +3436,7 @@ void host_coomm_batched(I                    M,
                         I                    K,
                         I                    nnz,
                         I                    batch_count_A,
-                        I                    batch_stride_A,
+                        int64_t              batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3352,15 +3444,15 @@ void host_coomm_batched(I                    M,
                         const I*             coo_col_ind_A,
                         const T*             coo_val_A,
                         const T*             B,
-                        I                    ldb,
+                        int64_t              ldb,
                         I                    batch_count_B,
                         I                    batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        I                    ldc,
+                        int64_t              ldc,
                         I                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -6635,73 +6727,6 @@ double get_time_us_sync(hipStream_t stream);
 #ifdef __cplusplus
 }
 #endif
-
-inline void missing_file_error_message(const char* filename)
-{
-    std::cerr << "#" << std::endl;
-    std::cerr << "# error:" << std::endl;
-    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# What could be the reason of this error: " << std::endl;
-    std::cerr << "# You are running the testing application and it expects to find the file "
-                 "at the specified location. This means that either you did not download the test "
-                 "matrices, or you did not specify the location of the folder containing your "
-                 "files. If you want to specify the location of the folder containing your files, "
-                 "then you will find the needed information with 'hipsparse-test --help'."
-                 "If you need to download matrices, then a cmake script "
-                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
-              << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr
-        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
-        << std::endl;
-    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
-    std::cerr << "# (or        'export "
-                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
-              << std::endl;
-    std::cerr << "#" << std::endl;
-}
-
-static const char* s_hipsparse_clients_matrices_dir = nullptr;
-
-inline const char* get_hipsparse_clients_matrices_dir()
-{
-    return s_hipsparse_clients_matrices_dir;
-}
-
-inline std::string get_filename(const std::string& bin_file)
-{
-    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
-    if(matrices_dir == nullptr)
-    {
-        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
-    }
-
-    std::string r;
-    if(matrices_dir != nullptr)
-    {
-        r = std::string(matrices_dir) + "/" + bin_file;
-    }
-    else
-    {
-        r = hipsparse_exepath() + "../matrices/" + bin_file;
-    }
-
-    FILE* tmpf = fopen(r.c_str(), "r");
-    if(!tmpf)
-    {
-        missing_file_error_message(r.c_str());
-        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
-        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
-    }
-    else
-    {
-        fclose(tmpf);
-    }
-    return r;
-}
 
 struct testhyb
 {

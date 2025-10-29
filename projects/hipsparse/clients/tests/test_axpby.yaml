@@ -39,4 +39,6 @@ Tests:
   nnz: [0, 5, 1000, 10000]
   alpha: [1.0]
   alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
