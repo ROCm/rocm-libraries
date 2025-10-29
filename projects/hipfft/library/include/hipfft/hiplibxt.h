@@ -37,14 +37,19 @@
 typedef struct hipXtDesc_t
 {
     int version;
+
     // Count of GPUs
     int nGPUs;
+
     // Device IDs
     int GPUs[MAX_HIP_DESCRIPTOR_GPUS];
+
     // Data pointers for each GPU
     void* data[MAX_HIP_DESCRIPTOR_GPUS];
+
     // Size of data pointed to, for each GPU
     size_t size[MAX_HIP_DESCRIPTOR_GPUS];
+
     // Internal state
     void* hipXtState;
 } hipXtDesc;

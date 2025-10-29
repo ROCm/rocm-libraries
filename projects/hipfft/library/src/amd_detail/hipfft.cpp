@@ -1859,10 +1859,10 @@ try
 
     // but at this point we know devices, so record what the user
     // gave us
-    for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+    for(size_t idx = 0; idx < static_cast<size_t>(count); ++idx)
     {
-        plan->inBricks[i].device  = gpus[i];
-        plan->outBricks[i].device = gpus[i];
+        plan->inBricks[idx].device  = gpus[idx];
+        plan->outBricks[idx].device = gpus[idx];
     }
 
     plan->singleProcMultiDevice = true;
@@ -1945,15 +1945,15 @@ try
 
     xt_desc->nGPUs = static_cast<int>(bricks->size());
 
-    for(size_t i = 0; i < bricks->size(); ++i)
+    for(size_t idx = 0; idx < bricks->size(); ++idx)
     {
-        auto& brick = (*bricks)[i];
+        auto& brick = (*bricks)[idx];
 
         rocfft_scoped_device dev(brick.device);
 
-        xt_desc->GPUs[i] = brick.device;
-        xt_desc->size[i] = brick.min_size * bits_per_element / 8;
-        if(hipMalloc(&(xt_desc->data[i]), xt_desc->size[i]) != hipSuccess)
+        xt_desc->GPUs[idx] = brick.device;
+        xt_desc->size[idx] = brick.min_size * bits_per_element / 8;
+        if(hipMalloc(&(xt_desc->data[idx]), xt_desc->size[idx]) != hipSuccess)
             return HIPFFT_INTERNAL_ERROR;
     }
 

@@ -22,7 +22,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::NONE, ""}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
+inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
 {
     auto type = node.attributes_type();
 
@@ -50,7 +50,7 @@ void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
+inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
 {
     graphJson["nodes"] = graph.nodes();
     graphJson["compute_type"] = graph.compute_type();
@@ -64,7 +64,8 @@ void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
+                                   const nlohmann::json& entry)
 {
     auto type = entry.at("type").get<data_objects::NodeAttributes>();
     auto name = entry.at("name").get<std::string>();
@@ -91,7 +92,8 @@ auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder, const nlohm
 }
 
 template <>
-auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
+                                    const nlohmann::json& entry)
 {
     using namespace data_objects;
     using namespace flatbuffers;

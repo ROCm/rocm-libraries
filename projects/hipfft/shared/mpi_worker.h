@@ -608,6 +608,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
             fft_params params_inplace = params;
             params_inplace.placement  = fft_placement_inplace;
 
+            params.apply_host_load_ops(cpu_data);
+
             switch(params_inplace.precision)
             {
             case fft_precision_half:
@@ -620,6 +622,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
                 execute_reference_fft<double>(params_inplace, cpu_data);
                 break;
             }
+
+            params.apply_host_store_ops(cpu_data);
 
             cpu_output_norm = norm(cpu_data,
                                    params_inplace.ilength(),

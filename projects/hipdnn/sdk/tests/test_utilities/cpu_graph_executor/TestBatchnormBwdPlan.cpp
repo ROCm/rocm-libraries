@@ -82,12 +82,12 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     CpuFpReferenceValidation<float> cpuRefOutputValidation(
         batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dxTensor.memory(),
-                                                planTensorBundle.dxTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dscaleTensor.memory(),
-                                                planTensorBundle.dscaleTensor.memory()));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dbiasTensor.memory(),
-                                                planTensorBundle.dbiasTensor.memory()));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dscaleTensor,
+                                                planTensorBundle.dscaleTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dbiasTensor,
+                                                planTensorBundle.dbiasTensor));
 }
 
 TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
