@@ -43,8 +43,14 @@ TEST(TestBatchnormFwdInferenceSignatureKey, EqualityOperator)
     BatchnormFwdInferenceSignatureKey key9{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key10{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE};
+        DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
+
+    BatchnormFwdInferenceSignatureKey key11{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    BatchnormFwdInferenceSignatureKey key12{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE};
+    EXPECT_FALSE(key11 == key12);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
@@ -62,12 +68,16 @@ TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    BatchnormFwdInferenceSignatureKey key6{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();
     auto hash5 = key5.hashSelf();
+    auto hash6 = key6.hashSelf();
 
-    EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
+    EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5 && hash3 != hash6
+                && hash4 != hash6 && hash5 != hash6);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, Copy)

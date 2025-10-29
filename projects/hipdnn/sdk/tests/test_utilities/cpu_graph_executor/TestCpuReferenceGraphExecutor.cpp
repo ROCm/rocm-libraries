@@ -65,17 +65,23 @@ public:
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
-    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-    static void runBatchnormBwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType)
+    template <typename InputType,
+              typename ScaleBiasType,
+              typename MeanVarianceType,
+              typename ComputeType>
+    static void runBatchnormBwdTest()
     {
+        auto inputDataType = nativeTypeToDataType<InputType>();
+        auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+        auto meanVarianceDataType = nativeTypeToDataType<MeanVarianceType>();
+        auto computeDataType = nativeTypeToDataType<ComputeType>();
+
         std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
             dims, 1, TensorLayout::NCHW);
 
         auto graphTuple = buildBatchnormBwdGraph(
-            tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType);
+            tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType, computeDataType);
 
         auto& graph = std::get<0>(graphTuple);
         auto& variantPack = std::get<1>(graphTuple);
@@ -199,20 +205,18 @@ TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllFloats)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<float, float, float>(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<float, float, float, float>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllHalfs)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<half, half, half>(
-        DataType::HALF, DataType::HALF, DataType::HALF);
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<half, half, half, half>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
-        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+    TestCpuReferenceGraphExecutor::
+        runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16, hip_bfloat16>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
