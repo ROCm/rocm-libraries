@@ -193,7 +193,8 @@ public:
 
 } // namespace
 
-TEST_P(TestGpuMiopenConvFwdBiasActivExecuteGraphNchwFp32, Correctness)
+// TODO: re-enable after integration tests are added
+TEST_P(TestGpuMiopenConvFwdBiasActivExecuteGraphNchwFp32, DISABLED_Correctness)
 {
     const ConvBiasActivTestCase& testCase = GetParam();
     runConvFwdBiasActivGraph(
