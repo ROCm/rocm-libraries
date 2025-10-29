@@ -1,6 +1,6 @@
 from ..Component import TensorDataMover
 from ..Common.DataType import DataType
-from typing import Mapping
+from typing import Mapping, Optional
 from rocisa.code import Module
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, TensorLoadToLds, VReadfirstlaneB32, SMulLOU32
@@ -95,13 +95,17 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def issueLoad(self, group0: int | str, group1: int | str, group2: int | str, group3: int | str) -> Module:
+    def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tensor load")
-        mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR)))
+        if all(g is not None for g in [group2, group3]):
+            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                    sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR)))
+        else:
+            mod.add(TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
+                                    None, None))
         return mod
 
-    def initOperands(self, group0: int | str, group1: int | str, group2: int | str, group3: int | str) -> Module:
+    def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
         mod = Module("tdmInit")
         for i in range(self.GROUP0_NUM_SGPR):
             val = 1 if i == 0 else 0
@@ -112,11 +116,13 @@ class TensorDataMoverLoad(TensorDataMover):
         for i in range(self.GROUP1_NUM_SGPR):
             mod.add(SMovB32(sgpr(f"{group1}+{i}"), 0))
 
-        for i in range(self.GROUP2_NUM_SGPR):
-            mod.add(SMovB32(sgpr(f"{group2}+{i}"), 0))
+        if group2 is not None:
+            for i in range(self.GROUP2_NUM_SGPR):
+                mod.add(SMovB32(sgpr(f"{group2}+{i}"), 0))
 
-        for i in range(self.GROUP3_NUM_SGPR):
-            mod.add(SMovB32(sgpr(f"{group3}+{i}"), 0))
+        if group3 is not None:
+            for i in range(self.GROUP3_NUM_SGPR):
+                mod.add(SMovB32(sgpr(f"{group3}+{i}"), 0))
 
         return mod
 
