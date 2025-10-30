@@ -62,16 +62,16 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   # Need to add hipblaslt since tests directly use gemm_v2.cpp
   if(hipblaslt_FOUND)
-    target_link_libraries( ${TEST_NAME} roc::hipblaslt )
+    target_link_libraries(${TEST_NAME} roc::hipblaslt)
   endif()
   # Need to add rocBLAS since static builds of MIOpen require rocBLAS linkage
   if(rocblas_FOUND)
-    target_link_libraries( ${TEST_NAME} $<BUILD_INTERFACE:roc::rocblas> )
+    target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:roc::rocblas>)
   endif()
 
   # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
   #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main MIOpen ${Boost_LIBRARIES} hip::host )
+  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main MIOpen hip::host)
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()

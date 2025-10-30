@@ -23,21 +23,16 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "get_handle.hpp"
-#include "random.hpp"
-#include <verify.hpp>
-#include <miopen/miopen.h>
 #include <miopen/datatype.hpp>
-#include <miopen/kernel_build_params.hpp>
 #include <gtest/gtest.h>
 
-#include <tensor_util.hpp>
+#include "get_handle.hpp"
+#include "verify.hpp"
 
 #include "perf_helper.hpp"
-#include <miopen/float_equal.hpp>
 
 #define MAX_TENSOR_ELEM 17
-#define PERF_ENABLE 0
+#define PERF_ENABLE 1
 #define POW_2 1
 
 struct TensorsConfig
@@ -89,31 +84,29 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     if constexpr(PERF_ENABLE)
     {
-
         const auto& handle = get_handle();
+        auto deviceName    = handle.GetDeviceName();
         size_t maxTotalSize;
-
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(handle.GetDeviceName(), "gfx90a") ||
-           miopen::StartsWith(handle.GetDeviceName(), "gfx908"))
+        if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
         {
             maxTotalSize = 16; // twice the 8MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
+        else if(miopen::StartsWith(deviceName, "gfx803"))
         {
             maxTotalSize = 4; // twice the 2MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
-                miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
+        else if(miopen::StartsWith(deviceName, "gfx900") ||
+                miopen::StartsWith(deviceName, "gfx906"))
         {
             maxTotalSize = 8; // twice the 4MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx942"))
+        else if(miopen::StartsWith(deviceName, "gfx942"))
         {
             maxTotalSize = 256; // 256MB L3
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx103"))
+        else if(miopen::StartsWith(deviceName, "gfx103"))
         {
             maxTotalSize = 128; // 128MB L3
         }
@@ -121,7 +114,6 @@ std::vector<TensorsConfig> TensorsConfigs()
         {
             maxTotalSize = 4; // twice the 2MB L2, default case.
         }
-
         maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
 
         if constexpr(POW_2)
@@ -246,7 +238,6 @@ protected:
                                       std::multiplies<int>());
 
         bitmap = 0;
-
         bitmap |= (1 << (tensorsConfig.blens.size() - d));
 
         for(int i = (d - 2); i >= 0; i--)
@@ -261,14 +252,6 @@ protected:
                 work_per_wg *= tensorsConfig.aclens[i];
             }
         }
-
-        // if(std::accumulate(tensorsConfig.blens.begin(),
-        //                    tensorsConfig.blens.end(),
-        //                    4,
-        //                    std::multiplies<std::size_t>()) == 1)
-        // {
-        //     bitmap = 4;
-        // }
 
         num_wg_orig = num_wg;
         max_num_wg  = 4096;
@@ -289,7 +272,6 @@ protected:
 
     void runCPU()
     {
-
         std::vector<T> A = tensA.data;
         std::vector<T> B = tensB.data;
         std::vector<T> C = tensC.data;
@@ -374,7 +356,7 @@ protected:
                                  static_cast<int64_t>(0),
                                  static_cast<int64_t>(0),
                                  static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+                                 num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -383,7 +365,6 @@ protected:
             ph.perfTest(handle,
                         "Op4dTensorGeneric",
                         network_config_ocl,
-                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -410,7 +391,7 @@ protected:
                         static_cast<int64_t>(0),
                         static_cast<int64_t>(0),
                         static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        num_wg_orig);
         }
     }
 
@@ -461,7 +442,7 @@ protected:
                                  static_cast<int64_t>(0),
                                  static_cast<int64_t>(0),
                                  static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+                                 num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
@@ -470,7 +451,6 @@ protected:
             ph.perfTest(handle,
                         "Op4dTensorGeneric",
                         network_config_hip,
-                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -497,7 +477,7 @@ protected:
                         static_cast<int64_t>(0),
                         static_cast<int64_t>(0),
                         static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        num_wg_orig);
         }
     }
 
@@ -510,7 +490,7 @@ protected:
     void verifyCPU()
     {
         auto error = miopen::rms_range(tensC_hip, tensC_cpu);
-        EXPECT_TRUE(error == 0) << "GPU outputs do not match each other. Error: " << error;
+        EXPECT_TRUE(error == 0) << "GPU outputs do not match CPU results. Error: " << error;
     }
 
     void TearDown() override
@@ -537,7 +517,7 @@ protected:
             stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                      "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
-            ph.writeStatsToCSV("tensor_4d.csv", stats);
+            ph.writeStatsToCSV("tensor_4d_generic.csv", stats);
         }
     }
 
@@ -545,9 +525,7 @@ protected:
     std::string params{};
     std::vector<size_t> vld, vgd;
     unsigned int bitmap;
-    int work_per_wg;
-    int num_wg_orig;
-    int max_num_wg;
+    int work_per_wg, num_wg_orig, max_num_wg;
 
     tensor<T> tensA;
     tensor<T> tensB;
@@ -565,7 +543,7 @@ protected:
     TensorsConfig tensorsConfig;
     float alpha0, alpha1, beta;
 
-    PerfHelper<T> ph;
+    PerfHelper ph;
 };
 
 struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>
@@ -574,12 +552,12 @@ struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>
 
 TEST_P(GPU_Op4dTensorGenericTest_FP32, PortTest)
 {
+    // run CPU implementation
+    //    runCPU();
     // run OCL kernel
     runOCL();
     // run HIP kernel
     runHIP();
-    // run CPU implementation
-    // runCPU();
     // verify if the output tensors are same
     verify();
 }
