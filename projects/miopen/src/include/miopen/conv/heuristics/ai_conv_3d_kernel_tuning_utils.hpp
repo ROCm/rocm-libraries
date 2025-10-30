@@ -52,9 +52,6 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 
-// Default validation function: accepts all kernel/split_k combinations
-inline constexpr auto AcceptAllCombinations = [](int, int) { return true; };
-
 // Main template implementation with validation function
 template <typename DataType, typename ValidationFunc>
 std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>

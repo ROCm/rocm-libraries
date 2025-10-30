@@ -83,6 +83,9 @@ const std::vector<std::string> dummy_kernels = {
 static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
     fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
 
+// Default validation function: accepts all kernel/split_k combinations
+inline constexpr auto AcceptAllCombinations = [](int, int) { return true; };
+
 // Helper: reusable problem description
 miopen::conv::ProblemDescription GetReusableProblemDescription(
     miopenDataType_t dataType         = miopenFloat,
