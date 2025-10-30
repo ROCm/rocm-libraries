@@ -38,9 +38,9 @@
 #endif
 
 #if MIOPEN_USE_64BIT_INDEX
-typedef ulong index_t;
+using index_t = unsigned long;
 #else
-typedef unsigned int index_t;
+using index_t = unsigned int;
 #endif
 
 extern "C" __global__ void Col2Im2dU(FLOAT* col,
@@ -69,43 +69,39 @@ extern "C" __global__ void Col2Im2dU(FLOAT* col,
     unsigned int im_h   = (im_pix / width) + pad_h;
     unsigned int im_w   = (im_pix % width) + pad_w;
 
-    if(gid < global_size)
+    if(gid >= global_size)
+        return;
+
+    unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
+                               ? 0
+                               : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
+    unsigned int end_h   = min(col_h, im_h / stride_h + 1);
+    unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
+                               ? 0
+                               : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
+    unsigned int end_w   = min(col_w, im_w / stride_w + 1);
+
+    index_t ch_offset = (index_t)(im_ch * col_w * col_h) * (index_t)(wei_w * wei_h);
+    col += ch_offset;
+
+    FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
+    for(unsigned int cy = start_h; cy < end_h; cy++)
     {
-
-        unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
-                                   ? 0
-                                   : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
-        unsigned int end_h   = min(col_h, im_h / stride_h + 1);
-        unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
-                                   ? 0
-                                   : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
-        unsigned int end_w   = min(col_w, im_w / stride_w + 1);
-
-        index_t ch_offset = (index_t)(im_ch * col_w * col_h) * (index_t)(wei_w * wei_h);
-        col += ch_offset;
-
-        FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
-        for(unsigned int cy = start_h; cy < end_h; cy++)
+        for(unsigned int cx = start_w; cx < end_w; cx++)
         {
-            for(unsigned int cx = start_w; cx < end_w; cx++)
+            if((im_h - cy * stride_h) % dilation_h == 0 && (im_w - cx * stride_w) % dilation_w == 0)
             {
-                if((im_h - cy * stride_h) % dilation_h == 0 &&
-                   (im_w - cx * stride_w) % dilation_w == 0)
-                {
-                    index_t col_off_y =
-                        cy + (((im_h - cy * stride_h) / dilation_h) * wei_w * col_h);
-                    index_t col_off_x =
-                        cx + (((im_w - cx * stride_w) / dilation_w) * col_w * col_h);
+                index_t col_off_y = cy + (((im_h - cy * stride_h) / dilation_h) * wei_w * col_h);
+                index_t col_off_x = cx + (((im_w - cx * stride_w) / dilation_w) * col_w * col_h);
 
-                    tmp += CVT_FLOAT2ACCUM(col[col_off_y * col_w + col_off_x]);
-                }
+                tmp += CVT_FLOAT2ACCUM(col[col_off_y * col_w + col_off_x]);
             }
         }
+    }
 
 #if ACCUMULATOR_NEEDS_CONVERSION
-        im_off[gid] = tmp > CVT_FLOAT2ACCUM(MAX_VAL) ? MAX_VAL : CVT_ACCUM2FLOAT(tmp);
+    im_off[gid] = tmp > CVT_FLOAT2ACCUM(MAX_VAL) ? MAX_VAL : CVT_ACCUM2FLOAT(tmp);
 #else
-        im_off[gid] = tmp;
+    im_off[gid] = tmp;
 #endif
-    }
 }

@@ -63,79 +63,78 @@ extern "C" __global__ void Col2Im3dU(FLOAT* col,
     FLOAT* im_off            = im + im_offset;
     unsigned int gid         = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int global_size = channels * depth * height * width;
-    if(gid < global_size)
+    if(gid >= global_size)
+        return;
+
+    unsigned int im_ch = gid / (width * height * depth);
+    unsigned int itmp  = gid % (width * height * depth);
+    unsigned int im_d  = itmp / (width * height);
+    itmp               = itmp % (width * height);
+    unsigned int im_h  = itmp / width;
+    unsigned int im_w  = itmp % width;
+
+    im_d += pad_d;
+    im_h += pad_h;
+    im_w += pad_w;
+
+    unsigned int start_d = (im_d < dilation_d * (wei_d - 1) + 1)
+                               ? 0
+                               : (im_d - (dilation_d * (wei_d - 1) + 1)) / stride_d + 1;
+    unsigned int end_d   = min(col_d, im_d / stride_d + 1);
+
+    unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
+                               ? 0
+                               : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
+    unsigned int end_h   = min(col_h, im_h / stride_h + 1);
+
+    unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
+                               ? 0
+                               : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
+    unsigned int end_w   = min(col_w, im_w / stride_w + 1);
+
+#if MIOPEN_USE_64BIT_INDEX
+    ulong ch_offset = (ulong)im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
+#else
+    unsigned int ch_offset = im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
+#endif
+
+    col += ch_offset;
+
+    FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
+
+    for(unsigned int cz = start_d; cz < end_d; cz++)
     {
-        unsigned int im_ch = gid / (width * height * depth);
-        unsigned int itmp  = gid % (width * height * depth);
-        unsigned int im_d  = itmp / (width * height);
-        itmp               = itmp % (width * height);
-        unsigned int im_h  = itmp / width;
-        unsigned int im_w  = itmp % width;
-
-        im_d += pad_d;
-        im_h += pad_h;
-        im_w += pad_w;
-
-        unsigned int start_d = (im_d < dilation_d * (wei_d - 1) + 1)
-                                   ? 0
-                                   : (im_d - (dilation_d * (wei_d - 1) + 1)) / stride_d + 1;
-        unsigned int end_d   = min(col_d, im_d / stride_d + 1);
-
-        unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
-                                   ? 0
-                                   : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
-        unsigned int end_h   = min(col_h, im_h / stride_h + 1);
-
-        unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
-                                   ? 0
-                                   : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
-        unsigned int end_w   = min(col_w, im_w / stride_w + 1);
-
-#if MIOPEN_USE_64BIT_INDEX
-        ulong ch_offset = (ulong)im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
-#else
-        unsigned int ch_offset = im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
-#endif
-
-        col += ch_offset;
-
-        FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
-
-        for(unsigned int cz = start_d; cz < end_d; cz++)
+        for(unsigned int cy = start_h; cy < end_h; cy++)
         {
-            for(unsigned int cy = start_h; cy < end_h; cy++)
+            for(unsigned int cx = start_w; cx < end_w; cx++)
             {
-                for(unsigned int cx = start_w; cx < end_w; cx++)
+                if((im_d - cz * stride_d) % dilation_d == 0 &&
+                   (im_h - cy * stride_h) % dilation_h == 0 &&
+                   (im_w - cx * stride_w) % dilation_w == 0)
                 {
-                    if((im_d - cz * stride_d) % dilation_d == 0 &&
-                       (im_h - cy * stride_h) % dilation_h == 0 &&
-                       (im_w - cx * stride_w) % dilation_w == 0)
-                    {
-                        unsigned int z = (im_d - cz * stride_d) / dilation_d;
-                        unsigned int y = (im_h - cy * stride_h) / dilation_h;
-                        unsigned int x = (im_w - cx * stride_w) / dilation_w;
+                    unsigned int z = (im_d - cz * stride_d) / dilation_d;
+                    unsigned int y = (im_h - cy * stride_h) / dilation_h;
+                    unsigned int x = (im_w - cx * stride_w) / dilation_w;
 
 #if MIOPEN_USE_64BIT_INDEX
-                        unsigned long col_off =
-                            ((((((unsigned long)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h +
-                             cy) *
-                                col_w +
-                            cx;
+                    unsigned long col_off =
+                        ((((((unsigned long)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h +
+                         cy) *
+                            col_w +
+                        cx;
 #else
-                        unsigned int col_off =
-                            (((((z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) * col_w +
-                            cx;
+                    unsigned int col_off =
+                        (((((z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) * col_w + cx;
 #endif
 
-                        tmp += CVT_FLOAT2ACCUM(col[col_off]);
-                    }
+                    tmp += CVT_FLOAT2ACCUM(col[col_off]);
                 }
             }
         }
-#if ACCUMULATOR_NEEDS_CONVERSION
-        im_off[gid] = tmp > CVT_FLOAT2ACCUM(MAX_VAL) ? MAX_VAL : CVT_ACCUM2FLOAT(tmp);
-#else
-        im_off[gid] = tmp;
-#endif
     }
+#if ACCUMULATOR_NEEDS_CONVERSION
+    im_off[gid] = tmp > CVT_FLOAT2ACCUM(MAX_VAL) ? MAX_VAL : CVT_ACCUM2FLOAT(tmp);
+#else
+    im_off[gid] = tmp;
+#endif
 }
