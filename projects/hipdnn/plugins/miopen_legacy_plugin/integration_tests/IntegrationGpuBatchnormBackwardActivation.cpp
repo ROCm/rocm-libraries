@@ -35,21 +35,17 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        // x and dy: wider range
         bundle.tensors.at(_inputTensorIds.at("x"))->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
         bundle.tensors.at(_inputTensorIds.at("dy"))->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
 
-        // scale: around 1.0
         bundle.tensors.at(_inputTensorIds.at("scale"))
             ->fillTensorWithRandomValues(0.5f, 1.5f, seed);
 
-        // bias and mean: small values
         bundle.tensors.at(_inputTensorIds.at("bias"))
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(_inputTensorIds.at("mean"))
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
 
-        // inv_variance: positive values
         bundle.tensors.at(_inputTensorIds.at("inv_variance"))
             ->fillTensorWithRandomValues(0.5f, 2.0f, seed);
     }
@@ -229,7 +225,7 @@ protected:
         }
 
         // Use float tolerance * 2 = 4e-3 for all data types to match MIOpen.
-        // It is also the highest, and passes unlike the others.
+        // It is also the highest, and unlike the others tols; it passes.
         const auto rmsFloatTol = batchnorm::getToleranceBackward<float>() * 2.0f;
 
         this->registerRmsValidator(dxOut, rmsFloatTol);
