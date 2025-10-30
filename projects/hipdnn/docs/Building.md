@@ -20,10 +20,12 @@
 ### System Requirements
 - **GPU**: AMD GPU with ROCm support
 - **Operating System**: 
-  - Linux: Matching support to [TheRock](https://github.com/ROCm/TheRock)
+  - Linux: Any distribution supported by [TheRock](https://github.com/ROCm/TheRock), such as Ubuntu 24
   - Windows: Windows 11 (limited support, see [Windows section](#windows))
 
 ### Dependencies
+> [!TIP]
+> 💡 Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md).
 
 #### Required Dependencies
 | Dependency | Version | Description |
@@ -51,64 +53,16 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 
 ## Quick Start Guide
 
-### Using Docker (Recommended)
+Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
 
-> [!TIP]
-> 💡 Docker provides a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about Docker images, see the [Docker README](../dockerfiles/README.md).
-
-1. **Clone hipDNN**
+1. **Clone rocm-libraries**
    ```bash
-   git clone https://github.com/ROCm/hipDNN.git
+   git clone https://github.com/ROCm/rocm-libraries.git
    ```
 
-2. **Build the Development Container**
+2. **Build**
    ```bash
-   cd hipDNN/dockerfiles/
-   
-   # For Ubuntu 24.04 using prebuilt tarballs with gfx94X support (recommended)
-   # (see Docker README for other options if needed)
-   docker build -f ./Dockerfile.ubuntu24 -t hipdnn-dev:ubuntu24 .
-   ```
-
-3. **Run the Container**
-   ```bash
-   # Replace <path/to/hipDNN> with your hipDNN repository path
-   docker run -it \
-     -v <path/to/hipDNN>:/workspace/hipDNN \
-     --privileged \
-     --rm \
-     --device=/dev/kfd \
-     --device=/dev/dri:/dev/dri:rw \
-     --volume=/dev/dri:/dev/dri:rw \
-     -v /var/lib/docker:/var/lib/docker \
-     --group-add video \
-     --cap-add=SYS_PTRACE \
-     --security-opt seccomp=unconfined \
-     hipdnn-dev:ubuntu24
-   ```
-
-4. **Build and Test**
-   ```bash
-   cd /workspace/hipDNN
-   mkdir build && cd build
-   cmake -GNinja ..
-   ninja check
-   ```
-
-5. **Install**
-   ```bash
-   # Default installation to /opt/rocm
-   sudo ninja install
-   ```
-
-### Native Build
-
-1. **Install ROCm** (follow [official ROCm installation guide](https://rocm.docs.amd.com/))
-
-2. **Clone and Build**
-   ```bash
-   git clone https://github.com/ROCm/hipDNN.git
-   cd hipDNN
+   cd rocm-libraries/projects/hipDNN
    mkdir build && cd build
    
    # Configure with Ninja (recommended)
@@ -117,7 +71,9 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
    # Build and run tests
    ninja check
 
-   # Install
+3. **Install**
+   Refer to the Build Configurations section below for details on using an install path other than the default `/opt/rocm`.
+   ```bash
    sudo ninja install
    ```
 
