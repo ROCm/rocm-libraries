@@ -55,16 +55,22 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 ### Build Examples
 
 #### 📦 Prebuilt Mode (Recommended)
+The list of latest precompiled tarballs is available [here](https://therock-nightly-tarball.s3.amazonaws.com/)..
 
 **Default prebuilt** (gfx94X, tag 7.0.0rc20250909):
 ```bash
 docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 ```
 
+This will download and install prebuilt binaries using the filename `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` and tags the image as `hipdnn:prebuilt`.
+
 **Override ASIC and Git Tag** (gfx950, tag 7.0.0rc20250908):
+
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:prebuilt_gfx950 .
 ```
+
+This will download and install prebuilt artifacts using the filename `therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz` and tags the image as `hipdnn:prebuilt_gfx950`.
 
 #### 🏗️ Fullbuild Mode
 
