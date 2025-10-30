@@ -188,6 +188,10 @@ target_compile_options(hipsparse-test PRIVATE -Wno-unused-command-line-argument 
 # Internal common header
 target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(hipsparse-test PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+endif()
+
 # Target link libraries
 target_link_libraries(hipsparse-test PRIVATE GTest::gtest roc::hipsparse)
 
@@ -208,7 +212,20 @@ set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
-set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml)
+set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml 
+                         test_doti.yaml 
+                         test_dotci.yaml
+                         test_sctr.yaml
+                         test_roti.yaml
+                         test_gthr.yaml
+                         test_gthrz.yaml
+
+                         test_bsrmv.yaml 
+                         test_csrmv.yaml 
+                         test_bsrsv2.yaml
+                         test_csrsv2.yaml 
+                         test_gemvi.yaml
+                         test_hybmv.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")

@@ -708,6 +708,12 @@ namespace rocRoller
         */
         template <typename EdgeType>
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
+
+        /**
+         * @brief Given a tag in coordinate graph, this function returns which direction it is
+         * dangling. If the node is not dangling, it returns std::nullopt.
+         */
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag);
     }
 }
 

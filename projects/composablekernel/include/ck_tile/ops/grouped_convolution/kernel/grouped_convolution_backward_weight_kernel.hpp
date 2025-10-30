@@ -26,7 +26,8 @@ struct GroupedConvBwdWeightKernelArgs
                                      GroupedConvTraitsType_::ConvSpecialization,
                                      GroupedConvTraitsType_::VectorSizeA,
                                      GroupedConvTraitsType_::VectorSizeB,
-                                     GroupedConvTraitsType_::VectorSizeC>;
+                                     GroupedConvTraitsType_::VectorSizeC,
+                                     GroupedConvTraitsType_::NumGroupsToMerge>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
     template <
@@ -40,13 +41,13 @@ struct GroupedConvBwdWeightKernelArgs
     CK_TILE_HOST GroupedConvBwdWeightKernelArgs(const GroupedConvBwdWeightHostArgs& args)
     {
         in_g_n_c_wis_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.N_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.input_spatial_lengths_[0])};
+                                 static_cast<index_t>(args.N_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.input_spatial_lengths_[0])};
         wei_g_k_c_xs_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.K_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.filter_spatial_lengths_[0])};
+                                 static_cast<index_t>(args.K_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[0])};
         out_g_n_k_wos_lengths = {static_cast<index_t>(args.G_),
                                  static_cast<index_t>(args.N_),
                                  static_cast<index_t>(args.K_),
@@ -84,9 +85,11 @@ struct GroupedConvBwdWeightKernelArgs
         b_grid_desc_k_n = grid_descs.at(number<1>{});
         c_grid_desc_m_n = grid_descs.at(number<2>{});
 
-        group_stride_a = args.K_;            // A: Out NWGK
-        group_stride_b = args.C_;            // B: In  NWGC
-        group_stride_c = args.K_ * args.C_ * // C: Wei GKXC
+        NumGroupsPerBatch = GroupedConvTraitsType_::NumGroupsToMerge;
+        group_stride_a    = args.K_ * NumGroupsPerBatch; // A: Out NWGK
+        group_stride_b    = args.C_ * NumGroupsPerBatch; // B: In  NWGC
+        group_stride_c    = args.K_ * args.C_            // C: Wei GKXC
+                         * NumGroupsPerBatch *
                          std::accumulate(args.filter_spatial_lengths_.begin(),
                                          args.filter_spatial_lengths_.end(),
                                          1,
@@ -95,7 +98,14 @@ struct GroupedConvBwdWeightKernelArgs
         GemmM     = a_grid_desc_k_m.get_length(number<1>{});
         GemmN     = b_grid_desc_k_n.get_length(number<1>{});
         GemmK     = a_grid_desc_k_m.get_length(number<0>{});
-        GemmBatch = args.G_;
+        GemmBatch = integer_divide_ceil(args.G_, NumGroupsPerBatch);
+
+        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+        {
+            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
+                      << ", GemmBatch: " << GemmBatch
+                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << std::endl;
+        }
     }
 
     template <
@@ -109,15 +119,15 @@ struct GroupedConvBwdWeightKernelArgs
     CK_TILE_HOST GroupedConvBwdWeightKernelArgs(const GroupedConvBwdWeightHostArgs& args)
     {
         in_g_n_c_wis_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.N_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.input_spatial_lengths_[0]),
-                                static_cast<index_t>(args.input_spatial_lengths_[1])};
+                                 static_cast<index_t>(args.N_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.input_spatial_lengths_[0]),
+                                 static_cast<index_t>(args.input_spatial_lengths_[1])};
         wei_g_k_c_xs_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.K_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.filter_spatial_lengths_[0]),
-                                static_cast<index_t>(args.filter_spatial_lengths_[1])};
+                                 static_cast<index_t>(args.K_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[0]),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[1])};
         out_g_n_k_wos_lengths = {static_cast<index_t>(args.G_),
                                  static_cast<index_t>(args.N_),
                                  static_cast<index_t>(args.K_),
@@ -125,13 +135,13 @@ struct GroupedConvBwdWeightKernelArgs
                                  static_cast<index_t>(args.output_spatial_lengths_[1])};
 
         conv_filter_strides   = {static_cast<index_t>(args.conv_filter_strides_[0]),
-                               static_cast<index_t>(args.conv_filter_strides_[1])};
+                                 static_cast<index_t>(args.conv_filter_strides_[1])};
         conv_filter_dilations = {static_cast<index_t>(args.conv_filter_dilations_[0]),
                                  static_cast<index_t>(args.conv_filter_dilations_[1])};
         input_left_pads       = {static_cast<index_t>(args.input_left_pads_[0]),
-                           static_cast<index_t>(args.input_left_pads_[1])};
+                                 static_cast<index_t>(args.input_left_pads_[1])};
         input_right_pads      = {static_cast<index_t>(args.input_right_pads_[0]),
-                            static_cast<index_t>(args.input_right_pads_[1])};
+                                 static_cast<index_t>(args.input_right_pads_[1])};
 
         k_batch = args.k_batch;
 
@@ -160,9 +170,11 @@ struct GroupedConvBwdWeightKernelArgs
         b_grid_desc_k_n = grid_descs.at(number<1>{});
         c_grid_desc_m_n = grid_descs.at(number<2>{});
 
-        group_stride_a = args.K_;            // A: Out NHWGK
-        group_stride_b = args.C_;            // B: In  NHWGC
-        group_stride_c = args.K_ * args.C_ * // C: Wei GKYXC
+        NumGroupsPerBatch = GroupedConvTraitsType_::NumGroupsToMerge;
+        group_stride_a    = args.K_ * NumGroupsPerBatch; // A: Out NHWGK
+        group_stride_b    = args.C_ * NumGroupsPerBatch; // B: In  NHWGC
+        group_stride_c    = args.K_ * args.C_            // C: Wei GKYXC
+                         * NumGroupsPerBatch *
                          std::accumulate(args.filter_spatial_lengths_.begin(),
                                          args.filter_spatial_lengths_.end(),
                                          1,
@@ -171,7 +183,14 @@ struct GroupedConvBwdWeightKernelArgs
         GemmM     = a_grid_desc_k_m.get_length(number<1>{});
         GemmN     = b_grid_desc_k_n.get_length(number<1>{});
         GemmK     = a_grid_desc_k_m.get_length(number<0>{});
-        GemmBatch = args.G_;
+        GemmBatch = integer_divide_ceil(args.G_, NumGroupsPerBatch);
+
+        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+        {
+            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
+                      << ", GemmBatch: " << GemmBatch
+                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << std::endl;
+        }
     }
 
     template <
@@ -185,17 +204,17 @@ struct GroupedConvBwdWeightKernelArgs
     CK_TILE_HOST GroupedConvBwdWeightKernelArgs(const GroupedConvBwdWeightHostArgs& args)
     {
         in_g_n_c_wis_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.N_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.input_spatial_lengths_[0]),
-                                static_cast<index_t>(args.input_spatial_lengths_[1]),
-                                static_cast<index_t>(args.input_spatial_lengths_[2])};
+                                 static_cast<index_t>(args.N_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.input_spatial_lengths_[0]),
+                                 static_cast<index_t>(args.input_spatial_lengths_[1]),
+                                 static_cast<index_t>(args.input_spatial_lengths_[2])};
         wei_g_k_c_xs_lengths  = {static_cast<index_t>(args.G_),
-                                static_cast<index_t>(args.K_),
-                                static_cast<index_t>(args.C_),
-                                static_cast<index_t>(args.filter_spatial_lengths_[0]),
-                                static_cast<index_t>(args.filter_spatial_lengths_[1]),
-                                static_cast<index_t>(args.filter_spatial_lengths_[2])};
+                                 static_cast<index_t>(args.K_),
+                                 static_cast<index_t>(args.C_),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[0]),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[1]),
+                                 static_cast<index_t>(args.filter_spatial_lengths_[2])};
         out_g_n_k_wos_lengths = {static_cast<index_t>(args.G_),
                                  static_cast<index_t>(args.N_),
                                  static_cast<index_t>(args.K_),
@@ -204,17 +223,17 @@ struct GroupedConvBwdWeightKernelArgs
                                  static_cast<index_t>(args.output_spatial_lengths_[2])};
 
         conv_filter_strides   = {static_cast<index_t>(args.conv_filter_strides_[0]),
-                               static_cast<index_t>(args.conv_filter_strides_[1]),
-                               static_cast<index_t>(args.conv_filter_strides_[2])};
+                                 static_cast<index_t>(args.conv_filter_strides_[1]),
+                                 static_cast<index_t>(args.conv_filter_strides_[2])};
         conv_filter_dilations = {static_cast<index_t>(args.conv_filter_dilations_[0]),
                                  static_cast<index_t>(args.conv_filter_dilations_[1]),
                                  static_cast<index_t>(args.conv_filter_dilations_[2])};
         input_left_pads       = {static_cast<index_t>(args.input_left_pads_[0]),
-                           static_cast<index_t>(args.input_left_pads_[1]),
-                           static_cast<index_t>(args.input_left_pads_[2])};
+                                 static_cast<index_t>(args.input_left_pads_[1]),
+                                 static_cast<index_t>(args.input_left_pads_[2])};
         input_right_pads      = {static_cast<index_t>(args.input_right_pads_[0]),
-                            static_cast<index_t>(args.input_right_pads_[1]),
-                            static_cast<index_t>(args.input_right_pads_[2])};
+                                 static_cast<index_t>(args.input_right_pads_[1]),
+                                 static_cast<index_t>(args.input_right_pads_[2])};
 
         k_batch = args.k_batch;
 
@@ -243,9 +262,11 @@ struct GroupedConvBwdWeightKernelArgs
         b_grid_desc_k_n = grid_descs.at(number<1>{});
         c_grid_desc_m_n = grid_descs.at(number<2>{});
 
-        group_stride_a = args.K_;            // A: Out NDHWGK
-        group_stride_b = args.C_;            // B: In  NDHWGC
-        group_stride_c = args.K_ * args.C_ * // C: wEI GKZYXC
+        NumGroupsPerBatch = GroupedConvTraitsType_::NumGroupsToMerge;
+        group_stride_a    = args.K_ * NumGroupsPerBatch; // A: Out NDHWGK
+        group_stride_b    = args.C_ * NumGroupsPerBatch; // B: In  NDHWGC
+        group_stride_c    = args.K_ * args.C_            // C: Wei GKZYXC
+                         * NumGroupsPerBatch *
                          std::accumulate(args.filter_spatial_lengths_.begin(),
                                          args.filter_spatial_lengths_.end(),
                                          1,
@@ -254,11 +275,18 @@ struct GroupedConvBwdWeightKernelArgs
         GemmM     = a_grid_desc_k_m.get_length(number<1>{});
         GemmN     = b_grid_desc_k_n.get_length(number<1>{});
         GemmK     = a_grid_desc_k_m.get_length(number<0>{});
-        GemmBatch = args.G_;
+        GemmBatch = integer_divide_ceil(args.G_, NumGroupsPerBatch);
+
+        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+        {
+            std::cout << "GemmM: " << GemmM << ", GemmN: " << GemmN << ", GemmK: " << GemmK
+                      << ", GemmBatch: " << GemmBatch
+                      << ", NumGroupsPerBatch: " << NumGroupsPerBatch << std::endl;
+        }
     }
 
-    using ABCGridDescs = remove_cvref_t<decltype(
-        ConvToGemmTransformer{}.MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N())>;
+    using ABCGridDescs = remove_cvref_t<
+        decltype(ConvToGemmTransformer{}.MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N())>;
 
     using AGridDescKM = remove_cvref_t<decltype(ABCGridDescs{}[number<0>{}])>;
     using BGridDescKN = remove_cvref_t<decltype(ABCGridDescs{}[number<1>{}])>;
@@ -279,6 +307,7 @@ struct GroupedConvBwdWeightKernelArgs
     index_t GemmN;
     index_t GemmK;
     index_t GemmBatch;
+    index_t NumGroupsPerBatch;
 
     const void* out_ptr;
     const void* in_ptr;
@@ -317,10 +346,9 @@ struct GroupedConvBwdWeightKernelArgs
 ///            the policy is responsible for definition of all necessary data layouts and thread's
 ///            work distribution.
 ///
-/// @tparam GroupedConvTraitsType_       The type of class providing traits for grouped convolution.
+/// @tparam GroupedConvTraitsType_      The type of class providing traits for grouped convolution.
 /// @tparam TilePartitioner_            The type of class providing mapping of workgroup index into
-/// the
-///                                     output data tile to be calculated. It determines the
+///                                     the output data tile to be calculated. It determines the
 ///                                     workgroup to data relationship (or in other words - which
 ///                                     data would be processed and calculated by which workgroup).
 /// @tparam GemmPipeline_               The type of class which provides the core part of matrix
@@ -382,8 +410,23 @@ struct GroupedConvolutionBackwardWeightKernel
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
+        constexpr auto NumGroupsToMerge = GroupedConvTraitsType_::NumGroupsToMerge;
         // clang-format off
-        return concat('_', "grouped_convolution_backward_weight", gemm_prec_str<InDataType, WeiDataType>, GemmPipeline::GetName());
+        if (NumGroupsToMerge > 1) {
+            return concat('_', "grouped_convolution_backward_weight", 
+                gemm_prec_str<InDataType, WeiDataType>(),
+                "gemm",
+                GemmPipeline::GetName(),
+                "epilogue",
+                EpiloguePipeline::GetName());
+        } else {
+            return concat('_', "grouped_convolution_backward_weight", 
+                gemm_prec_str<InDataType, WeiDataType>(),
+                "gemm",
+                GemmPipeline::GetName(),
+                "epilogue",
+                EpiloguePipeline::GetName(), "merge", NumGroupsToMerge);
+        }
         // clang-format on
     }
 
@@ -402,6 +445,12 @@ struct GroupedConvolutionBackwardWeightKernel
     CK_TILE_HOST static constexpr GroupedConvBwdWeightKernelArgsSpecialized
     MakeKernelArgs(const GroupedConvBwdWeightHostArgs& hostArgs)
     {
+        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+        {
+            std::cout << "MPerBlock: " << number<TilePartitioner::MPerBlock>{} << std::endl;
+            std::cout << "NPerBlock: " << number<TilePartitioner::NPerBlock>{} << std::endl;
+            std::cout << "KPerBlock: " << number<TilePartitioner::KPerBlock>{} << std::endl;
+        }
         return GroupedConvBwdWeightKernelArgsSpecialized(hostArgs);
     }
 
@@ -442,11 +491,14 @@ struct GroupedConvolutionBackwardWeightKernel
     {
         return [&]() {
             if(kargs.k_batch > 1)
-                hipGetErrorString(hipMemsetAsync(kargs.wei_ptr,
-                                                 0,
-                                                 kargs.GemmBatch * kargs.GemmM * kargs.GemmN *
-                                                     sizeof(WeiDataType),
-                                                 s.stream_id_));
+            {
+                // Total number of convolution groups (ConvG) = GemmBatch * NumGroupsPerBatch
+                // since we require that ConvG % NumGroupsPerBatch == 0.
+                const auto wei_size =
+                    kargs.GemmBatch * kargs.GemmM * kargs.GemmN * kargs.NumGroupsPerBatch;
+                hipGetErrorString(
+                    hipMemsetAsync(kargs.wei_ptr, 0, wei_size * sizeof(WeiDataType), s.stream_id_));
+            }
         };
     }
 
@@ -527,7 +579,8 @@ struct GroupedConvolutionBackwardWeightKernel
             // Check access per C
             if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
             {
-                CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
+                CK_TILE_ERROR("Conv C is not a multiple of vector load size for "
+                              "input image!");
                 return false;
             }
         }
@@ -559,7 +612,8 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             if(ConvK % GroupedConvTraitsType_::VectorSizeA != 0)
             {
-                CK_TILE_ERROR("Conv K is not a multiple of vector store size for output image!");
+                CK_TILE_ERROR("Conv K is not a multiple of vector store size "
+                              "for output image!");
                 return false;
             }
         }
@@ -567,6 +621,18 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             CK_TILE_ERROR("Not supported output layout!");
             return false;
+        }
+
+        if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+        {
+            const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+            if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
+            {
+                CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge!");
+                return false;
+            }
+
+            // TODO: Should we also check that GemmM <= MPerBlock and GemmN <= NPerBlock?
         }
 
         return true;
@@ -654,6 +720,16 @@ struct GroupedConvolutionBackwardWeightKernel
         return make_tuple(a_pad_view, b_pad_view, ds_pad_view, c_pad_view);
     }
 
+    /**
+     * @brief Create views to the data that each workgroup will process.
+     *
+     * @param views padded views of A, B, D and C tensors
+     * @param i_m block m-index
+     * @param i_n block n-index
+     * @param i_k block k-index
+     *
+     * @return tuple of tile windows for A, B, D and C tensors
+     */
     template <typename PadView>
     CK_TILE_DEVICE static auto MakeGemmTileWindows(const PadView& views,
                                                    const index_t i_m,
@@ -818,7 +894,6 @@ struct GroupedConvolutionBackwardWeightKernel
         const InDataType* b_ptr  = static_cast<const InDataType*>(kargs.in_ptr) + group_offset_b;
         WeiDataType* c_ptr       = static_cast<WeiDataType*>(kargs.wei_ptr) + group_offset_c;
 
-        // allocate LDS
         __shared__ char smem_ptr_0[GetSmemSize()];
 
         if constexpr(GemmPipeline::DoubleSmemBuffer == true)

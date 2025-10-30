@@ -113,6 +113,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BF6.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BF8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_BFloat16.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Buffer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_E8M0.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_E8M0x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_F6_Utils.hpp"
@@ -247,6 +248,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/OrderMemory.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/PrefetchScale.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemapOutputTiles.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemapOutputTiles_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveDuplicates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate_details.hpp"
@@ -254,6 +257,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/SwizzleScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/UnrollLoops.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/UpdateParameters.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/WorkgroupRemapXCC.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/WorkgroupRemapXCC_detail.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/BlockScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/BlockScale_fwd.hpp"
@@ -283,6 +288,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
 
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/LoadOption.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"

@@ -70,14 +70,14 @@ public:
         auto shallowDYTensor = createShallowTensor<InputDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        // TODO: Figure out pre / post padding.  Probably have to re-write ConvolutionBwdInference
         CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convBwdData(
             *shallowDXTensor,
             *shallowWTensor,
             *shallowDYTensor,
             _params.stride,
             _params.dilation,
-            _params.prePadding);
+            _params.prePadding,
+            _params.postPadding);
     }
 
 private:

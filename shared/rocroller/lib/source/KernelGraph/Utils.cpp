@@ -1392,5 +1392,20 @@ namespace rocRoller
             return controlStack(control, graph.control);
         }
 
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag)
+        {
+            bool const isUpstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag).empty();
+            bool const isDownstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(tag).empty();
+
+            if(isUpstreamEmpty == isDownstreamEmpty)
+            {
+                // Not dangling if both directions are empty or not empty.
+                return std::nullopt;
+            }
+
+            return isUpstreamEmpty ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+        }
     }
 }

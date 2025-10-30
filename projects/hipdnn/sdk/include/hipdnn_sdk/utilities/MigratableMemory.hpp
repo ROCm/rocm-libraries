@@ -24,16 +24,11 @@ enum class MemoryLocation
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
-template <typename T>
 class IMigratableMemory
 {
 public:
     virtual ~IMigratableMemory() = default;
 
-    virtual T* hostData() = 0;
-    virtual T* hostDataAsync() = 0;
-    virtual const T* hostData() const = 0;
-    virtual const T* hostDataAsync() const = 0;
     virtual void* deviceData() = 0;
     virtual void* deviceDataAsync() = 0;
 
@@ -48,10 +43,22 @@ public:
     virtual void clear() = 0;
 };
 
+template <typename T>
+class MigratableMemoryBase : public IMigratableMemory
+{
+public:
+    ~MigratableMemoryBase() override = default;
+
+    virtual T* hostData() = 0;
+    virtual T* hostDataAsync() = 0;
+    virtual const T* hostData() const = 0;
+    virtual const T* hostDataAsync() const = 0;
+};
+
 // NOLINTEND(portability-template-virtual-member-function)
 
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
-class MigratableMemory : public IMigratableMemory<T>
+class MigratableMemory : public MigratableMemoryBase<T>
 {
     static_assert(std::is_base_of_v<IHostAllocator<T>, HostAlloc>,
                   "HostAlloc must derive from IHostAllocator<T>");

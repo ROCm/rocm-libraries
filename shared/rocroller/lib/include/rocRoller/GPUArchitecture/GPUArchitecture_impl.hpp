@@ -150,6 +150,11 @@ namespace rocRoller
         return isSupportedConstantValue(static_cast<int>(value));
     }
 
+    inline bool GPUArchitecture::isSupportedConstantValue(Buffer value) const
+    {
+        return false;
+    }
+
     template <std::integral T>
     bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
