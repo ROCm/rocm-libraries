@@ -1290,15 +1290,11 @@ TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transform
     std::string expected;
     if(DataTypeInfo::Get(dstDatatype).isSigned)
         expected = R"(        
-            v_mov_b32 v4, v0
-            v_mov_b32 v5, v2
-            v_add_i32 v6, v4, v5
+            v_add_i32 v4, v0, v2
         )";
     else
         expected = R"(
-            v_mov_b32 v4, v0
-            v_mov_b32 v5, v2
-            v_add_u32 v6, v4, v5
+            v_add_u32 v4, v0, v2
         )";
 
     INFO(context.output());
