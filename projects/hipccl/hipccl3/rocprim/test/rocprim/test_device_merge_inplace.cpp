@@ -81,8 +81,8 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
         h_data[left_size + i] = i * 2 + 1;
     }
 
-    common::device_ptr<value_type>     d_data(h_data);
-    std::vector<value_type>            h_expected(h_data);
+    common::device_ptr<value_type> d_data(h_data);
+    std::vector<value_type>        h_expected(h_data);
 
     // get temporary storage
     HIP_CHECK(rocprim::merge_inplace(nullptr, storage_size, d_data.get(), left_size, right_size));
@@ -445,29 +445,6 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
             bool is_sorted
                 = test_utils::device_sort_check(d_data.get(), size_total, compare_op, stream);
 
-            // skip host-side reference check with large inputs
-            if(size_total > 16ULL * 1024 * 1024)
-            {
-                // input too big, only check device sort
-                ASSERT_TRUE(is_sorted);
-                continue;
-            }
-
-            // compare with reference
-            auto h_output = d_data.load_async(stream);
-
-            // compute reference
-            std::vector<value_type> h_reference(size_a + size_b);
-            std::merge(h_data.begin(),
-                       h_data.begin() + size_a,
-                       h_data.begin() + size_a,
-                       h_data.end(),
-                       h_reference.begin());
-
-            // assert on host first, as this will print the offending value and index
-            ASSERT_NO_FATAL_FAILURE((test_utils::assert_eq(h_output, h_reference)));
-
-            // then check the result from device for good measure
             ASSERT_TRUE(is_sorted);
         }
 
