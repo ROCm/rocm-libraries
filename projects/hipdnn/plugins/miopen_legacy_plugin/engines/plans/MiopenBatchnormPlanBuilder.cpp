@@ -18,23 +18,44 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
-    if(opGraph.nodeCount() != 1)
+    if(opGraph.nodeCount() == 1)
     {
+        if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
+               hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+               hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
+        {
+            HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
+            return false;
+        }
+        return true;
+    }
+    if(opGraph.nodeCount() == 2)
+    {
+        const auto& node0 = opGraph.getNodeWrapper(0);
+        const auto& node1 = opGraph.getNodeWrapper(1);
+
+        bool isFwdInferenceFirst
+            = node0.attributesType()
+              == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        bool isPointwiseSecond = node1.attributesType()
+                                 == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+
+        if(isFwdInferenceFirst && isPointwiseSecond)
+        {
+            HIPDNN_LOG_INFO("Batchnorm plan builder applicable for batchnorm inference + "
+                            "activation fusion");
+            return true;
+        }
+
         HIPDNN_LOG_INFO(
-            "Batchnorm plan builder is applicable only for single node graphs. Graph has {} nodes",
-            opGraph.nodeCount());
+            "Batchnorm plan builder is not applicable for this graph node order and types");
         return false;
     }
 
-    if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
-           hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-           hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
-    {
-        HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
-        return false;
-    }
-
-    return true;
+    HIPDNN_LOG_INFO(
+        "Batchnorm plan builder is applicable only for 1 or 2 node graphs. Graph has {} nodes",
+        opGraph.nodeCount());
+    return false;
 }
 
 size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
@@ -91,6 +112,23 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                          const hipdnn_plugin::IGraph& opGraph,
+                                          HipdnnEnginePluginExecutionContext& executionContext)
+{
+
+    const auto& node0 = opGraph.getNodeWrapper(0);
+    const auto& node1 = opGraph.getNodeWrapper(1);
+
+    const auto& fwdInference
+        = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+    const auto& activation = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+
+    BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void MiopenBatchnormPlanBuilder::buildPlan(
@@ -98,6 +136,13 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     const hipdnn_plugin::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
+    if(opGraph.nodeCount() == 2)
+    {
+        HIPDNN_LOG_INFO("Building batchnorm inference + activation");
+        buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
+        return;
+    }
+
     const auto& node = opGraph.getNode(0);
 
     std::string nodeName = getNodeName(node);

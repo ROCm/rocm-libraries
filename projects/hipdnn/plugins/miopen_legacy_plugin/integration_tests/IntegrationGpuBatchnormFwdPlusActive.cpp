@@ -11,7 +11,7 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
@@ -22,7 +22,7 @@ namespace
 {
 
 template <typename DataType, typename IntermediateType, typename TestCaseType>
-class BatchnormFwdPlusActiv : public GraphVerifierTest<DataType, TestCaseType>
+class BatchnormFwdPlusActiv : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
@@ -89,25 +89,34 @@ protected:
                                                         scaleTensorAttr,
                                                         biasTensorAttr,
                                                         bnAttrs);
+        setTensorAttributeDetails(yTensorAttr, uid, dataType, testCase.getDims(), layout, false);
 
-        if(!yTensorAttr->has_uid())
-        {
-            yTensorAttr->set_uid(uid++);
-        }
-
-        yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(testCase.getDims());
-        yTensorAttr->set_stride(generateStrides(testCase.getDims(), layout.strideOrder));
-        yTensorAttr->set_output(true);
-
-        //now setup activation
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_name("activation");
-        pointwiseAttrs.set_mode(hipdnn_frontend::PointwiseMode::NOT_SET);
-        auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
+        pointwiseAttrs.set_mode(hipdnn_frontend::PointwiseMode::IDENTITY);
 
-        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        this->verifyGraph(graphObj, testCase.seed, validator);
+        auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
+        setTensorAttributeDetails(outTensorAttr, uid, dataType, testCase.getDims(), layout, true);
+
+        this->registerValidator(outTensorAttr, tolerance);
+        this->verifyGraph(graphObj, testCase.seed);
+    }
+
+    void setTensorAttributeDetails(std::shared_ptr<graph::TensorAttributes>& tensorAttr,
+                                   int64_t& uid,
+                                   hipdnn_frontend::DataType dataType,
+                                   const std::vector<int64_t>& dims,
+                                   const TensorLayout& layout,
+                                   bool isOutput)
+    {
+        tensorAttr->set_data_type(dataType);
+        tensorAttr->set_dim(dims);
+        tensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
+        tensorAttr->set_output(isOutput);
+        if(!tensorAttr->has_uid())
+        {
+            tensorAttr->set_uid(uid++);
+        }
     }
 };
 
@@ -193,9 +202,13 @@ TEST_P(IntegrationGpuBatchnormFwdPlusActivNchwFp32, Correctness)
 //     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 // }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormFwdPlusActivNchwFp32,
-                         testing::ValuesIn(getBatchnorm2dTestCases()));
+                         testing::ValuesIn(getBnFwdInferenceTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormFwdPlusActivNchwFp32,
+                         testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
 // INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwBfp16, testing::ValuesIn(getConvTestCases4D()));
 
