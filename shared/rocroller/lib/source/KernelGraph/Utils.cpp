@@ -1410,7 +1410,6 @@ namespace rocRoller
             }
 
             return isUpstreamEmpty ? Graph::Direction::Upstream : Graph::Direction::Downstream;
-
         }
 
         bool isGlobalToLDSOp(KernelGraph const& graph, int op)
