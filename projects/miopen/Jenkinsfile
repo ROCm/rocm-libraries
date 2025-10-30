@@ -364,23 +364,25 @@ pipeline {
                     }
                 }
                 // DBSYNC Tests for gfx908, gfx90a, gfx942
-                matrix {
-                    axes {
-                        axis {
-                            name 'TARGET'
-                            values 'gfx908', 'gfx90a', 'gfx942'
-                        }
-                    }
-                    stages {
-                        stage("Dbsync ${TARGET}") {
-                            when {
-                                beforeAgent true
-                                expression { params.DBSYNC_TEST && params["TARGET_${TARGET.toUpperCase()}"] }
+                stage('DBSYNC Tests') {
+                    matrix {
+                        axes {
+                            axis {
+                                name 'TARGET'
+                                values 'gfx908', 'gfx90a', 'gfx942'
                             }
-                            options { retry(2) }
-                            agent { label getAgentLabel(TARGET) }
-                            steps { runDbSyncJob() }
-                            post { always { cleanWs() } }
+                        }
+                        stages {
+                            stage("Dbsync ${TARGET}") {
+                                when {
+                                    beforeAgent true
+                                    expression { params.DBSYNC_TEST && params["TARGET_${TARGET.toUpperCase()}"] }
+                                }
+                                options { retry(2) }
+                                agent { label getAgentLabel(TARGET) }
+                                steps { runDbSyncJob() }
+                                post { always { cleanWs() } }
+                            }
                         }
                     }
                 }
