@@ -5,8 +5,6 @@
   - [System Requirements](#system-requirements)
   - [Dependencies](#dependencies)
 - [Quick Start Guide](#quick-start-guide)
-  - [Using Docker (Recommended)](#using-docker-recommended)
-  - [Native Build](#native-build)
 - [Build Configurations](#build-configurations)
 - [Build Targets](#build-targets)
 - [Platform-Specific Instructions](#platform-specific-instructions)
@@ -54,6 +52,10 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 ## Quick Start Guide
 
 Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
+
+> [!TIP]
+> 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build enviornment.
+
 Refer to the [Platform-Specific Instructions](#platform-specific-instructions) section for details on building under Windows.
 
 1. **Clone rocm-libraries**
