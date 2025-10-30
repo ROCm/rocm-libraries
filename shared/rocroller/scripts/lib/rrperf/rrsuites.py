@@ -129,6 +129,10 @@ HGEMM_7680x8448x8448 = dict(
     types=TypeParameters(fp16, trans_A="N", trans_B="T"),
 )
 
+SGEMM_256x256x16384 = dict(
+    M=256, N=256, K=16384, mac_m=64, mac_n=64, mac_k=64, types=fp32
+)
+
 
 def update_parameters(*args, **kwargs):
     rv = {}
@@ -611,43 +615,29 @@ def streamk():
             ),
         )
 
-def gemm_fp32_smallMN_largeK():
-    yield GEMMRun(
-        M=256,
-        N=256,
-        K=16384,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        wave_m=32,
-        wave_n=32,
-        wave_k=2,
-        wave_b=1,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
-        storeLDS_D=True,
-        prefetch=False,
-        streamK=True,
-        betaInFma=True,
-        scheduler="Priority",
-        matchMemoryAccess=True,
-        types=TypeParameters(
-            trans_A="T",
-            trans_B="N",
-            type_A="float",
-            type_B="float",
-            type_C="float",
-            type_D="float",
-            type_acc="float",
-        ),
-        numOuter=1,
-        numWarmUp=1000,
-        numInner=1000,
-    )
+
+def smallMN_largeK_fp32():
+    for isStreamk in [True, False]:
+        for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
+            for base in [SGEMM_256x256x16384]:
+                yield mkGEMM(
+                    base,
+                    workgroup_size_x=128,
+                    workgroup_size_y=2,
+                    visualize=False,
+                    prefetch=False,  # TODO: Fix k loop unrolling with stream k
+                    # prefetchInFlight=2,
+                    # prefetchLDSFactor=2,
+                    streamK=isStreamk,
+                    streamKTwoTile=twoTile,
+                    streamKTwoTileDPFirst=twoTileDPFirst,
+                    types=TypeParameters(
+                        base["types"],
+                        trans_A="T",
+                        trans_B="N",
+                    ),
+                )
+
 
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
@@ -1768,6 +1758,7 @@ def all():
         yield from streamk_sweep()
         yield from scalar_is_zero()
         yield from codegen()
+        yield from smallMN_largeK_fp32()
 
 
 def all_gfx120X():
