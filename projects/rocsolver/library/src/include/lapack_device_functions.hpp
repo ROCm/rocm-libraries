@@ -1190,17 +1190,19 @@ ROCSOLVER_KERNEL void scal_kernel(I const n, S const da, T* const x, I const inc
     }
 }
 
+#define MAXITERS 50 // Max number of iterations for root finding method
+
 template <typename S, typename I>
-__device__ I slaed6(I kniter,
-                    bool orgati,
-                    S rho,
-                    S* d,
-                    S* z,
-                    S finit,
-                    S& tau,
-                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
-                    S ssfmin = std::numeric_limits<S>::min(),
-                    I MAXIT = 50)
+__device__ I laed6(I kniter,
+                   bool orgati,
+                   S rho,
+                   S* d,
+                   S* z,
+                   S finit,
+                   S& tau,
+                   S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                   S ssfmin = std::numeric_limits<S>::min(),
+                   I MAXIT = MAXITERS)
 {
     auto lam_abs = [](auto x) -> auto
     {
@@ -1537,15 +1539,15 @@ __device__ I slaed6(I kniter,
 }
 
 template <typename S, typename I>
-__device__ I slaed4(I n,
-                    I i,
-                    S* delta,
-                    S* z,
-                    S rho,
-                    S& dlam,
-                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
-                    S ssfmin = std::numeric_limits<S>::min(),
-                    I MAXIT = 50)
+__device__ I laed4(I n,
+                   I i,
+                   S* delta,
+                   S* z,
+                   S rho,
+                   S& dlam,
+                   S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                   S ssfmin = std::numeric_limits<S>::min(),
+                   I MAXIT = MAXITERS)
 {
     auto lam_abs = [](auto x) -> auto
     {
@@ -2118,7 +2120,7 @@ __device__ I slaed4(I n,
                 ZZ(3) = Z(iip1) * Z(iip1);
             }
             ZZ(2) = Z(ii) * Z(ii);
-            info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin, MAXIT);
+            info = laed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin, MAXIT);
             if(info != 0)
             {
                 return info;
@@ -2323,8 +2325,8 @@ __device__ I slaed4(I n,
                         ZZ(3) = Z(iip1) * Z(iip1);
                     }
                 }
-                info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin,
-                              MAXIT);
+                info = laed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin,
+                             MAXIT);
                 if(info != 0)
                 {
                     return info;
@@ -2414,7 +2416,19 @@ __device__ I slaed4(I n,
     return info;
 }
 
-#define MAXITERS 50 // Max number of iterations for root finding method
+template <typename S, typename I>
+__device__ I slaed4(I n,
+                    I i,
+                    S* delta,
+                    S* z,
+                    S rho,
+                    S& dlam,
+                    S eps = std::numeric_limits<S>::epsilon() / S(2.),
+                    S ssfmin = std::numeric_limits<S>::min(),
+                    I MAXIT = MAXITERS)
+{
+    return laed4(n, i, delta, z, rho, dlam, eps, ssfmin, MAXIT);
+}
 
 /** SEQ_EVAL evaluates the secular equation at a given point. It accumulates the
     corrections to the elements in D so that distance to poles are computed
