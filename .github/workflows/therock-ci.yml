@@ -72,7 +72,6 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          TEST_MACHINE_AVAILABLE_ONLY: true
           AMDGPU_FAMILIES: "gfx94X, gfx950"
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -80,7 +79,6 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          TEST_MACHINE_AVAILABLE_ONLY: true
           AMDGPU_FAMILIES: "gfx110X, gfx1151"
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
