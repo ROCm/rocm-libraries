@@ -95,7 +95,17 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Alias);
 
         /**
-         * Identify - denotes coordinates that ...
+         * Identify - connects coordinates that can be identified with
+         * another coordinate.
+	 *
+	 * This is a variant of `DataFlowEdge`; and therefore they are
+	 * not traversed during coordinate transforms.
+	 *
+	 * Primarily used in StreamK kernels to connect streaming
+	 * Unroll coordinates to their associated ForLoop coordinate
+	 * deeper in the coordinate transform.
+	 *
+	 * See `rocRoller::KernelGraph::followIdentify()`.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Identify);
 

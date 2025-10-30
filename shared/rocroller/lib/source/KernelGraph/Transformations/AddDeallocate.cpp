@@ -68,7 +68,8 @@ namespace rocRoller::KernelGraph
                 if(!isBarrier)
                     return false;
                 auto maybeBarrierForLoop = findContainingOperation<ForLoopOp>(barrier, original);
-                return maybeBarrierForLoop == *maybeForLoop;
+                // We know maybeForLoop has a value, so...
+                return maybeBarrierForLoop && (maybeBarrierForLoop.value() == maybeForLoop.value());
             };
 
             auto downstreamBarriers = filter(isBarrierInSameLoopPredicate,

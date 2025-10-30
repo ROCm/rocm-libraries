@@ -294,9 +294,29 @@ namespace rocRoller
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)
         {
-            auto range   = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
-            auto forLoop = kgraph.mapper.get<CT::ForLoop>(forLoopOp);
-            return {forLoop, range};
+            // Coordinate graph for for-loops look like:
+            //
+            //        Linear      <- This is the "iterator"; it can be connected
+            //          |            via DataFlow to multiple ForLoop coordinates.
+            //       DataFlow
+            //          |
+            //       ForLoop      <- This is the ForLoop coordinate, elucidating
+            //                       how a particular path in a coordinate transform
+            //                       depends on a for-loop.
+            //
+            // The iterator is connected to a ForLoopOp via a
+            // NaryArgument::DEST connection.
+            //
+            // The ForLoopCoord is connected to a ForLoopOp via a
+            // TypeAndSubDimension connection.
+            auto forLoopIterator = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
+            auto forLoopCoord    = kgraph.mapper.get<CT::ForLoop>(forLoopOp);
+            AssertFatal(
+                forLoopIterator != -1, "No iterator connected to ForLoopOp", ShowValue(forLoopOp));
+            AssertFatal(forLoopCoord != -1,
+                        "No ForLoop coordinate connected to ForLoopOp",
+                        ShowValue(forLoopOp));
+            return {forLoopCoord, forLoopIterator};
         }
 
         int getDEST(KernelGraph const& kgraph, int assign)

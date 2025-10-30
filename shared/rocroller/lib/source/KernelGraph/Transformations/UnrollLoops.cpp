@@ -489,9 +489,8 @@ namespace rocRoller
 
             // Update size of ForLoop coordinate
             {
-                auto forLoopCoordTag = graph.mapper.get<ForLoop>(tag);
-                AssertFatal(forLoopCoordTag != -1);
-                auto forLoopCoord = *graph.coordinates.get<ForLoop>(forLoopCoordTag);
+                auto [forLoopCoordTag, _ignore] = getForLoopCoords(tag, graph);
+                auto forLoopCoord = graph.coordinates.get<ForLoop>(forLoopCoordTag).value();
                 forLoopCoord.size = forLoopCoord.size / Expression::literal(unrollAmount);
                 graph.coordinates.setElement(forLoopCoordTag, forLoopCoord);
             }

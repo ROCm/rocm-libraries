@@ -1088,6 +1088,11 @@ namespace rocRoller
             // from accumulator increment to forward and reverse
             // accumulator ForLoop dimensions.
             //
+            // Add Identify edges from the new accumulator coordinate
+            // to the original coordinate.  These edges are traversed
+            // when computing indexes, so that offsets and strides are
+            // appropriately placed.
+            //
             {
                 auto dataflow
                     = *only(graph.coordinates.getNeighbours<GD::Downstream>(forAccumIncr));
