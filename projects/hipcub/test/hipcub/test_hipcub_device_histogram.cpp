@@ -33,6 +33,8 @@
 #include <hipcub/iterator/counting_input_iterator.hpp>
 #include <hipcub/iterator/transform_input_iterator.hpp>
 
+#include <thrust/iterator/counting_iterator.h>
+
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
 {
@@ -392,7 +394,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        auto          d_input = rocprim::counting_iterator<sample_type>{0UL};
+        auto          d_input = thrust::counting_iterator<sample_type>(0);
         counter_type* d_histogram;
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
 
