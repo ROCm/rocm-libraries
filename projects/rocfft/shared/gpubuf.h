@@ -58,7 +58,7 @@ public:
         ret.owned             = false;
         ret.buf               = p;
         ret.bsize             = size_bytes;
-        ret.is_managed_memory = false;
+        ret.is_managed_memory = false; // irrelevant if not owned
         return ret;
     }
 

@@ -4,6 +4,13 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(rocm-libraries LANGUAGES C CXX Fortran ASM)
 
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 include(CMakeDependentOption)
@@ -94,7 +101,8 @@ if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # required deps: pip install pytest-cmake
+    # pip packages:
+    #   pip install pytest-cmake
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
         COMPONENT rocroller

@@ -105,15 +105,16 @@ struct philox4x32_10_device_engine : public ::rocrand_device::philox4x32_10_engi
     // m_state from base class
 };
 
-template<typename T, typename Distribution>
-__host__ __device__ __forceinline__ void generate_philox(dim3                        block_idx,
-                                                         dim3                        thread_idx,
-                                                         dim3                        grid_dim,
-                                                         dim3                        block_dim,
-                                                         philox4x32_10_device_engine engine,
-                                                         T*                          data,
-                                                         const size_t                n,
-                                                         Distribution                distribution)
+template<typename T, typename Distribution, host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_philox(dim3                        block_idx,
+                     dim3                        thread_idx,
+                     dim3                        grid_dim,
+                     dim3                        block_dim,
+                     philox4x32_10_device_engine engine,
+                     T*                          data,
+                     const size_t                n,
+                     Distribution                distribution)
 {
     constexpr unsigned int input_width  = Distribution::input_width;
     constexpr unsigned int output_width = Distribution::output_width;
@@ -327,21 +328,31 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
+        auto generate_philox_kernel
+            = [&](auto arch, auto... args) { generate_philox<T, Distribution, arch>(args...); };
+
         status = dynamic_dispatch(
             m_order,
             [&, this](auto is_dynamic)
             {
-                return system_type::template launch<generate_philox<T, Distribution>,
-                                                    ConfigProvider,
-                                                    T,
-                                                    is_dynamic>(dim3(config.blocks),
-                                                                dim3(config.threads),
-                                                                0,
-                                                                m_stream,
-                                                                m_engine,
-                                                                data,
-                                                                data_size,
-                                                                distribution);
+                return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                    generate_philox_kernel,
+                    target_arch,
+                    dim3(config.blocks),
+                    dim3(config.threads),
+                    0,
+                    m_stream,
+                    m_engine,
+                    data,
+                    data_size,
+                    distribution);
             });
         if(status != ROCRAND_STATUS_SUCCESS)
         {

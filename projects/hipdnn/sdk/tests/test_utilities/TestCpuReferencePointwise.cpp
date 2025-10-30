@@ -80,7 +80,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinarySubtractOperation()
@@ -100,7 +100,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinaryAddOperationSanityValidation()
@@ -134,7 +134,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinarySubtractOperationSanityValidation()
@@ -171,7 +171,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinaryAddOperation3D()
@@ -191,7 +191,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinarySingleElementTensors()
@@ -212,7 +212,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBinaryNumericalPrecision()
@@ -233,7 +233,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testElementwise1D()
@@ -261,7 +261,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBroadcast2Dx1D()
@@ -303,7 +303,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBroadcast3D()
@@ -338,7 +338,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBroadcast3DImplicitLeading()
@@ -374,7 +374,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     // Test case: 4D × 4D: [N,C,H,W] + [1,C,1,1] → broadcast to [N,C,H,W]
@@ -425,7 +425,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     // Test case: Complex N-D broadcasting: [2,1,3,1] + [1,2,1,4] → [2,2,3,4]
@@ -479,7 +479,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testBroadcast5D()
@@ -543,7 +543,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     // ======================= UNARY OPERATIONS =======================
@@ -589,7 +589,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testReluBackwardOperation()
@@ -666,7 +666,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testParameterizedReluForwardOperation()
@@ -721,7 +721,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testParameterizedReluBackwardOperation()
@@ -805,7 +805,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testSigmoidForwardOperation()
@@ -871,7 +871,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testSigmoidBackwardOperation()
@@ -929,7 +929,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testTanhForwardOperation()
@@ -970,7 +970,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testTanhBackwardOperation()
@@ -1026,7 +1026,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testAbsoluteValueOperation()
@@ -1067,7 +1067,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testNegationOperation()
@@ -1101,7 +1101,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testUnary1DOperation()
@@ -1129,7 +1129,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testUnary2DOperation()
@@ -1163,7 +1163,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testUnary3DOperation()
@@ -1182,7 +1182,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 
     void testUnarySingleElementTensor()
@@ -1201,7 +1201,7 @@ protected:
 
         auto tolerance = getMixedTypeTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
+        EXPECT_TRUE(validator.allClose(expected, output));
     }
 };
 

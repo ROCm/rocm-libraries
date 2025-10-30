@@ -409,6 +409,7 @@ namespace rocRoller
 
             auto tileNumTag = graph.coordinates.addElement(
                 *graph.coordinates.get<MacroTileNumber>(nextTileNumTag)); // Copy existing
+
             graph.coordinates.addElement(Split(), {nextTileNumTag}, {tileNumTag, plusOneTag});
 
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
@@ -765,6 +766,10 @@ namespace rocRoller
             std::vector<int> tileNumbers;
             for(auto d : loopInfo.dimensionIndices)
             {
+                // Skip if no dangling MacroTileNumber at this dimension
+                if(accumInfo.tileNumberCoords.at(d).empty())
+                    continue;
+
                 auto tileNumber = graph.coordinates.addElement(
                     MacroTileNumber(d, argInfo.numTiles[d], nullptr));
 
@@ -891,6 +896,9 @@ namespace rocRoller
                     return false;
                 };
 
+                // NOTE: a dimension might not have any dangling MacroTileNumber.
+                //       This happens when workgroupMapping (RemapOutputTiles)
+                //       applied as M & N dimensions get flattened int a new MacroTileNumber.
                 accumInfo.tileNumberCoords[dimension]
                     = graph.coordinates.findElements(danglingTileNumberPredicate)
                           .to<std::unordered_set>();
@@ -1365,6 +1373,7 @@ namespace rocRoller
                                 = convert(numTilesDT, macTileNumber->size);
                     }
                 }
+
                 argInfo.numTileArgExprs.back() = convert(
                     numTilesDT, graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size);
 
@@ -1394,9 +1403,11 @@ namespace rocRoller
             //   for basic StreamK:   0
             //   fro 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
             //
-
             for(auto d : loopInfo.dimensionIndices)
             {
+                if(argInfo.numTileArgExprs[d] == nullptr)
+                    continue;
+
                 argInfo.numTiles.push_back(k->addArgument({concatenate("numTiles", d),
                                                            numTilesDT,
                                                            DataDirection::ReadOnly,
@@ -1404,6 +1415,7 @@ namespace rocRoller
                 if(d > 0)
                     enableDivideBy(argInfo.numTiles.back(), context);
             }
+
             argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",
                                                        numTilesDT,
                                                        DataDirection::ReadOnly,
@@ -1416,6 +1428,9 @@ namespace rocRoller
                 ExpressionPtr numNonAccTiles = nullptr;
                 for(auto d : loopInfo.dimensionIndices)
                 {
+                    if(argInfo.numTileArgExprs[d] == nullptr)
+                        continue;
+
                     numNonAccTiles = numNonAccTiles ? numNonAccTiles * argInfo.numTileArgExprs[d]
                                                     : argInfo.numTileArgExprs[d];
                 }
@@ -1536,6 +1551,7 @@ namespace rocRoller
 
             auto argInfo
                 = setupArguments(m_context, m_params, m_numWGs, graph, loopInfo, accumInfo);
+
             commit(m_context, m_params, graph, loopInfo, accumInfo, argInfo);
 
             return graph;

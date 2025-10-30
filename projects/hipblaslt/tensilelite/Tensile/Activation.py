@@ -166,7 +166,7 @@ class ActivationType:
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('sigmoid', { \
                             'instance': ActivationTypeRegister('sigmoid', False, 0,     True,  True, False,   False, False, False, False), \
-                            'supported_by': SupportedBy.TENSILE}), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('tanh', {  \
                             'instance': ActivationTypeRegister('tanh', False, 2,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \

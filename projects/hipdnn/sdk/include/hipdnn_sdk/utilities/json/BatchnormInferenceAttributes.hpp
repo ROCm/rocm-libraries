@@ -8,7 +8,7 @@
 namespace hipdnn_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& batchnormJson, BatchnormInferenceAttributes const& bn)
+inline void to_json(nlohmann::json& batchnormJson, const BatchnormInferenceAttributes& bn)
 {
     auto& inputs = batchnormJson["inputs"] = {};
 
@@ -25,8 +25,8 @@ void to_json(nlohmann::json& batchnormJson, BatchnormInferenceAttributes const& 
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::BatchnormInferenceAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                                    const nlohmann::json& entry)
+inline auto to<data_objects::BatchnormInferenceAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                           const nlohmann::json& entry)
 {
     auto& inputs = entry["inputs"];
     return data_objects::CreateBatchnormInferenceAttributes(

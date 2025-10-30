@@ -924,9 +924,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                           std::vector<gpubuf>&  ibuffer,
+                           std::vector<void*>&   pibuffer,
+                           std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -1006,8 +1007,9 @@ public:
     }
 
     // call the hipFFT APIs to gather the data back from the multiple GPUs
-    virtual void multi_gpu_finalize(std::vector<gpubuf>& obuffer,
-                                    std::vector<void*>&  pobuffer) override
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                                    std::vector<gpubuf>&  obuffer,
+                                    std::vector<void*>&   pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -1265,7 +1267,7 @@ private:
         if(externally_managed_workareas.size() < get_num_used_gpus())
             externally_managed_workareas.resize(get_num_used_gpus());
         std::vector<void*> workareas(get_num_used_gpus(), nullptr);
-        for(auto workarea_idx = 0; workarea_idx < get_num_used_gpus(); workarea_idx++)
+        for(size_t workarea_idx = 0; workarea_idx < get_num_used_gpus(); workarea_idx++)
         {
             const auto req_size = req_workarea_sizes[workarea_idx];
             auto&      buf      = externally_managed_workareas[workarea_idx];
