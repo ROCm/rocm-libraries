@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-.include "Conv_Winograd_Fury_vX_X_X_metadata.inc"
+.include "Conv_Winograd_Fury_v2_X_X_X_metadata.inc"
 
 .if (.amdgcn.gfx_generation_number == 11)
     .if ((.amdgcn.gfx_generation_minor == 0 && (.amdgcn.gfx_generation_stepping == 0 || .amdgcn.gfx_generation_stepping == 1)) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 1))

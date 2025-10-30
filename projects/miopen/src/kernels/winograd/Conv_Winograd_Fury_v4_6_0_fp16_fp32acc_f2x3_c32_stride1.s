@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-.include "Conv_Winograd_Fury_vX_X_X_metadata.inc"
+.include "Conv_Winograd_Fury_v2_X_X_X_metadata.inc"
 
 .if (.amdgcn.gfx_generation_number == 12)
     KERNEL_PROLOG 4_6_0, _1536vgprs_fp16_fp32acc_f2x3_c32_stride1
