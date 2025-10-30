@@ -54,10 +54,11 @@ public:
             ComputeDataType elemStd = inVal - mean;
             ComputeDataType inhat = elemStd * invVariance;
 
-            output.setHostValue(staticCast<InputDataType>((scale.getHostValue(0, cidx)
-                                                           * staticCast<ScaleBiasDataType>(inhat))
-                                                          + bias.getHostValue(0, cidx)),
-                                indices);
+            output.setHostValue(
+                staticCast<InputDataType>(
+                    (staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * inhat)
+                    + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
+                indices);
         };
 
         // Iterate all indices in parallel
@@ -128,9 +129,9 @@ public:
                     auto xHat = (xVal - channelMean) * invVar;
 
                     y.setHostValue(
-                        staticCast<InputDataType>(scale.getHostValue(0, cidx)
-                                                      * staticCast<ScaleBiasDataType>(xHat)
-                                                  + bias.getHostValue(0, cidx)),
+                        staticCast<InputDataType>(
+                            staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * xHat
+                            + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
                         fullIndices);
                 });
 

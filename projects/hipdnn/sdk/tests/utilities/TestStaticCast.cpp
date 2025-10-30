@@ -10,25 +10,37 @@ using namespace hipdnn_sdk::utilities;
 namespace
 {
 
-[[maybe_unused]] void testCompiles()
+template <class T, class S>
+void testCastTo(S value)
 {
-    std::ignore = staticCast<hip_bfloat16>(float());
-    std::ignore = staticCast<hip_bfloat16>(double());
-    std::ignore = staticCast<hip_bfloat16>(half());
-    std::ignore = staticCast<hip_bfloat16>(hip_bfloat16());
-    std::ignore = staticCast<hip_bfloat16>(int());
-    std::ignore = staticCast<hip_bfloat16>(0U);
-    std::ignore = staticCast<hip_bfloat16>(0UL);
-    std::ignore = staticCast<hip_bfloat16>(0L);
+    EXPECT_EQ(staticCast<T>(value), static_cast<T>(value));
+}
 
-    std::ignore = staticCast<half>(float());
-    std::ignore = staticCast<half>(double());
-    std::ignore = staticCast<half>(half());
-    std::ignore = staticCast<half>(hip_bfloat16());
-    std::ignore = staticCast<half>(int());
-    std::ignore = staticCast<half>(0U);
-    std::ignore = staticCast<half>(0UL);
-    std::ignore = staticCast<half>(0L);
+template <class T, class S>
+void testCastToWithFloatIntermediate(S value)
+{
+    EXPECT_EQ(staticCast<T>(value), static_cast<T>(static_cast<float>(value)));
+}
+
+TEST(TestStaticCast, Correctness)
+{
+    testCastTo<hip_bfloat16>(float());
+    testCastToWithFloatIntermediate<hip_bfloat16>(double());
+    testCastTo<hip_bfloat16>(half());
+    testCastTo<hip_bfloat16>(hip_bfloat16());
+    testCastToWithFloatIntermediate<hip_bfloat16>(int());
+    testCastToWithFloatIntermediate<hip_bfloat16>(0U);
+    testCastToWithFloatIntermediate<hip_bfloat16>(0UL);
+    testCastToWithFloatIntermediate<hip_bfloat16>(0L);
+
+    testCastTo<half>(float());
+    testCastToWithFloatIntermediate<half>(double());
+    testCastTo<half>(half());
+    testCastTo<half>(hip_bfloat16());
+    testCastToWithFloatIntermediate<half>(int());
+    testCastToWithFloatIntermediate<half>(0U);
+    testCastToWithFloatIntermediate<half>(0UL);
+    testCastToWithFloatIntermediate<half>(0L);
 }
 
 }
