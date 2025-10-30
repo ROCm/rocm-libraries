@@ -30,18 +30,20 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
 | `BUILD_TYPE` | `prebuilt` | Selects build method | `prebuilt`, `fullbuild` |
-| `THEROCK_ASIC` | `gfx94X` (prebuilt)<br>`gfx90a` (fullbuild) | GPU architecture target | values for prebuild [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux), and values for fullbuild [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) |
+| `THEROCK_ASIC` | `gfx94X` (prebuilt)<br>`gfx90a` (fullbuild) | GPU architecture target | Values for prebuild mode can be parsed from the filenames listed [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux), and values for fullbuild [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)<br>Note: For prebuilt mode, ensure that the specified asic is supported by the prebuilt artifacts as set in `THEROCK_GIT_TAG` described below.|
 
 #### 📦 Prebuilt-Only Arguments
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Git tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) |
-| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG) |
-
 > **Note**: Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
 
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full tarball name using `THEROCK_TARBALL` below. |
+| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG) |
+
 #### 🏗️ Fullbuild-Only Arguments
+
+> **Note**: Fullbuild mode clones and compiles TheRock from source (slower and can take several hours to complete but more flexible)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -49,8 +51,6 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types) |
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset |
 | `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores |
-
-> **Note**: Fullbuild mode clones and compiles TheRock from source (slower but more flexible)
 
 ### Build Examples
 
@@ -67,6 +67,8 @@ docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg 
 ```
 
 #### 🏗️ Fullbuild Mode
+
+Note that the full build can take several hours to complete.
 
 **Default fullbuild** (gfx90a, default branch):
 ```bash
