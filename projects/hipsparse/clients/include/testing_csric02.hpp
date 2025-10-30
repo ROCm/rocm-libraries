@@ -42,9 +42,9 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csric02_bad_arg(void)
+void testing_csric02_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int                    m         = 100;
     int                    nnz       = 100;
     int                    safe_size = 100;
@@ -159,7 +159,7 @@ void testing_csric02_bad_arg(void)
 template <typename T>
 hipsparseStatus_t testing_csric02(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                    m        = argus.M;
     hipsparseIndexBase_t   idx_base = argus.baseA;
     hipsparseSolvePolicy_t policy   = argus.solve_policy;

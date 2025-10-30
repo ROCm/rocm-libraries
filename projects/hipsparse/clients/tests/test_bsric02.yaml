@@ -21,30 +21,35 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
-#level2
-include: test_bsrmv.yaml
-include: test_bsrsv2.yaml
-include: test_csrmv.yaml
-include: test_csrsv2.yaml
-include: test_gemvi.yaml
-include: test_hybmv.yaml
+---
+include: hipsparse_common.yaml
 
-#precond
-include: test_csric02.yaml
-include: test_csrilu02.yaml
-include: test_bsric02.yaml
-include: test_bsrilu02.yaml
-include: test_gtsv.yaml
-include: test_gtsv2_nopivot.yaml
-include: test_gtsv2_strided_batch.yaml
-include: test_gtsv_interleaved_batch.yaml
-include: test_gpsv_interleaved_batch.yaml
 
+Tests:
+- name: bsric02_bad_arg
+  category: pre_checkin
+  function: bsric02_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: bsric02
+  category: quick
+  function: bsric02
+  precision: *single_double_precisions_complex_real
+  M: [50, 426]
+  block_dim: [3, 5, 9]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: bsric02
+  category: pre_checkin
+  function: bsric02
+  precision: *single_double_precisions
+  M: 1
+  block_dim: [3, 5, 9]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4, 
+             nos6, 
+             nos7]
