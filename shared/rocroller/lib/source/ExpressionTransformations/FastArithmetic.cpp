@@ -36,10 +36,9 @@ namespace rocRoller
         {
         }
 
-        std::vector<std::function<ExpressionPtr(ExpressionPtr)>>
-            FastArithmetic::getTransforms() const
+        std::vector<ExpressionTransformType> FastArithmetic::getTransforms() const
         {
-            std::vector<std::function<ExpressionPtr(ExpressionPtr)>> transforms
+            std::vector<ExpressionTransformType> transforms
                 = {splitBitfieldCombine,
                    lowerBitfieldCombine,
                    convertPropagation,
@@ -59,8 +58,7 @@ namespace rocRoller
         }
 
         ExpressionPtr FastArithmetic::applyTransforms(
-            ExpressionPtr                                                   expr,
-            const std::vector<std::function<ExpressionPtr(ExpressionPtr)>>& transforms) const
+            ExpressionPtr expr, const std::vector<ExpressionTransformType>& transforms) const
         {
             for(const auto& transform : transforms)
                 expr = transform(expr);

@@ -35,6 +35,8 @@ namespace rocRoller
 {
     namespace Expression
     {
+        using ExpressionTransformType = std::function<ExpressionPtr(ExpressionPtr)>;
+
         ExpressionPtr identity(ExpressionPtr expr);
 
         /**
@@ -181,11 +183,10 @@ namespace rocRoller
             FastArithmetic() = delete;
             explicit FastArithmetic(ContextPtr);
 
-            ExpressionPtr operator()(ExpressionPtr) const;
-            std::vector<std::function<ExpressionPtr(ExpressionPtr)>> getTransforms() const;
-            ExpressionPtr                                            applyTransforms(
-                                                           ExpressionPtr,
-                                                           const std::vector<std::function<ExpressionPtr(ExpressionPtr)>>&) const;
+            ExpressionPtr                        operator()(ExpressionPtr) const;
+            std::vector<ExpressionTransformType> getTransforms() const;
+            ExpressionPtr                        applyTransforms(ExpressionPtr,
+                                                                 const std::vector<ExpressionTransformType>&) const;
 
         private:
             ContextPtr m_context;

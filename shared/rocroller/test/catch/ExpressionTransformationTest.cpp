@@ -440,15 +440,14 @@ TEST_CASE("FastArithmetic pipeline properly simplifies expressions",
     Expression::FastArithmetic fastArith(context.get());
     auto                       transforms = fastArith.getTransforms();
 
-    auto isSimplify = [](const auto& transform) {
-        auto* func
-            = transform.template target<Expression::ExpressionPtr (*)(Expression::ExpressionPtr)>();
-        return func && *func == Expression::simplify;
+    auto isSimplify = [](const Expression::ExpressionTransformType& transformFunction) {
+        using ExprTransformFuncPtrType = Expression::ExpressionPtr (*)(Expression::ExpressionPtr);
+        const auto* funcPtr            = transformFunction.target<ExprTransformFuncPtrType>();
+        return funcPtr && *funcPtr == Expression::simplify;
     };
 
     // Create a version with extra simplifies after each non-simplify transform
-    std::vector<std::function<Expression::ExpressionPtr(Expression::ExpressionPtr)>>
-        transformsExtraSimplify;
+    std::vector<Expression::ExpressionTransformType> transformsExtraSimplify;
     for(const auto& transform : transforms)
     {
         transformsExtraSimplify.push_back(transform);
@@ -457,9 +456,8 @@ TEST_CASE("FastArithmetic pipeline properly simplifies expressions",
     }
 
     // Create a version with only one simplify
-    std::vector<std::function<Expression::ExpressionPtr(Expression::ExpressionPtr)>>
-         transformsOneSimplify;
-    bool hasSimplify = false;
+    std::vector<Expression::ExpressionTransformType> transformsOneSimplify;
+    bool                                             hasSimplify = false;
     for(const auto& transform : transforms)
     {
         if(isSimplify(transform))
