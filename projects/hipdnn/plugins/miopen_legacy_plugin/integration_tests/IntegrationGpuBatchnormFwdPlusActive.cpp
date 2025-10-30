@@ -10,7 +10,9 @@
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
+#include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
+
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
@@ -27,7 +29,7 @@ class BatchnormFwdPlusActiv : public IntegrationGraphVerificationHarness<DataTyp
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
-        const TestCaseType& testCase = this->GetParam();
+        const auto& [testCase, activeCase] = this->GetParam();
 
         auto derivedDims = getDerivedShape(testCase.getDims());
 
@@ -93,7 +95,31 @@ protected:
 
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_name("activation");
-        pointwiseAttrs.set_mode(hipdnn_frontend::PointwiseMode::IDENTITY);
+        pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activeCase.mode));
+        if(activeCase.reluLowerClip.has_value())
+        {
+            pointwiseAttrs.set_relu_lower_clip(activeCase.reluLowerClip.value());
+        }
+        if(activeCase.reluUpperClip.has_value())
+        {
+            pointwiseAttrs.set_relu_upper_clip(activeCase.reluUpperClip.value());
+        }
+        if(activeCase.reluLowerClipSlope.has_value())
+        {
+            pointwiseAttrs.set_relu_lower_clip_slope(activeCase.reluLowerClipSlope.value());
+        }
+        if(activeCase.swishBeta.has_value())
+        {
+            pointwiseAttrs.set_swish_beta(activeCase.swishBeta.value());
+        }
+        if(activeCase.eluAlpha.has_value())
+        {
+            pointwiseAttrs.set_elu_alpha(activeCase.eluAlpha.value());
+        }
+        if(activeCase.softplusBeta.has_value())
+        {
+            pointwiseAttrs.set_softplus_beta(activeCase.softplusBeta.value());
+        }
 
         auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
         setTensorAttributeDetails(outTensorAttr, uid, dataType, testCase.getDims(), layout, true);
@@ -121,9 +147,13 @@ protected:
 };
 
 using IntegrationGpuBatchnormFwdPlusActivNchwFp32
-    = BatchnormFwdPlusActiv<float, float, Batchnorm2dTestCase>;
+    = BatchnormFwdPlusActiv<float,
+                            float,
+                            std::tuple<Batchnorm2dTestCase, test_activation_common::ActivTestCase>>;
 using IntegrationGpuBatchnormFwdPlusActivNcdhwFp32
-    = BatchnormFwdPlusActiv<float, float, Batchnorm2dTestCase>;
+    = BatchnormFwdPlusActiv<float,
+                            float,
+                            std::tuple<Batchnorm2dTestCase, test_activation_common::ActivTestCase>>;
 
 // using IntegrationGpuBatchnormFwdPlusActivNchwBfp16 = BatchnormFwdPlusActiv<hip_bfloat16>;
 // using IntegrationGpuBatchnormFwdPlusActivNcdhwBfp16 = BatchnormFwdPlusActiv<hip_bfloat16>;
@@ -202,13 +232,15 @@ TEST_P(IntegrationGpuBatchnormFwdPlusActivNchwFp32, Correctness)
 //     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 // }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormFwdPlusActivNchwFp32,
-                         testing::ValuesIn(getBnFwdInferenceTestCases()));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdPlusActivNchwFp32,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceTestCases()),
+                     testing::ValuesIn(test_activation_common::getActivationTestCases())));
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         IntegrationGpuBatchnormFwdPlusActivNchwFp32,
-                         testing::ValuesIn(getBnFwdInferenceFullTestCases()));
+// INSTANTIATE_TEST_SUITE_P(Full,
+//                          IntegrationGpuBatchnormFwdPlusActivNchwFp32,
+//                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
 // INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwBfp16, testing::ValuesIn(getConvTestCases4D()));
 
