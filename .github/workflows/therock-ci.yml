@@ -86,7 +86,7 @@ jobs:
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
   therock-ci-linux:
-    name: Linux (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.family }})
+    name: Linux (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
       contents: read
       id-token: write
@@ -103,11 +103,11 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      amdgpu_families: ${{ matrix.target_bundle.family }}
+      amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
 
   therock-ci-windows:
-    name: Windows (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.family }})
+    name: Windows (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
       contents: read
       id-token: write
@@ -124,7 +124,7 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
-      amdgpu_families: ${{ matrix.target_bundle.family }}
+      amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
 
   therock_ci_summary:
