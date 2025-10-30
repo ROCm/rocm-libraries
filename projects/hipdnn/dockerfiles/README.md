@@ -43,7 +43,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 🏗️ Fullbuild-Only Arguments
 
-> **Note**: Fullbuild mode clones and compiles TheRock from source (slower and can take several hours to complete but more flexible)
+> **Note**: Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
