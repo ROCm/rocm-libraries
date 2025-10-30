@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   therock-build-linux:
-    name: Build
+    name: Build (${{ inputs.amdgpu_families }})
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
@@ -141,7 +141,7 @@ jobs:
             --upload
 
   therock-test-linux:
-    name: "Test"
+    name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
