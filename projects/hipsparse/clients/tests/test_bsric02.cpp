@@ -24,7 +24,9 @@
 #include "test.hpp"
 #include "testing_bsric02.hpp"
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST_ROUTINE(bsric02, precond, arg.M, arg.block_dim, arg.dirA, arg.solve_policy, arg.baseA);
+#endif
 
 // #include "testing_bsric02.hpp"
 // #include "utility.hpp"
