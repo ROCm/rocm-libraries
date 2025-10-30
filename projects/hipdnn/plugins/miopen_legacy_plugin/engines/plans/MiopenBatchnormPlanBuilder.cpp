@@ -304,8 +304,7 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     }
 
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
-    const auto& node = nodeWrapper.node();
-    const auto nodeName = node.name() != nullptr ? node.name()->str() : "";
+    const auto nodeName = nodeWrapper.name();
 
     switch(nodeWrapper.attributesType())
     {

@@ -42,13 +42,7 @@ BatchnormBwdParams::BatchnormBwdParams(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& batchnormInferenceAttributes,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
     : _x(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createTensor(
-          tensorMap,
-          pointwiseAttributes.in_1_tensor_uid().has_value()
-              ? pointwiseAttributes.in_1_tensor_uid().value()
-              : throw hipdnn_plugin::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                    "Pointwise attributes missing in_1_tensor_uid (dy tensor uid)")))
+    , _dy(miopen_utils::createTensor(tensorMap, pointwiseAttributes.in_1_tensor_uid().value()))
     , _dx(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
     , _dscale(

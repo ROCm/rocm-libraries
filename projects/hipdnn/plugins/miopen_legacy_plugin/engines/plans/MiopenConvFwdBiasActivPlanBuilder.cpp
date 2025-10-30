@@ -16,11 +16,6 @@ namespace miopen_legacy_plugin
 namespace
 {
 
-std::string getNodeName(const hipdnn_sdk::data_objects::Node& node)
-{
-    return node.name() != nullptr ? node.name()->str() : "";
-}
-
 bool isNodeBias(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
 {
     return attr.operation() == hipdnn_sdk::data_objects::PointwiseMode::ADD;
@@ -61,31 +56,33 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
 
     // Expect that the graph is sorted in topological order
     // Expect the first node to be convolution forward operation
-    const auto& convNode = opGraph.getNode(0);
-    auto convNodeName = getNodeName(convNode);
-    if(convNode.attributes_type()
+    const auto& convNodeWrapper = opGraph.getNodeWrapper(0);
+    const auto convNodeName = convNodeWrapper.name();
+    if(convNodeWrapper.attributesType()
        != hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "First node in the graph (" + convNodeName
                 + ") must be convolution forward. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(convNode.attributes_type())));
+                + std::string(
+                    hipdnn_sdk::data_objects::toString(convNodeWrapper.attributesType())));
     }
-    const auto& convAttr = opGraph.getNodeWrapper(0)
-                               .attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
+    const auto& convAttr
+        = convNodeWrapper.attributesAs<hipdnn_sdk::data_objects::ConvolutionFwdAttributes>();
 
     // Expect the second node to be either bias or activation forward
-    const auto& secondNode = opGraph.getNode(1);
-    auto secondNodeName = getNodeName(convNode);
-    if(secondNode.attributes_type()
+    const auto& secondNodeWrapper = opGraph.getNodeWrapper(1);
+    const auto secondNodeName = secondNodeWrapper.name();
+    if(secondNodeWrapper.attributesType()
        != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Second node in the graph (" + secondNodeName
                 + ") must be pointwise operation. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(secondNode.attributes_type())));
+                + std::string(
+                    hipdnn_sdk::data_objects::toString(secondNodeWrapper.attributesType())));
     }
     const auto& secondNodeAttr
         = opGraph.getNodeWrapper(1).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
@@ -127,15 +124,17 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
                                                    "Graph must have 3 nodes when bias is present.");
     }
 
-    const auto& thirdNode = opGraph.getNode(2);
-    auto thirdNodeName = getNodeName(thirdNode);
-    if(thirdNode.attributes_type() != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    const auto& thirdNodeWrapper = opGraph.getNodeWrapper(2);
+    const auto thirdNodeName = thirdNodeWrapper.name();
+    if(thirdNodeWrapper.attributesType()
+       != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Third node in the graph (" + thirdNodeName
                 + ") must be pointwise operation. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(thirdNode.attributes_type())));
+                + std::string(
+                    hipdnn_sdk::data_objects::toString(thirdNodeWrapper.attributesType())));
     }
     const auto& thirdNodeAttr
         = opGraph.getNodeWrapper(2).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
