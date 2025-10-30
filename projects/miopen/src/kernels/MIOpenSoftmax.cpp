@@ -40,60 +40,72 @@ __device__ T logaddexp(T x, T y)
     T b = min(x, y);
     T c = b - a;
 
+    // Cppcheck doesn't properly recognize that NEGATIVE_CUTOFF_VAL<T> is a template instantiation
+    // cppcheck-suppress internalAstError
     return c <= NEGATIVE_CUTOFF_VAL<T> ? max(a, NEGATIVE_CUTOFF_VAL<T>)
-                                       : max(T(a + log(T(1) + exp(b - a))), NEGATIVE_CUTOFF_VAL<T>);
+                                       : max(T{a + log(T{1} + exp(c))}, NEGATIVE_CUTOFF_VAL<T>);
 }
 
-template <int ARRAY_SIZE, typename LAMBDA>
+template <int ARRAY_SIZE, typename FUNCTION>
 __device__ void reduce(FLOAT_ACCUM array[ARRAY_SIZE],
                        const unsigned int lid,
                        const unsigned int batch_lid,
                        FLOAT_ACCUM value_lid,
-                       LAMBDA&& lambda)
+                       FUNCTION&& function)
 {
     array[lid] = value_lid;
     __syncthreads();
 
-#pragma unroll
+#pragma nounroll
     for(auto i = ARRAY_SIZE >> 1; i > 0; i >>= 1)
     {
         if(batch_lid < i)
         {
-            lambda.template operator()<ARRAY_SIZE>(array, lid, i);
+            array[lid] = function(array[lid], array[lid + i]);
         }
         __syncthreads();
     }
 }
 
-// This is valid C++20 code. It compiles and runs fine. The current version of Cppcheck, 2.12.1,
-// doesn't support it. The most recent release of Cppcheck, 2.18.0, does support it.
-// cppcheck-suppress syntaxError
-constexpr static auto reduce_sum = []<int ARRAY_SIZE>(FLOAT_ACCUM array[LOCAL_SIZE],
-                                                      const unsigned int lid,
-                                                      int i) { array[lid] += array[lid + i]; };
+constexpr struct
+{
+    template <typename T>
+    __forceinline__ __device__ constexpr T operator()(T a, T b) const
+    {
+        return a + b;
+    }
+} reduce_sum;
 
-constexpr static auto reduce_sum_log =
-    []<int ARRAY_SIZE>(FLOAT_ACCUM array[ARRAY_SIZE], const unsigned int lid, int i) {
+constexpr struct
+{
+    template <typename T>
+    __forceinline__ __device__ constexpr T operator()(T a, T b) const
+    {
         if constexpr(USE_SOFTMAX_LOG)
         {
-            array[lid] = logaddexp(array[lid], array[lid + i]);
+            return logaddexp(a, b);
         }
         else
         {
-            array[lid] += array[lid + i];
+            return a + b;
         }
-    };
+    }
+} reduce_sum_log;
 
-constexpr static auto reduce_max =
-    []<int ARRAY_SIZE>(FLOAT_ACCUM array[LOCAL_SIZE], const unsigned int lid, int i) {
-        array[lid] = max(array[lid], array[lid + i]);
-    };
+constexpr struct
+{
+    template <typename T>
+    __forceinline__ __device__ constexpr T operator()(T a, T b) const
+    {
+        return max(a, b);
+    }
+} reduce_max;
 
 template <int BOUND, int STEP, typename LAMBDA>
 __device__ void loop(const unsigned int lid, LAMBDA&& lambda)
 {
     auto i = 0;
-#pragma unroll
+#pragma nounroll
     for(; i + STEP < BOUND; i += STEP)
     {
         lambda(i + lid);
@@ -105,12 +117,12 @@ __device__ void loop(const unsigned int lid, LAMBDA&& lambda)
 }
 
 template <typename TI, typename TO>
-__device__ void softmaxfwd(const TI* __restrict__ x,
-                           TO* __restrict__ y,
-                           const int x_offset,
-                           const int y_offset,
-                           const float alpha,
-                           const float beta)
+__forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
+                                           TO* __restrict__ y,
+                                           const int x_offset,
+                                           const int y_offset,
+                                           const float alpha,
+                                           const float beta)
 {
     const auto lid = threadIdx.x;
 
@@ -288,7 +300,10 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 }
                 else
                 {
-                    value /= channel_sum;
+                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
+                    // is somewhat less accurate (1 ULP) than a full division, but is noticably more
+                    // performant.
+                    value *= __builtin_amdgcn_rcpf(channel_sum);
                 }
 
                 value = value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
@@ -299,7 +314,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
     else // CSR-Stream like approach
     {
         /* Each workgroup is computing the softmax for NUM_BATCH spatial_dims ala CSR-Stream.
-         * The number of threads iterting over channels to compute softmax for one batch is
+         * The number of threads iterating over channels to compute softmax for one batch is
          * BATCH_SIZE. The number of values each thread works on is U_BATCH_SIZE (read micro batch
          * size). Each batch in the workgroup works on its nth image and s (spatial_dim). E.g. a 256
          * thread workgroup with c=31 has 8 batches and a batchsize of 32. The number of workgroups
@@ -325,9 +340,12 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
         }
 
         FLOAT_ACCUM values[U_BATCH_SIZE];
-        for(FLOAT_ACCUM& value : values)
+        if constexpr(!USE_SOFTMAX_FAST)
         {
-            value = -MAX_VAL;
+            for(FLOAT_ACCUM& value : values)
+            {
+                value = -MAX_VAL;
+            }
         }
 
         // Compute max per channel
@@ -448,7 +466,10 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 }
                 else
                 {
-                    values[v_idx] /= channel_sum;
+                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
+                    // is somewhat less accurate (1 ULP) than a full division, but is noticably more
+                    // performant.
+                    values[v_idx] *= __builtin_amdgcn_rcpf(channel_sum);
                 }
 
                 values[v_idx] = values[v_idx] * FLOAT_ACCUM(alpha) +
@@ -462,14 +483,14 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 }
 
 template <typename TI, typename TO>
-__device__ void softmaxbwd(const TI* __restrict__ y,
-                           const TI* __restrict__ dy,
-                           TO* __restrict__ dx,
-                           const int y_offset,
-                           const int dy_offset,
-                           const int dx_offset,
-                           const float alpha,
-                           const float beta)
+__forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
+                                           const TI* __restrict__ dy,
+                                           TO* __restrict__ dx,
+                                           const int y_offset,
+                                           const int dy_offset,
+                                           const int dx_offset,
+                                           const float alpha,
+                                           const float beta)
 {
     __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
 
