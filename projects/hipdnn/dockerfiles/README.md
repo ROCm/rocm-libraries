@@ -1,6 +1,6 @@
 # hipDNN Docker Environments
 
-This directory contains the Dockerfile for building hipDNN development environment.
+This directory contains the Dockerfile for building hipDNN development environment Docker image.
 
 ## 📋 Prerequisites
 
@@ -153,6 +153,9 @@ docker run -it \
   --security-opt seccomp=unconfined \
   hipdnn:prebuilt
 ```
+### Building hipDNN
+
+Follow the [quick start steps in the build guide](./docs/Building.md#quick-start-guide) to build hipDNN.
 
 ## 💡 Tips and Best Practices
 
