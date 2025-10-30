@@ -63,22 +63,6 @@ def runDbSyncJob()
     }
 }
 
-def createDbSyncStage(String target, String label="")  {
-    def agentLabel = label == "" ? rocmnode(target) : label
-    return {
-        stage('Dbsync ' + target) {
-            when {
-                beforeAgent true
-                expression { params.DBSYNC_TEST && params["TARGET_${target.toUpperCase()}"] }
-            }
-            options { retry(2) }
-            agent { label agentLabel }
-            steps { runDbSyncJob() }
-            post { always { cleanWs() } }
-        }
-    }
-}
-
 def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420)
 {
     script {
@@ -367,9 +351,20 @@ pipeline {
                         }
                     }
                 }
-                createDbSyncStage("gfx908").call()
-                createDbSyncStage("gfx90a").call()
-                createDbSyncStage("gfx942").call()
+                // DBSYNC Tests for gfx908, gfx90a, gfx942
+                ['gfx908', 'gfx90a', 'gfx942'].each { target ->
+                    stage("Dbsync ${target}") {
+                        when {
+                            beforeAgent true
+                            expression { params.DBSYNC_TEST && params["TARGET_${target.toUpperCase()}"] }
+                        }
+                        options { retry(2) }
+                        agent { label rocmnode(target) }
+                        steps { runDbSyncJob() }
+                        post { always { cleanWs() } }
+                    }
+                }
+
                 stage('Bf16 Hip Install All gfx908') {
                     when {
                         beforeAgent true
