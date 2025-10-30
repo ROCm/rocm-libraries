@@ -10,6 +10,7 @@
 
 namespace hipdnn_sdk::data_objects
 {
+
 inline const char* toString(hipdnn_sdk::data_objects::NodeAttributes attributes)
 {
     return hipdnn_sdk::data_objects::EnumNameNodeAttributes(attributes);
@@ -19,6 +20,12 @@ inline const char* toString(hipdnn_sdk::data_objects::DataType dataType)
 {
     return hipdnn_sdk::data_objects::EnumNameDataType(dataType);
 }
+
+inline const char* toString(hipdnn_sdk::data_objects::PointwiseMode pointwiseMode)
+{
+    return hipdnn_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode);
+}
+
 }
 
 inline std::ostream& operator<<(std::ostream& os,
@@ -30,6 +37,12 @@ inline std::ostream& operator<<(std::ostream& os,
 inline std::ostream& operator<<(std::ostream& os, hipdnn_sdk::data_objects::DataType dataType)
 {
     return os << hipdnn_sdk::data_objects::EnumNameDataType(dataType);
+}
+
+inline std::ostream& operator<<(std::ostream& os,
+                                hipdnn_sdk::data_objects::PointwiseMode pointwiseMode)
+{
+    return os << hipdnn_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode);
 }
 
 template <>
@@ -51,5 +64,16 @@ struct fmt::formatter<hipdnn_sdk::data_objects::DataType> : fmt::formatter<const
     {
         return fmt::formatter<const char*>::format(
             hipdnn_sdk::data_objects::EnumNameDataType(dataType), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_sdk::data_objects::PointwiseMode> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_sdk::data_objects::PointwiseMode pointwiseMode, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(
+            hipdnn_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode), ctx);
     }
 };

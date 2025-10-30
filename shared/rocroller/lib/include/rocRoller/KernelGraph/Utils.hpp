@@ -712,6 +712,12 @@ namespace rocRoller
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
 
         /**
+         * @brief Given a tag in coordinate graph, this function returns which direction it is
+         * dangling. If the node is not dangling, it returns std::nullopt.
+         */
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag);
+
+        /**
          * @brief Returns a vector of all tags of operations of type DstOpType
          * that are connected to the same MacroTile as the given srcOpTag of
          * an operation of type SrcOpType.

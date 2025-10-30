@@ -8,6 +8,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
@@ -104,6 +105,8 @@ private:
             return ConvolutionFwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+            return ConvolutionWrwSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }
