@@ -35,6 +35,7 @@
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 
+#include <common/SourceMatcher.hpp>
 #include <common/TestValues.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -1261,4 +1262,45 @@ TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-tr
 
         CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
+}
+
+TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transformation][codegen]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    const auto srcDatatype = GENERATE(DataType::Int64, DataType::UInt64);
+    const auto dstDatatype = GENERATE(DataType::Int32, DataType::UInt32);
+
+    auto r64a
+        = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, srcDatatype, 1);
+    r64a->allocateNow();
+    auto r64b
+        = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, srcDatatype, 1);
+    r64b->allocateNow();
+
+    Register::ValuePtr d32;
+
+    auto kb = [&]() -> Generator<Instruction> {
+        co_yield Expression::generate(
+            d32, convert(dstDatatype, r64a->expression() + r64b->expression()), context.get());
+    };
+    context.get()->schedule(kb());
+
+    std::string expected;
+    if(DataTypeInfo::Get(dstDatatype).isSigned)
+        expected = R"(        
+            v_mov_b32 v4, v0
+            v_mov_b32 v5, v2
+            v_add_i32 v6, v4, v5
+        )";
+    else
+        expected = R"(
+            v_mov_b32 v4, v0
+            v_mov_b32 v5, v2
+            v_add_u32 v6, v4, v5
+        )";
+
+    INFO(context.output());
+    CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
 }
