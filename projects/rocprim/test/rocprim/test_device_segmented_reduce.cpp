@@ -51,6 +51,13 @@
 #include <stdint.h>
 #include <vector>
 
+#if __has_include(<valgrind/valgrind.h>)
+    #include <valgrind/valgrind.h>
+    #define HAS_VALGRIND_H 1
+#else
+    #define HAS_VALGRIND_H 0
+#endif
+
 using bra = ::rocprim::block_reduce_algorithm;
 
 template<class Input,
@@ -462,10 +469,20 @@ void testLargeIndices()
 
 TEST(RocprimDeviceSegmentedReduce, LargeIndices)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndices<>();
 }
 
 TEST(RocprimDeviceSegmentedReduce, LargeIndicesWithGraphs)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
     testLargeIndices<true>();
 }
