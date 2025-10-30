@@ -31,39 +31,13 @@ std::tuple<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes&,
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
-    const auto& bnInfNode = opGraph.getNode(0);
-    if(bnInfNode.attributes_type()
-       != hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "First node must be batchnorm inference. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(bnInfNode.attributes_type())));
-    }
     const auto& bnInfAttr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
 
-    const auto& actNode = opGraph.getNode(1);
-    if(actNode.attributes_type() != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Second node must be pointwise operation. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(actNode.attributes_type())));
-    }
     const auto& actAttr
         = opGraph.getNodeWrapper(1).attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
-    const auto& bnBwdNode = opGraph.getNode(2);
-    if(bnBwdNode.attributes_type()
-       != hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Third node must be batchnorm backward. Found node of type: "
-                + std::string(hipdnn_sdk::data_objects::toString(bnBwdNode.attributes_type())));
-    }
     const auto& bnBwdAttr
         = opGraph.getNodeWrapper(2)
               .attributesAs<hipdnn_sdk::data_objects::BatchnormBackwardAttributes>();
