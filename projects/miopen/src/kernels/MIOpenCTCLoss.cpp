@@ -383,6 +383,111 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 }
 
 template <bool OptLclMemBeta, bool OptLclMemLb>
+__forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
+                                            const unsigned int gid,
+                                            const unsigned int grp_id,
+                                            const FLOAT* probs_logits,
+                                            FLOAT* workSpace,
+                                            int* dim_data,
+                                            FLOAT* losses,
+                                            FLOAT* gradients,
+                                            FLOAT* beta0  = nullptr,
+                                            FLOAT* beta1  = nullptr,
+                                            int* lb_prime = nullptr)
+{
+    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
+    {
+        unsigned int input_len     = *(dim_data + bid);
+        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
+        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
+        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
+
+        if constexpr(OptLclMemLb)
+        {
+            for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+            {
+                lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
+            }
+        }
+        else
+        {
+            for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+            {
+                dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
+                    dim_data[4 * BATCH_SZ + label_offsets + i];
+            }
+        }
+
+        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
+        {
+            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
+        }
+
+        if constexpr(!OptLclMemBeta)
+        {
+            for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
+            {
+                *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
+            }
+        }
+
+        __syncthreads();
+
+        const int* label_prime;
+        if constexpr(OptLclMemLb)
+        {
+            label_prime = lb_prime;
+        }
+        else
+        {
+            label_prime = &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN];
+        }
+        CTCAlpha(probs_logits,
+                 label_prime,
+                 label_len,
+                 input_len,
+                 bid,
+                 label_repeat,
+                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &losses[bid]);
+
+        if constexpr(OptLclMemBeta)
+        {
+            for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
+            {
+                *(beta0 + i) = negative_cutoff_val;
+                *(beta1 + i) = negative_cutoff_val;
+            }
+        }
+
+        __syncthreads();
+
+        FLOAT *beta_buf0, *beta_buf1;
+        if constexpr(OptLclMemBeta)
+        {
+            beta_buf0 = beta0;
+            beta_buf1 = beta1;
+        }
+        else
+        {
+            beta_buf0 = &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN];
+            beta_buf1 = &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN];
+        }
+        CTCGradient(probs_logits,
+                    label_prime,
+                    label_len,
+                    input_len,
+                    bid,
+                    label_repeat,
+                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    beta_buf0,
+                    beta_buf1,
+                    &losses[bid],
+                    gradients);
+    }
+}
+
+template <bool OptLclMemBeta, bool OptLclMemLb>
 __forceinline__ __device__ void CTCLoss(const unsigned int lid,
                                         const unsigned int gid,
                                         const unsigned int grp_id,
@@ -402,54 +507,8 @@ __forceinline__ __device__ void CTCLoss<false, false>(const unsigned int lid,
                                                       FLOAT* losses,
                                                       FLOAT* gradients)
 {
-    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
-    {
-        unsigned int input_len     = *(dim_data + bid);
-        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
-        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
-        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
-
-        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
-        {
-            dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
-                dim_data[4 * BATCH_SZ + label_offsets + i];
-        }
-
-        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCAlpha(probs_logits,
-                 &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
-                 label_len,
-                 input_len,
-                 bid,
-                 label_repeat,
-                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                 &losses[bid]);
-
-        __syncthreads();
-
-        CTCGradient(probs_logits,
-                    &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
-                    label_len,
-                    input_len,
-                    bid,
-                    label_repeat,
-                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                    &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN],
-                    &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN],
-                    &losses[bid],
-                    gradients);
-    }
+    CTCLossImpl<false, false>(
+        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients);
 }
 
 template <>
@@ -464,56 +523,8 @@ __forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
 {
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
-
-    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
-    {
-        unsigned int input_len     = *(dim_data + bid);
-        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
-        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
-        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
-
-        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
-        {
-            dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
-                dim_data[4 * BATCH_SZ + label_offsets + i];
-        }
-
-        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCAlpha(probs_logits,
-                 &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
-                 label_len,
-                 input_len,
-                 bid,
-                 label_repeat,
-                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                 &losses[bid]);
-
-        for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(beta0 + i) = negative_cutoff_val;
-            *(beta1 + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCGradient(probs_logits,
-                    &dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN],
-                    label_len,
-                    input_len,
-                    bid,
-                    label_repeat,
-                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                    &beta0[0],
-                    &beta1[0],
-                    &losses[bid],
-                    gradients);
-    }
+    CTCLossImpl<true, false>(
+        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients, beta0, beta1);
 }
 
 template <>
@@ -527,54 +538,17 @@ __forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
                                                      FLOAT* gradients)
 {
     __shared__ int lb_prime[MAX_S_LEN];
-
-    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
-    {
-        unsigned int input_len     = *(dim_data + bid);
-        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
-        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
-        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
-
-        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
-        {
-            lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
-        }
-
-        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCAlpha(probs_logits,
-                 &lb_prime[0],
-                 label_len,
-                 input_len,
-                 bid,
-                 label_repeat,
-                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                 &losses[bid]);
-
-        __syncthreads();
-
-        CTCGradient(probs_logits,
-                    &lb_prime[0],
-                    label_len,
-                    input_len,
-                    bid,
-                    label_repeat,
-                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                    &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN],
-                    &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN],
-                    &losses[bid],
-                    gradients);
-    }
+    CTCLossImpl<false, true>(lid,
+                             gid,
+                             grp_id,
+                             probs_logits,
+                             workSpace,
+                             dim_data,
+                             losses,
+                             gradients,
+                             nullptr,
+                             nullptr,
+                             lb_prime);
 }
 
 template <>
@@ -590,55 +564,17 @@ __forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
     __shared__ int lb_prime[MAX_S_LEN];
-
-    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
-    {
-        unsigned int input_len     = *(dim_data + bid);
-        unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
-        unsigned int label_offsets = *(dim_data + 2 * BATCH_SZ + bid);
-        unsigned int label_repeat  = *(dim_data + 3 * BATCH_SZ + bid);
-
-        for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
-        {
-            lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
-        }
-
-        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCAlpha(probs_logits,
-                 &lb_prime[0],
-                 label_len,
-                 input_len,
-                 bid,
-                 label_repeat,
-                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                 &losses[bid]);
-
-        for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
-        {
-            *(beta0 + i) = negative_cutoff_val;
-            *(beta1 + i) = negative_cutoff_val;
-        }
-
-        __syncthreads();
-
-        CTCGradient(probs_logits,
-                    &lb_prime[0],
-                    label_len,
-                    input_len,
-                    bid,
-                    label_repeat,
-                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
-                    &beta0[0],
-                    &beta1[0],
-                    &losses[bid],
-                    gradients);
-    }
+    CTCLossImpl<true, true>(lid,
+                            gid,
+                            grp_id,
+                            probs_logits,
+                            workSpace,
+                            dim_data,
+                            losses,
+                            gradients,
+                            beta0,
+                            beta1,
+                            lb_prime);
 }
 
 extern "C" __global__ void CTCLossGPU([[maybe_unused]] const FLOAT* probs,
