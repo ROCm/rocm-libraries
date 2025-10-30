@@ -9,6 +9,10 @@ on:
         type: string
       test_type:
         type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +23,10 @@ jobs:
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target_bundle: ${{ fromJSON(needs.setup_metadata.outputs.package_targets) }}
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:2f3ebd0beb04c449fdb36933e54bdc69483b914fb9005594d3fc9444c206b54b
       options: -v /runner/config:/home/awsconfig/
@@ -27,7 +35,7 @@ jobs:
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: "gfx94X-dcgpu"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
@@ -142,7 +150,7 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}

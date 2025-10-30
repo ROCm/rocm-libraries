@@ -9,6 +9,10 @@ on:
         type: string
       test_type:
         type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
 
 permissions:
   contents: read
@@ -19,8 +23,6 @@ jobs:
     runs-on: azure-windows-scale-rocm
     # Skip hipDNN build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
     if: ${{ !contains(inputs.project_to_test, 'hipdnn') }}
-    outputs:
-      AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
       contents: read
       id-token: write
@@ -31,9 +33,7 @@ jobs:
       BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      # TODO(geomin12): Add matrix of families
-      # To get a fast signal of windows building for TheRock, adding gfx1151
-      AMDGPU_FAMILIES: "gfx1151"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: Configure GitHub longpath
         run: |
@@ -168,7 +168,7 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
-      test_runs_on: "windows-strix-halo-gpu-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}
