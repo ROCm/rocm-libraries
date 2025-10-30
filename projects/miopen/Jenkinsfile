@@ -343,6 +343,29 @@ pipeline {
             when {
                 expression { params.BUILD_FULL_TESTS }
             }
+            // DBSYNC Tests for gfx908, gfx90a, gfx942
+            stage('DBSYNC Tests') {
+                matrix {
+                    axes {
+                        axis {
+                            name 'TARGET'
+                            values 'gfx908', 'gfx90a', 'gfx942'
+                        }
+                    }
+                    stages {
+                        stage("Dbsync ${TARGET}") {
+                            when {
+                                beforeAgent true
+                                expression { params.DBSYNC_TEST && params["TARGET_${TARGET.toUpperCase()}"] }
+                            }
+                            options { retry(2) }
+                            agent { label getAgentLabel(TARGET) }
+                            steps { runDbSyncJob() }
+                            post { always { cleanWs() } }
+                        }
+                    }
+                }
+            }
             parallel{
                 stage('Hip Tidy') {
                     agent{ label rocmnode("nogpu") }
@@ -363,30 +386,6 @@ pipeline {
                         }
                     }
                 }
-                // DBSYNC Tests for gfx908, gfx90a, gfx942
-                stage('DBSYNC Tests') {
-                    matrix {
-                        axes {
-                            axis {
-                                name 'TARGET'
-                                values 'gfx908', 'gfx90a', 'gfx942'
-                            }
-                        }
-                        stages {
-                            stage("Dbsync ${TARGET}") {
-                                when {
-                                    beforeAgent true
-                                    expression { params.DBSYNC_TEST && params["TARGET_${TARGET.toUpperCase()}"] }
-                                }
-                                options { retry(2) }
-                                agent { label getAgentLabel(TARGET) }
-                                steps { runDbSyncJob() }
-                                post { always { cleanWs() } }
-                            }
-                        }
-                    }
-                }
-
                 stage('Bf16 Hip Install All gfx908') {
                     when {
                         beforeAgent true
