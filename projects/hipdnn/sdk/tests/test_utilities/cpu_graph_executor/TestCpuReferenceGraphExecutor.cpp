@@ -160,6 +160,31 @@ public:
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
+
+    template <typename InputType, typename AccumulatorType>
+    static void runConvolutionWrwTest(hipdnn_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_sdk::data_objects::DataType accumulatorDataType)
+    {
+        std::vector<int64_t> xDims = {1, 1, 2, 2};
+        std::vector<int64_t> dwDims = {1, 1, 1, 1};
+        std::vector<int64_t> dyDims = {1, 1, 2, 2};
+        ConvolutionWrwTensorBundle<InputType> tensorBundle(
+            xDims, dwDims, dyDims, 1, TensorLayout::NCHW);
+
+        auto graphTuple
+            = buildConvolutionWrwGraph(tensorBundle, inputDataType, accumulatorDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+    }
 };
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllFloats)
@@ -259,6 +284,22 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllHalfs)
 TEST(TestCpuReferenceGraphExecutor, ConvolutionBwdAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runConvolutionBwdTest<hip_bfloat16, float>(DataType::BFLOAT16,
+                                                                              DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runConvolutionWrwTest<float, float>(DataType::FLOAT,
+                                                                       DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runConvolutionWrwTest<half, float>(DataType::HALF,
+                                                                      DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runConvolutionWrwTest<hip_bfloat16, float>(DataType::BFLOAT16,
                                                                               DataType::FLOAT);
 }
 
