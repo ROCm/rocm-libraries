@@ -135,10 +135,12 @@ docker run -it \
 | `--group-add video` | Add container to video group for GPU access |
 | `--cap-add=SYS_PTRACE` | Enable debugging capabilities |
 | `--security-opt seccomp=unconfined` | Required for some debugging tools |
+| `<image-name>` | The tag added to the image with the `-t` option in the build command |
 
 ### Example Run Commands
 
-Ubuntu 22.04:
+1. Switch to the `rocm-libraries/projects/hipdnn` folder.
+2. Using image tagged `hipdnn:prebuilt`:
 ```bash
 docker run -it \
   -v $(pwd):/workspace/hipdnn \
@@ -163,8 +165,12 @@ docker run -it \
    ```bash
    rocm-smi
    ```
+   or
+   ```bash
+   rocminfo
+   ```
 
-3. **Development Workflow**: The containers include all necessary development tools, so you can edit code on your host machine and build/test inside the container.
+4. **Development Workflow**: The containers include all necessary development tools, so you can edit code on your host machine and build/test inside the container.
 
 ## ⚠️ Troubleshooting
 
