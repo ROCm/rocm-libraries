@@ -54,6 +54,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 ## Quick Start Guide
 
 Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
+Refer to the [Platform-Specific Instructions](#platform-specific-instructions) section for details on building under Windows.
 
 1. **Clone rocm-libraries**
    ```bash
@@ -70,9 +71,12 @@ Ensure the required dependencies are installed on your system as outlined in [De
    
    # Build and run tests
    ninja check
+   ```
+   Refer to the [Build Targets](#build-targets) section below for additional build targets that can be used.
 
 3. **Install**
-   Refer to the Build Configurations section below for details on using an install path other than the default `/opt/rocm`.
+   
+   Refer to the [Build Configurations](#build-configurations) section below for details on using an install path other than the default `/opt/rocm`.
    ```bash
    sudo ninja install
    ```
