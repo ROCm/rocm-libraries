@@ -1143,7 +1143,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
     using T              = size_t;
     using input_type     = T;
     using output_type    = T;
-    using IteratorType   = rocprim::counting_iterator<input_type>;
+    using IteratorType   = test_utils::counting_iterator<input_type>;
     using reduce_op_type = typename hipcub::Sum;
     using offset_type    = T;
 

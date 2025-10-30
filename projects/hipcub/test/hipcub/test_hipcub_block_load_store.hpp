@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprim/iterator/discard_iterator.hpp>
-
 test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(HipcubBlockLoadStoreTests, name_suffix, load_store_params);
