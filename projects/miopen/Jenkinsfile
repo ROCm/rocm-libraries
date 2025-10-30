@@ -818,7 +818,7 @@ pipeline {
                         }
                     }
                 }
-                stage('Bf16 Hip Install All gfx908') {
+                stage('Bf16 Hip All gfx908') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
@@ -836,7 +836,7 @@ pipeline {
                         }
                     }
                 }
-                stage('Fp16 Hip All Install gfx908') {
+                stage('Fp16 Hip All gfx908') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
@@ -873,7 +873,7 @@ pipeline {
                     }
                 }
                 // GFX115X Strix Halo Tests
-                stage('Bf16 Hip All Install gfx115X') {
+                stage('Bf16 Hip All gfx115X') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
@@ -894,7 +894,7 @@ pipeline {
                         }
                     }
                 }
-                stage('Fp16 Hip All Install gfx115X') {
+                stage('Fp16 Hip All gfx115X') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
@@ -916,7 +916,7 @@ pipeline {
                         }
                     }
                 }
-                stage('Fp32 Hip All Install gfx115X') {
+                stage('Fp32 Hip All gfx115X') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
