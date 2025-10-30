@@ -173,7 +173,7 @@ Follow the [quick start steps in the build guide](./docs/Building.md#quick-start
    rocminfo
    ```
 
-4. **Development Workflow**: The containers include all necessary development tools, so you can edit code on your host machine and build/test inside the container.
+3. **Development Workflow**: The containers include all necessary development tools, so you can edit code on your host machine and build/test inside the container.
 
 ## ⚠️ Troubleshooting
 
