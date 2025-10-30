@@ -72,3 +72,18 @@ TEST(TestAttributes, FillFromContextSetNodeComputeTypeNotOverriden)
 
     EXPECT_EQ(attributes.get_compute_data_type(), nodeDataType);
 }
+
+TEST(TestAttributes, FillFromContextSetNodeComputeTypeDoesNotUnset)
+{
+    GraphAttributes graphAttributes;
+    graphAttributes.set_compute_data_type(DataType::NOT_SET);
+
+    auto nodeDataType = hipdnn_frontend::DataType::INT32;
+
+    Dummy attributes;
+    attributes.set_compute_data_type(nodeDataType);
+
+    attributes.fill_from_context(graphAttributes);
+
+    EXPECT_EQ(attributes.get_compute_data_type(), nodeDataType);
+}
