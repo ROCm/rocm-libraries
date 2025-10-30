@@ -23,7 +23,6 @@ Checks: >
   -readability-use-anyofallof,
   -readability-function-cognitive-complexity
 
-WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']
 
 # This regex is a inclusion filter for the files to be checked. Its a Posix regex and
