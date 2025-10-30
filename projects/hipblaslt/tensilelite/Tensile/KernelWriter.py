@@ -284,7 +284,7 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  tmpvgpr: List[int]                     = field(init=False) # vgpr dict for localread
   numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
@@ -567,10 +567,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numPack = 999
     for n in range(numPack):
       if srcPackItems:
-        numPacked += 1
         item = srcPackItems.pop(0)
         dstPackItems.append(item)
-        itemStr = str(item)
+        numPacked += 1
+        itemStr = str(item.comment)
         for string in searchStrings:
           if string in itemStr:
             return numPacked
@@ -1125,7 +1125,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif isinstance(inst, SMFMAInstruction):
           srcRegs = [inst.a, inst.b, inst.metadata]
         else:
-          srcRegs = inst.srcs
+          if hasattr(inst, 'srcs'):
+            srcRegs = inst.srcs
+          else:
+            srcRegs = []
 
         return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
 

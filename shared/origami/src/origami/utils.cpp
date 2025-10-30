@@ -336,59 +336,379 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
 size_t select_best_wgmxcc(const hardware_t& hardware, size_t M, size_t N, size_t K, size_t batch,
                           size_t MT_M, size_t MT_N, size_t MT_K, bool print) {
     // Return the number of XCDs
-    return hardware.NUM_XCD;
+    // These values doesn't matter, should be removed in the refactoring
+        constexpr int dynamic_grid_version = 6;
+        constexpr bool transA = false;
+        constexpr bool transB = false;
+        constexpr size_t element_size_A = 32;
+        constexpr size_t element_size_B = element_size_A;
+        constexpr size_t element_size_out = element_size_A;
+        constexpr data_type_t mi_datatype = data_type_t::Float;
+        constexpr size_t MI_M = 16;
+        constexpr size_t MI_N = 16;
+        constexpr size_t MI_K = 16;
+        constexpr size_t workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+        constexpr int occupancy = 0;
+
+        // default WGM
+        size_t defaultWGM = ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD));
+
+        // What SK does
+        auto [skGrid, numActiveCUs, numWaves, splittingFactor]
+            = compute_CU_occupancy(hardware,
+                                   M,
+                                   N,
+                                   K,
+                                   batch,
+                                   transA,
+                                   transB,
+                                   MT_M,
+                                   MT_N,
+                                   MT_K,
+                                   MI_M,
+                                   MI_N,
+                                   MI_K,
+                                   element_size_A,
+                                   element_size_B,
+                                   element_size_out,
+                                   mi_datatype,
+                                   defaultWGM,
+                                   workspace_size_per_elem_c,
+                                   workspace_size_per_elem_c,
+                                   occupancy,
+                                   dynamic_grid_version,
+                                   print);
+                                   
+        // Default is always number of XCD
+        size_t wgmxcc = hardware.NUM_XCD;
+
+        // Number of output MTs per split and batch
+        size_t numMT_M = (M + MT_M - 1) / MT_M;
+        size_t numMT_N = (N + MT_N - 1) / MT_N;
+        size_t numMTs  = numMT_M * numMT_N;
+
+        // Batched GEMMs
+        if(batch > 1)
+        {
+            // Total tiles including batch count
+            size_t numTotalTiles = numMTs * batch;
+            
+            // if only one MT per each GEMM -> no mapping
+            // if less than hardware.NUM_XCD total tiles -> no mapping
+            if(numMTs == 1 || numTotalTiles <= hardware.NUM_XCD)
+                return 1;
+            else
+                return hardware.NUM_XCD;
+        }
+
+        // If we are lucky that the splittingFactor is a multiple of NUM_XCD -> no mapping
+        if(splittingFactor % hardware.NUM_XCD == 0)
+            return 1;
+
+        // Small GEMMs
+        if(numMTs <= hardware.NUM_XCD)
+            return 1;
+
+        // For sizes that we have more than 2 waves of computations, we skip xcc mapping as MALL is
+        // more important -- matrix should not be skinny
+        bool MallIsImportant = (splittingFactor == 1 
+            && batch == 1 
+            && numMTs > 2 * hardware.N_CU
+            && numMT_M > 4
+            && numMT_N > 4);
+        if(MallIsImportant)
+            return 1;
+
+        // Return the number of XCDs
+        return wgmxcc;
 }
 
 /*!
- * \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
- *
- * \param[in] hardware          - Hardware
- * \param[in] M, N, K, batch    - Problem
- * \param[in] MT_M, MT_N, MT_K  - Solution
- * \param[in] print             - whether to print the final best result
- *
- * \return best WGM.
- */
-int32_t select_best_wgm(const hardware_t& hardware, size_t M, size_t N, size_t K, size_t batch,
-                        size_t MT_M, size_t MT_N, size_t MT_K, bool print) {
-    constexpr size_t element_size =
-        32;  // L2 scales linearly with element size so it doesn't matter
+        * \brief Helper function to calculate unique rows/columns per XCD after each WGM transformation
+        * Compute, for each XCD (given as a column-major contiguous range [L,R)),
+        * the global number of unique transformed rows (ty) and columns (tx)
+        * populated in the output matrix after applying the WGM transform.
+         *
+         * \param[in] M    - number of WG rows (wg0 in [0, M))
+         * \param[in] N    - number of WG cols (wg1 in [0, N))
+         * \param[in] WGM  - slab width along transformed-x (last slab may be narrower)
+         * \param[in] xcd_ranges - per-XCD [L,R) ranges in column-major
+         *
+         * \return returns unique rows and columns
+        */
+    inline std::vector<std::pair<size_t, size_t>> unique_rows_cols_wgm(
+        int M, 
+        int N, 
+        int WGM,
+        const std::vector<std::pair<uint32_t, uint32_t>>& xcd_ranges) 
+    {
+        std::vector<std::pair<size_t,size_t>> result(xcd_ranges.size(), {0,0});
 
-    std::vector<size_t> wgmList = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+        if (M <= 0 || N <= 0 || WGM <= 0) 
+            return result;
 
-    using WGMResult = std::pair<double, size_t>;  // (l2_hit_rate, WGM)
-    std::vector<WGMResult> valid_results;
-    valid_results.reserve(wgmList.size());
+        int numSlabs = (N + WGM - 1) / WGM;
 
-    // Iterate over all candidate WGM values
-    for (const auto& candidate_wgm : wgmList) {
-        if (hardware_t::is_debug_enabled()) {
-            std::cout << "Evaluating WGM=" << candidate_wgm << "\n";
+        for (size_t xi = 0; xi < xcd_ranges.size(); ++xi) 
+        {
+            auto [L, R] = xcd_ranges[xi];
+            if (L >= R) 
+                continue;
+
+            // Decode XCD range in column-major
+            int j0 = L / M;
+            int i0 = L % M;
+            int j1 = (R - 1) / M;
+            int i1 = (R - 1) % M;
+
+            // Track unique ty and tx globally
+            std::vector<uint8_t> rowFlags(M, 0);
+            std::vector<uint8_t> colFlags; // size determined later
+
+            for (int slab = 0; slab < numSlabs; ++slab) 
+            {
+                int c0 = slab * WGM;
+                int c1 = std::min((slab + 1) * WGM, N);
+                int Wb = c1 - c0;
+                if (Wb <= 0) continue;
+
+                std::vector<uint8_t> localCols(Wb, 0);
+
+                // Intersection of XCD columns with this slab
+                int lo = std::max(c0, j0);
+                int hi = std::min(c1 - 1, j1);
+                if (lo > hi) 
+                    continue;
+
+                // First partial column
+                if (j0 >= c0 && j0 < c1) 
+                {
+                    int remY = j0 - c0;
+                    for (int i = i0; i < M; ++i) 
+                    {
+                        int serial = i + remY * M;
+                        int ty = serial / Wb;
+                        int tx = serial % Wb;
+                        rowFlags[ty] = 1;
+                        localCols[tx] = 1;
+                    }
+                }
+
+                // Interior full columns
+                int f_lo = std::max(j0 + 1, c0);
+                int f_hi = std::min(j1 - 1, c1 - 1);
+                for (int j = f_lo; j <= f_hi; ++j) 
+                {
+                    int remY = j - c0;
+                    for (int i = 0; i < M; ++i) 
+                    {
+                        int serial = i + remY * M;
+                        int ty = serial / Wb;
+                        int tx = serial % Wb;
+                        rowFlags[ty] = 1;
+                        localCols[tx] = 1;
+                    }
+                }
+
+                // Last partial column
+                if (j1 >= c0 && j1 < c1) 
+                {
+                    int remY = j1 - c0;
+                    for (int i = 0; i <= i1; ++i) 
+                    {
+                        int serial = i + remY * M;
+                        int ty = serial / Wb;
+                        int tx = serial % Wb;
+                        rowFlags[ty] = 1;
+                        localCols[tx] = 1;
+                    }
+                }
+
+                // Count localCols and add to global colFlags
+                if (colFlags.size() < (size_t)(slab * WGM + Wb))
+                    colFlags.resize(slab * WGM + Wb, 0);
+                for (int k = 0; k < Wb; ++k) 
+                {
+                    if (localCols[k]) 
+                        colFlags[slab * WGM + k] = 1;
+                }
+            }
+
+            size_t uniqueRows = 0, uniqueCols = 0;
+            for (auto f : rowFlags) 
+                if (f) 
+                    ++uniqueRows;
+            for (auto f : colFlags) 
+                if (f) 
+                    ++uniqueCols;
+
+            result[xi] = {uniqueRows, uniqueCols};
+        }
+        return result;
+    }
+
+/*!
+         * \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
+         *
+         * \param[in] hardware          - Hardware
+         * \param[in] M, N, K, batch    - Problem
+         * \param[in] MT_M, MT_N, MT_K  - Solution
+         * \param[in] print             - whether to print the final best result
+         *
+         * \return best WGM.
+         */
+    int32_t select_best_wgm(const hardware_t& hardware,
+                            size_t            M,
+                            size_t            N,
+                            size_t            K,
+                            size_t            batch,
+                            size_t            MT_M,
+                            size_t            MT_N,
+                            size_t            MT_K,
+                            size_t            wgmxcc,
+                            bool              print)
+    {
+        // These values doesn't matter, should be removed in the refactoring
+        constexpr int dynamic_grid_version = 6;
+        constexpr bool transA = false;
+        constexpr bool transB = false;
+        constexpr size_t element_size_A = 32;
+        constexpr size_t element_size_B = element_size_A;
+        constexpr size_t element_size_out = element_size_A;
+        constexpr data_type_t mi_datatype = data_type_t::Float;
+        constexpr size_t MI_M = 16;
+        constexpr size_t MI_N = 16;
+        constexpr size_t MI_K = 16;
+        constexpr size_t workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+        constexpr int occupancy = 0;
+        
+        // Number of output MTs per split and batch
+        size_t numMT_M = (M + MT_M - 1) / MT_M;
+        size_t numMT_N = (N + MT_N - 1) / MT_N;
+        size_t numMTs  = numMT_M * numMT_N;
+
+        // Default is the closest we can get to a square
+        size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
+        size_t defaultWGM = ceil(std::sqrt(max_CU_XCD));
+
+        // What SK does
+        auto [skGrid, numActiveCUs, numWaves, splittingFactor]
+            = compute_CU_occupancy(hardware,
+                                   M,
+                                   N,
+                                   K,
+                                   batch,
+                                   transA,
+                                   transB,
+                                   MT_M,
+                                   MT_N,
+                                   MT_K,
+                                   MI_M,
+                                   MI_N,
+                                   MI_K,
+                                   element_size_A,
+                                   element_size_B,
+                                   element_size_out,
+                                   mi_datatype,
+                                   defaultWGM,
+                                   workspace_size_per_elem_c,
+                                   workspace_size_per_elem_c,
+                                   occupancy,
+                                   dynamic_grid_version,
+                                   print);
+        
+        // shortcut:
+        // For sizes that we have more than 2 waves of computations, MALL is more important
+        // Note that the matrix should not be skinny
+        bool MallIsImportant = (splittingFactor == 1 
+            && batch == 1 
+            && numMTs > 2 * hardware.N_CU
+            && numMT_M > 4
+            && numMT_N > 4);
+        // 1. if we have decided to not remap xcc, there is no reason to use wgm
+        // 2. GEMMs that only have one tile in one dimension don't need wgm
+        // 3. Batched GEMMs don't need wgm (emprically -> batch count is often large!)
+        if((wgmxcc == 1 && !MallIsImportant) || numMT_M == 1 || numMT_N == 1 || batch > 1)
+            return 0;
+
+        // There are cases where StreamK combines output tiles and work on them in one WG
+        // Note: These cases emprically have shown to be sizes where one dimension is way larger than the other.
+        // As the time complexity scales with O(N/WGM), this shortcut also helps the selection time
+        if(MallIsImportant)
+        {
+            return max_CU_XCD;
         }
 
-        // Compute L2 hit rate for this WGM
-        double current_hit =
-            estimate_l2_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size,
-                            static_cast<int>(candidate_wgm), 1 /* splittingFactor */);
+        // Range of "output tiles" that each xcd takes.
+        // Note the "output tiles" -- The returned range is an ID of the output tiles that each XCD works on
+        // These IDs are L2 coherent.
+        // Note that batched GEMMs have been ruled out
+        std::vector<std::pair<uint32_t, uint32_t>> XCD_ranges;
+        XCD_ranges.reserve(numWaves * hardware.NUM_XCD);
+        size_t numWGs = numMTs * splittingFactor;
+        size_t q = numWGs / hardware.NUM_XCD;
+        size_t r = numWGs % hardware.NUM_XCD;
+        size_t offset = 0;
+        for (uint32_t w = 0; w < numWaves; ++w)
+        {
+            for (uint32_t x = 0; x < hardware.NUM_XCD; ++x) 
+            {
+                uint32_t fullIDs = (x < r) ? (q + 1) : q;
+                // All WGs that this XCD works on are [offset, offset + fullIDs)
+                // However, not all of them are L2-coherent if we are doing batch or split-k
+                // Batched GEMMs should be ruled out at this point, so we only adjust for split-k
+                uint32_t fullIDs_adjusted = fullIDs / splittingFactor;
+                XCD_ranges.emplace_back(offset, offset + fullIDs_adjusted);
+                offset += fullIDs;
+            }
+        }
 
-        valid_results.emplace_back(current_hit, candidate_wgm);
+        // Loop over some candidate WGM values
+        using WGMResult = std::pair<size_t, size_t>; // (unique_L2_loads, WGM)
+        std::vector<size_t> wgmList = {1, 2, 4, 6, 8, 16};
+        if(numMT_N < max_CU_XCD / 2 && numMT_N % 2 != 0)
+            wgmList.push_back(numMT_N);
+        std::vector<WGMResult> valid_results;
+        valid_results.reserve(wgmList.size());
+
+        // Iterate over all candidate WGM values
+        for(auto& candidate_wgm : wgmList)
+        {
+            // Compute unique loads per L2 tile 
+            auto L2_rows_cols = unique_rows_cols_wgm(numMT_M,
+                                                     numMT_N,
+                                                     candidate_wgm,
+                                                     XCD_ranges);
+            
+            // Sum up the L2 loads over all XCD
+            // We should technically multiply by K (or splitted K), but it
+            // has no effect on sorting
+            size_t total_L2 = 0;
+            for (auto& [rows, cols] : L2_rows_cols)
+                total_L2 += rows * MT_M + cols * MT_N;
+
+            if(candidate_wgm == 1)
+            {
+                // WGM0 is essentially the same as WGM1 (no mapping) no overhead 
+                // and can be skipped in the kernel to save few instructions.
+                candidate_wgm = 0;
+                // For cases that total_L2 for multiple WGM values is equal,
+                // it's better to promote WGM0 for the reason mentioned above.
+                total_L2 -= 1;
+            }
+            
+            valid_results.emplace_back(total_L2, candidate_wgm);
+        }
+
+        // Find the minimum L2 loads in valid_results
+        auto best_it = std::min_element(
+            valid_results.begin(), valid_results.end(), [](const WGMResult& a, const WGMResult& b) {
+                return a.first < b.first; // "less" => a has smaller hit rate than b
+            });
+        
+        // Return best WGM
+        return best_it->second;
     }
-
-    // If no valid WGM was found, throw an error
-    if (valid_results.empty()) {
-        throw std::runtime_error("No valid WGM found.");
-    }
-
-    // Find the maximum L2 hit rate in valid_results
-    // (Use max_element on the first value in the pair.)
-    auto best_it = std::max_element(
-        valid_results.begin(), valid_results.end(), [](const WGMResult& a, const WGMResult& b) {
-            return a.first < b.first;  // "less" => a has smaller hit rate than b
-        });
-
-    // Return best WGM
-    return best_it->second;
-}
 
 // Logic to decide between two MT that are "tied"
 std::vector<std::tuple<double, size_t, size_t, size_t>> tie_breaker_macro_tile_sizes(
