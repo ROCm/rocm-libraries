@@ -718,7 +718,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ocl/mloNorm.cpp
         ocl/rnnocl.cpp
         ocl/utilocl.cpp
-        ocl/ctcocl.cpp
         ocl/dropoutocl.cpp
         ocl/gcn_asm_utils.cpp
         ocl/rnn_util_ocl.cpp
