@@ -77,6 +77,18 @@ def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420)
     }
 }
 
+def getAgentLabel(target) {
+    def labelMap = [
+        'gfx908': 'gfx908',
+        'gfx90a': 'gfx90a',
+        'gfx942': 'gfx942',
+        'navi32': 'navi32',
+        'navi35': 'strix',  
+        'navi4': 'navi4'
+    ]
+    return rocmnode(labelMap[target] ?: target)
+}
+
 //launch develop branch nightly jobs 
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX90A=true;TARGET_GFX942=true
@@ -352,16 +364,24 @@ pipeline {
                     }
                 }
                 // DBSYNC Tests for gfx908, gfx90a, gfx942
-                ['gfx908', 'gfx90a', 'gfx942'].each { target ->
-                    stage("Dbsync ${target}") {
-                        when {
-                            beforeAgent true
-                            expression { params.DBSYNC_TEST && params["TARGET_${target.toUpperCase()}"] }
+                matrix {
+                    axes {
+                        axis {
+                            name 'TARGET'
+                            values 'gfx908', 'gfx90a', 'gfx942'
                         }
-                        options { retry(2) }
-                        agent { label rocmnode(target) }
-                        steps { runDbSyncJob() }
-                        post { always { cleanWs() } }
+                    }
+                    stages {
+                        stage("Dbsync ${TARGET}") {
+                            when {
+                                beforeAgent true
+                                expression { params.DBSYNC_TEST && params["TARGET_${TARGET.toUpperCase()}"] }
+                            }
+                            options { retry(2) }
+                            agent { label getAgentLabel(TARGET) }
+                            steps { runDbSyncJob() }
+                            post { always { cleanWs() } }
+                        }
                     }
                 }
 
