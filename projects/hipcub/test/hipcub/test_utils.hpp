@@ -27,10 +27,20 @@
 
 // hipCUB API
 #ifdef __HIP_PLATFORM_AMD__
-    #include <hipcub/backend/rocprim/util_ptx.hpp>
+    #include <hipcub/hipcub.hpp>
+    #include <rocprim/iterator/constant_iterator.hpp>
+    #include <rocprim/iterator/counting_iterator.hpp>
+    #include <rocprim/iterator/discard_iterator.hpp>
+    #include <rocprim/iterator/transform_iterator.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cub/block/block_load.cuh>
+    #include <cub/block/block_store.cuh>
+    #include <cub/cub.cuh>
     #include <cub/util_ptx.cuh>
-    #include <hipcub/config.hpp>
+    #include <cub/util_type.cuh>
+    #include <cuda/std/array>
+    #include <cuda/std/mdspan>
+    #include <hipcub/hipcub.hpp>
 #endif
 
 #include "test_utils_assertions.hpp"
@@ -45,6 +55,8 @@
 // Seed values
 #include "test_seed.hpp"
 
+#include <array>
+#include <cstddef>
 #include <type_traits>
 
 namespace test_utils
@@ -619,6 +631,85 @@ inline constexpr auto ceiling_div(const T a, const U b)
 {
     return a / b + (a % b > 0 ? 1 : 0);
 }
+
+#if defined(__HIP_PLATFORM_AMD__)
+
+template<typename IndexType, std::size_t... Dims>
+using extents = ::hipcub::extents<IndexType, Dims...>;
+
+template<typename Extents>
+struct extents_size;
+
+template<typename IndexType, std::size_t... Dims>
+struct extents_size<extents<IndexType, Dims...>>
+{
+    static constexpr std::size_t value = (Dims * ... * 1);
+};
+
+template<typename T, typename Difference = std::ptrdiff_t>
+using constant_iterator = ::rocprim::constant_iterator<T, Difference>;
+
+template<typename T>
+using counting_iterator = ::rocprim::counting_iterator<T>;
+
+template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::it_value_t<It>>
+using transform_iterator = ::rocprim::transform_iterator<It, UnaryOp, ValueType>;
+
+struct discard_iterator : public ::rocprim::discard_iterator
+{
+    using base_type         = ::rocprim::discard_iterator;
+    using value_type        = void;
+    using difference_type   = std::ptrdiff_t;
+    using iterator_category = std::random_access_iterator_tag;
+
+    using base_type::base_type;
+
+    discard_iterator(const ::rocprim::discard_iterator& other) : base_type(other) {}
+};
+
+using discard_output_iterator = discard_iterator;
+
+inline auto make_discard_iterator() -> discard_iterator
+{
+    return discard_iterator(::rocprim::make_discard_iterator());
+}
+
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+
+template<typename IndexType, std::size_t... Dims>
+using extents = ::cuda::std::extents<IndexType, Dims...>;
+
+template<typename Extents>
+struct extents_size;
+
+template<typename IndexType, std::size_t... Dims>
+struct extents_size<extents<IndexType, Dims...>>
+{
+    static constexpr std::size_t value = (Dims * ... * 1);
+};
+
+template<typename T, typename Difference = std::ptrdiff_t>
+using constant_iterator = ::cub::ConstantInputIterator<T, Difference>;
+
+template<typename T>
+using counting_iterator = ::cub::CountingInputIterator<T>;
+
+template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::it_value_t<It>>
+using transform_iterator = ::cub::TransformInputIterator<ValueType, UnaryOp, It>;
+
+template<typename T = void>
+using discard_iterator = ::cub::DiscardOutputIterator<T>;
+
+template<typename T = void>
+using discard_output_iterator = ::cub::DiscardOutputIterator<T>;
+
+template<typename T = std::size_t>
+inline auto make_discard_iterator() -> ::cub::DiscardOutputIterator<T>
+{
+    return ::cub::DiscardOutputIterator<T>();
+}
+
+#endif
 
 } // namespace test_utils
 

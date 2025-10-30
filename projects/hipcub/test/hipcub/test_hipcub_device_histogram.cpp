@@ -390,7 +390,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        auto          d_input = rocprim::counting_iterator<sample_type>(0);
+        auto          d_input = test_utils::counting_iterator<sample_type>{0UL};
         counter_type* d_histogram;
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
 
@@ -883,8 +883,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                     }
                 }
             }
-            rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
-                   d_input2(d_input, transform_op<sample_type>());
+            test_utils::transform_iterator<sample_type*, transform_op<sample_type>> d_input2(
+                d_input,
+                transform_op<sample_type>());
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -1213,8 +1214,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                     }
                 }
             }
-            rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
-                   d_input2(d_input, transform_op<sample_type>());
+            test_utils::transform_iterator<sample_type*, transform_op<sample_type>> d_input2(
+                d_input,
+                transform_op<sample_type>());
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {

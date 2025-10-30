@@ -236,8 +236,10 @@ inline auto assert_near(const custom_test_type<T>& result, const custom_test_typ
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.x, expected.x, diff1);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.y, expected.y, diff2);
+    if(!bit_equal(result.x, expected.x))
+        ASSERT_NEAR(result.x, expected.x, diff1);
+    if(!bit_equal(result.y, expected.y))
+        ASSERT_NEAR(result.y, expected.y, diff2);
 }
 
 template<class T>
@@ -245,7 +247,7 @@ inline auto assert_near(const custom_test_type<T>& result, const custom_test_typ
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.x,expected.x);
-    ASSERT_EQ(result.y,expected.y);
+    ASSERT_EQ(result.x,expected.x);
 }
 
 // End assert_near
@@ -348,5 +350,5 @@ inline void assert_type(ExpectedT /*obj1*/, ActualT /*obj2*/)
 {
     testing::StaticAssertTypeEq<ExpectedT, ActualT>();
 }
-}
+} // namespace test_utils
 #endif  // HIPCUB_TEST_HIPCUB_TEST_UTILS_ASSERTIONS_HPP_

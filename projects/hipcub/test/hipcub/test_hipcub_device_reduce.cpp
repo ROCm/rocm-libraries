@@ -685,8 +685,8 @@ void test_argminmax2(typename TestFixture::input_type empty_value)
     using T             = typename TestFixture::input_type;
     using Iterator      = typename hipcub::ArgIndexInputIterator<T*, int>;
     using argidx_type   = typename Iterator::value_type;
-    using extremum_type = typename argidx_type::value_type;
-    using index_type    = typename argidx_type::key_type;
+    using extremum_type = decltype(std::declval<argidx_type>().value);
+    using index_type    = decltype(std::declval<argidx_type>().key);
 
     DispatchFunction function;
 
@@ -1159,7 +1159,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
 
     using T            = typename TestFixture::input_type;
     using U            = typename TestFixture::output_type;
-    using IteratorType                  = rocprim::constant_iterator<T>;
+    using IteratorType                  = test_utils::constant_iterator<T>;
     const std::vector<size_t> exponents = {30, 31, 32, 33, 34};
     for(auto exponent : exponents)
     {
