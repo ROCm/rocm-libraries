@@ -44,6 +44,7 @@ endfunction()
 function(find_libblis compiler)
   file(GLOB DIRS "/opt/AMD/aocl/aocl-linux-${compiler}-*")
   list(SORT DIRS)
+  list(REVERSE DIRS)
 
   foreach(dir IN LISTS DIRS)
     get_filename_component(dir_name "${dir}" NAME)
