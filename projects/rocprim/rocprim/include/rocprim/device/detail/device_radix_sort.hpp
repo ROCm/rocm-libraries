@@ -1372,7 +1372,7 @@ struct onesweep_iteration_helper
                     if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
-                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
+                        if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))
                         {
                             storage.ordered_block_values[offset] = v_pack::create(values[i]);
                         }
