@@ -671,7 +671,11 @@ __global__
 void warp_id_kernel(unsigned int* output)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
-    output[index]            = ::rocprim::warp_id();
+#ifdef __HIP_PLATFORM_NVIDIA__
+    output[index] = hipThreadIdx_x / warpSize;
+#else
+    output[index] = ::rocprim::warp_id();
+#endif
 }
 
 TEST(HipcubUtilPtxTests, WarpId)
@@ -755,7 +759,11 @@ template<unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_pow_two() {
+#ifdef __HIP_PLATFORM_NVIDIA__
+    const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
+#else
     const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
+#endif
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     const unsigned int warp_start      = logical_warp_id * LogicalWarpSize;
@@ -796,7 +804,11 @@ template<unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_non_pow_two() {
+#ifdef __HIP_PLATFORM_NVIDIA__
+    const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
+#else
     const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
+#endif
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     for(unsigned int lane = 0; lane < LogicalWarpSize; ++lane)

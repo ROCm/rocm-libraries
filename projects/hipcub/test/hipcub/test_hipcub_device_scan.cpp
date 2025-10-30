@@ -136,7 +136,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType     = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
@@ -328,7 +328,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType     = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
@@ -512,7 +512,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
     // as all conversions in the tests are to more precise types,
@@ -697,7 +697,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType     = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
@@ -902,7 +902,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
     // as all conversions in the tests are to more precise types,
@@ -1090,7 +1090,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
 TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
 {
     using T              = unsigned int;
-    using InputIterator  = rocprim::counting_iterator<T>;
+    using InputIterator  = test_utils::counting_iterator<T>;
     using OutputIterator = test_utils::single_index_iterator<T>;
 
     const size_t size = (1ul << 31) + 1ul;
@@ -1100,7 +1100,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
     unsigned int seed_value = rand();
     SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    // Create rocprim::counting_iterator<U> with random starting point
+    // Create test_utils::counting_iterator<U> with random starting point
     InputIterator input_begin(test_utils::get_random_value<T>(0, 200, seed_value));
 
     T* d_output;
@@ -1160,7 +1160,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
 TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
 {
     using T              = unsigned int;
-    using InputIterator  = rocprim::counting_iterator<T>;
+    using InputIterator  = test_utils::counting_iterator<T>;
     using OutputIterator = test_utils::single_index_iterator<T>;
 
     const size_t size = (1ul << 31) + 1ul;
@@ -1170,7 +1170,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
     unsigned int seed_value = rand();
     SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    // Create rocprim::counting_iterator<U> with random starting point
+    // Create test_utils::counting_iterator<U> with random starting point
     InputIterator input_begin(test_utils::get_random_value<T>(0, 200, seed_value));
     T             initial_value = test_utils::get_random_value<T>(1, 10, seed_value);
 
@@ -1255,7 +1255,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
     // use float as device-side accumulator and double as host-side accumulator
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
-    using IteratorType = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
+    using IteratorType = test_utils::transform_iterator<T*, hipcub::CastOp<acc_type>>;
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
     // as all conversions in the tests are to more precise types,

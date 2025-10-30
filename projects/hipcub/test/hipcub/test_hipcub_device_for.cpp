@@ -691,7 +691,7 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = rocprim::counting_iterator<T>{0};
+            const auto    it = test_utils::counting_iterator<T>{0};
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));
 
@@ -744,7 +744,7 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = rocprim::counting_iterator<T>{0};
+            const auto    it = test_utils::counting_iterator<T>{0};
 
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));
@@ -896,11 +896,11 @@ struct HipcubDeviceForEachInExtentsTests : public ::testing::Test
 
 template<class IndexType>
 using HipcubDeviceForEachInExtentsParamGenerator
-    = ::testing::Types<DeviceForEachInExtentsParams<::hipcub::extents<IndexType>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5, 3>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5, 3, 4>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 2, 5, 3, 4>>>;
+    = ::testing::Types<DeviceForEachInExtentsParams<::test_utils::extents<IndexType>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3, 4>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 2, 5, 3, 4>>>;
 
 using HipcubDeviceForEachInExtentsTestsParams = typename HipcubTestParamsMergeAll<
     HipcubDeviceForEachInExtentsParamGenerator<std::int16_t>,
@@ -940,7 +940,8 @@ template<
 }
 
 template<typename T, typename IndexType, size_t... Extents>
-inline void fill_linear(std::vector<T>& vector, const ::hipcub::extents<IndexType, Extents...>& ext)
+inline void fill_linear(std::vector<T>&                                     vector,
+                        const ::test_utils::extents<IndexType, Extents...>& ext)
 {
     size_t pos = 0;
     fill_linear_impl(vector, ext, pos);
@@ -973,8 +974,8 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
 
     using item_t                = int;
     using data_t                = std::array<item_t, 3>;
-    using extents_type          = hipcub::extents<item_t, 3, 2, 2>;
-    constexpr auto extents_size = hipcub::extents_size<extents_type>::value;
+    using extents_type          = test_utils::extents<item_t, 3, 2, 2>;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
     constexpr auto memory_size  = extents_size * sizeof(data_t);
 
     constexpr extents_type ext{};
@@ -1032,7 +1033,7 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
 
     using item_t                = index_type;
     using data_t                = std::array<item_t, extents_type::rank()>;
-    constexpr auto extents_size = hipcub::extents_size<extents_type>::value;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
     constexpr auto memory_size  = extents_size * sizeof(data_t);
     constexpr auto rank         = extents_type::rank();
     using store_op_t            = LinearStore<index_type, rank>;
