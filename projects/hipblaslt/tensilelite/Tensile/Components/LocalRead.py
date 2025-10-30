@@ -197,7 +197,7 @@ class LocalReadMFMA(LocalRead):
         module.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
         commentStr = ""
         if (index % 8) == 4:
-            commentStr = "__TF32_1_"+tct
+            commentStr = "__TF32_1_" + tct
         module.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
 
 
@@ -439,10 +439,10 @@ class LocalReadMFMA(LocalRead):
                                         v5 = vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v6 = vgpr("Valu%s_X%u_I%u+%u+6"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v7 = vgpr("Valu%s_X%u_I%u+%u+7"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        packCodeT.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack tail begin"))
+                                        packCodeT.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack final begin"))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v6, src0=v4, src1=v5))
                                         packCodeT.add(VCvtPkF32toBF16(dst=v5, src0=v2, src1=v3))
-                                        commentStr ="__TF32_2_" + tc + " pack tail end"
+                                        commentStr = "__TF32_2_" + tc + " pack final end"
                                         packCodeT.add(VCvtPkF32toBF16(dst=v4, src0=v0, src1=v1, comment=commentStr))
                                         if kernel["UseDirect32XEmulation"]:
                                             index = len(tmpvgprFP32) - 1

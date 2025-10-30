@@ -88,7 +88,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
 
     // Node with NONE attributes type
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder, "unsupported", hipdnn_sdk::data_objects::NodeAttributes::NONE, 0);
+        builder, "unsupported", hipdnn_sdk::data_objects::DataType::FLOAT, hipdnn_sdk::data_objects::NodeAttributes::NONE, 0);
     nodes.push_back(node);
 
     auto graphOffset
