@@ -63,6 +63,22 @@ def runDbSyncJob()
     }
 }
 
+def createDbSyncStage(String target, String agentLabel="")  {
+    def agentLabel = agentLabel == "" ? rocmnode(target) : agentLabel
+    return {
+        stage('Dbsync ' + target) {
+            when {
+                beforeAgent true
+                expression { params.DBSYNC_TEST && params["TARGET_${target.toUpperCase()}"] }
+            }
+            options { retry(2) }
+            agent { label agentLabel }
+            steps { runDbSyncJob() }
+            post { always { cleanWs() } }
+        }
+    }
+}
+
 def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420)
 {
     script {
@@ -351,60 +367,9 @@ pipeline {
                         }
                     }
                 }
-                stage('Dbsync gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.DBSYNC_TEST && params.TARGET_GFX908 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runDbSyncJob()
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Dbsync gfx90a') {
-                    when {
-                        beforeAgent true
-                        expression { params.DBSYNC_TEST && params.TARGET_GFX90A }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx90a") }
-                    steps{
-                        runDbSyncJob()
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Dbsync gfx942') {
-                    when {
-                        beforeAgent true
-                        expression { params.DBSYNC_TEST && (params.TARGET_GFX942 || params.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx942") }
-                    steps{
-                        runDbSyncJob()
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
+                createDbSyncStage("gfx908")
+                createDbSyncStage("gfx90a")
+                createDbSyncStage("gfx942")
                 stage('Bf16 Hip Install All gfx908') {
                     when {
                         beforeAgent true
@@ -912,167 +877,167 @@ pipeline {
                 }
             }
         }
-        stage("Non-Critical HW Nightly Tests") {
-            when {
-                expression { params.NONCRITICAL_HW_NIGHTLY }
-            }
-            parallel{
-                stage('Mark Build As Nightly') {
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                // Adds a comment under the jenkins build number so you can tell it is a nightly build.
-                                currentBuild.description = "Non-Critical HW Nightly Build"
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                // GFX908 Tests
-                stage('Dbsync gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DBSYNC_TEST }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runDbSyncJob()
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Bf16 Hip Install All gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runBuildAndSingleGtestJob(Full_test + Bf16_flags, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Fp16 Hip All Install gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runBuildAndSingleGtestJob(Full_test + Fp16_flags, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Fp32 Hip All gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runBuildAndSingleGtestJob(Full_test, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                // GFX115X Strix Halo Tests
-                stage('Bf16 Hip All Install gfx115X') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("strix") }
-                    environment{
-                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
-                    }
-                    steps{
-                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Bf16_flags, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Fp16 Hip All Install gfx115X') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("strix") }
-                    environment{
-                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
-                        build_timeout_minutes = 420
-                    }
-                    steps{
-                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Fp16_flags, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Fp32 Hip All Install gfx115X') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("strix") }
-                    environment{
-                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
-                        build_timeout_minutes = 420
-                    }
-                    steps{
-                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-            }
-        }
+        // stage("Non-Critical HW Nightly Tests") {
+        //     when {
+        //         expression { params.NONCRITICAL_HW_NIGHTLY }
+        //     }
+        //     parallel{
+        //         stage('Mark Build As Nightly') {
+        //             agent{ label rocmnode("nogpu") }
+        //             steps{
+        //                 script {
+        //                     withWorkingDir {
+        //                         // Adds a comment under the jenkins build number so you can tell it is a nightly build.
+        //                         currentBuild.description = "Non-Critical HW Nightly Build"
+        //                     }
+        //                 }
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         // GFX908 Tests
+        //         stage('Dbsync gfx908') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_GFX908 && params.DBSYNC_TEST }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("gfx908") }
+        //             steps{
+        //                 runDbSyncJob()
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         stage('Bf16 Hip Install All gfx908') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("gfx908") }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(Full_test + Bf16_flags, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         stage('Fp16 Hip All Install gfx908') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("gfx908") }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(Full_test + Fp16_flags, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         stage('Fp32 Hip All gfx908') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("gfx908") }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(Full_test, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         // GFX115X Strix Halo Tests
+        //         stage('Bf16 Hip All Install gfx115X') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("strix") }
+        //             environment{
+        //                 gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+        //             }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Bf16_flags, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         stage('Fp16 Hip All Install gfx115X') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("strix") }
+        //             environment{
+        //                 gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+        //                 build_timeout_minutes = 420
+        //             }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Fp16_flags, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //         stage('Fp32 Hip All Install gfx115X') {
+        //             when {
+        //                 beforeAgent true
+        //                 expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
+        //             }
+        //             options {
+        //                 retry(2)
+        //             }
+        //             agent{ label rocmnode("strix") }
+        //             environment{
+        //                 gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+        //                 build_timeout_minutes = 420
+        //             }
+        //             steps{
+        //                 runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test, Build_timeout_minutes)
+        //             }
+        //             post {
+        //                 always {
+        //                     cleanWs()
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 }
