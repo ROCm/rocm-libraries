@@ -84,7 +84,7 @@ static std::function<std::vector<std::string>(const miopen::conv::ProblemDescrip
     fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
 
 // Default validation function: accepts all kernel/split_k combinations
-inline constexpr auto AcceptAllCombinations = [](int, int) { return true; };
+inline constexpr auto accept_all_combinations = [](int, int) { return true; };
 
 // Helper: reusable problem description
 miopen::conv::ProblemDescription GetReusableProblemDescription(
@@ -334,7 +334,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Test)
                                                                  kernel_id,
                                                                  fill_valid_kernels,
                                                                  solver_name,
-                                                                 AcceptAllCombinations);
+                                                                 accept_all_combinations);
 
     ASSERT_TRUE(ai_success);
     ASSERT_FALSE(kernel_id.empty());
@@ -360,7 +360,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, RunParameterPredictionModel_Fallback_Test)
                                                                  kernel_id,
                                                                  empty_kernels,
                                                                  solver_name,
-                                                                 AcceptAllCombinations);
+                                                                 accept_all_combinations);
 
     ASSERT_FALSE(ai_success);
     ASSERT_TRUE(kernel_id.empty());
