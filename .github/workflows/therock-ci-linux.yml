@@ -23,10 +23,6 @@ jobs:
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        target_bundle: ${{ fromJSON(needs.setup_metadata.outputs.package_targets) }}
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:2f3ebd0beb04c449fdb36933e54bdc69483b914fb9005594d3fc9444c206b54b
       options: -v /runner/config:/home/awsconfig/
