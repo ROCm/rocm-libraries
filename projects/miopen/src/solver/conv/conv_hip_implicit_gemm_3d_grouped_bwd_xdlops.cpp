@@ -455,9 +455,11 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
                 if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
                     return false;
 
-                // TODO: Add split_k validation when split_k support is implemented
-                // For now, accept any split_k value (typically 0 for this solver)
-                (void)split_k_value;
+                // TODO: Add split_k validation if split_k support is implemented
+                // for now, only allow split_k_value == 0
+                if(split_k_value != 0)
+                    return false;
+
                 return true;
             };
 
