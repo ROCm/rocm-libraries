@@ -54,8 +54,8 @@ def run_bench(benchExecutable,
         print('hipblaslt-perf: ' + ' '.join(cmd))
 
     startingToken = "["
-    csvKeys = ''
-    benchResultsList = []
+    csvKeys = []
+    benchResultsList = [] # a list with each elem is a {}
     capturingValues = False
     isAPIOverhead = False
 
@@ -138,7 +138,7 @@ def run_sh_cmd(cmdLine,
     startingToken = "["
     solNameToken = "--Solution name:"
     csvKeys = []
-    benchResultsList = {}
+    benchResultsList = [] # a list with each elem is a {}
     capturingValues = False
 
     async def run_command(*args, timeout=None):
@@ -180,13 +180,24 @@ def run_sh_cmd(cmdLine,
                     continue
 
                 if line.startswith(startingToken):
+                    # if we are encountering the next problem
+                    # (in a single hipblaslt-bench, this means it is called with --yaml containing multi-sizes)
+                    # then we complete the current problem and result
+                    # reset csvKeys to empty indicating a new problem
+                    if len(csvKeys) > 0:
+                        singleValuesList.append(solutionName)
+                        dd_output = defaultdict(str, zip(csvKeys, singleValuesList))
+                        benchResultsList += [dd_output]
+                        print(f"{','.join(singleValuesList)}\n")
+                        csvKeys = []
+
                     line = line.replace('hipblaslt-Gflops', 'gflops')
                     line = line.replace('hipblaslt-GB/s', 'GB/s')
                     splitLine = line.split(':')
                     # SSN = splitLine[0] # should be [0]
                     keys = splitLine[1] + str(",solution-name")
                     csvKeys = keys.split(',')
-                    # print(f'\n{keys}')
+                    print(f'\n{keys}')
                     # print(f'\n{csvKeys}')
                     capturingValues = True # Next line must be values
                 else:
@@ -198,8 +209,12 @@ def run_sh_cmd(cmdLine,
                     else:
                         continue
 
-        singleValuesList.append(solutionName)
-        benchResultsList = defaultdict(str, zip(csvKeys, singleValuesList))
+        # the last one result (for running .sh cmd with --yaml argument)
+        if len(csvKeys) > 0:
+            singleValuesList.append(solutionName)
+            dd_output = defaultdict(str, zip(csvKeys, singleValuesList))
+            benchResultsList += [dd_output]
+            print(f"{','.join(singleValuesList)}\n")
 
         return await process.wait()  # Wait for the child process to exit
 
