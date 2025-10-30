@@ -58,7 +58,15 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          # Exclude a specific patch when applying patches
+          # TODO: Revert this change once the rocm-libraries fix that removes this patch is merged.
+          for patch in ./TheRock/patches/amd-mainline/rocm-libraries/*.patch; do
+            if [[ "$(basename "$patch")" == "0008-Revert-remove-options-no-enumerate-966.patch" ]]; then
+              echo "Skipping patch: $patch"
+              continue
+            fi
+            git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn "$patch"
+          done
 
       - name: Install requirements
         # The first two lines removes the default commmunity feed and uses the internal proxy feed
