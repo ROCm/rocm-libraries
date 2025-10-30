@@ -25,7 +25,7 @@
 
 ### Dependencies
 > [!TIP]
-> 💡 Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md).
+> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md).
 
 #### Required Dependencies
 | Dependency | Version | Description |
