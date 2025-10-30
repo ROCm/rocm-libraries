@@ -367,9 +367,9 @@ pipeline {
                         }
                     }
                 }
-                createDbSyncStage("gfx908")
-                createDbSyncStage("gfx90a")
-                createDbSyncStage("gfx942")
+                createDbSyncStage("gfx908").call()
+                createDbSyncStage("gfx90a").call()
+                createDbSyncStage("gfx942").call()
                 stage('Bf16 Hip Install All gfx908') {
                     when {
                         beforeAgent true
