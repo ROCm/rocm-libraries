@@ -1,6 +1,6 @@
 # hipDNN Docker Environments
 
-This directory contains the Dockerfile for building hipDNN development environment.
+This directory contains the Dockerfile for building hipDNN development environment Docker image.
 
 ## 📋 Prerequisites
 
@@ -30,18 +30,20 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
 | `BUILD_TYPE` | `prebuilt` | Selects build method | `prebuilt`, `fullbuild` |
-| `THEROCK_ASIC` | `gfx94X` (prebuilt)<br>`gfx90a` (fullbuild) | GPU architecture target | values for prebuild [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux), and values for fullbuild [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) |
+| `THEROCK_ASIC` | `gfx94X` (prebuilt)<br>`gfx90a` (fullbuild) | GPU architecture target | Values for prebuild mode can be parsed from the filenames listed [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux), and values for fullbuild [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)<br>Note: For prebuilt mode, ensure that the specified asic is supported by the prebuilt artifacts as set in `THEROCK_GIT_TAG` described below.|
 
 #### 📦 Prebuilt-Only Arguments
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Git tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) |
-| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG) |
-
 > **Note**: Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
 
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full tarball name using `THEROCK_TARBALL` below. |
+| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG) |
+
 #### 🏗️ Fullbuild-Only Arguments
+
+> **Note**: Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -50,23 +52,29 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset |
 | `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores |
 
-> **Note**: Fullbuild mode clones and compiles TheRock from source (slower but more flexible)
-
 ### Build Examples
 
 #### 📦 Prebuilt Mode (Recommended)
+The list of latest precompiled tarballs is available [here](https://therock-nightly-tarball.s3.amazonaws.com/)..
 
 **Default prebuilt** (gfx94X, tag 7.0.0rc20250909):
 ```bash
 docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 ```
 
+This will download and install prebuilt binaries using the filename `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` and tags the image as `hipdnn:prebuilt`.
+
 **Override ASIC and Git Tag** (gfx950, tag 7.0.0rc20250908):
+
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:prebuilt_gfx950 .
 ```
 
+This will download and install prebuilt artifacts using the filename `therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz` and tags the image as `hipdnn:prebuilt_gfx950`.
+
 #### 🏗️ Fullbuild Mode
+
+Note that the full build can take several hours to complete.
 
 **Default fullbuild** (gfx90a, default branch):
 ```bash
@@ -127,10 +135,12 @@ docker run -it \
 | `--group-add video` | Add container to video group for GPU access |
 | `--cap-add=SYS_PTRACE` | Enable debugging capabilities |
 | `--security-opt seccomp=unconfined` | Required for some debugging tools |
+| `<image-name>` | The tag added to the image with the `-t` option in the build command |
 
 ### Example Run Commands
 
-Ubuntu 22.04:
+1. Switch to the `rocm-libraries/projects/hipdnn` folder.
+2. Using image tagged `hipdnn:prebuilt`:
 ```bash
 docker run -it \
   -v $(pwd):/workspace/hipdnn \
@@ -143,6 +153,9 @@ docker run -it \
   --security-opt seccomp=unconfined \
   hipdnn:prebuilt
 ```
+### Building hipDNN
+
+Follow the [quick start steps in the build guide](./docs/Building.md#quick-start-guide) to build hipDNN.
 
 ## 💡 Tips and Best Practices
 
@@ -154,6 +167,10 @@ docker run -it \
 2. **GPU Verification**: Once inside the container, verify GPU access:
    ```bash
    rocm-smi
+   ```
+   or
+   ```bash
+   rocminfo
    ```
 
 3. **Development Workflow**: The containers include all necessary development tools, so you can edit code on your host machine and build/test inside the container.
