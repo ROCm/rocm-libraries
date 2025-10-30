@@ -16482,7 +16482,7 @@ class KernelWriterAssembly(KernelWriter):
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
     sizeTile0, sizeTile1 = du, mt
-    bpe: int = int(tP["bpeGR"])
+    bpe: float  = tP["bpeGR"]
     #TODO: temp hack
     numWaves: int = prod(kernel["MIWaveGroup"])
     wavelen: int = kernel["WavefrontSize"]
@@ -16497,16 +16497,18 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numWaves * bpe * du, "woffset = wId * mt // numWaves * bpe * du"))
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe), "woffset = wId * mt // numWaves * bpe * du"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
+    #TODO: refactor, currently special handling for FP4 along K-dim
+    sizeShifter = 1 if dtype.isFloat4() else 0
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
-    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self))
+    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
-    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self))
+    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
     mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
-    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName()))
+    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
     return mod
 
   def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
@@ -16531,7 +16533,7 @@ class KernelWriterAssembly(KernelWriter):
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
     sizeTile0, sizeTile1 = du, mt
-    bpe: int = int(tP["bpeGR"])
+    bpe: float = tP["bpeGR"]
     #TODO: temp hack
     numWaves: int = prod(kernel["MIWaveGroup"])
     numComp: int = numWaves // 2
@@ -16548,16 +16550,18 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // numComp"))
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), mt // numComp * bpe * du, "woffset = wId * mt // numComp * bpe * du"))
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe), "woffset = wId * mt // numComp * bpe * du"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
+    #TODO: refactor, currently special handling for FP4 along K-dim
+    sizeShifter = 1 if dtype.isFloat4() else 0
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
-    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self))
+    mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
-    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self))
+    mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
     mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp, self))
-    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName()))
+    mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
     return mod
 
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
