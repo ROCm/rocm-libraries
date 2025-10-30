@@ -135,9 +135,6 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                         hipMemcpyHostToDevice,
                         handle.GetStream());
 
-    std::string program_name = "MIOpenCTCLoss.cpp";
-    std::string kernel_name  = "CTCLossGPU";
-
     std::string network_config =
         "t" + std::to_string(max_time_step) + "n" + std::to_string(batch_size) + "a" +
         std::to_string(class_sz) + "mlb" + std::to_string(max_label_len) + "tlb" +
@@ -146,7 +143,8 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         std::to_string(blank_label_id); // max timestep, batch, alphabet, max label length, total
                                         // label length, softmax layer indicator, blank ID
 
-    auto&& kernels = handle.GetKernels(kernel_name, network_config);
+    std::string kernel_name = "CTCLossGPU";
+    auto&& kernels          = handle.GetKernels(kernel_name, network_config);
 
     float time = 0.;
     if(apply_softmax_layer)
@@ -184,7 +182,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         size_t work_per_grp = batch_size <= 64 ? 256 : batch_size <= 128 ? 128 : 64;
         assert(512 >= work_per_grp && work_per_grp > 0);
 
-        constexpr size_t max_active_threads = 64 * 4 * 64;
+        constexpr size_t max_active_threads = static_cast<size_t>(64 * 4 * 64);
         size_t glb_sz = batch_size < (max_active_threads / work_per_grp) ? batch_size * work_per_grp
                                                                          : max_active_threads;
         size_t grp_num = glb_sz / work_per_grp;
@@ -257,6 +255,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
 
         const std::vector<size_t> vld{work_per_grp, 1, 1};
         const std::vector<size_t> vgd{glb_sz, 1, 1};
+        std::string program_name = "MIOpenCTCLoss.cpp";
         handle.AddKernel(kernel_name, network_config, program_name, kernel_name, vld, vgd, params)(
             probs, workSpace, workSpace, losses, gradients);
     }
