@@ -63,8 +63,8 @@ def runDbSyncJob()
     }
 }
 
-def createDbSyncStage(String target, String agentLabel="")  {
-    def agentLabel = agentLabel == "" ? rocmnode(target) : agentLabel
+def createDbSyncStage(String target, String label="")  {
+    def agentLabel = label == "" ? rocmnode(target) : label
     return {
         stage('Dbsync ' + target) {
             when {
