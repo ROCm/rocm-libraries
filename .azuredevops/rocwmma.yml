@@ -25,6 +25,8 @@ trigger:
     - develop
     - release-staging/rocm-rel-7.*
   paths:
+    include:
+    - projects/rocwmma
     exclude:
     - projects/rocwmma/.githooks
     - projects/rocwmma/.github
