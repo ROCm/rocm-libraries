@@ -12,19 +12,21 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
+#include "../tests/common/BatchnormFusionCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 using namespace test_bn_common;
+using namespace test_bn_fusion_common;
 
 namespace
 {
 
 template <typename DataType>
 class BatchnormBackwardActivation
-    : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
+    : public IntegrationGraphVerificationHarness<DataType, BnActivTestCase>
 {
 protected:
     std::unordered_map<std::string, int64_t> _inputTensorIds;
@@ -56,8 +58,8 @@ protected:
     {
         namespace fe = hipdnn_frontend;
 
-        const BatchnormTestCase& testCase = this->GetParam();
-        auto dims = testCase.dims;
+        const BnActivTestCase& testCase = this->GetParam();
+        auto dims = testCase.bn.dims;
 
         std::vector<int64_t> channelDims = getDerivedShape(dims);
 
@@ -141,12 +143,36 @@ protected:
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
         _inputTensorIds.insert({"dy", dyTensorAttr->get_uid()});
 
-        // DX_drelu = pointwise(DY, BN_Y, RELU_BWD)
-        graph::PointwiseAttributes reluBwdAttrs;
-        reluBwdAttrs.set_name("relu_bwd");
-        reluBwdAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_BWD);
+        // DX_dactiv = pointwise(DY, BN_Y, activation_mode)
+        graph::PointwiseAttributes activBwdAttrs;
+        activBwdAttrs.set_name("activation_bwd");
+        activBwdAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(testCase.activ.mode));
+        if(testCase.activ.reluLowerClip.has_value())
+        {
+            activBwdAttrs.set_relu_lower_clip(testCase.activ.reluLowerClip.value());
+        }
+        if(testCase.activ.reluUpperClip.has_value())
+        {
+            activBwdAttrs.set_relu_upper_clip(testCase.activ.reluUpperClip.value());
+        }
+        if(testCase.activ.reluLowerClipSlope.has_value())
+        {
+            activBwdAttrs.set_relu_lower_clip_slope(testCase.activ.reluLowerClipSlope.value());
+        }
+        if(testCase.activ.swishBeta.has_value())
+        {
+            activBwdAttrs.set_swish_beta(testCase.activ.swishBeta.value());
+        }
+        if(testCase.activ.eluAlpha.has_value())
+        {
+            activBwdAttrs.set_elu_alpha(testCase.activ.eluAlpha.value());
+        }
+        if(testCase.activ.softplusBeta.has_value())
+        {
+            activBwdAttrs.set_softplus_beta(testCase.activ.softplusBeta.value());
+        }
 
-        auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, reluBwdAttrs);
+        auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
         dxDrelu->set_name("DX_drelu");
         dxDrelu->set_data_type(
             dataType); // leaving this as intermediate could yield more accurate results
@@ -210,7 +236,7 @@ protected:
         this->registerRmsValidator(dscaleOut, rmsFloatTol);
         this->registerRmsValidator(dbiasOut, rmsFloatTol);
 
-        this->verifyGraph(graphObj, testCase.seed);
+        this->verifyGraph(graphObj, testCase.bn.seed);
     }
 };
 
@@ -251,7 +277,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp32,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
@@ -260,7 +286,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwBfp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
@@ -269,7 +295,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNchwFp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
@@ -278,7 +304,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp32,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 {
@@ -287,7 +313,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
 {
@@ -296,7 +322,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNhwcFp16,
-                         testing::ValuesIn(getBnBwdTestCases()));
+                         testing::ValuesIn(getBnActivBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
@@ -305,7 +331,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp32,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
@@ -314,7 +340,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwBfp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
@@ -323,7 +349,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNcdhwFp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
@@ -332,7 +358,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp32,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 {
@@ -341,7 +367,7 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcBfp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, Correctness)
 {
@@ -350,4 +376,4 @@ TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormBackwardActivationNdhwcFp16,
-                         testing::ValuesIn(getBnBwd3dTestCases()));
+                         testing::ValuesIn(getBnActiv3dBwdTestCases()));

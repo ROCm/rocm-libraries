@@ -15,7 +15,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
-#include "common/FusionCommon.hpp"
+#include "common/ConvolutionFusionCommon.hpp"
 #include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
