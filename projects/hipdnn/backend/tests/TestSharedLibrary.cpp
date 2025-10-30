@@ -129,8 +129,8 @@ INSTANTIATE_TEST_SUITE_P(PathVariations,
                          TestSharedLibraryPaths,
                          ::testing::Values(
                              // Path without extension
-                             std::string(LIBRARY_PATH),
+                             std::string(LIBRARY_PATH.string()),
                              // Path with full filename
-                             std::string(FULL_LIBRARY_PATH),
+                             std::string(FULL_LIBRARY_PATH.string()),
                              // Absolute path
                              std::filesystem::absolute(FULL_LIBRARY_PATH).string()));
