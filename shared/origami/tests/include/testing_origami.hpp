@@ -596,6 +596,7 @@ void BestWGM(const origami::hardware_t& hardware,
              size_t                     MT_N,
              size_t                     MT_K)
 {
+    size_t num_xcd = 8;
     std::vector<size_t> WGM_list = {1, 2, 4, 6, 8, 12};
 
     auto best_wgm_large_tile = select_best_wgm(hardware,
@@ -606,6 +607,7 @@ void BestWGM(const origami::hardware_t& hardware,
                                                MT_M,
                                                MT_N,
                                                MT_K,
+                                               num_xcd,
                                                false);
 
     auto best_wgm_small_tile = select_best_wgm(hardware,
@@ -616,6 +618,7 @@ void BestWGM(const origami::hardware_t& hardware,
                                                MT_M,
                                                MT_N,
                                                MT_K * 2,
+                                               num_xcd,
                                                false);
 
     auto best_wgm_nonsquare = select_best_wgm(hardware,
@@ -626,6 +629,7 @@ void BestWGM(const origami::hardware_t& hardware,
                                               MT_M,
                                               MT_N,
                                               MT_K,
+                                              num_xcd,
                                               false);
 
     EXPECT_GT(best_wgm_large_tile, best_wgm_small_tile);

@@ -11,6 +11,8 @@ add_executable(
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvBwdPlan.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
@@ -21,6 +23,7 @@ add_executable(
     TestMiopenBatchnormFwdInferenceOperations.cpp
     TestMiopenBatchnormBwdOperations.cpp
     TestMiopenBatchnormBwdActFusionOperations.cpp
+    TestMiopenConvFwdBiasActivOperations.cpp
     TestMiopenConvFwdOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
