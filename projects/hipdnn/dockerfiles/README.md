@@ -48,7 +48,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified). |
-| `THEROCK_ASIC` | `gfx90a` for fullbuild | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
+| `THEROCK_ASIC` | `gfx90a` for fullbuild | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found in the LLVM Target column of the Supported GPU table [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
 | `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types). |
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset. |
 | `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores. |
