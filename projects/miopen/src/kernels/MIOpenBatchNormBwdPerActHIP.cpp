@@ -45,8 +45,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                          const FLOAT_ACCUM* __restrict savedMean,
                                          const FLOAT_ACCUM* __restrict savedInvVariance)
 {
-    unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
 
     // skip execution for out-of-bound threads
     if(xgid >= MIO_BN_C || ygid >= MIO_BN_HW)
@@ -119,8 +119,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                     FLOAT_ACCUM* __restrict delta_bias,
                                     double epsilon)
 {
-    unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
 
     // skip execution for out-of-bound threads
     if(xgid >= MIO_BN_C || ygid >= MIO_BN_HW)

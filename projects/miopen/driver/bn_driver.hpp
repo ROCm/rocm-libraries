@@ -64,7 +64,7 @@
 
 #define MIO_DRIVER_BN_REFERENCE_COMPUTE_3D_AS_2D 1 // Resolves issue #1974
 
-//#define BN_RUNFOR_PROFILER
+// #define BN_RUNFOR_PROFILER
 
 template <typename TInput,
           typename Tref,
@@ -1831,8 +1831,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 #if(MIO_BN_DEBUG == 1)
         for(int i = 0; i < out_ref.data.size() && i < MIO_BN_MAX_DEBUGLOOP; i++)
         {
-            auto diff   = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
-            maxval = maxval < diff ? diff : maxval;
+            auto diff = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
+            maxval    = maxval < diff ? diff : maxval;
             if(!std::isfinite(diff) || diff > tolerance)
             {
                 std::cout << "out_ref[" << i << "]: " << out_ref.data[i];
