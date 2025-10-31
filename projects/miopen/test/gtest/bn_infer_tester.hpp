@@ -75,12 +75,6 @@ struct BatchNormInferTester
         shift_dev       = handle.Write(shift.data);
         estMean_dev     = handle.Write(estMean.data);
         estVariance_dev = handle.Write(estVariance.data);
-
-        // Enable profiling
-        if(perf_enable)
-        {
-            handle.EnableProfiling(true);
-        }
     }
 
     virtual void RunTestGPU(bool hip_en = true) = 0;

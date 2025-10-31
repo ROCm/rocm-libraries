@@ -190,7 +190,7 @@ struct PerfHelper
                   Args&&... args)
     {
         // Get kernels matching the kernel_name and network_config from the cache
-        auto&& kernels = handle.GetKernels(kernel_name, network_config);
+        auto kernels = handle.GetKernelsImpl(kernel_name, network_config);
         // Ensure we have at least one kernel
         assert(!kernels.empty());
         // Vector to hold the execution times
@@ -209,7 +209,7 @@ struct PerfHelper
         for(size_t i = 0; i < numWarmupRuns + numPerfRuns; i++)
         {
             // Execute the kernel
-            kernels.front()(std::forward<Args>(args)...);
+            handle.Run(kernels.front())(std::forward<Args>(args)...);
             // Append the elapsed time to the vector
             if(i >= numWarmupRuns)
             {
@@ -217,6 +217,8 @@ struct PerfHelper
             }
             handle.ResetKernelTime();
         }
+
+        handle.EnableProfiling(false); // Disable profiling
 
         gpuStats = calcStats(elapsedTime_ms);
         kernelTestStats.push_back({kernel_name,
