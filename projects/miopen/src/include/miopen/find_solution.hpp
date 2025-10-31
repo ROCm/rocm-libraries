@@ -137,16 +137,18 @@ auto FindSolutionImpl(rank<1>,
 
         if(context.do_search || enforce.IsSearch(context)) // TODO: Make it a customization point
         {
-            MIOPEN_LOG_I("Starting search: " << s.SolverDbId() << ", enforce: " << enforce);
+            auto record = DbRecord(DbKinds::PerfDb, problem);
+            MIOPEN_LOG_W("Search Start: " << record.GetKey() << " : " << s.SolverDbId() << ", enforce: " << enforce);
             try
             {
                 auto c = s.Search(context, problem, invoke_ctx);
+                MIOPEN_LOG_W("Search Ended: " << record.GetKey() << " : " << s.SolverDbId());
                 db().Update(problem, s.SolverDbId(), c);
                 return s.GetSolution(context, problem, c);
             }
             catch(const miopen::Exception& ex)
             {
-                MIOPEN_LOG_E("Search failed for: " << s.SolverDbId() << ": " << ex.what());
+                MIOPEN_LOG_E("Search Failed: " << record.GetKey() << s.SolverDbId() << ": " << ex.what());
                 return ConvSolution(miopenStatusInternalError);
             }
         }
