@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/kernel_build_params.hpp>
 #include <miopen/generic_search.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
@@ -585,27 +586,27 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
                            : (problem.GetInWidth() % 3 == 0) ? 3
                            : (problem.GetInWidth() % 2 == 0) ? 2
                                                              : 1;
-        int n_grp0_size0 = 256;
+        int local_size_x = 256;
 
-        // clang-format off
-        const auto subsample_kernel_compilation_options =
-            std::string(" -DMLO_GRP0_SZ0=") + std::to_string(n_grp0_size0) +
-            std::string(" -DMLO_GRP0_SZ1=1 ") + std::string(" -DMLO_GRP0_SZ2=1 ") +
-            std::string(" -DMLO_FILTER0_STRIDE0=") + std::to_string(problem.GetKernelStrideW()) +
-            std::string(" -DMLO_FILTER0_STRIDE1=") + std::to_string(problem.GetKernelStrideH()) +
-            std::string(" -DMLO_WRITE_UNIT=") + std::to_string(write_unit) +
-            std::string(" -DMLO_OUT_CHANNEL_STRIDE=") + std::to_string(problem.GetInChannelStride()) +
-            std::string(" -DMLO_OUT_STRIDE=") + std::to_string(problem.GetInStrideH()) +
-            std::string(" -DMLO_IN_BATCH_STRIDE=") + std::to_string(in_batch_stride) +
-            std::string(" -DMLO_IN0_BATCH_STRIDE=") + std::to_string(problem.GetOutBatchStride()) +
-            std::string(" -DMLO_IN0_CHANNEL_STRIDE=") + std::to_string(problem.GetOutChannelStride()) +
-            std::string(" -DMLO_IN0_STRIDE=") + std::to_string(problem.GetOutStrideH()) +
-            ctx.general_compile_options;
-        // clang-format on
+        const auto subsample_kernel_build_params = KernelBuildParameters{
+            {"LOCAL_SIZE_X", local_size_x},
+            {"LOCAL_SIZE_Y", int(1)},
+            {"FILTER0_STRIDE0", problem.GetKernelStrideW()},
+            {"FILTER0_STRIDE1", problem.GetKernelStrideH()},
+            {"WRITE_UNIT", write_unit},
+            {"OUT_CHANNEL_STRIDE", problem.GetInChannelStride()},
+            {"OUT_STRIDE", problem.GetInStrideH()},
+            {"IN_BATCH_STRIDE", in_batch_stride},
+            {"IN0_BATCH_STRIDE", problem.GetOutBatchStride()},
+            {"IN0_CHANNEL_STRIDE", problem.GetOutChannelStride()},
+            {"IN0_STRIDE", problem.GetOutStrideH()},
+            {"MIOPEN_USE_BFP16", static_cast<int>(problem.GetInDataType() == miopenBFloat16)},
+            {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+            {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
 
         KernelInfo kernel;
 
-        kernel.l_wk.push_back(n_grp0_size0);
+        kernel.l_wk.push_back(local_size_x);
         kernel.l_wk.push_back(1);
         kernel.l_wk.push_back(1);
         // output is number of subsampled input maps
@@ -617,11 +618,9 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
         kernel.g_wk.push_back(gbl_wk1);
         kernel.g_wk.push_back(gbl_wk2);
 
-        kernel.kernel_file = "MIOpenUtilKernels3.cl";
-
-        kernel.kernel_name = "SubSample";
-
-        kernel.comp_options = subsample_kernel_compilation_options;
+        kernel.kernel_file  = "MIOpenUtilKernels3.cpp";
+        kernel.kernel_name  = "SubSample";
+        kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
 
         result.construction_params.push_back(kernel);
     }

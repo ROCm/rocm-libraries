@@ -39,6 +39,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/kernel_build_params.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_PERF_VALS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_SEARCH_OPTIMIZED)
@@ -661,29 +662,26 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
                               : (AsmImgWidth(problem) % 2 == 0) ? 2
                                                                 : 1;
 
-        int n_grp0_size0 = 256;
+        const int local_size_x = 256;
 
-        // clang-format off
-        const auto subsample_kernel_compilation_options =
-            std::string(" -DDATA_TYPE=") +
-            (problem.GetInDataType() == miopenHalf ? "ushort" : "float") +
-            std::string(" -DMLO_GRP0_SZ0=") + std::to_string(n_grp0_size0) +
-            std::string(" -DMLO_GRP0_SZ1=1 ") + std::string(" -DMLO_GRP0_SZ2=1 ") +
-            std::string(" -DMLO_FILTER0_STRIDE0=") + std::to_string(problem.GetKernelStrideW()) +
-            std::string(" -DMLO_FILTER0_STRIDE1=") + std::to_string(problem.GetKernelStrideH()) +
-            std::string(" -DMLO_WRITE_UNIT=") + std::to_string(write_unit) +
-            std::string(" -DMLO_OUT_CHANNEL_STRIDE=") + std::to_string(problem.GetOutChannelStride()) +
-            std::string(" -DMLO_OUT_STRIDE=") + std::to_string(problem.GetOutStrideH()) +
-            std::string(" -DMLO_IN_BATCH_STRIDE=") + std::to_string(in_batch_stride) +
-            std::string(" -DMLO_IN0_BATCH_STRIDE=") +
-            std::to_string(problem.IsDirectionForward() ? problem.GetInBatchStride()
-                                                         : problem.GetOutBatchStride()) +
-            std::string(" -DMLO_IN0_CHANNEL_STRIDE=") + std::to_string(problem.GetInChannelStride()) +
-            std::string(" -DMLO_IN0_STRIDE=") + std::to_string(problem.GetInStrideH()) +
-            ctx.general_compile_options;
-        // clang-format on
+        const auto subsample_kernel_build_params = KernelBuildParameters{
+            {"LOCAL_SIZE_X", local_size_x},
+            {"LOCAL_SIZE_Y", int(1)},
+            {"FILTER0_STRIDE0", problem.GetKernelStrideW()},
+            {"FILTER0_STRIDE1", problem.GetKernelStrideH()},
+            {"WRITE_UNIT", write_unit},
+            {"OUT_CHANNEL_STRIDE", problem.GetOutChannelStride()},
+            {"OUT_STRIDE", problem.GetOutStrideH()},
+            {"IN_BATCH_STRIDE", in_batch_stride},
+            {"IN0_BATCH_STRIDE",
+             problem.IsDirectionForward() ? problem.GetInBatchStride()
+                                          : problem.GetOutBatchStride()},
+            {"IN0_CHANNEL_STRIDE", problem.GetInChannelStride()},
+            {"IN0_STRIDE", problem.GetInStrideH()},
+            {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+            {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
 
-        ss_us_kernel.l_wk.push_back(n_grp0_size0);
+        ss_us_kernel.l_wk.push_back(local_size_x);
         ss_us_kernel.l_wk.push_back(1);
         ss_us_kernel.l_wk.push_back(1);
         // output is number of subsampled input maps
@@ -695,14 +693,14 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
         ss_us_kernel.g_wk.push_back(gbl_wk1);
         ss_us_kernel.g_wk.push_back(gbl_wk2);
 
-        ss_us_kernel.kernel_file = "MIOpenUtilKernels3.cl";
+        ss_us_kernel.kernel_file = "MIOpenUtilKernels3.cpp";
 
         if(UseSubsample(problem))
             ss_us_kernel.kernel_name = "SubSample";
         else
             ss_us_kernel.kernel_name = "UpSample";
 
-        ss_us_kernel.comp_options = subsample_kernel_compilation_options;
+        ss_us_kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
     }
     result.workspace_sz = GetWorkspaceSize(ctx, problem);
 

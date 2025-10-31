@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/env.hpp>
 #include <miopen/visit_float.hpp>
+#include <miopen/kernel_build_params.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1)
 
@@ -388,6 +389,23 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
         if(n_passes > 1 && problem.GetPadH() == 0 && problem.GetPadW() == 0 &&
            (problem.GetKernelStrideW() > 1 || problem.GetKernelStrideH() > 1))
         {
+
+            const auto subsample_kernel_build_params = KernelBuildParameters{
+                {"LOCAL_SIZE_X", n_grp_size0},
+                {"LOCAL_SIZE_Y", int(1)},
+                {"FILTER0_STRIDE0", kernel0_stride0},
+                {"FILTER0_STRIDE1", kernel0_stride1},
+                {"WRITE_UNIT", write_unit},
+                {"OUT_CHANNEL_STRIDE", out_channel_stride},
+                {"OUT_STRIDE", out_stride},
+                {"IN_BATCH_STRIDE", in_batch_stride},
+                {"IN0_BATCH_STRIDE", in0_batch_stride},
+                {"IN0_CHANNEL_STRIDE", in0_channel_stride},
+                {"IN0_STRIDE", in0_stride},
+                {"MIOPEN_USE_BFP16", static_cast<int>(problem.GetInDataType() == miopenBFloat16)},
+                {"MIOPEN_USE_FP16", static_cast<int>(problem.GetInDataType() == miopenHalf)},
+                {"MIOPEN_USE_FP32", static_cast<int>(problem.GetInDataType() == miopenFloat)}};
+
             KernelInfo kernel;
 
             kernel.l_wk.push_back(n_grp0_size0);
@@ -402,11 +420,9 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
             kernel.g_wk.push_back(gbl_wk1);
             kernel.g_wk.push_back(gbl_wk2);
 
-            kernel.kernel_file = "MIOpenUtilKernels3.cl";
-
-            kernel.kernel_name = "SubSample";
-
-            kernel.comp_options = comp_options;
+            kernel.kernel_file  = "MIOpenUtilKernels3.cpp";
+            kernel.kernel_name  = "SubSample";
+            kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
 
             result.construction_params.push_back(kernel);
         }
