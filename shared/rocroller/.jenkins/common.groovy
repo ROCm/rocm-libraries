@@ -355,8 +355,12 @@ def runPerformanceCommand (platform, project)
                         ${sshBlock}
 
                         #Get Master Results
-                        wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                        unzip archive.zip
+                        ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                        if wget ${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                          unzip archive.zip
+                        else
+                          echo "WARNING: No lastSuccessfulBuild found at ${ARTIFACT_URL_PREFIX}"
+                        fi
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
