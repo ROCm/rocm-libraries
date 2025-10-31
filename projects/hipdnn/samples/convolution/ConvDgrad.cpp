@@ -48,7 +48,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(inputType);
+    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dyAttr = createTensor({n, k, outH, outW}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
