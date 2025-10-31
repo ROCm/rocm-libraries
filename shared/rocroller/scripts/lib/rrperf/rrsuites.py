@@ -1775,6 +1775,7 @@ def all():
         yield from scalar_is_zero()
         yield from codegen()
         yield from smallMN_largeK_fp32()
+        yield from smallMN_largeK_streamk_fp32()
 
 
 def all_gfx120X():
