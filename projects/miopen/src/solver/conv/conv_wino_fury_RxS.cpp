@@ -208,9 +208,6 @@ protected:
         const uint64_t ph_activ  = n_works_per_cu;
         const uint64_t ph_filter = f_relaods * c_loops;
 
-        // Constant parameters of the model valid for gfx1100. Values for other ASICs may be
-        // different, however as an approximate heuristic for choosing between C16 and C32
-        // modes it would be enough.
         const uint64_t start_cost  = model_params[c32_mode ? 1 : 0].start_cost;
         const uint64_t accum_cost  = model_params[c32_mode ? 1 : 0].accum_cost;
         const uint64_t activ_cost  = model_params[c32_mode ? 1 : 0].activ_cost;
@@ -348,8 +345,8 @@ bool IsShaderConstraintsMet(const WinoShaderArgsV2& args,
                             const std::string& dev_name)
 {
     const bool reduced_vgpr_mem = GpuHasReducedVGPRMem(dev_name);
-    // Approximation since we don't have real cu_count from ctx and it isn't uses for checking
-    // shader constraints
+    // The cu_count is not required for shader constraint checks.
+    // It is simply assigned the value of n_groups for reference.
     const uint32_t cu_count = n_groups;
 
     auto shader_model =
