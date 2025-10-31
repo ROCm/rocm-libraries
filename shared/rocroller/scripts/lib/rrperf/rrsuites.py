@@ -617,26 +617,42 @@ def streamk():
 
 
 def smallMN_largeK_fp32():
-    for isStreamk in [True, False]:
-        for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
-            for base in [SGEMM_256x256x16384]:
-                yield mkGEMM(
-                    base,
-                    workgroup_size_x=128,
-                    workgroup_size_y=2,
-                    visualize=False,
-                    prefetch=False,  # TODO: Fix k loop unrolling with stream k
-                    # prefetchInFlight=2,
-                    # prefetchLDSFactor=2,
-                    streamK=isStreamk,
-                    streamKTwoTile=twoTile,
-                    streamKTwoTileDPFirst=twoTileDPFirst,
-                    types=TypeParameters(
-                        base["types"],
-                        trans_A="T",
-                        trans_B="N",
-                    ),
-                )
+    yield mkGEMM(
+        SGEMM_256x256x16384,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        visualize=False,
+        prefetch=False,  # TODO: Fix k loop unrolling with stream k
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
+        streamK=False,
+        types=TypeParameters(
+            SGEMM_256x256x16384["types"],
+            trans_A="T",
+            trans_B="N",
+        ),
+    )
+
+
+def smallMN_largeK_streamk_fp32():
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
+        yield mkGEMM(
+            SGEMM_256x256x16384,
+            workgroup_size_x=128,
+            workgroup_size_y=2,
+            visualize=False,
+            prefetch=False,  # TODO: Fix k loop unrolling with stream k
+            # prefetchInFlight=2,
+            # prefetchLDSFactor=2,
+            streamK=True,
+            streamKTwoTile=twoTile,
+            streamKTwoTileDPFirst=twoTileDPFirst,
+            types=TypeParameters(
+                SGEMM_256x256x16384["types"],
+                trans_A="T",
+                trans_B="N",
+            ),
+        )
 
 
 def scalar_is_zero():
