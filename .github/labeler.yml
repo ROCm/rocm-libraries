@@ -97,7 +97,7 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
   
-"shared: rocwmma":
+"project: rocwmma":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocwmma/**/*'
 
