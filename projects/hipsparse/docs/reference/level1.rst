@@ -22,6 +22,27 @@ hipsparseXaxpyi()
   :outline:
 .. doxygenfunction:: hipsparseZaxpyi
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_axpyi.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_axpyi.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+
+
+
 hipsparseXdoti()
 =================
 

@@ -70,9 +70,6 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p alpha, \p xVal, \p xInd or \p y is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_axpyi.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

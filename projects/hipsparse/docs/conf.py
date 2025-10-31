@@ -33,3 +33,16 @@ external_projects_current_project = "hipsparse"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Extend the extensions list with additional extensions
+if 'extensions' not in globals():
+    extensions = []
+extensions.extend([
+    'breathe',
+    'sphinx_tabs.tabs',  # Add the tabs extension
+    'sphinx_design',     # Add the design extension for grid directive
+])
+
+# Configure Breathe (Doxygen integration)
+breathe_projects = {"hipsparse": "doxygen/xml"}
+breathe_default_project = "hipsparse"

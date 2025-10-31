@@ -46,7 +46,7 @@
         }                                                                   \
     }
 
-//! [doc example]
+//! [doc example start]
 int main(int argc, char* argv[])
 {
     // Number of non-zeros of the sparse vector
@@ -109,4 +109,4 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipFree(dy));
     return 0;
 }
-//! [doc example]
+//! [doc example end]
