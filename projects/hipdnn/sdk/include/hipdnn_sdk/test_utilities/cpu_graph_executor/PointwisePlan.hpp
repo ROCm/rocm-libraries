@@ -214,6 +214,17 @@ public:
             convertFlatbuffersOptionalToStdOptional(nodeAttributes->elu_alpha()),
             convertFlatbuffersOptionalToStdOptional(nodeAttributes->softplus_beta()));
 
+        // Throw if these values get set so its clear to any future users they are not supported.
+        // Throwing here also makes it clear that we need to update PointwisePlan::execute
+        // to use the params once there are implementations that can use them.
+        // Cant throw in isApplicable and I want better error messaging than just returning false
+        if(params.swishBeta.has_value() || params.eluAlpha.has_value()
+           || params.softplusBeta.has_value())
+        {
+            throw std::runtime_error("Swish, ELU, and Softplus parameters are not supported "
+                                     "in PointwisePlanBuilder for the Cpu Graph Executor yet");
+        }
+
         return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }
 };
