@@ -11,7 +11,7 @@
 2. **Build Samples:** From this `samples` directory:
    ```bash
    mkdir build && cd build
-   cmake -G Ninja ..
+   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
    ninja
    ```
 
