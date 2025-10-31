@@ -80,7 +80,7 @@ bool checkNumericsImpl(
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 
     // Let each thread work on a single element
-    const size_t threadsPerBlock   = 256;
+    const size_t threadsPerBlock = 256;
 
     // Calculate based on tensor size
     const size_t totalThreads = numElements;
@@ -88,7 +88,7 @@ bool checkNumericsImpl(
 
     // Calculate based on hardware occupancy
     const size_t numCUs                = handle.GetMaxHardwareComputeUnits();
-    const size_t minWavesPerCU         = 4;   // Minimum occupancy target
+    const size_t minWavesPerCU         = 4;    // Minimum occupancy target
     const size_t maxWavesPerCU         = 2048; // Maximum to avoid over-subscription
     const size_t wavesPerBlock         = threadsPerBlock / handle.GetWavefrontWidth();
     const size_t minBlocksForOccupancy = (numCUs * minWavesPerCU) / wavesPerBlock;
