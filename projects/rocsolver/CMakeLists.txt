@@ -340,6 +340,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocSOLVER-coverage_*.profraw -o ./coverage-report/rocSOLVER.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocsolver.so -instr-profile=./coverage-report/rocSOLVER.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocsolver.so -instr-profile=./coverage-report/rocSOLVER.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocsolver.so -instr-profile=./coverage-report/rocSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
