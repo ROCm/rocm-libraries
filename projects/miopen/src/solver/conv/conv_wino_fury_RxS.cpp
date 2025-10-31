@@ -156,14 +156,8 @@ public:
 
 protected:
     // Divide two non-negative integers and return ceil of the quotient
-    uint64_t DivCeil(uint64_t numer, uint64_t denom) const
-    {
-        return (numer + denom - 1) / denom;
-    }
-    uint64_t RoundUpToMultiple(uint64_t val, uint64_t mul) const
-    {
-        return DivCeil(val, mul) * mul;
-    }
+    uint64_t DivCeil(uint64_t numer, uint64_t denom) const { return (numer + denom - 1) / denom; }
+    uint64_t RoundUpToMultiple(uint64_t val, uint64_t mul) const { return DivCeil(val, mul) * mul; }
     PerfModelInfo PerfPrediction(bool c32_mode) const
     {
         constexpr uint64_t t_R  = 3;
