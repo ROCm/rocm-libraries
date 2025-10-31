@@ -610,9 +610,9 @@ namespace rocsparse
                                       beta,
                                       y->data_type,
                                       y->values,
-                                      alpha_type,
-                                      alpha,
-                                      y->data_type,
+                                      0,
+                                      nullptr,
+                                      nullptr,
                                       nullptr,
                                       fallback_algorithm)));
                 return rocsparse_status_success;

@@ -49,8 +49,10 @@ namespace rocsparse
                                         const void*,
                                         const void*,
                                         void*,
-                                        const void*,
-                                        const void*,
+                                        rocsparse_int,
+                                        rocsparse_datatype*,
+                                        const void**,
+                                        rocsparse_const_dnvec_descr*,
                                         bool,
                                         bool);
 
@@ -70,7 +72,6 @@ namespace rocsparse
                            typename rocsparse::indextype_traits<J>::type_t, \
                            typename rocsparse::datatype_traits<A>::type_t,  \
                            typename rocsparse::datatype_traits<X>::type_t,  \
-                           typename rocsparse::datatype_traits<Y>::type_t,  \
                            typename rocsparse::datatype_traits<Y>::type_t>  \
     }
     // clang-format on
@@ -395,38 +396,39 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
-                                  rocsparse_operation       trans,
-                                  rocsparse::csrmv_alg      alg,
-                                  int64_t                   m,
-                                  int64_t                   n,
-                                  int64_t                   nnz,
-                                  rocsparse_datatype        alpha_device_host_datatype,
-                                  const void*               alpha_device_host,
-                                  const rocsparse_mat_descr descr,
-                                  rocsparse_datatype        csr_val_datatype,
-                                  const void*               csr_val,
-                                  rocsparse_indextype       csr_row_ptr_indextype,
-                                  const void*               csr_row_ptr,
-                                  rocsparse_indextype       csr_row_ptr_end_indextype,
-                                  const void*               csr_row_ptr_end,
-                                  rocsparse_indextype       csr_col_ind_indextype,
-                                  const void*               csr_col_ind,
-                                  rocsparse_csrmv_info      csrmv_info,
-                                  rocsparse_datatype        x_datatype,
-                                  const void*               x,
-                                  rocsparse_datatype        beta_device_host_datatype,
-                                  const void*               beta_device_host,
-                                  rocsparse_datatype        y_datatype,
-                                  void*                     y,
-                                  rocsparse_datatype        gamma_device_host_datatype,
-                                  const void*               gamma_device_host,
-                                  rocsparse_datatype        z_datatype,
-                                  const void*               z,
-                                  bool                      fallback_algorithm)
+rocsparse_status rocsparse::csrmv(rocsparse_handle             handle,
+                                  rocsparse_operation          trans,
+                                  rocsparse::csrmv_alg         alg,
+                                  int64_t                      m,
+                                  int64_t                      n,
+                                  int64_t                      nnz,
+                                  rocsparse_datatype           alpha_device_host_datatype,
+                                  const void*                  alpha_device_host,
+                                  const rocsparse_mat_descr    descr,
+                                  rocsparse_datatype           csr_val_datatype,
+                                  const void*                  csr_val,
+                                  rocsparse_indextype          csr_row_ptr_indextype,
+                                  const void*                  csr_row_ptr,
+                                  rocsparse_indextype          csr_row_ptr_end_indextype,
+                                  const void*                  csr_row_ptr_end,
+                                  rocsparse_indextype          csr_col_ind_indextype,
+                                  const void*                  csr_col_ind,
+                                  rocsparse_csrmv_info         csrmv_info,
+                                  rocsparse_datatype           x_datatype,
+                                  const void*                  x,
+                                  rocsparse_datatype           beta_device_host_datatype,
+                                  const void*                  beta_device_host,
+                                  rocsparse_datatype           y_datatype,
+                                  void*                        y,
+                                  rocsparse_int                num_extra,
+                                  rocsparse_datatype*          gamma_types,
+                                  const void**                 gamma_ptrs,
+                                  rocsparse_const_dnvec_descr* z_vecs,
+                                  bool                         fallback_algorithm)
 {
 
     ROCSPARSE_ROUTINE_TRACE;
+
     rocsparse::csrmv_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_find(&f,
                                                     alpha_device_host_datatype,
@@ -453,8 +455,10 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                 x,
                                 beta_device_host,
                                 y,
-                                gamma_device_host,
-                                z,
+                                num_extra,
+                                gamma_types,
+                                gamma_ptrs,
+                                z_vecs,
                                 force_conj,
                                 fallback_algorithm));
 

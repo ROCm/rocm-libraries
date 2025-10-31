@@ -79,7 +79,7 @@ int main()
 
     // Create descriptors
     rocsparse_spmat_descr A;
-    rocsparse_dnvec_descr x_vec, y_vec;
+    rocsparse_dnvec_descr x_vec, y_vec, z_vec;
     rocsparse_spmv_descr  spmv_descr;
 
     ROCSPARSE_CHECK(rocsparse_create_csr_descr(&A,
@@ -96,6 +96,7 @@ int main()
 
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&x_vec, n, dx, rocsparse_datatype_f32_r));
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&y_vec, m, dy, rocsparse_datatype_f32_r));
+    ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&z_vec, m, dz, rocsparse_datatype_f32_r));
     ROCSPARSE_CHECK(rocsparse_create_spmv_descr(&spmv_descr));
 
     // Set spmv parameters
@@ -104,15 +105,12 @@ int main()
         handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
 
     // Set extra residual parameters
-    float              gamma          = 0.5f;
-    rocsparse_datatype gamma_types[1] = {rocsparse_datatype_f32_r};
-    const void*        gamma_ptrs[1]  = {&gamma};
-    rocsparse_datatype z_types[1]     = {rocsparse_datatype_f32_r};
-    const void*        z_ptrs[1]      = {dz};
-    rocsparse_status   error;
+    float                       gamma          = 0.5f;
+    rocsparse_datatype          gamma_types[1] = {rocsparse_datatype_f32_r};
+    const void*                 gamma_ptrs[1]  = {&gamma};
+    rocsparse_const_dnvec_descr z_vecs[1]      = {z_vec};
 
-    ROCSPARSE_CHECK(
-        rocsparse_spmv_set_extra(spmv_descr, 1, gamma_types, gamma_ptrs, z_types, z_ptrs, &error));
+    ROCSPARSE_CHECK(rocsparse_spmv_set_extra(spmv_descr, 1, gamma_types, gamma_ptrs, z_vecs));
 
     float alpha = 1.0f, beta = 0.0f;
 
@@ -168,6 +166,7 @@ int main()
     ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
     ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x_vec));
     ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y_vec));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(z_vec));
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
 
     std::cout << "Success!\n";

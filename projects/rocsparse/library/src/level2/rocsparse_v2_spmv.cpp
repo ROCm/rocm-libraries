@@ -223,19 +223,17 @@ public:
     // Residual computation parameters
     struct extra_params
     {
-        rocsparse_int       count;
-        rocsparse_datatype* gamma_types;
-        const void**        gamma_ptrs;
-        rocsparse_datatype* z_types;
-        const void**        z_ptrs;
-        bool                enabled;
+        rocsparse_int                count;
+        rocsparse_datatype*          gamma_types;
+        const void**                 gamma_ptrs;
+        rocsparse_const_dnvec_descr* z_vecs;
+        bool                         enabled;
 
         extra_params()
             : count(0)
             , gamma_types(nullptr)
             , gamma_ptrs(nullptr)
-            , z_types(nullptr)
-            , z_ptrs(nullptr)
+            , z_vecs(nullptr)
             , enabled(false)
         {
         }
@@ -251,24 +249,20 @@ public:
                 delete[] gamma_types;
             if(gamma_ptrs)
                 delete[] gamma_ptrs;
-            if(z_types)
-                delete[] z_types;
-            if(z_ptrs)
-                delete[] z_ptrs;
+            if(z_vecs)
+                delete[] z_vecs;
 
             count       = 0;
             gamma_types = nullptr;
             gamma_ptrs  = nullptr;
-            z_types     = nullptr;
-            z_ptrs      = nullptr;
+            z_vecs      = nullptr;
             enabled     = false;
         }
 
-        rocsparse_status set(rocsparse_int       num_extras,
-                             rocsparse_datatype* gamma_types_in,
-                             const void**        gamma_ptrs_in,
-                             rocsparse_datatype* z_types_in,
-                             const void**        z_ptrs_in)
+        rocsparse_status set(rocsparse_int                num_extras,
+                             rocsparse_datatype*          gamma_types_in,
+                             const void**                 gamma_ptrs_in,
+                             rocsparse_const_dnvec_descr* z_vecs_in)
         {
             clear();
 
@@ -281,15 +275,13 @@ public:
 
             gamma_types = new rocsparse_datatype[count];
             gamma_ptrs  = new const void*[count];
-            z_types     = new rocsparse_datatype[count];
-            z_ptrs      = new const void*[count];
+            z_vecs      = new rocsparse_const_dnvec_descr[count];
 
             for(rocsparse_int i = 0; i < count; ++i)
             {
                 gamma_types[i] = gamma_types_in[i];
                 gamma_ptrs[i]  = gamma_ptrs_in[i];
-                z_types[i]     = z_types_in[i];
-                z_ptrs[i]      = z_ptrs_in[i];
+                z_vecs[i]      = z_vecs_in[i];
             }
 
             enabled = true;
@@ -483,17 +475,14 @@ namespace rocsparse
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(format, alg)));
 
-        const bool use_extra_vectors
-            = (spmv_descr->extras.enabled && spmv_descr->extras.count == 1);
-        const void* gamma          = use_extra_vectors ? spmv_descr->extras.gamma_ptrs[0] : nullptr;
-        const void* z_const_values = use_extra_vectors && spmv_descr->extras.z_ptrs[0] != nullptr
-                                         ? spmv_descr->extras.z_ptrs[0]
-                                         : nullptr;
-
-        const rocsparse_datatype gamma_type
-            = spmv_descr->extras.enabled ? spmv_descr->extras.gamma_types[0] : y->data_type;
-        const rocsparse_datatype z_data_type
-            = spmv_descr->extras.enabled ? spmv_descr->extras.z_types[0] : y->data_type;
+        // Pass gamma arrays and dnvec descriptors for z vectors
+        const rocsparse_int num_extra = spmv_descr->extras.enabled ? spmv_descr->extras.count : 0;
+        rocsparse_datatype* gamma_types
+            = spmv_descr->extras.enabled ? spmv_descr->extras.gamma_types : nullptr;
+        const void** gamma_ptrs
+            = spmv_descr->extras.enabled ? spmv_descr->extras.gamma_ptrs : nullptr;
+        rocsparse_const_dnvec_descr* z_vecs
+            = spmv_descr->extras.enabled ? spmv_descr->extras.z_vecs : nullptr;
 
         switch(stage)
         {
@@ -796,10 +785,10 @@ namespace rocsparse
                                       local_beta,
                                       y_data_type,
                                       y_values,
-                                      gamma_type,
-                                      gamma,
-                                      z_data_type,
-                                      z_const_values,
+                                      num_extra,
+                                      gamma_types,
+                                      gamma_ptrs,
+                                      z_vecs,
                                       fallback_algorithm)));
                 return rocsparse_status_success;
             }
@@ -1062,28 +1051,20 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr descr,
-                                                     rocsparse_int        num_extras,
-                                                     rocsparse_datatype*  gamma_types,
-                                                     const void**         gamma_ptrs,
-                                                     rocsparse_datatype*  z_types,
-                                                     const void**         z_ptrs,
-                                                     rocsparse_status*    error)
+extern "C" rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr         descr,
+                                                     rocsparse_int                num_extras,
+                                                     rocsparse_datatype*          gamma_types,
+                                                     const void**                 gamma_ptrs,
+                                                     rocsparse_const_dnvec_descr* z_vecs)
 try
 {
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(1, num_extras, (num_extras <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG_ARRAY(2, num_extras, gamma_types);
     ROCSPARSE_CHECKARG_ARRAY(3, num_extras, gamma_ptrs);
-    ROCSPARSE_CHECKARG_ARRAY(4, num_extras, z_types);
-    ROCSPARSE_CHECKARG_ARRAY(5, num_extras, z_ptrs);
+    ROCSPARSE_CHECKARG_ARRAY(4, num_extras, z_vecs);
 
-    rocsparse_status status
-        = descr->extras.set(num_extras, gamma_types, gamma_ptrs, z_types, z_ptrs);
-
-    if(error)
-        *error = status;
-    return status;
+    return descr->extras.set(num_extras, gamma_types, gamma_ptrs, z_vecs);
     // LCOV_EXCL_START
 }
 catch(...)

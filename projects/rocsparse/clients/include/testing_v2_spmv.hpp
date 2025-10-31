@@ -510,12 +510,10 @@ public:
             rocsparse_datatype gamma_types[1] = {ttype};
             const void*        gamma_ptrs[1]
                 = {pointer_mode == 0 ? (const void*)(&gamma_val) : (const void*)d_gamma};
-            rocsparse_datatype z_types[1] = {ttype};
-            const void*        z_ptrs[1]  = {d_extra.data()};
+            rocsparse_const_dnvec_descr z_vecs[1] = {extra};
 
-            rocsparse_status error;
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_extra(
-                spmv_descr, 1, gamma_types, gamma_ptrs, z_types, z_ptrs, &error));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmv_set_extra(spmv_descr, 1, gamma_types, gamma_ptrs, z_vecs));
 
             size_t buffer_size = 0;
             CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,

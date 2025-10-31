@@ -251,24 +251,18 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  @param[in]
  *  gamma_ptrs      array of pointers to gamma scalars.
  *  @param[in]
- *  z_types         array of data types for z vectors.
- *  @param[in]
- *  z_ptrs          array of pointers to z vectors.
- *  @param[out]
- *  error           error output (optional).
+ *  z_vecs          array of dense vector descriptors for z vectors.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
  *  \retval rocsparse_status_invalid_value invalid parameters.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr descr,
-                                          rocsparse_int        num_extras,
-                                          rocsparse_datatype*  gamma_types,
-                                          const void**         gamma_ptrs,
-                                          rocsparse_datatype*  z_types,
-                                          const void**         z_ptrs,
-                                          rocsparse_status*    error);
+rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr         descr,
+                                          rocsparse_int                num_extras,
+                                          rocsparse_datatype*          gamma_types,
+                                          const void**                 gamma_ptrs,
+                                          rocsparse_const_dnvec_descr* z_vecs);
 
 /*! \ingroup generic_module
  *  \brief Clear extra residual parameters for spmv
