@@ -116,12 +116,17 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
 
     // Wrong order: activation -> batchnorm inference -> batchnorm backward
     auto node0 = hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder, "pointwise", hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes, 0);
+        builder,
+        "pointwise",
+        hipdnn_sdk::data_objects::DataType::UNSET,
+        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        0);
     nodes.push_back(node0);
 
     auto node1 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inference",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         0);
     nodes.push_back(node1);
@@ -129,6 +134,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
     auto node2 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_backward",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         0);
     nodes.push_back(node2);
@@ -166,6 +172,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAct
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -184,6 +191,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAct
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -202,6 +210,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAct
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -236,6 +245,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -254,6 +264,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -272,6 +283,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationMis
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -350,8 +362,12 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
 
     // Node with NONE attributes type
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder, "unsupported", hipdnn_sdk::data_objects::DataType::FLOAT, hipdnn_sdk::data_objects::NodeAttributes::NONE, 0);
+    auto node
+        = hipdnn_sdk::data_objects::CreateNodeDirect(builder,
+                                                     "unsupported",
+                                                     hipdnn_sdk::data_objects::DataType::FLOAT,
+                                                     hipdnn_sdk::data_objects::NodeAttributes::NONE,
+                                                     0);
     nodes.push_back(node);
 
     auto graphOffset
@@ -384,6 +400,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttri
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_bn_inference",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         0);
     nodes.push_back(node);
@@ -417,6 +434,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_bn_backward",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         0);
     nodes.push_back(node);
@@ -453,6 +471,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
     auto node0 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_bn_inference",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         0);
     nodes.push_back(node0);
@@ -472,6 +491,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -490,6 +510,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirs
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_backward",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -527,6 +548,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inference",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -534,6 +556,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
     auto node1 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_pointwise",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         0);
     nodes.push_back(node1);
@@ -553,6 +576,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphSeco
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_backward",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -590,6 +614,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inference",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -608,6 +633,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -615,6 +641,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphThir
     auto node2 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "malformed_bn_backward",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         0);
     nodes.push_back(node2);
@@ -654,6 +681,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -672,6 +700,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -690,6 +719,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -725,6 +755,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -743,6 +774,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -761,6 +793,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -795,6 +828,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -813,6 +847,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -831,6 +866,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnBackwardXDi
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -866,6 +902,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -884,6 +921,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -902,6 +940,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -936,6 +975,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -954,6 +994,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -972,6 +1013,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenBnInferenceOu
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 
@@ -1006,6 +1048,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttr.Union()));
 
@@ -1024,6 +1067,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "act",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
@@ -1042,6 +1086,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_bwd",
+        hipdnn_sdk::data_objects::DataType::UNSET,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttr.Union()));
 

@@ -257,6 +257,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
+        intermediateDataType,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
@@ -277,6 +278,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "relu_bwd",
+        intermediateDataType,
         hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttributes.Union()));
 
@@ -299,6 +301,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_backward",
+        intermediateDataType,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttributes.Union()));
 
