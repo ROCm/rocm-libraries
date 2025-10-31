@@ -22,7 +22,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
-    std::cout << "Running convolution forward graph " << inputType << " [" << layout << "]"
+    std::cout << "Running convolution fprop graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     constexpr int64_t n = 16; // Batch size
@@ -50,7 +50,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
-    convAttributes.set_name("conv_forward_node");
+    convAttributes.set_name("conv_fprop_node");
     convAttributes.set_padding({padH, padW});
     convAttributes.set_stride({u, v});
     convAttributes.set_dilation({dilH, dilW});
@@ -122,7 +122,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
     }
 
-    std::cout << "Convolution forward graph execution complete for " << inputType << ".\n\n";
+    std::cout << "Convolution fprop graph execution complete for " << inputType << ".\n\n";
 }
 
 int main(int argc, char* argv[])
@@ -137,6 +137,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All convolution forward runs completed.\n";
+    std::cout << "All convolution fprop runs completed.\n";
     return 0;
 }
