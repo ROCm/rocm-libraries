@@ -1871,10 +1871,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleA == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -1922,10 +1923,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleB == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
