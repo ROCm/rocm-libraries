@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <windows.h>
 
+#include "StringUtil.hpp"
+
 namespace hipdnn_sdk
 {
 namespace utilities
@@ -54,7 +56,7 @@ inline void unsetEnv(const char* var)
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
-    return std::filesystem::equivalent(a, b);
+    return toLower(a.string()) == toLower(b.string());
 }
 
 inline std::filesystem::path getCurrentExecutableDirectory()

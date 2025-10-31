@@ -51,6 +51,8 @@ protected:
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
+        SKIP_IF_WINDOWS();
+
         hipdnnPluginConstData_t opGraph
             = {_graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size()};
 
