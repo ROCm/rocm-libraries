@@ -625,7 +625,7 @@ namespace rocRoller::KernelGraph
                            candidate,
                            *maybeTopOfLoop,
                            GD::Upstream,
-                           isDirect2LDS,
+                           isStorePartOfGlobalToLDSOp,
                            -1,
                            false);
                 return;
