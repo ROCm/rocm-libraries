@@ -23,8 +23,9 @@ void toJsonAndBackTestSuite(const hipdnn_sdk::data_objects::Graph* graph,
     builder.Finish(newGraphBuilder);
     auto newGraph = hipdnn_sdk::data_objects::GetGraph(builder.GetBufferPointer());
 
-    EXPECT_EQ(graph->compute_type(), newGraph->compute_type()) << context;
-    EXPECT_EQ(graph->io_type(), newGraph->io_type()) << context;
+    EXPECT_EQ(graph->compute_data_type(), newGraph->compute_data_type()) << context;
+    EXPECT_EQ(graph->intermediate_data_type(), newGraph->intermediate_data_type()) << context;
+    EXPECT_EQ(graph->io_data_type(), newGraph->io_data_type()) << context;
     EXPECT_EQ(graph->name()->str(), newGraph->name()->str()) << context;
 
     ASSERT_EQ(graph->tensors()->size(), newGraph->tensors()->size()) << context;

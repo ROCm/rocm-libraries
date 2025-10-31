@@ -142,7 +142,7 @@ namespace TensileLite
                     (*iter)->postProblem();
             }
 
-            virtual void preSolution(ContractionSolution const& solution) override
+            virtual void preSolution(ContractionSolution* const solution) override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)
                     (*iter)->preSolution(solution);
