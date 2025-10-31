@@ -51,15 +51,23 @@ In order for auto-tuning to begin, the following conditions must be met:
 * The value of the ``exhaustiveSearch`` parameter is set to ``true``
 * Neither the System nor User PerfDb can contain values for the relevant "problem configuration".
 
-You can override the latter two conditions and force the search using the
-``-MIOPEN_FIND_ENFORCE`` environment variable. You can also use this variable to remove values
-from User PerfDb, as described in the following section.
+You can override the latter two conditions and force the search using either the API call
+``miopenSetTuningPolicy()`` or the ``-MIOPEN_FIND_ENFORCE`` environment variable. In addition to
+controlling the auto-tuning behaviour of convolutions, both ``miopenSetTuningPolicy()`` and
+``-MIOPEN_FIND_ENFORCE`` can be used to control the tuning for batch normalization.
+See the following section for more details.
 
 To optimize performance, MIOpen provides several find modes to accelerate find API calls.
+These modes include:
+
+*  normal find
+*  fast find
+*  hybrid find
+*  dynamic hybrid find
 
 For more information about the MIOpen find modes, see :ref:`Find modes <find_modes>`.
 
-Using MIOPEN_FIND_ENFORCE
+Using MIOPEN_FIND_ENFORCE or miopenSetTuningPolicy() to control auto-tuning
 ----------------------------------------------------------------------------------------------------------
 
 ``MIOPEN_FIND_ENFORCE`` supports case-insensitive symbolic and numeric values. The possible values
@@ -84,69 +92,23 @@ are:
 
       Use the ``DB_CLEAN`` option with care.
 
+Note that the API call miopenSetTuningPolicy() can be used to set the same modes as
+``MIOPEN_FIND_ENFORCE``.  For example, to set the ``SEARCH`` mode, code like the following could be used:
+.. code-block:: c
+
+    miopenSetTuningPolicy(handle, miopenTuningPolicySearch);
+    miopenBatchNorm*()
+    miopenSetTuningPolicy(handle, miopenTuningPolicyNone);
+
+Note that this API method is supported for both convolutions and batchnorms, although batchnorm does
+not support a policy of ``DB_UPDATE`` (this will be a no-op and the user should specify ``SEARCH_DB_UPDATE``
+instead if they want ``DB_UPDATE`` behavior).
+
+If both the API method and environment variable are used, then the API method takes precedence.
+
 Updating MIOpen and User PerfDb
 ==========================================================
 
 If you install a new version of MIOpen, it is recommended that you move or delete your old User
 PerfDb file. This prevents older database entries from affecting configurations within the newer system
 database. The User PerfDb is named ``miopen.udb`` and can be found at the User PerfDb path location.
-
-.. _find_mode_and_enforce_combinations:
-
-Find mode and enforcement combinations
-==========================================================
-
-MIOpen includes automatic safety validation to prevent unsafe combinations of ``MIOPEN_FIND_MODE`` and ``MIOPEN_FIND_ENFORCE`` that could lead to incomplete database entries.
-
-Common warning messages
-----------------------------------------------------------------------------------------------------------
-
-**"Unsafe combination: Specified find mode and enforcement may lead to incomplete database entries"**
-
-This warning appears when you try to use Fast, Hybrid, or Trust find modes (2, 3, 5, 6, 7) with database update operations (``DB_UPDATE=2``, ``SEARCH_DB_UPDATE=4``, or ``DB_CLEAN=5``).
-
-**Resolution**: 
-- Use ``MIOPEN_FIND_ENFORCE=3`` (SEARCH) with any ``MIOPEN_FIND_MODE`` or
-- Use ``MIOPEN_FIND_MODE=1`` (NORMAL) with any ``MIOPEN_FIND_ENFORCE`` operations.
-
-**"MIOPEN_FIND_MODE is set to NORMAL due to unsafe combination with MIOPEN_FIND_ENFORCE"**
-
-This informational message indicates that MIOpen automatically corrected an unsafe combination by switching to Normal mode.
-
-**Resolution**: No action is required. MIOpen handled the correction automatically. Consider updating your environment variables to use a safe combination.
-
-Safe combination reference
-----------------------------------------------------------------------------------------------------------
-
-.. list-table:: Safe MIOPEN_FIND_MODE and MIOPEN_FIND_ENFORCE Combinations
-    :header-rows: 1
-    :widths: 25,25,50
-
-    * - **Find mode**
-      - **Enforcement**
-      - **Status**
-    * - Any mode (1,2,3,5,6,7)
-      - NONE (1)
-      - Safe
-    * - Any mode (1,2,3,5,6,7)
-      - SEARCH (3)
-      - Safe
-    * - NORMAL (1)
-      - Any enforcement
-      - Safe
-    * - FAST (2), HYBRID (3), DYNAMIC_HYBRID (5), TRUST_VERIFY (6), TRUST_VERIFY_FULL (7)
-      - DB_UPDATE (2)
-      - Blocked - switches to NORMAL
-    * - FAST (2), HYBRID (3), DYNAMIC_HYBRID (5), TRUST_VERIFY (6), TRUST_VERIFY_FULL (7)
-      - SEARCH_DB_UPDATE (4)
-      - Blocked - switches to NORMAL
-    * - FAST (2), HYBRID (3), DYNAMIC_HYBRID (5), TRUST_VERIFY (6), TRUST_VERIFY_FULL (7)
-      - DB_CLEAN (5)
-      - Blocked - switches to NORMAL
-
-Best practices
-----------------------------------------------------------------------------------------------------------
-
-1. **For development and testing**: Use ``MIOPEN_FIND_ENFORCE=3`` (SEARCH) with any find mode.
-2. **For comprehensive tuning**: Use ``MIOPEN_FIND_MODE=1`` (NORMAL) with appropriate enforcement.
-3. **Always check the logs**: MIOpen will warn you about any automatic corrections made.

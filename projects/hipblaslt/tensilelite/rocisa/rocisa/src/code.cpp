@@ -249,13 +249,26 @@ void init_code(nb::module_ m)
         });
 
     nb::class_<rocisa::ValueIf, rocisa::Item>(m_code, "ValueIf")
-        .def(nb::init<int>(), nb::arg("value"))
+        .def(nb::init<const std::string&>(), nb::arg("value"))
         .def("__str__", &rocisa::ValueIf::toString)
         .def("__deepcopy__",
              [](const rocisa::ValueIf& self, nb::dict&) { return new rocisa::ValueIf(self); })
         .def("__getstate__", [](const rocisa::ValueIf& self) { return self.value; })
-        .def("__setstate__",
-             [](rocisa::ValueIf& self, int value) { new(&self) rocisa::ValueIf(value); });
+        .def("__setstate__", [](rocisa::ValueIf& self, const std::string& value) {
+            new(&self) rocisa::ValueIf(value);
+        });
+
+    nb::class_<rocisa::ValueElseIf, rocisa::Item>(m_code, "ValueElseIf")
+        .def(nb::init<const std::string&>(), nb::arg("value"))
+        .def("__str__", &rocisa::ValueElseIf::toString)
+        .def("__deepcopy__",
+             [](const rocisa::ValueElseIf& self, nb::dict&) {
+                 return new rocisa::ValueElseIf(self);
+             })
+        .def("__getstate__", [](const rocisa::ValueElseIf& self) { return self.value; })
+        .def("__setstate__", [](rocisa::ValueElseIf& self, const std::string& value) {
+            new(&self) rocisa::ValueElseIf(value);
+        });
 
     nb::class_<rocisa::ValueSet, rocisa::Item>(m_code, "ValueSet")
         .def(nb::init<const std::string&, int, int, int>(),

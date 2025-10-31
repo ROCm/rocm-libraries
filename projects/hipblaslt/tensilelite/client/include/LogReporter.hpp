@@ -348,7 +348,7 @@ namespace TensileLite
                 m_firstRun = true;
             }
 
-            virtual void preSolution(ContractionSolution const& solution) override
+            virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_csvOutput.push();
                 m_rowLevel = LogLevel::Normal;

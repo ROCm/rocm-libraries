@@ -33,7 +33,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadInstruction, DSLoadU16, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
-  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, \
+  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
@@ -284,7 +284,7 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  tmpvgpr: List[int]                     = field(init=False) # vgpr dict for localread
   numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
@@ -567,10 +567,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numPack = 999
     for n in range(numPack):
       if srcPackItems:
-        numPacked += 1
         item = srcPackItems.pop(0)
         dstPackItems.append(item)
-        itemStr = str(item)
+        numPacked += 1
+        itemStr = str(item.comment)
         for string in searchStrings:
           if string in itemStr:
             return numPacked
@@ -1125,7 +1125,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif isinstance(inst, SMFMAInstruction):
           srcRegs = [inst.a, inst.b, inst.metadata]
         else:
-          srcRegs = inst.srcs
+          if hasattr(inst, 'srcs'):
+            srcRegs = inst.srcs
+          else:
+            srcRegs = []
 
         return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
 
@@ -2095,12 +2098,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
         module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 1 1 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
       else:
         module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
         module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 0 0 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
@@ -3727,13 +3730,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numVgprBufferPackB = 1
 
     if kernel["UnrollMajorLDSA"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollA = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollA = 1
 
     if kernel["UnrollMajorLDSB"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollB = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollB = 1

@@ -80,8 +80,8 @@ TEST_F(TestConvolutionBwdPlan, ExecutePlan)
     CpuFpReferenceValidation<float> cpuRefOutputValidation(conv::getToleranceBwd<float>(),
                                                            conv::getToleranceBwd<float>());
 
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dxTensor.memory(),
-                                                planTensorBundle.dxTensor.memory()));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
 }
 
 TEST(TestConvolutionBwdPlanBuilder, PlanConstruction)
