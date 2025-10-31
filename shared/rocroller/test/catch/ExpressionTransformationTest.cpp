@@ -923,7 +923,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     r2->allocateNow();
     auto reg64 = r2->expression();
 
-    SECTION("Combine into first dword of 64bit and fold to constant")
+    SECTION("Combine into the first dword of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 16, 8);
 
@@ -934,7 +934,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into second dword of 64bit and fold to constant")
+    SECTION("Combine into the second dword of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 48, 8);
 
@@ -945,7 +945,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into middle of first and second dword of 64bit and fold to constant")
+    SECTION("Combine into the first and second dwords of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 24, 16);
 
@@ -957,7 +957,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into first dword of 64bit")
+    SECTION("Combine into the first dword of 64 bit dst")
     {
         auto expr = bfc(reg32, zero64, 0, 16, 8);
 
@@ -968,7 +968,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into second dword of 64bit")
+    SECTION("Combine into the second dword of 64 bit dst")
     {
         auto expr = bfc(reg32, zero64, 0, 48, 8);
 
@@ -979,9 +979,14 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into middle of first and second dword of 64bit")
+    SECTION("Combine into the first and second dwords of 64 bit dst")
     {
         auto expr = bfc(reg32, zero64, 0, 24, 16);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 XXXXXXXX XXXXXXXX 00000000 00000000 00000000
+        // expect1    XXXXXXXX 00000000 00000000 00000000
+        // expect2    00000000 00000000 00000000 XXXXXXXX
 
         auto                                   expect1 = bfc(reg32, zero32, 0, 24, 8);
         auto                                   expect2 = bfc(reg32, zero32, 8, 0, 8);
@@ -991,10 +996,16 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Chain two BitfieldCombines into 64bit")
+    SECTION("Chain two BitfieldCombines into 64 bit dst")
     {
         auto expr  = bfc(reg32, zero64, 0, 16, 8);
         auto expr2 = bfc(ones32, expr, 0, 48, 8);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expr2      00000000 11111111 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expect1    00000000 XXXXXXXX 00000000 00000000
+        // expect2    00000000 11111111 00000000 00000000
 
         auto                                   expect1 = bfc(reg32, zero32, 0, 16, 8);
         std::vector<Expression::ExpressionPtr> operands{
@@ -1004,11 +1015,17 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
 
-    SECTION("Chain two BitfieldCombines into 64bit, second uses the into middle of first and "
-            "second dword of 64bit")
+    SECTION("Chain two BitfieldCombines into 64 bit dst, the second bfc goes into the first and "
+            "second dwords of dst")
     {
         auto expr  = bfc(reg32, zero64, 0, 16, 8);
         auto expr2 = bfc(ones32, expr, 0, 24, 16);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expr2      00000000 00000000 00000000 11111111 11111111 XXXXXXXX 00000000 00000000
+        // expect1    11111111 XXXXXXXX 00000000 00000000
+        // expect2    00000000 00000000 00000000 11111111
 
         auto expect1 = bfc(reg32, Expression::literal(0xff000000ul, DataType::UInt32), 0, 16, 8);
         std::vector<Expression::ExpressionPtr> operands{
@@ -1018,7 +1035,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
 
-    SECTION("Chain two BitfieldCombines into 64bit and fold to constant")
+    SECTION("Chain two BitfieldCombines into 64 bit dst and fold to constant")
     {
         auto expr  = bfc(ones32, zero64, 0, 16, 8);
         auto expr2 = bfc(ones32, expr, 0, 40, 8);
@@ -1031,7 +1048,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
 
-    SECTION("Combine into first dword of 128bit and fold to constant")
+    SECTION("Combine into the first dword of 128 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero128, 0, 16, 8);
 
@@ -1042,9 +1059,12 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine two dword register into of 128bit constant")
+    SECTION("Combine 64 bit register into 128 bit dst")
     {
         auto expr = bfc(reg64, zero128, 0, 0, 64);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // expr       0x 00000000 00000000 XXXXXXXX XXXXXXXX
 
         std::vector<Expression::ExpressionPtr> operands{reg64, zero32, zero32};
         auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
@@ -1052,9 +1072,13 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine 32bit across src dword boundary register into of 128bit constant")
+    SECTION("Combine into the first dword of 128 bit dst, across src dword boundary")
     {
         auto expr = bfc(reg64, zero128, 16, 0, 32);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // reg64      0x 0000XXXX XXXX0000
+        // expr       0x 00000000 00000000 00000000 XXXXXXXX
 
         std::vector<Expression::ExpressionPtr> operands{
             bfe(DataType::UInt32, reg64, 16, 32), zero32, zero32, zero32};
@@ -1063,10 +1087,13 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine 32bit across src dword boundary register into of 128bit constant across dst "
-            "dword boundary")
+    SECTION("Combine into the first and second dwords of 128 bit dst, across src dword boundary")
     {
         auto expr = bfc(reg64, zero128, 16, 16, 32);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // reg64      0x 0000XXXX XXXX0000
+        // expr       0x 00000000 00000000 0000XXXX XXXX0000
 
         std::vector<Expression::ExpressionPtr> operands{
             bfc(bfe(DataType::UInt32, reg64, 16, 16), zero32, 0, 16, 16),
@@ -1078,10 +1105,17 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("BitfieldCombine chain into 128bit")
+    SECTION("BitfieldCombine chain into 128 bit")
     {
         auto expr  = bfc(reg32, zero128, 0, 90, 12);
         auto expr2 = bfc(four, expr, 0, 110, 8);
+
+        // zero128  00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr     00000000 00000000 00000000 00XXXXXX XXXXXX00 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // four     00000000 00000000 00000000 00000100
+        // expr2    00000000 00000001 00000000 00XXXXXX XXXXXX00 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expect1  XXXXXX00 00000000 00000000 00000000
+        // expect2  00000000 00000001 00000000 00XXXXXX
 
         auto expect1 = bfc(reg32, zero32, 0, 26, 6);
         auto expect2 = bfc(reg32, Expression::literal(0x00010000ul, DataType::UInt32), 6, 0, 6);
