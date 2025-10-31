@@ -79,18 +79,17 @@ bool checkNumericsImpl(
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 
-    // Let each thread at least work on 4 grid-strided elements
-    const size_t elementsPerThread = 4;
+    // Let each thread work on a single element
     const size_t threadsPerBlock   = 256;
 
     // Calculate based on tensor size
-    const size_t totalThreads = numElements / elementsPerThread;
+    const size_t totalThreads = numElements;
     const size_t minBlocks    = (totalThreads + threadsPerBlock - 1) / threadsPerBlock;
 
     // Calculate based on hardware occupancy
     const size_t numCUs                = handle.GetMaxHardwareComputeUnits();
     const size_t minWavesPerCU         = 4;   // Minimum occupancy target
-    const size_t maxWavesPerCU         = 256; // Maximum to avoid over-subscription
+    const size_t maxWavesPerCU         = 2048; // Maximum to avoid over-subscription
     const size_t wavesPerBlock         = threadsPerBlock / handle.GetWavefrontWidth();
     const size_t minBlocksForOccupancy = (numCUs * minWavesPerCU) / wavesPerBlock;
     const size_t maxBlocksForOccupancy = (numCUs * maxWavesPerCU) / wavesPerBlock;
