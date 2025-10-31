@@ -1175,6 +1175,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         // expect1  XXXXXX00 00000000 00000000 00000000
         // expect2  00000000 00000001 00000000 00XXXXXX
 
+        // four is combined with an offset of 110, so its bit 1 goes to position 110 + 2. The other 7 bits from four are all zeros.
+
         auto expect1 = bfc(reg32, zero32, 0, 26, 6);
         auto expect2 = bfc(reg32, Expression::literal(0x00010000ul, DataType::UInt32), 6, 0, 6);
         std::vector<Expression::ExpressionPtr> operands{zero32, zero32, expect1, expect2};
