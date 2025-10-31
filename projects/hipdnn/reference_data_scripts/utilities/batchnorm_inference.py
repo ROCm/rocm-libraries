@@ -1,6 +1,8 @@
-import torch.nn.functional as functional;
+import torch.nn.functional as functional
+import torch
 from tensor import TensorAttributes
 from common import register_node
+from common import DTypeConverter
 
 @register_node
 class BatchnormInference:
@@ -28,10 +30,12 @@ class BatchnormInference:
                  scale: TensorAttributes,
                  bias: TensorAttributes,
                  y: TensorAttributes,
+                 compute_data_type: torch.dtype = torch.float ,
                  name: str = ""):
         self.inputs = BatchnormInference.Input(x, mean, inv_variance, scale, bias)
         self.outputs = BatchnormInference.Output(y)
         self.name = name
+        self.compute_data_type = compute_data_type
 
     def as_dict(self):
         return {
@@ -46,6 +50,7 @@ class BatchnormInference:
                 "y_tensor_uid": self.outputs.y.uid
             },
             "type": BatchnormInference.type_str,
+            "compute_data_type": DTypeConverter.to_string(self.compute_data_type),
             "name": self.name
         }
     def execute(self, using_gpu: bool):
@@ -112,4 +117,5 @@ class BatchnormInference:
                                   tensors[inputs["scale_tensor_uid"]],
                                   tensors[inputs["bias_tensor_uid"]],
                                   tensors[outputs["y_tensor_uid"]],
+                                  d["compute_data_type"],
                                   d["name"])
