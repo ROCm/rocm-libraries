@@ -79,7 +79,7 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          AMDGPU_FAMILIES: "gfx110X, gfx1151"
+          AMDGPU_FAMILIES: "gfx1151"
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
