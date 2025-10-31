@@ -3930,8 +3930,8 @@ class KernelWriterAssembly(KernelWriter):
                                             sgpr(scalarGro)))
 
     needFirstSgprOffset = kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]
-
-    if (kernel["_UseSgprForGRO"] or self.states.checkGRO) and (needFirstSgprOffset or graIdx > 0) and not kernel["enableTDM%s"%tc]:
+    # TODO: Check correctness of MXS on TDM
+    if (kernel["_UseSgprForGRO"] or self.states.checkGRO) and (needFirstSgprOffset or graIdx > 0) and ("MXS" in tc or not kernel["enableTDM%s"%tc]):
       # compute offsets for scalar global read offsets:
       if kernel["_UseSgprForGRO"]:
         tmpIdx = graIdx if needFirstSgprOffset else graIdx-1
@@ -9015,7 +9015,8 @@ class KernelWriterAssembly(KernelWriter):
     imod = Module("globalReadIncrementAB")
     tdmA: bool = kernel["enableTDMA"]
     tdmB: bool = kernel["enableTDMB"]
-    numWaves: int = prod(kernel["MIWaveGroup"])
+    # TODO: check correctness of non-MI kernels.
+    numWaves: int = prod(kernel["MIWaveGroup"] if kernel["EnableMatrixInstruction"] else [1])
 
     #TDM Wave Separated
     if tdmA and tdmB and tPA and tPB and numWaves > 1:
