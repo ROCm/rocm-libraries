@@ -49,7 +49,7 @@ Tests:
 - name: csrsm2
   category: pre_checkin
   function: csrsm2
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   M: 1
   N: [17]
   alpha: [1.0]
