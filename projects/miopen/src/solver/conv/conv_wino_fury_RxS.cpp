@@ -156,11 +156,11 @@ public:
 
 protected:
     // Divide two non-negative integers and return ceil of the quotient
-    const uint64_t DivCeil(uint64_t numer, uint64_t denom) const
+    uint64_t DivCeil(uint64_t numer, uint64_t denom) const
     {
         return (numer + denom - 1) / denom;
     }
-    const uint64_t RoundUpToMultiple(uint64_t val, uint64_t mul) const
+    uint64_t RoundUpToMultiple(uint64_t val, uint64_t mul) const
     {
         return DivCeil(val, mul) * mul;
     }
@@ -289,17 +289,17 @@ public:
             && W < PowOf2<16>()
             && R <= 3
             && S <= 3
-            && G * K < (1ll << 16)
-            && G * C < (1ll << 16)
+            && G * K < (1LL << 16)
+            && G * C < (1LL << 16)
             && oH < PowOf2<16>()
             && oW < PowOf2<16>() - 3
-            && ((G * K - 1) * C + 1) * R * S < (1ll << 28)
+            && ((G * K - 1) * C + 1) * R * S < (1LL << 28)
             && (static_cast<uint64_t>(N - 1) * G * C + 1) * H * W < PowOf2<31>()
             && (static_cast<uint64_t>(N - 1) * G * K + 1) * oH * oW < PowOf2<31>()
-            && pad_h + static_cast<int64_t>(H) <= (1ll << 16)
-            && pad_w + static_cast<int64_t>(W) <= (1ll << 16)
-            && abs(pad_h) + oH + R             <= (1ll << 16)
-            && abs(pad_w) + oW + S             <= (1ll << 16)
+            && pad_h + static_cast<int64_t>(H) <= (1LL << 16)
+            && pad_w + static_cast<int64_t>(W) <= (1LL << 16)
+            && abs(pad_h) + oH + R             <= (1LL << 16)
+            && abs(pad_w) + oW + S             <= (1LL << 16)
             && DivCeil(K, 16) <= n_groups;
         // clang-format on
     }
