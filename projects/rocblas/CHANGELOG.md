@@ -7,7 +7,7 @@ rocBLAS documentation is available at
 ## rocBLAS 5.1.1 for ROCm 7.1.1
 
 ### Changed
-  * By default, rocBLAS will not use stream order allocation for its internal workspace. To enable this behavior, user must set the `ROCBLAS_STREAM_ORDER_ALLOC` environment variable.
+  * By default, rocBLAS will not use stream order allocation for its internal workspace. To enable this behavior, set the `ROCBLAS_STREAM_ORDER_ALLOC` environment variable.
 
 ## rocBLAS 5.1.0 for ROCm 7.1
 
