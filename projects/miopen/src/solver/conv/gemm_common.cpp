@@ -37,6 +37,11 @@
 // is used instead of rocBLAS. See also issue #2809.
 #define WORKAROUND_MLOPEN_ISSUE_1430 1
 
+// Disable the workaround limiting GPU memory to ~7.2 GB.
+// See issue #1329 (ROCm/rocm-libraries) for an example where
+// this is helpful.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_GEMM_VRAM_LIMIT)
+
 // Double the limit for FP32, for GemmFwdRest and GemmBwdRest solvers only.
 // See issues #2789 and #2808.
 //
@@ -58,6 +63,8 @@ std::size_t MaxMemAllocSz(const Handle& h,
 {
     const auto m = h.GetMaxMemoryAllocSize();
 #if WORKAROUND_MLOPEN_ISSUE_1430
+    if(env::disabled(MIOPEN_GEMM_VRAM_LIMIT))
+        return m;
     auto limit = static_cast<std::size_t>(7287183769);
     if(!env::disabled(MIOPEN_WORKAROUND_ISSUE_2789))
     {
