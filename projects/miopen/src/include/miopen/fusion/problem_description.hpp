@@ -96,7 +96,7 @@ struct FusionDescription : ProblemDescriptionBase
 
     bool Is2D() const { return (fusion_plan_desc->input_desc).GetLengths().size() == 4; }
 
-    bool IsLayoutNCHW() const
+    bool IsLayoutContiguous() const
     {
         // determine input and output layouts
         const auto in_layout  = fusion_plan_desc->input_desc.GetLayout_str();
