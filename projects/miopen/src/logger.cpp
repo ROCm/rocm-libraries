@@ -123,8 +123,17 @@ inline std::string GetDateTimeMs()
 {
     auto now = std::chrono::system_clock::now();
     auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-    auto now_t         = std::chrono::system_clock::to_time_t(now);
-    std::tm local_time = *std::localtime(&now_t);
+    auto now_t = std::chrono::system_clock::to_time_t(now);
+
+    std::tm local_time{};
+#if defined(_WIN32)
+    if(localtime_s(&local_time, &now_t) != 0)
+        return std::string{};
+#else
+    if(localtime_r(&now_t, &local_time) == nullptr)
+        return std::string{};
+#endif
+
     std::ostringstream time_s;
     time_s << std::put_time(&local_time, "%Y-%m-%dT%H:%M:%S");
     time_s << "." << std::setfill('0') << std::setw(3) << ms.count() << "Z";
