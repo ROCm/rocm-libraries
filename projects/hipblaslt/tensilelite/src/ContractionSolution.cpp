@@ -565,7 +565,7 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware);
+        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware, sk.grid);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
@@ -994,7 +994,8 @@ namespace TensileLite
     
     std::pair<int32_t, uint32_t> ContractionSolution::calculateAutoWGM(
         Problem const&  problem,
-        Hardware const* hardware) const
+        Hardware const* hardware,
+        uint32_t const  skgrid) const
     {
         // Default
         int32_t defaultWGM = sizeMapping.workGroupMapping;
@@ -1009,11 +1010,12 @@ namespace TensileLite
             defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
         // Run-time prediction
-        if(sizeMapping.streamK != 0)
+        if(sizeMapping.streamK != 0 && skgrid != 0)
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
             // Runtime selection for WGM and WGMXCC
-            if(pAMDGPU->skDynamicWGM == 1)
+            // non-temporals are excluded for now till libs are fixed to support auto WGMXCC
+            if(pAMDGPU->skDynamicWGM == 1 && sizeMapping.nonTemporalA < 4 && sizeMapping.nonTemporalB < 4)
             {
                 int32_t c_wgm = 0;
                 uint32_t c_wgmxcc = 0;
@@ -1021,38 +1023,36 @@ namespace TensileLite
                 std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
 
                 if(!c_wgm && !c_wgmxcc)
-                { // Did not find values in cache
+                { 
+                    // Did not find values in cache
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(hardware);
                     auto sizes = problem.problemSizes();
                     if(sizes.size() >= 4)
                     {
-                        defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
-                                                                    sizes[0],
-                                                                    sizes[1],
-                                                                    sizes[3],
-                                                                    sizes[2],
-                                                                    sizeMapping.macroTile.x,
-                                                                    sizeMapping.macroTile.y,
-                                                                    sizeMapping.depthU,
-                                                                    false);
-                        defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                                sizes[0],
-                                                                sizes[1],
-                                                                sizes[3],
-                                                                sizes[2],
-                                                                sizeMapping.macroTile.x,
-                                                                sizeMapping.macroTile.y,
-                                                                sizeMapping.depthU,
-                                                                defaultWGMXCC,
-                                                                false);
+                        auto wgm_pred = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
+                                                             sizes[0],
+                                                             sizes[1],
+                                                             sizes[3],
+                                                             sizes[2],
+                                                             sizeMapping.macroTile.x,
+                                                             sizeMapping.macroTile.y,
+                                                             sizeMapping.depthU,
+                                                             sizeMapping.nonTemporalA,
+                                                             sizeMapping.nonTemporalB,
+                                                             skgrid,
+                                                             false);
+                        defaultWGMXCC = std::get<0>(wgm_pred);
+                        defaultWGM    = std::get<1>(wgm_pred);
+
                         // Add to cache only if dynamically calculated.
                         paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
                         if(Debug::Instance().printPropertyEvaluation())
                             std::cout << "Dynamic WGM "<< defaultWGM << ", WGMXCC " << defaultWGMXCC << std::endl;
                     }
                 }
-                else {
+                else 
+                {
                     defaultWGM = c_wgm;
                     defaultWGMXCC = c_wgmxcc;
                 }
@@ -1073,6 +1073,7 @@ namespace TensileLite
             // WGMXCC should be in this range: [1, 2, 3, ..., 63]
             assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
         }
+
         return std::make_pair(defaultWGM, defaultWGMXCC);
     }
 
@@ -1332,7 +1333,7 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware);
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware, sk.grid);
             if(T_Debug)
             {
                 std::cout << "AutoWGM: " << autoWGM << std::endl;
@@ -1503,7 +1504,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware);
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware, 0);
 
             if(internalArgsSupport.useUniversalArgs)
             {

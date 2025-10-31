@@ -15,14 +15,14 @@ def node_from_dict(node_dict: dict, tensors: dict[int, TensorAttributes]):
 class Graph:
     def  __init__(self, nodes,
                   dtype: torch.dtype = None,
-                  io_type: torch.dtype = None,
-                  compute_type: torch.dtype = None,
-                  intermediate_type: torch.dtype = None,
+                  io_data_type: torch.dtype = None,
+                  compute_data_type: torch.dtype = None,
+                  intermediate_data_type: torch.dtype = None,
                   name: str=""):
-        if dtype != None and (io_type == None and compute_type == None and intermediate_type == None):
-            io_type = compute_type = intermediate_type = dtype
+        if dtype != None and (io_data_type == None and compute_data_type == None and intermediate_data_type == None):
+            io_data_type = compute_data_type = intermediate_data_type = dtype
         elif dtype != None:
-            raise ValueError("type must be set, or all of io_type, compute_type and intermediate_type must be")
+            raise ValueError("type must be set, or all of io_data_type, compute_data_type and intermediate_data_type must be")
 
         self.nodes = nodes
         self.tensors = dict()
@@ -32,9 +32,9 @@ class Graph:
             tensors = filter(lambda x: type(x) == TensorAttributes, chain(inputs, outputs))
             self.tensors.update({ tensor.uid: tensor for tensor in tensors })
 
-        self.io_type = io_type
-        self.compute_type = compute_type
-        self.intermediate_type = intermediate_type
+        self.io_data_type = io_data_type
+        self.compute_data_type = compute_data_type
+        self.intermediate_data_type = intermediate_data_type
         self.name = name
 
     # TODO Implement execute for more complicated graphs
@@ -45,9 +45,9 @@ class Graph:
         return {
             "nodes": [node.as_dict() for node in self.nodes],
             "tensors": tensors,
-            "io_type": DTypeConverter.to_string(self.io_type),
-            "compute_type": DTypeConverter.to_string(self.compute_type),
-            "intermediate_type": DTypeConverter.to_string(self.intermediate_type),
+            "io_data_type": DTypeConverter.to_string(self.io_data_type),
+            "compute_data_type": DTypeConverter.to_string(self.compute_data_type),
+            "intermediate_data_type": DTypeConverter.to_string(self.intermediate_data_type),
             "name": self.name
         }
 
@@ -72,11 +72,11 @@ class Graph:
             if os.path.exists(filepath):
                 load_data_from_binary(filepath, tensor)
 
-        io_type = DTypeConverter.from_string(d["io_type"])
-        compute_type = DTypeConverter.from_string(d["compute_type"])
-        intermediate_type = DTypeConverter.from_string(d["intermediate_type"])
+        io_data_type = DTypeConverter.from_string(d["io_data_type"])
+        compute_data_type = DTypeConverter.from_string(d["compute_data_type"])
+        intermediate_data_type = DTypeConverter.from_string(d["intermediate_data_type"])
 
-        return Graph(nodes, io_type=io_type, compute_type=compute_type, intermediate_type=intermediate_type, name=d["name"] )
+        return Graph(nodes, io_data_type=io_data_type, compute_data_type=compute_data_type, intermediate_data_type=intermediate_data_type, name=d["name"] )
 
 
 
