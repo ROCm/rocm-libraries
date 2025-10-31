@@ -25,12 +25,17 @@ namespace
 
 struct BatchnormActivationTensorIds
 {
-    int64_t xUid;
-    int64_t dyUid;
-    int64_t scaleUid;
-    int64_t biasUid;
-    int64_t meanUid;
-    int64_t invVarianceUid;
+    static constexpr int64_t X_UID = 1;
+    static constexpr int64_t SCALE_UID = 2;
+    static constexpr int64_t BIAS_UID = 3;
+    static constexpr int64_t MEAN_UID = 4;
+    static constexpr int64_t INV_VARIANCE_UID = 5;
+    static constexpr int64_t BN_Y_UID = 6;
+    static constexpr int64_t DY_UID = 7;
+    static constexpr int64_t DX_DRELU_UID = 8;
+    static constexpr int64_t DX_OUT_UID = 9;
+    static constexpr int64_t DSCALE_OUT_UID = 10;
+    static constexpr int64_t DBIAS_OUT_UID = 11;
 };
 
 template <typename DataType>
@@ -40,21 +45,22 @@ class BatchnormBackwardActivation
           std::tuple<test_bn_common::BatchnormTestCase, test_activation_common::ActivTestCase>>
 {
 protected:
-    BatchnormActivationTensorIds _tensorIds;
-
     void initializeBundle([[maybe_unused]] const graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        bundle.tensors.at(_tensorIds.xUid)->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
-        bundle.tensors.at(_tensorIds.dyUid)->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
-
-        bundle.tensors.at(_tensorIds.scaleUid)->fillTensorWithRandomValues(0.5f, 1.5f, seed);
-
-        bundle.tensors.at(_tensorIds.biasUid)->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(_tensorIds.meanUid)->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-        bundle.tensors.at(_tensorIds.invVarianceUid)->fillTensorWithRandomValues(0.5f, 2.0f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
+            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::DY_UID)
+            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::SCALE_UID)
+            ->fillTensorWithRandomValues(0.5f, 1.5f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::BIAS_UID)
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::MEAN_UID)
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+        bundle.tensors.at(BatchnormActivationTensorIds::INV_VARIANCE_UID)
+            ->fillTensorWithRandomValues(0.5f, 2.0f, seed);
     }
 
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
@@ -70,54 +76,46 @@ protected:
         graphObj.set_name("BatchnormBackwardActivationTest");
         graphObj.set_compute_data_type(fe::DataType::FLOAT);
 
-        int64_t uid = 1;
-        auto nextUid = [&]() { return uid++; };
-
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = fe::DataType::FLOAT;
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, dims, generateStrides(dims, layout.strideOrder));
-        xAttr.set_uid(nextUid());
+        xAttr.set_uid(BatchnormActivationTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        _tensorIds.xUid = xTensorAttr->get_uid();
 
         auto scaleAttr
             = graph::makeTensorAttributes("scale",
                                           intermediateDataType,
                                           channelDims,
                                           generateStrides(channelDims, layout.strideOrder));
-        scaleAttr.set_uid(nextUid());
+        scaleAttr.set_uid(BatchnormActivationTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        _tensorIds.scaleUid = scaleTensorAttr->get_uid();
 
         auto biasAttr
             = graph::makeTensorAttributes("bias",
                                           intermediateDataType,
                                           channelDims,
                                           generateStrides(channelDims, layout.strideOrder));
-        biasAttr.set_uid(nextUid());
+        biasAttr.set_uid(BatchnormActivationTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
-        _tensorIds.biasUid = biasTensorAttr->get_uid();
 
         auto meanAttr
             = graph::makeTensorAttributes("mean",
                                           intermediateDataType,
                                           channelDims,
                                           generateStrides(channelDims, layout.strideOrder));
-        meanAttr.set_uid(nextUid());
+        meanAttr.set_uid(BatchnormActivationTensorIds::MEAN_UID);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-        _tensorIds.meanUid = meanTensorAttr->get_uid();
 
         auto invVarAttr
             = graph::makeTensorAttributes("inv_variance",
                                           intermediateDataType,
                                           channelDims,
                                           generateStrides(channelDims, layout.strideOrder));
-        invVarAttr.set_uid(nextUid());
+        invVarAttr.set_uid(BatchnormActivationTensorIds::INV_VARIANCE_UID);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
-        _tensorIds.invVarianceUid = invVarianceTensorAttr->get_uid();
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
         graph::BatchnormInferenceAttributes bnInfAttrs;
@@ -135,16 +133,12 @@ protected:
         bnY->set_dim(dims);
         bnY->set_stride(generateStrides(dims, layout.strideOrder));
         bnY->set_is_virtual(true);
-        if(!bnY->has_uid())
-        {
-            bnY->set_uid(nextUid());
-        }
+        bnY->set_uid(BatchnormActivationTensorIds::BN_Y_UID);
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
-        dyAttr.set_uid(nextUid());
+        dyAttr.set_uid(BatchnormActivationTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-        _tensorIds.dyUid = dyTensorAttr->get_uid();
 
         // DX_dactiv = pointwise(DY, BN_Y, activation_mode)
         graph::PointwiseAttributes activBwdAttrs;
@@ -177,15 +171,11 @@ protected:
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
         dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_data_type(
-            dataType); // leaving this as intermediate could yield more accurate results
+        dxDrelu->set_data_type(dataType);
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
         dxDrelu->set_is_virtual(true);
-        if(!dxDrelu->has_uid())
-        {
-            dxDrelu->set_uid(nextUid());
-        }
+        dxDrelu->set_uid(BatchnormActivationTensorIds::DX_DRELU_UID);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_name("batchnorm_backward");
@@ -202,10 +192,7 @@ protected:
         dxOut->set_stride(generateStrides(dims, layout.strideOrder));
         dxOut->set_is_virtual(false);
         dxOut->set_output(true);
-        if(!dxOut->has_uid())
-        {
-            dxOut->set_uid(nextUid());
-        }
+        dxOut->set_uid(BatchnormActivationTensorIds::DX_OUT_UID);
 
         auto& dscaleOut = bnBwdOuts[1];
         dscaleOut->set_name("dscale");
@@ -214,10 +201,7 @@ protected:
         dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dscaleOut->set_is_virtual(false);
         dscaleOut->set_output(true);
-        if(!dscaleOut->has_uid())
-        {
-            dscaleOut->set_uid(nextUid());
-        }
+        dscaleOut->set_uid(BatchnormActivationTensorIds::DSCALE_OUT_UID);
 
         auto& dbiasOut = bnBwdOuts[2];
         dbiasOut->set_name("dbias");
@@ -226,10 +210,7 @@ protected:
         dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dbiasOut->set_is_virtual(false);
         dbiasOut->set_output(true);
-        if(!dbiasOut->has_uid())
-        {
-            dbiasOut->set_uid(nextUid());
-        }
+        dbiasOut->set_uid(BatchnormActivationTensorIds::DBIAS_OUT_UID);
 
         // Use 4e-3 float tolerance for all data types to match MIOpen.
         // https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/test/gtest/bn.hpp#L484
