@@ -33,11 +33,11 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormInferenceGraph(const std::vector<int64_t>& strides = {1, 3, 224, 224},
-                                       const std::vector<int64_t>& dims = {1, 3, 224, 224},
-                                       hipdnn_sdk::data_objects::DataType inputDataType
-                                       = DataType::FLOAT)
+inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
+    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& dims = {1, 3, 224, 224},
+    hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT,
+    hipdnn_sdk::data_objects::DataType computeDataType = DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
@@ -97,6 +97,7 @@ inline flatbuffers::FlatBufferBuilder
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm",
+        computeDataType,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnormAttributes.Union());
     nodes.push_back(node);
@@ -172,6 +173,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_bwd",
+        DataType::FLOAT,
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnormAttributes.Union());
     nodes.push_back(node);
@@ -321,8 +323,11 @@ inline flatbuffers::FlatBufferBuilder createBatchnormGraph()
     std::vector<int64_t> peerStats = {-1, -2, -3, -4};
     auto batchnormNode = CreateBatchnormAttributesDirect(
         builder, 0, 1, 2, 3, &peerStats, 4, 5, 6, 7, 8, 9, 10, 11);
-    nodes.push_back(CreateNodeDirect(
-        builder, "Node", NodeAttributes::BatchnormAttributes, batchnormNode.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "Node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::BatchnormAttributes,
+                                     batchnormNode.Union()));
 
     std::array tensorNames = {"x",
                               "scale",
@@ -396,8 +401,11 @@ inline flatbuffers::FlatBufferBuilder
                                                                ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<Node>> nodes;
-    auto node = CreateNodeDirect(
-        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union());
+    auto node = CreateNodeDirect(builder,
+                                 "conv_fwd",
+                                 DataType::FLOAT,
+                                 NodeAttributes::ConvolutionFwdAttributes,
+                                 convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = CreateGraphDirect(builder,
@@ -447,8 +455,11 @@ inline flatbuffers::FlatBufferBuilder
                                                                ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<Node>> nodes;
-    auto node = CreateNodeDirect(
-        builder, "conv_bwd", NodeAttributes::ConvolutionBwdAttributes, convAttributes.Union());
+    auto node = CreateNodeDirect(builder,
+                                 "conv_bwd",
+                                 DataType::FLOAT,
+                                 NodeAttributes::ConvolutionBwdAttributes,
+                                 convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = CreateGraphDirect(builder,
@@ -498,8 +509,11 @@ inline flatbuffers::FlatBufferBuilder
                                                                ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<Node>> nodes;
-    auto node = CreateNodeDirect(
-        builder, "conv_wrw", NodeAttributes::ConvolutionWrwAttributes, convAttributes.Union());
+    auto node = CreateNodeDirect(builder,
+                                 "conv_wrw",
+                                 DataType::FLOAT,
+                                 NodeAttributes::ConvolutionWrwAttributes,
+                                 convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = CreateGraphDirect(builder,
@@ -534,8 +548,11 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
                                                    5.f, // elu_alpha
                                                    6.f); // softplus_beta
 
-    nodes.push_back(CreateNodeDirect(
-        builder, "Node", NodeAttributes::PointwiseAttributes, pointwiseNode.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "Node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     pointwiseNode.Union()));
 
     std::array tensorNames = {"axis", "in_0", "in_1", "in_2", "out_0"};
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -632,8 +649,11 @@ inline flatbuffers::FlatBufferBuilder
                                                                &convStrides,
                                                                &convDilation,
                                                                ConvMode::CROSS_CORRELATION);
-    nodes.push_back(CreateNodeDirect(
-        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "conv_fwd",
+                                     DataType::UNSET,
+                                     NodeAttributes::ConvolutionFwdAttributes,
+                                     convAttributes.Union()));
 
     if(doBias)
     {
@@ -647,8 +667,11 @@ inline flatbuffers::FlatBufferBuilder
                                                         biasTensorUid,
                                                         flatbuffers::nullopt,
                                                         yBiasTensorUid);
-        nodes.push_back(CreateNodeDirect(
-            builder, "bias", NodeAttributes::PointwiseAttributes, biasAttributes.Union()));
+        nodes.push_back(CreateNodeDirect(builder,
+                                         "bias",
+                                         DataType::UNSET,
+                                         NodeAttributes::PointwiseAttributes,
+                                         biasAttributes.Union()));
     }
 
     auto activAttributes = CreatePointwiseAttributes(builder,
@@ -664,8 +687,11 @@ inline flatbuffers::FlatBufferBuilder
                                                      swishBeta,
                                                      eluAlpha,
                                                      softplusBeta);
-    nodes.push_back(CreateNodeDirect(
-        builder, "activ", NodeAttributes::PointwiseAttributes, activAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "activ",
+                                     DataType::UNSET,
+                                     NodeAttributes::PointwiseAttributes,
+                                     activAttributes.Union()));
 
     auto graphOffset = CreateGraphDirect(builder,
                                          "test",
