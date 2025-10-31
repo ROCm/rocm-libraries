@@ -79,7 +79,10 @@ struct BatchnormTrainParams
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> nextRunningVarianceTensor;
 };
 
-template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
+template <typename InputDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename ComputeDataType>
 class BatchnormTrainPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -151,20 +154,24 @@ public:
             nextRunningVariancePtr = nextRunningVariance.get();
         }
 
-        CpuFpReferenceBatchnormImpl<InputDataType, ScaleBiasDataType, MeanVarianceDataType>::
-            batchnormFwdTraining(*shallowXTensor,
-                                 *shallowScaleTensor,
-                                 *shallowBiasTensor,
-                                 *shallowYTensor,
-                                 shallowEpsilonTensor->getHostValue(0),
-                                 momentum == nullptr ? static_cast<MeanVarianceDataType>(0.1f)
-                                                     : momentum->getHostValue(0),
-                                 shallowMeanTensor.get(),
-                                 shallowInvVarianceTensor.get(),
-                                 prevRunningMeanPtr,
-                                 prevRunningVariancePtr,
-                                 nextRunningMeanPtr,
-                                 nextRunningVariancePtr);
+        CpuFpReferenceBatchnormImpl<
+            InputDataType,
+            ScaleBiasDataType,
+            MeanVarianceDataType,
+            ComputeDataType>::batchnormFwdTraining(*shallowXTensor,
+                                                   *shallowScaleTensor,
+                                                   *shallowBiasTensor,
+                                                   *shallowYTensor,
+                                                   shallowEpsilonTensor->getHostValue(0),
+                                                   momentum == nullptr
+                                                       ? static_cast<MeanVarianceDataType>(0.1f)
+                                                       : momentum->getHostValue(0),
+                                                   shallowMeanTensor.get(),
+                                                   shallowInvVarianceTensor.get(),
+                                                   prevRunningMeanPtr,
+                                                   prevRunningVariancePtr,
+                                                   nextRunningMeanPtr,
+                                                   nextRunningVariancePtr);
     }
 
 private:
@@ -173,19 +180,26 @@ private:
 
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormTrainPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
         if(nodeAttributes == nullptr)
         {
@@ -302,9 +316,10 @@ public:
             nextRunningMean,
             nextRunningVariance);
 
-        return std::make_unique<
-            BatchnormTrainPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(
-            std::move(params));
+        return std::make_unique<BatchnormTrainPlan<InputDataType,
+                                                   ScaleBiasDataType,
+                                                   MeanVarianceDataType,
+                                                   ComputeDataType>>(std::move(params));
     }
 };
 

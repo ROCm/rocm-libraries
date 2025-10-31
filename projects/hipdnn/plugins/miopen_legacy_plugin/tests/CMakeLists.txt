@@ -10,14 +10,18 @@ add_executable(miopen_legacy_plugin_tests
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvBwdPlan.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
+    TestMiopenActivationDescriptor.cpp
     TestMiopenBatchnormFwdInferenceOperations.cpp
     TestMiopenBatchnormBwdOperations.cpp
+    TestMiopenConvFwdBiasActivOperations.cpp
     TestMiopenConvFwdOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp

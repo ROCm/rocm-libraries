@@ -38,7 +38,7 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
                         ArgumentLoader
-from rocisa.enum import InstType, SelectBit
+from rocisa.enum import InstType, SelectBit, CacheScope
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
@@ -765,6 +765,8 @@ class KernelWriterAssembly(KernelWriter):
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
             moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
+            if kernel["UseDirect32XEmulation"]:
+              moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_T%u_I%u"%(bi,iui), self.states.startVgprCvt, ri // 2))
             ri += self.states.a.numVgprValuPerBlock
         ri = 0
         if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
@@ -806,6 +808,8 @@ class KernelWriterAssembly(KernelWriter):
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
             moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
+            if kernel["UseDirect32XEmulation"]:
+              moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_T%u_I%u"%(bi,iui), self.states.startVgprCvt + (self.states.b.startVgprValu - self.states.startVgpr) // 2, ri // 2))
             ri += self.states.b.numVgprValuPerBlock
         ri = 0
         if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
@@ -1440,7 +1444,7 @@ class KernelWriterAssembly(KernelWriter):
           % (self.states.kernelName, self.states.overflowedResources, msg, \
           self.vgprPool.size(), self.sgprPool.size()))
       mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
-      mkb.body.add(ValueIf(value=0), 1)
+      mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -5426,7 +5430,7 @@ class KernelWriterAssembly(KernelWriter):
         kernel["ProblemType"]["IndicesSummation"][loopIdx]]
     if not tailLoop and not noLabelGen:
       module.add(Label("openLoop%s"%loopChar, ""))
-    loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "" )
+    loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "", alignment=16 )
     loopLabelEnd = Label("%sLoopEnd%s"%("Tail" if tailLoop else "", loopChar), "" )
 
     if beginLabelOnly:
@@ -6172,6 +6176,8 @@ class KernelWriterAssembly(KernelWriter):
     iui_new_offset = iui%numReadsIterCoalesced*vgprPerInput
     ab_new = idxAB*vgprPerInput*numReadsIterCoalesced
     abStr = "Valu%c_X%u_I%u+%u+%u+%u" % (tc, vgprBuffer_new, iui_new, ab_new, vgprBuffer_new_offset, iui_new_offset)
+    if kernel["UseDirect32XEmulation"] and bk != None and (int(bk) % 8) < 4:
+      abStr = "Valu%c_T%u_I%u+%u+%u+%u" % (tc, vgprBuffer_new, iui_new, ab_new // 2, vgprBuffer_new_offset, iui_new_offset)
     if kernel["DirectToVgpr%c"%tc] and not (packDTV or convDTV):
       # overwrite aStr/bStr for DirectToVgpr (except for pack DTV case)
       numVgprPerBlock = statesAorB.numVgprG2LAllocated
@@ -6784,8 +6790,31 @@ class KernelWriterAssembly(KernelWriter):
         outer = 0
         loopSwap = True
       inner = 1 - outer # inner is the opposite of outer
-      for idxOuter in range(0, kernel["MIWaveTile"][outer]):
-        for idxInner in range(0, kernel["MIWaveTile"][inner]):
+
+      idxOuter_start = 0
+      idxInner_start = 0
+      idxOuter_stop = kernel["MIWaveTile"][outer]
+      idxInner_stop = kernel["MIWaveTile"][inner]
+      numSubTiles = kernel["numSubTiles"]
+      if numSubTiles > 1 and not self.states.inTailLoop:
+        # iter  (idxOuter_start, idxOuter_stop)    (idxInner_start, idxInner_stop)        MFMA
+        #  0          (0,4)                             (0,4)                          MFMA(A0,B0) 
+        #  1          (0,4)                             (4,8)                          MFMA(A1,B0) 
+        #  2          (4,8)                             (0,4)                          MFMA(A0,B1)
+        #  3          (4,8)                             (4,8)                          MFMA(A1,B1)
+        outerBy2=(kernel["MIWaveTile"][outer]//numSubTiles)
+        innerBy2=(kernel["MIWaveTile"][inner]//numSubTiles)
+        outerMod2=(kernel["MIWaveTile"][outer]%numSubTiles)
+        innerMod2=(kernel["MIWaveTile"][inner]%numSubTiles)
+        idxHalfO = u//numSubTiles
+        idxHalfI = u % numSubTiles
+        idxOuter_start = (outerBy2 + outerMod2)*idxHalfO 
+        idxInner_start = (innerBy2 + innerMod2)*idxHalfI 
+        idxOuter_stop = kernel["MIWaveTile"][outer] - (1-idxHalfO)* outerBy2
+        idxInner_stop = kernel["MIWaveTile"][inner] - (1-idxHalfI)* innerBy2
+
+      for idxOuter in range(idxOuter_start, idxOuter_stop):
+        for idxInner in range(idxInner_start, idxInner_stop):
           idx0 = idxInner
           idx1 = idxOuter
           if loopSwap:
@@ -6925,19 +6954,28 @@ class KernelWriterAssembly(KernelWriter):
                   src0_0     = vgpr(aStr_base[:-4], vgprPerInputA / 2)
                   src0_1     = vgpr(aStr_base[:-4] + abOffsetStr, vgprPerInputA / 2)
 
-
-                imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
-                imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
                 imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                        a=src0_0, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                                       comment="src0_h*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                if kernel["SourceSwap"]:
+                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                else:
+                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
@@ -12257,7 +12295,9 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def chooseGlobalWrite(self, useBuffer, bps, srcVgpr, rpv, \
                         addr0, addr1, offset, soffset=0, \
-                        glc=False, slc=False, nt=False, hi16=0, comment="store"):
+                        glc=False, slc=False, nt=False, dlc=False, \
+                        scope=CacheScope.SCOPE_NONE, \
+                        hi16=0, comment="store"):
     """
     create the store instruction for requested vector width and other parms
     rpv = regs per vector
@@ -12300,7 +12340,7 @@ class KernelWriterAssembly(KernelWriter):
           if offset2 >= 4096:
             module.add(SMovB32(dst=tmpSgpr, src=offset2, comment="large offset"))
             offset2 = 0
-          mubuf2 = MUBUFModifiers(offen=True, offset12=offset2, glc=glc, slc=slc, nt=nt, isStore=True)
+          mubuf2 = MUBUFModifiers(offen=True, offset12=offset2, glc=glc, slc=slc, dlc=dlc, scope=scope, nt=nt, isStore=True)
           vgprOff = int(srcVgpr + shiftRpv * i) if isinstance(srcVgpr, int) else f"{srcVgpr}+{int(shiftRpv * i)}"
           module.add(BufferStoreB128(src=vgpr(vgprOff, shiftRpv), vaddr=addr0, \
                 saddr=addr1, soffset=tmpSgpr, mubuf=mubuf2, comment=comment))
@@ -12308,7 +12348,7 @@ class KernelWriterAssembly(KernelWriter):
         assert 0, "bad bps"
 
     if useBuffer:
-      mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=glc, slc=slc, nt=nt, isStore=True)
+      mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=glc, slc=slc, dlc=dlc, scope=scope, nt=nt, isStore=True)
       if soffset != 0:
         assert offset < 4096, "sgpr offset provided with large const offset"
       # buffer_load offset field is 12-bit.
@@ -12319,13 +12359,13 @@ class KernelWriterAssembly(KernelWriter):
           tmpSgpr = sgpr(tmpSgprInfo.idx)
           if offset >= 4096:
             module.add(SMovB32(dst=tmpSgpr, src=offset, comment="large offset"))
-            mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, isStore=True)
+            mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, dlc=dlc, scope=scope, nt=nt, isStore=True)
           bufferStoreImpl(tmpSgpr, mubuf)
       else:
         bufferStoreImpl(soffset, mubuf)
 
     else:
-      flat = FLATModifiers(glc=glc, slc=slc, isStore=True)
+      flat = FLATModifiers(glc=glc, slc=slc, dlc=dlc, scope=scope, isStore=True)
       if bps==2 and hi16:
         module.add(FlatStoreD16HIB16(vaddr=addr0, src=vgpr(srcVgpr*2), flat=flat, comment=comment))
       elif bps==2 and not hi16:
@@ -12455,6 +12495,8 @@ class KernelWriterAssembly(KernelWriter):
       isGlc = False
       isSlc = False
       isNT = False
+      scope = CacheScope.SCOPE_NONE
+      isDlc = False
 
       if tc == 'D':
         isGlc = bool(kernel["NonTemporalD"] & 0x1)
@@ -12495,6 +12537,8 @@ class KernelWriterAssembly(KernelWriter):
         isGlc = True
         isSlc = True
         isNT  = bool(kernel["NonTemporalD"] & 0x4)
+        isDlc = True
+        scope = CacheScope.SCOPE_DEV
 
         bps = self.states.bpeCinternal * ss.cfg.gwvw
         rpv = self.states.bpeCinternal * ss.cfg.gwvw / self.states.bpr
@@ -12544,36 +12588,36 @@ class KernelWriterAssembly(KernelWriter):
           if self.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
             module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
                 addr0, addr1, globalOffset, soffset=wsOffset, \
-                glc=isGlc, slc=isSlc, nt=isNT, hi16=0, comment=comment))
+                glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, hi16=0, comment=comment))
           else:
             module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx//2, rpv, \
                 addr0, addr1, globalOffset, soffset=wsOffset, \
-                glc=isGlc, slc=isSlc, nt=isNT, hi16=sumIdx%2, comment=comment))
+                glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, hi16=sumIdx%2, comment=comment))
         else:
           # (B,B,B,B,S,S), internal S
           # (H,H,H,H,H,H), internal S
           # (H,H,H,H,S,S), internal S
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
-              glc=isGlc, slc=isSlc, nt=isNT, hi16=0, comment=comment))
+              glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, hi16=0, comment=comment))
       elif dataType.isInt32() or dataType.isSingle():
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, comment=comment))
       elif dataType.isDouble() or dataType.isSingleComplex():
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx*2, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, comment=comment))
       elif dataType.isDoubleComplex():
         rps = dataType.numRegisters()
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx*rps, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, comment=comment))
       elif dataType.isInt8() or dataType.isAnyFloat8() or dataType.isAnyBFloat8() or dataType.isAnyFloat8BFloat8() or dataType.isAnyBFloat8Float8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
-              glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+              glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, scope=scope, comment=comment))
     return module
 
   ##############################################################################
@@ -13841,7 +13885,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
 
     if numCodePath == 1:
-      module.add(TextBlock("MAINLOOP 0\n"))
+      module.add(MacroInstruction(name="MAINLOOP", args=[0]))
       module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
       module.add(Label("LoopEnd%s"%(loopChar), "" ))
       return module
@@ -13850,7 +13894,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment0("SIMD specialized dispatch")
 
     for l in range(numCodePath):
-      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "" ))
+      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "", alignment=16))
       loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u"%(loopChar, l), "" ))
     loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
 
@@ -13873,7 +13917,7 @@ class KernelWriterAssembly(KernelWriter):
     for l in range(numCodePath):
       module.addComment0("SIMD %u code-path"%l)
       module.add(loopLabelBegin[l])
-      module.add(TextBlock("MAINLOOP %u\n"%l))
+      module.add(MacroInstruction(name="MAINLOOP", args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
       tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2)
       sgprPC = ContinuousRegister(tmpSgpr1, 3)

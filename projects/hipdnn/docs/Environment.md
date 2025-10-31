@@ -7,6 +7,7 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Logging Configuration](#logging-configuration)
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
+  - [Test Configuration](#test-configuration)
 - [Error Handling](#error-handling)
 
 ---
@@ -56,6 +57,38 @@ The frontend and plugins can be configured to use the same logging destination a
 > 💡 When using the MIOpen legacy plugin, you can use MIOpen-specific environment variables to control the underlying library's logging behavior.
 
 For more details about MIOpen logging, see the latest [MIOpen Debug and Logging documentation](https://rocm.docs.amd.com/projects/MIOpen/en/develop/how-to/debug-log.html). All MIOpen environment variables remain compatible with hipDNN's MIOpen legacy plugin.
+
+### Test Configuration
+
+#### HIPDNN_GLOBAL_TEST_SEED
+
+Controls the random number generator seed used across hipDNN tests. This allows for reproducible test runs or full randomization when needed.
+
+| Value        | Description                                                |
+|--------------|------------------------------------------------------------|
+| (not set)    | Uses default seed value of `1` (default behavior)         |
+| `<number>`   | Uses the specified numeric seed (e.g., `42`, `12345`)     |
+| `RANDOM`     | Generates a random seed using `std::random_device`        |
+
+> [!NOTE]
+> The `RANDOM` value is case-insensitive (`random`, `Random`, `RANDOM` all work).
+
+**Examples:**
+```bash
+# Use a specific seed for consistent results
+export HIPDNN_GLOBAL_TEST_SEED=42
+
+# Use default seed (1) for reproducible tests
+unset HIPDNN_GLOBAL_TEST_SEED
+
+# Use random seed for each test run
+export HIPDNN_GLOBAL_TEST_SEED=RANDOM
+```
+
+**Best Practices:**
+- Use the default seed (1) for CI/CD pipelines to ensure consistent test results
+- Use a specific numeric seed when debugging to reproduce exact test conditions
+- Use `RANDOM` during development to catch edge cases with different data patterns
 
 ---
 

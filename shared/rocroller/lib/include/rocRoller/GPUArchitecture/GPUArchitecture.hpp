@@ -76,6 +76,8 @@ namespace rocRoller
 
         bool isSupportedConstantValue(Raw32 value) const;
 
+        bool isSupportedConstantValue(Buffer value) const;
+
         template <typename T>
         requires(std::is_pointer_v<T>) bool isSupportedConstantValue(T value) const;
 
