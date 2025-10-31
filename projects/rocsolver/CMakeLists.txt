@@ -343,10 +343,4 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} export -object ./library/src/librocsolver.so -instr-profile=./coverage-report/rocSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
-
-  # Coverage cleanup
-  add_custom_target(coverage_cleanup
-      COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
 endif()
