@@ -152,7 +152,7 @@ std::tuple<const hipdnn_sdk::data_objects::ConvolutionFwdAttributes&,
     return {convAttr, &biasAttr, activAttr};
 }
 
-auto getNodeAttrsNoExcept(const hipdnn_plugin::IGraph& opGraph)
+auto getNodeAttrsLogErrors(const hipdnn_plugin::IGraph& opGraph)
     -> std::optional<decltype(getNodeAttrs(opGraph))>
 {
     try
@@ -279,7 +279,7 @@ void nodeAttrsCheckTensors(
     }
 }
 
-bool nodeAttrsCheckTensorsNoExcept(
+bool nodeAttrsCheckTensorsLogErrors(
     const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr,
@@ -302,16 +302,16 @@ bool nodeAttrsCheckTensorsNoExcept(
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
                                                      const hipdnn_plugin::IGraph& opGraph) const
 {
-    const auto nodeAttrs = getNodeAttrsNoExcept(opGraph);
+    const auto nodeAttrs = getNodeAttrsLogErrors(opGraph);
     if(!nodeAttrs.has_value())
     {
         return false;
     }
 
-    if(!nodeAttrsCheckTensorsNoExcept(std::get<0>(nodeAttrs.value()),
-                                      std::get<1>(nodeAttrs.value()),
-                                      std::get<2>(nodeAttrs.value()),
-                                      opGraph.getTensorMap()))
+    if(!nodeAttrsCheckTensorsLogErrors(std::get<0>(nodeAttrs.value()),
+                                       std::get<1>(nodeAttrs.value()),
+                                       std::get<2>(nodeAttrs.value()),
+                                       opGraph.getTensorMap()))
     {
         return false;
     }

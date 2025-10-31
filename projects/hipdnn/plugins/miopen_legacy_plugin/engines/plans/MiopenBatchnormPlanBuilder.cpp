@@ -6,6 +6,7 @@
 #include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <miopen/miopen.h>
 #include <string>
+#include <unordered_set>
 
 #include "MiopenBatchnormPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
@@ -45,7 +46,7 @@ std::tuple<const hipdnn_sdk::data_objects::BatchnormInferenceAttributes&,
     return {bnInfAttr, actAttr, bnBwdAttr};
 }
 
-auto getBatchnormBackwardFusionNodeAttrsNoExcept(const hipdnn_plugin::IGraph& opGraph)
+auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin::IGraph& opGraph)
     -> std::optional<decltype(getBatchnormBackwardFusionNodeAttrs(opGraph))>
 {
     try
@@ -59,20 +60,36 @@ auto getBatchnormBackwardFusionNodeAttrsNoExcept(const hipdnn_plugin::IGraph& op
     }
 }
 
-void batchnormFusionCheckTensors(
+void batchnormBwdFusionCheckTensors(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
-    // Verify inference output is activation input
-    if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid()
-       && (!actAttr.in_1_tensor_uid().has_value()
-           || actAttr.in_1_tensor_uid().value() != bnInfAttr.y_tensor_uid()))
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_BWD};
+
+    if(s_supportedActivations.count(actAttr.operation()) == 0)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation node input must be the batchnorm inference output tensor");
+            "Batchnorm fusion currently only supports RELU_BWD activation");
+    }
+
+    // in_0 must be the batchnorm inference output (forward path)
+    if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation in_0 must be the batchnorm inference output tensor (y)");
+    }
+
+    // in_1 must be the dy (gradient from downstream)
+    if(!actAttr.in_1_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation backward requires in_1 tensor (dy gradient)");
     }
 
     // Verify activation backwards output is BN backward dy input
@@ -136,17 +153,21 @@ void batchnormFusionCheckTensors(
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
 
+    const auto& actTensorIn1
+        = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_1_tensor_uid().value());
+
+    if(actTensorIn1.virtual_())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_1 (dy gradient) must be non-virtual");
+    }
+
     const auto& actTensorIn0
         = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
     const auto& actTensorOut
         = miopen_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
 
-    const auto& actBnInputTensor
-        = (actAttr.in_0_tensor_uid() == bnInfAttr.y_tensor_uid())
-              ? actTensorIn0
-              : miopen_utils::findTensorAttributes(tensorMap, actAttr.in_1_tensor_uid().value());
-
-    if(!actBnInputTensor.virtual_() || !actTensorOut.virtual_())
+    if(!actTensorIn0.virtual_() || !actTensorOut.virtual_())
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -171,7 +192,7 @@ void batchnormFusionCheckTensors(
     }
 }
 
-bool batchnormFusionCheckTensorsNoExcept(
+bool batchnormBwdFusionCheckTensorsLogErrors(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
@@ -179,7 +200,7 @@ bool batchnormFusionCheckTensorsNoExcept(
 {
     try
     {
-        batchnormFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
+        batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
         return true;
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
@@ -211,16 +232,16 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     case 3:
     {
         // batchnorm inference -> activation -> batchnorm backward
-        const auto nodeAttrs = getBatchnormBackwardFusionNodeAttrsNoExcept(opGraph);
+        const auto nodeAttrs = getBatchnormBackwardFusionNodeAttrsLogErrors(opGraph);
         if(!nodeAttrs.has_value())
         {
             return false;
         }
 
-        if(!batchnormFusionCheckTensorsNoExcept(std::get<0>(nodeAttrs.value()),
-                                                std::get<1>(nodeAttrs.value()),
-                                                std::get<2>(nodeAttrs.value()),
-                                                opGraph.getTensorMap()))
+        if(!batchnormBwdFusionCheckTensorsLogErrors(std::get<0>(nodeAttrs.value()),
+                                                    std::get<1>(nodeAttrs.value()),
+                                                    std::get<2>(nodeAttrs.value()),
+                                                    opGraph.getTensorMap()))
         {
             return false;
         }
@@ -281,7 +302,7 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
                                        HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
-    batchnormFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
+    batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
 
     BatchnormBwdParams params(bnBwdAttr, actAttr, bnInfAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));

@@ -130,52 +130,6 @@ TEST(TestBatchnormBwdParams, FusedParamsHandlesMissingOptionalMeanVariance)
     EXPECT_FALSE(params.optInvVariance().has_value());
 }
 
-TEST(TestBatchnormBwdParams, ThrowsWhenPointwiseMissingIn1TensorUid)
-{
-    // Create valid batchnorm attributes for testing
-    auto validBuilder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph();
-    hipdnn_plugin::GraphWrapper validGraph(validBuilder.GetBufferPointer(), validBuilder.GetSize());
-
-    const auto& batchnormBwdNode = validGraph.getNode(0);
-    auto* batchnormBwdAttrs = batchnormBwdNode.attributes_as_BatchnormBackwardAttributes();
-    ASSERT_NE(batchnormBwdAttrs, nullptr);
-
-    // Create a minimal batchnorm inference attributes
-    flatbuffers::FlatBufferBuilder infBuilder;
-    auto bnInfOffset = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(infBuilder);
-    infBuilder.Finish(bnInfOffset);
-    auto* batchnormInfAttrs
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>(
-            infBuilder.GetBufferPointer());
-
-    // Create a PointwiseAttributes without in_1_tensor_uid set
-    flatbuffers::FlatBufferBuilder malformedBuilder;
-    auto pointwiseOffset = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
-        malformedBuilder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
-        flatbuffers::nullopt, // relu_lower_clip
-        flatbuffers::nullopt, // relu_upper_clip
-        flatbuffers::nullopt, // relu_lower_clip_slope
-        flatbuffers::nullopt, // axis_tensor_uid
-        10, // in_0_tensor_uid
-        flatbuffers::nullopt, // in_1_tensor_uid - intentionally missing
-        flatbuffers::nullopt, // in_2_tensor_uid
-        11 // out_0_tensor_uid
-    );
-    malformedBuilder.Finish(pointwiseOffset);
-
-    auto* malformedPointwiseAttrs
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::PointwiseAttributes>(
-            malformedBuilder.GetBufferPointer());
-
-    // This should throw because in_1_tensor_uid is missing
-    EXPECT_THROW(BatchnormBwdParams params(*batchnormBwdAttrs,
-                                           *malformedPointwiseAttrs,
-                                           *batchnormInfAttrs,
-                                           validGraph.getTensorMap()),
-                 hipdnn_plugin::HipdnnPluginException);
-}
-
 TEST(TestBatchnormBwdPlan, FusedModeHasActivationAndBias)
 {
     // Create a fused batchnorm backward + activation + bias graph
