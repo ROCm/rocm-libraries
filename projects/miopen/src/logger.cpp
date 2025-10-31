@@ -122,8 +122,8 @@ inline float GetTimeDiff()
 inline std::string GetDateTimeMs()
 {
     auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-    auto now_t = std::chrono::system_clock::to_time_t(now);
+    auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto now_t         = std::chrono::system_clock::to_time_t(now);
     std::tm local_time = *std::localtime(&now_t);
     std::ostringstream time_s;
     time_s << std::put_time(&local_time, "%Y-%m-%dT%H:%M:%S");
