@@ -169,7 +169,6 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     -D CMAKE_BUILD_TYPE=Release \
     -D GPU_ARCHS=${GPU_ARCHS} \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
-    -D DISABLE_OFFLOAD_COMPRESS=OFF \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \
     make -j ${num_threads} install && \    
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
