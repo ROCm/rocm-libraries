@@ -225,7 +225,30 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_bsrsv2.yaml
                          test_csrsv2.yaml 
                          test_gemvi.yaml
-                         test_hybmv.yaml)
+                         test_hybmv.yaml
+
+                         test_bsr2csr.yaml
+                         test_coo2csr.yaml
+                         test_csc2dense.yaml
+                         test_csr2bsr.yaml
+                         test_csr2coo.yaml
+                         test_csr2csc.yaml
+                         test_csr2csc_ex2.yaml
+                         test_csr2csr_compress.yaml
+                         test_csr2dense.yaml
+                         test_csr2gebsr.yaml
+                         test_csr2hyb.yaml
+                         test_csru2csr.yaml
+                         test_dense2csc.yaml
+                         test_dense2csr.yaml
+                         test_gebsr2csr.yaml
+                         test_gebsr2gebsc.yaml
+                         test_gebsr2gebsr.yaml
+                         test_hyb2csr.yaml
+                         test_prune_csr2csr.yaml
+                         test_prune_csr2csr_by_percentage.yaml
+                         test_prune_dense2csr.yaml
+                         test_prune_dense2csr_by_percentage.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")

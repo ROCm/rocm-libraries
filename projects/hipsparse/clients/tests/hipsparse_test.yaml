@@ -37,3 +37,27 @@ include: test_csrsv2.yaml
 include: test_gemvi.yaml
 include: test_hybmv.yaml
 
+# conversion
+include: test_bsr2csr.yaml
+include: test_coo2csr.yaml
+include: test_csc2dense.yaml
+include: test_csr2bsr.yaml
+include: test_csr2coo.yaml
+include: test_csr2csc.yaml
+include: test_csr2csc_ex2.yaml
+include: test_csr2csr_compress.yaml
+include: test_csr2dense.yaml
+include: test_csr2gebsr.yaml
+include: test_csr2hyb.yaml
+include: test_csru2csr.yaml
+include: test_dense2csc.yaml
+include: test_dense2csr.yaml
+include: test_gebsr2csr.yaml
+include: test_gebsr2gebsc.yaml
+include: test_gebsr2gebsr.yaml
+include: test_hyb2csr.yaml
+include: test_prune_csr2csr.yaml
+include: test_prune_csr2csr_by_percentage.yaml
+include: test_prune_dense2csr.yaml
+include: test_prune_dense2csr_by_percentage.yaml
+
