@@ -25,12 +25,11 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 ### Build Arguments
 
-#### 🔧 Common Arguments (Both Build Types)
+#### 🔧Select Build TYpe
 
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
 | `BUILD_TYPE` | `prebuilt` | Selects build method | `prebuilt`, `fullbuild` |
-| `THEROCK_ASIC` | `gfx94X` (prebuilt)<br>`gfx90a` (fullbuild) | GPU architecture target | Values for prebuild mode can be parsed from the filenames listed [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux), and values for fullbuild [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)<br>Note: For prebuilt mode, ensure that the specified asic is supported by the prebuilt artifacts as set in `THEROCK_GIT_TAG` described below.|
 
 #### 📦 Prebuilt-Only Arguments
 
@@ -38,8 +37,9 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full tarball name using `THEROCK_TARBALL` below. |
-| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG) |
+| `THEROCK_GIT_TAG` | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename key: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full tarball name using `THEROCK_TARBALL` below. |
+| `THEROCK_ASIC` | `gfx94X` for prebuilt | GPU architecture target. The values for THEROCK_ASIC for prebuild mode can be found [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing) or parsed directly from the tarball filename keys listed [here](https://therock-nightly-tarball.s3.amazonaws.com/).<br>Future support [here](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md#rocm-on-linux).<br>Note: For prebuilt mode, ensure that the specified asic is supported by the prebuilt artifacts as set in `THEROCK_GIT_TAG` described above. |
+| `THEROCK_TARBALL` | `therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz` | Overrides the full tarball path for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/) (setting this will ignore THEROCK_ASIC, and THEROCK_GIT_TAG). |
 
 #### 🏗️ Fullbuild-Only Arguments
 
@@ -47,10 +47,11 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified) |
-| `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types) |
-| `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset |
-| `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores |
+| `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified). |
+| `THEROCK_ASIC` | `gfx90a` for fullbuild | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
+| `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types). |
+| `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset. |
+| `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores. |
 
 ### Build Examples
 
