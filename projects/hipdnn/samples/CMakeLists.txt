@@ -21,3 +21,4 @@ add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 
 add_hipdnn_sample(conv_forward convolution/ConvForward.cpp)
+add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
