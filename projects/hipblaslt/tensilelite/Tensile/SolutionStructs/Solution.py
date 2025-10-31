@@ -1196,6 +1196,18 @@ class Solution(collections.abc.Mapping):
       if state["StreamKXCCMapping"] != 0:
         reject(state, printRejectionReason, "Cannot use auto WGMXCC with SKXCC.")
         return False
+    
+    if state["WorkGroupMapping"] == 0:
+      if state["WorkGroupMappingXCC"] == -1:
+        if state["StreamK"] == 0:
+          reject(state, printRejectionReason, "Can only use auto WGM with StreamK.")
+          return False
+        if state["NonTemporalA"] >= 4:
+          reject(state, printRejectionReason, "Cannot use auto WGM with NTA.")
+          return False
+        if state["NonTemporalB"] >= 4:
+          reject(state, printRejectionReason, "Cannot use auto WGM with NTB.")
+          return False
 
     problemType = state["ProblemType"]
 

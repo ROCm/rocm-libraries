@@ -18,7 +18,7 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class InputDataType, class AccumulatorType>
+template <class InputDataType, class ComputeDataType>
 class CpuFpReferenceConvolutionImpl
 {
 public:
@@ -94,7 +94,7 @@ public:
             // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> outputSpatialIndices(indices.begin() + 3, indices.end());
 
-            auto accumulator = static_cast<AccumulatorType>(0.0f);
+            auto accumulator = static_cast<ComputeDataType>(0.0f);
             int64_t baseInputChannel = gIdx * channelsPerGroup;
 
             for(int64_t c = 0; c < channelsPerGroup; ++c)
@@ -148,8 +148,8 @@ public:
                             InputDataType weightVal = weight.getHostValue(weightFullIndices);
 
                             accumulator = accumulator
-                                          + (static_cast<AccumulatorType>(inputVal)
-                                             * static_cast<AccumulatorType>(weightVal));
+                                          + (static_cast<ComputeDataType>(inputVal)
+                                             * static_cast<ComputeDataType>(weightVal));
                         }
                     });
             }
@@ -220,7 +220,7 @@ public:
             // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> inputSpatialIndices(indices.begin() + 3, indices.end());
 
-            auto vAcc = static_cast<AccumulatorType>(0.0f);
+            auto vAcc = static_cast<ComputeDataType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing output gradients
             iterateAlongDimensions(
@@ -278,8 +278,8 @@ public:
                             InputDataType vWei = weight.getHostValue(weightFullIndices);
 
                             vAcc = vAcc
-                                   + (static_cast<AccumulatorType>(vOut)
-                                      * static_cast<AccumulatorType>(vWei));
+                                   + (static_cast<ComputeDataType>(vOut)
+                                      * static_cast<ComputeDataType>(vWei));
                         }
                     }
                 });
@@ -350,7 +350,7 @@ public:
             // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> kernelSpatialIndices(indices.begin() + 3, indices.end());
 
-            auto vAcc = static_cast<AccumulatorType>(0.0f);
+            auto vAcc = static_cast<ComputeDataType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing output gradients
             iterateAlongDimensions(
@@ -397,8 +397,8 @@ public:
                             InputDataType vIn = input.getHostValue(inputFullIndices);
 
                             vAcc = vAcc
-                                   + (static_cast<AccumulatorType>(vOut)
-                                      * static_cast<AccumulatorType>(vIn));
+                                   + (static_cast<ComputeDataType>(vOut)
+                                      * static_cast<ComputeDataType>(vIn));
                         }
                     }
                 });
