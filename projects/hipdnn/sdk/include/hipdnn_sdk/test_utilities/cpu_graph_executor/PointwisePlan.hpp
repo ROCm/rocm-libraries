@@ -25,10 +25,22 @@ struct PointwiseParams
     PointwiseParams(const hipdnn_sdk::data_objects::PointwiseMode pointwiseMode,
                     const hipdnn_sdk::data_objects::TensorAttributes& in0Attributes,
                     const hipdnn_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
-                    const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes)
+                    const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes,
+                    std::optional<float> reluLowerClipLocal,
+                    std::optional<float> reluUpperClipLocal,
+                    std::optional<float> reluLowerClipSlopeLocal,
+                    std::optional<float> swishBetaLocal,
+                    std::optional<float> eluAlphaLocal,
+                    std::optional<float> softplusBetaLocal)
         : in0Tensor(unpackTensorAttributes(in0Attributes))
         , out0Tensor(unpackTensorAttributes(out0Attributes))
         , mode(pointwiseMode)
+        , reluLowerClip(reluLowerClipLocal)
+        , reluUpperClip(reluUpperClipLocal)
+        , reluLowerClipSlope(reluLowerClipSlopeLocal)
+        , swishBeta(swishBetaLocal)
+        , eluAlpha(eluAlphaLocal)
+        , softplusBeta(softplusBetaLocal)
     {
         if(optionalIn1Attributes != nullptr)
         {
@@ -40,6 +52,13 @@ struct PointwiseParams
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> in1Tensor;
     hipdnn_sdk::data_objects::TensorAttributesT out0Tensor;
     hipdnn_sdk::data_objects::PointwiseMode mode;
+
+    std::optional<float> reluLowerClip;
+    std::optional<float> reluUpperClip;
+    std::optional<float> reluLowerClipSlope;
+    std::optional<float> swishBeta;
+    std::optional<float> eluAlpha;
+    std::optional<float> softplusBeta;
 };
 
 template <typename DataType>
@@ -62,7 +81,17 @@ public:
         if(isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
+                _params.mode,
+                *shallowOut0Tensor,
+                *shallowIn0Tensor,
+                static_cast<DataType>(
+                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
         }
         else if(isBinaryPointwiseMode(_params.mode))
         {
@@ -139,6 +168,16 @@ public:
         return true;
     }
 
+    std::optional<float>
+        convertFlatbuffersOptionalToStdOptional(::flatbuffers::Optional<float> fbOptional) const
+    {
+        if(fbOptional)
+        {
+            return {*fbOptional};
+        }
+        return std::nullopt;
+    }
+
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin::IGraph& graph,
                       const hipdnn_sdk::data_objects::Node& node) const override
@@ -161,7 +200,19 @@ public:
                   ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
                   : nullptr;
 
-        PointwiseParams params(nodeAttributes->operation(), *in0Tensor, in1Tensor, *out0Tensor);
+        //grab the node values
+
+        PointwiseParams params(
+            nodeAttributes->operation(),
+            *in0Tensor,
+            in1Tensor,
+            *out0Tensor,
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_lower_clip()),
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_upper_clip()),
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_lower_clip_slope()),
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->swish_beta()),
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->elu_alpha()),
+            convertFlatbuffersOptionalToStdOptional(nodeAttributes->softplus_beta()));
 
         return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }
