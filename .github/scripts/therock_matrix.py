@@ -19,6 +19,7 @@ subtree_to_project_map = {
     "projects/rocsolver": "solver",
     "projects/rocsparse": "sparse",
     "projects/rocthrust": "prim",
+    "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
@@ -49,6 +50,10 @@ project_map = {
     "hipdnn": {
         "cmake_options": "-DTHEROCK_ENABLE_HIPDNN=ON",
         "project_to_test": "hipdnn",
+    },
+    "rocwmma": {
+        "cmake_options": "-DTHEROCK_ENABLE_ROCWMMA=ON",
+        "project_to_test": "rocwmma",
     }
 }
 
