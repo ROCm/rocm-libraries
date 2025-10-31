@@ -1,15 +1,15 @@
 .. meta::
-  :description: hipFFT documentation and API reference library
-  :keywords: FFT, hipFFT, rocFFT, ROCm, API, documentation, build from source, installing
+  :description: hipFFT documentation, hipFFTW documentation, and API reference library
+  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation, build from source, installing
 
-.. _building-installing-hipfft:
+.. _building-installing-hipfft-and-hipfftw:
 
 ********************************************************************
-Building and installing hipFFT
+Building and installing hipFFT and hipFFTW
 ********************************************************************
 
-This topic explains how to install hipFFT from the prebuilt packages or build it from the source code.
-hipFTT requires a ROCm-enabled platform. For more information,
+This topic explains how to install hipFFT and hipFFTW from the prebuilt packages or build it from the source code.
+hipFTT and hipFFTW require a ROCm-enabled platform. For more information,
 see the :doc:`Linux system requirements <rocm-install-on-linux:reference/system-requirements>`.
 
 Installing prebuilt packages
@@ -18,9 +18,9 @@ Installing prebuilt packages
 For information on downloading and installing ROCm, see the
 :doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`.
 
-To install hipFFT, use the package manager for the Linux distribution, which
+To install hipFFT and hipFFTW, use the package manager for the Linux distribution, which
 handles all dependencies.
-This lets you run programs that use hipFFT, but not compile them.
+This lets you run programs that use hipFFT or hipFFTW, but not compile them.
 
 On the Ubuntu distribution, run the following command:
 
@@ -35,10 +35,10 @@ On the Ubuntu distribution, run the following command:
    This package is named ``hipfft-dev`` on Ubuntu/Debian systems and
    ``hipfft-devel`` on RHEL and related variants.
 
-Building hipFFT from source
-=============================
+Building hipFFT and hipFFTW from source
+=======================================
 
-To build hipFFT from source, follow these steps:
+To build hipFFT and hipFFTW from source, follow these steps:
 
 #. Install the library build dependencies:
 
@@ -49,10 +49,10 @@ To build hipFFT from source, follow these steps:
 
 #. Install the client build dependencies for the clients:
 
-   The clients that are included with the hipFFT source code, including samples and tests,
-   depend on :doc:`hipRAND <hiprand:index>`, `FFTW <https://fftw.org/>`_, and GoogleTest.
+   The clients that are included with the source code, including samples and tests,
+   depend on :doc:`hipRAND <hiprand:index>`, `FFTW <https://fftw.org/>`_, `boost <https://www.boost.org/>`_, and GoogleTest.
 
-#. Build hipFFT:
+#. Build hipFFT and hipFFTW:
 
    To show all build options, run these commands from the ``rocm-libraries/projects/hipfft`` directory:
 
@@ -63,13 +63,13 @@ To build hipFFT from source, follow these steps:
 
    Here are some CMake build examples for AMD GPUs:
 
-   *  Building a project using :doc:`HIP language <hip:index>` APIs and hipFFT with the standard host compiler:
+   *  Building a project using :doc:`HIP language <hip:index>` APIs and hipFFT (or hipFFTW) with the standard host compiler:
 
       .. code-block:: shell
 
          cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -L ..
 
-   *  Building a project using HIP language APIs, hipFFT, and device kernels with HIP-Clang:
+   *  Building a project using HIP language APIs, hipFFT (or hipFFTW), and device kernels with HIP-Clang:
 
       .. code-block:: shell
 

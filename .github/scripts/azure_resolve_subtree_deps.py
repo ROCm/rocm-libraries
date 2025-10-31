@@ -109,6 +109,7 @@ def main(argv=None) -> None:
         "projects/hipsparselt": 309,
         "projects/miopen": 320,
         "shared/origami": 364,
+        "projects/rocwmma": 370,
     }
 
     args = parse_arguments(argv)

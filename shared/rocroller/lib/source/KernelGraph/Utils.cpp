@@ -546,14 +546,11 @@ namespace rocRoller
             return kgraph.coordinates.get<CT::LDS>(tag) || kgraph.coordinates.get<CT::User>(tag);
         }
 
-        std::pair<int, Graph::Direction>
-            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS)
+        std::pair<int, Graph::Direction> getOperationTarget(int                tag,
+                                                            KernelGraph const& kgraph,
+                                                            bool isStorePartOfBidirectionalOp)
         {
             auto elem = kgraph.control.getElement(tag);
-            if(isDirect2LDS)
-            {
-                return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
-            }
 
             using result = std::pair<int, Graph::Direction>;
 
@@ -563,10 +560,15 @@ namespace rocRoller
                         -> result {
                         return {kgraph.mapper.get<CT::User>(tag), GD::Upstream};
                     },
-                    [&](CIsAnyOf<CG::LoadTiled,
-                                 CG::LoadVGPR,
-                                 CG::LoadSGPR,
-                                 CG::LoadTileDirect2LDS> auto const& op) -> result {
+                    [&](CIsAnyOf<CG::LoadTileDirect2LDS> auto const& op) -> result {
+                        if(isStorePartOfBidirectionalOp)
+                        {
+                            return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
+                        }
+                        return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
+                    },
+                    [&](CIsAnyOf<CG::LoadTiled, CG::LoadVGPR, CG::LoadSGPR> auto const& op)
+                        -> result {
                         return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
                     },
                     [&](CG::StoreLDSTile const& op) -> result {
@@ -1258,16 +1260,18 @@ namespace rocRoller
         /**
         * @brief Get coordinates required by the code-generator.
         */
-        std::vector<int>
-            getCodeGeneratorCoordinates(KernelGraph const& graph, int tag, bool isDirect2LDS)
+        std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
+                                                     int                tag,
+                                                     bool               isStorePartOfGlobalToLDSOp)
         {
             auto [tileTag, tile] = graph.getDimension<CT::MacroTile>(tag);
-            if(isDirect2LDS)
+            if(isStorePartOfGlobalToLDSOp)
             {
                 return {graph.mapper.get<CT::ElementNumber>(tag, 2),
                         graph.mapper.get<CT::ElementNumber>(tag, 3)};
             }
-            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT)
+            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT
+               || tile.memoryType == MemoryType::WAVE_Direct2LDS)
             {
                 return {graph.mapper.get<CT::ElementNumber>(tag, 0),
                         graph.mapper.get<CT::ElementNumber>(tag, 1)};
@@ -1392,5 +1396,25 @@ namespace rocRoller
             return controlStack(control, graph.control);
         }
 
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag)
+        {
+            bool const isUpstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag).empty();
+            bool const isDownstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(tag).empty();
+
+            if(isUpstreamEmpty == isDownstreamEmpty)
+            {
+                // Not dangling if both directions are empty or not empty.
+                return std::nullopt;
+            }
+
+            return isUpstreamEmpty ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+        }
+
+        bool isGlobalToLDSOp(KernelGraph const& graph, int op)
+        {
+            return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value();
+        }
     }
 }
