@@ -179,7 +179,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
         if (check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size_A)) {
             double Total_latency = compute_total_latency(
                 hardware, M, N, K, batch, transA, transB, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K,
-                element_size_A, element_size_B, element_size_out, mi_datatype, mx_block_size, WGM,
+                element_size_A, element_size_B, element_size_out, mi_datatype, mx_block_size, defaultWGM,
                 non_temporal_a, non_temporal_b, occupancy, 0, max_cus);
 
             valid_results.emplace_back(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy,
