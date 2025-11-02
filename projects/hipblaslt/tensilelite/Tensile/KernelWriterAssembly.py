@@ -10310,13 +10310,33 @@ class KernelWriterAssembly(KernelWriter):
     if not needSwap:
       return Module("TDM LDS swap (Empty)")
 
-    assert kernel["LdsAlignPow2"], "Currently TDM only supports LDS starts with power of 2"
-
-    swapMask: int = kernel[f"LdsOffsetA_Blk"]
+    module: Module = Module("TDM LDS swap")
+    module.addComment(f"TDM LDS swap(pow2: {kernel["LdsAlignPow2"]})")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
-    module: Module = Module()
-    module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
+
+    if kernel["LdsAlignPow2"]:
+      swapMask: int = kernel[f"LdsOffsetA_Blk"]
+      module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
+    else:
+      #TODO: Refactor, this is for wave separated only
+      assert prod(kernel["MIWaveGroup"]) > 1
+      with self.allocTmpSgpr(2) as tmpSgprRes:
+        wavelen: int = kernel["WavefrontSize"]
+        waveIdSgprIdx: int = tmpSgprRes.idx
+        baseAddrSgprIdx: int = tmpSgprRes.idx + 1
+        module.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+        module.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+        module.add(SMovB32(sgpr(baseAddrSgprIdx), kernel["LdsOffsetA_Blk"], "Init as A blk"))
+        module.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+        module.add(SCSelectB32(sgpr(baseAddrSgprIdx), kernel["LdsOffsetB_Blk"], sgpr(baseAddrSgprIdx), "Set to B blk if odd"))
+        module.add(SMovB32(sgpr(waveIdSgprIdx), kernel["LdsNumElementsAlignedA"], "Init as A size"))
+        module.add(SCSelectB32(sgpr(waveIdSgprIdx), kernel["LdsNumElementsAlignedB"], sgpr(waveIdSgprIdx), "Set to B if odd"))
+        module.add(SCmpLtU32(sgpr(ldsAddrSgprName), sgpr(baseAddrSgprIdx), "Check if < blk offset"))
+        module.add(SMovB32(sgpr(baseAddrSgprIdx), -1, "Init as -1"))
+        module.add(SCSelectB32(sgpr(baseAddrSgprIdx), 1, sgpr(baseAddrSgprIdx), "neg or pos"))
+        module.add(SMulI32(sgpr(baseAddrSgprIdx), sgpr(baseAddrSgprIdx), sgpr(waveIdSgprIdx), "Mul to offset"))
+        module.add(SAddI32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(baseAddrSgprIdx), "Do swap"))
     return module
 
   ##############################################################################
