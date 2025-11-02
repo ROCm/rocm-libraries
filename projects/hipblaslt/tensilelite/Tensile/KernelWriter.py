@@ -5926,7 +5926,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     else:
       statesANumVgprG2LAllocated = statesANumVgprG2L
 
-    if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
+    if (not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMA"]:
       self.states.a.numVgprG2L = statesANumVgprG2L
       self.states.a.numVgprG2LAllocated = statesANumVgprG2LAllocated
       self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated if tensorParametersA["globalReadInstruction"].blockWidth != 6 else roundUp(statesANumVgprG2LAllocated * 4 / 3)
@@ -6012,7 +6012,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           statesBNumVgprG2LAllocated = roundUp(statesBNumVgprG2LAllocated * 4 / 3)
     else:
       statesBNumVgprG2LAllocated = statesBNumVgprG2L
-    if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
+    if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"] and not kernel["enableTDMB"]:
       self.states.b.numVgprG2L = statesBNumVgprG2L
       self.states.b.numVgprG2LAllocated = statesBNumVgprG2LAllocated
       self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
@@ -6655,7 +6655,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
     vgprIdx += numVgprValuPackA
     self.states.a.startVgprG2L = None
-    if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
+    if (not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMA"]:
       # DirectToVgpr + pack or input conversion case, overlap G2L and ValuPack
       if self.states.packDTVA:
         self.states.a.startVgprG2L = self.states.a.startVgprValuPack
@@ -6695,7 +6695,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
     vgprIdx += numVgprValuPackB
     self.states.b.startVgprG2L = None
-    if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
+    if (not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMB"]:
       # DirectToVgpr + pack  or input conversion case, overlap G2L and ValuPack
       if self.states.packDTVB:
         self.states.b.startVgprG2L = self.states.b.startVgprValuPack
