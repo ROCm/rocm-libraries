@@ -49,7 +49,23 @@ def allocPostLoopSrdSuppress(ch: str, labelStr: str, sgprLength) -> Module:
     return allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength)
 
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> SWaitTensorcnt:
-  return SWaitTensorcnt(tensorcnt=tensorcnt, comment=comment)
+  #TODO: refactor this
+  skipGR = tensorcnt > -1
+  vmcnt = 0 if skipGR else -1
+  mod = Module()
+  if skipGR:
+    numMXSA = kernel["NumLoadsPerpendicularMXSA"] * kernel["NumLoadsCoalescedMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
+    numMXSB = kernel["NumLoadsPerpendicularMXSB"] * kernel["NumLoadsCoalescedMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
+    numM = 0
+    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+      numM = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
+    numGR = 0
+    if tensorcnt > -1:
+      numGR += tensorcnt * (numMXSA + numMXSB + numM)
+    vmcnt += numGR
+    mod.add(SWaitCnt(vmcnt=vmcnt))
+  mod.add(SWaitTensorcnt(tensorcnt=tensorcnt, comment=comment))
+  return mod
 
 ##############################################################################
 # WaitCnt
