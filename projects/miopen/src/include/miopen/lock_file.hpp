@@ -36,6 +36,10 @@
 #include <boost/date_time/time.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 
+#if defined(_WIN32)
+#include <winsock.h>
+#endif
+
 #include <chrono>
 #include <fstream>
 #include <functional>
