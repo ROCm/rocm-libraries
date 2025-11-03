@@ -123,3 +123,36 @@ Executes the backward pass (data gradient) of a 2D convolution operation to comp
     H_in = stride_h * (H_out - 1) + dilation_h * (R - 1) + 1 - 2*pad_h
     W_in = stride_w * (W_out - 1) + dilation_w * (S - 1) + 1 - 2*pad_w
     ```
+
+### [**`ConvWgrad`**](./convolution/ConvWgrad.cpp)
+
+Executes the backward pass (filter gradient) of a 2D convolution operation to compute filter gradients.
+
+- For an output gradient tensor `dy` of shape `(N, K, H_out, W_out)` and an input tensor `x` of shape `(N, C, H_in, W_in)`, the convolution backward filter operation computes the filter gradient tensor `dw` of shape `(K, C, R, S)`. At a high-level, each filter gradient element is computed by accumulating contributions from all batch samples and valid spatial positions:
+
+    ```python
+    dw[k, c, r, s] = sum(sum(sum(dy[n, k, p, q] * x[n, c, h, w]
+                                 for n in range(N))
+                             for p in range(H_out))
+                         for q in range(W_out))
+    ```
+
+    where for each output position `(p, q)` and filter position `(r, s)`, the corresponding input position `(h, w)` is computed as:
+    
+    ```python
+    h = p * stride_h - pad_h + r * dilation_h
+    w = q * stride_w - pad_w + s * dilation_w
+    ```
+    
+    For each valid output position, the input position `(h, w)` must fall within the input bounds `[0, H_in) × [0, W_in)` to contribute to the gradient. Input positions outside these bounds (from padding regions) do not contribute.
+
+    The filter gradient dimensions match the original filter tensor from the forward pass:
+    
+    ```python
+    dw.shape = w.shape = (K, C, R, S)
+    ```
+    
+    where:
+    - `K` = number of output channels (filters)
+    - `C` = number of input channels per filter
+    - `R, S` = filter spatial dimensions (height, width)
