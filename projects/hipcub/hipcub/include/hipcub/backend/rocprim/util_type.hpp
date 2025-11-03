@@ -53,8 +53,16 @@ using NullType = ::rocprim::empty_type;
 
 #endif
 
+// This API needs to be deprecated once libhipcxx is available.
+#if defined(__SIZEOF_INT128__)
+    #define _CCCL_HAS_INT128() 1
+#else
+    #define _CCCL_HAS_INT128() 0
+#endif
+
 #ifndef HIPCUB_IS_INT128_ENABLED
-    #define HIPCUB_IS_INT128_ENABLED 1
+    // Deprecated [Since 4.2]
+    #define HIPCUB_IS_INT128_ENABLED _CCCL_HAS_INT128()
 #endif // !defined(HIPCUB_IS_INT128_ENABLED)
 
 template<bool B, typename T, typename F> struct
@@ -746,7 +754,7 @@ template <> struct NumericTraits<unsigned int> :        BaseTraits<UNSIGNED_INTE
 template <> struct NumericTraits<unsigned long> :       BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long, unsigned long> {};
 template <> struct NumericTraits<unsigned long long> :  BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long long, unsigned long long> {};
 
-    #if HIPCUB_IS_INT128_ENABLED
+    #if _CCCL_HAS_INT128()
 template<>
 struct NumericTraits<__uint128_t>
 {

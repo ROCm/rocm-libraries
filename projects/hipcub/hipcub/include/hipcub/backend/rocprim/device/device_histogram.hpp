@@ -70,7 +70,7 @@ struct int_arithmetic_t
     using type = ::std::conditional_t<
         sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
         uint32_t,
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
         ::std::conditional_t<(::std::is_same<CommonT, __int128_t>::value
                               || ::std::is_same<CommonT, __uint128_t>::value),
                              CommonT,

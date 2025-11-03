@@ -225,7 +225,7 @@ HIPCUB_FORCEINLINE unsigned int
     return detail::unsigned_bit_extract(source, bit_start, num_bits);
 }
 
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
 /**
  * Bitfield-extract for 128-bit types.
  */
