@@ -28,12 +28,14 @@
 #include <miopen/check_numerics.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
+#include <miopen/bfloat16.hpp>
 #include <gtest/gtest.h>
 #include <limits>
 #include <vector>
 #include <stdexcept>
 
 #include "get_handle.hpp"
+#include "../tensor_holder.hpp"
 
 namespace {
 
@@ -41,24 +43,24 @@ namespace {
 template <class T>
 void TestNormalValue(T val)
 {
-    miopen::Handle h = get_handle();
+    auto&& handle = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
-    auto buffer = h.Write(data);
+    auto buffer = handle.Write(data);
 
     EXPECT_FALSE(miopen::checkNumericsImpl(
-        h, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
+        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
     EXPECT_FALSE(miopen::checkNumericsImpl(
-        h, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
+        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
 
-    EXPECT_FALSE(miopen::checkNumericsImpl(h,
+    EXPECT_FALSE(miopen::checkNumericsImpl(handle,
                                           miopen::CheckNumerics::Throw |
                                               miopen::CheckNumerics::ComputeStats,
                                           desc,
                                           buffer.get(),
                                           true));
-    EXPECT_FALSE(miopen::checkNumericsImpl(h,
+    EXPECT_FALSE(miopen::checkNumericsImpl(handle,
                                           miopen::CheckNumerics::Throw |
                                               miopen::CheckNumerics::ComputeStats,
                                           desc,
@@ -70,37 +72,37 @@ void TestNormalValue(T val)
 template <class T>
 void TestAbnormalValue(T val)
 {
-    miopen::Handle h = get_handle();
+    auto&& handle = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
-    auto buffer = h.Write(data);
+    auto buffer = handle.Write(data);
 
     EXPECT_TRUE(miopen::checkNumericsImpl(
-        h, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
+        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
     EXPECT_TRUE(miopen::checkNumericsImpl(
-        h, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
+        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
 
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(
-                h, miopen::CheckNumerics::Throw, desc, buffer.get(), true);
+                handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true);
         },
         std::exception);
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(
-                h, miopen::CheckNumerics::Throw, desc, buffer.get(), false);
+                handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false);
         },
         std::exception);
 
-    EXPECT_TRUE(miopen::checkNumericsImpl(h,
+    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
                                          miopen::CheckNumerics::Warn |
                                              miopen::CheckNumerics::ComputeStats,
                                          desc,
                                          buffer.get(),
                                          true));
-    EXPECT_TRUE(miopen::checkNumericsImpl(h,
+    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
                                          miopen::CheckNumerics::Warn |
                                              miopen::CheckNumerics::ComputeStats,
                                          desc,
@@ -109,7 +111,7 @@ void TestAbnormalValue(T val)
 
     EXPECT_THROW(
         {
-            miopen::checkNumericsImpl(h,
+            miopen::checkNumericsImpl(handle,
                                      miopen::CheckNumerics::Throw |
                                          miopen::CheckNumerics::ComputeStats,
                                      desc,
@@ -119,7 +121,7 @@ void TestAbnormalValue(T val)
         std::exception);
     EXPECT_THROW(
         {
-            miopen::checkNumericsImpl(h,
+            miopen::checkNumericsImpl(handle,
                                      miopen::CheckNumerics::Throw |
                                          miopen::CheckNumerics::ComputeStats,
                                      desc,
