@@ -99,6 +99,12 @@ class RRPerfResult:
     checked: bool = field(repr=False, hash=False, compare=False, default=False)
     correct: bool = field(repr=False, hash=False, compare=False, default=True)
 
+    sgprCount: int = field(repr=False, hash=False, compare=False, default=None)
+    vgprCount: int = field(repr=False, hash=False, compare=False, default=None)
+    agprCount: int = field(repr=False, hash=False, compare=False, default=None)
+
+    ldsBytes: int = field(repr=False, hash=False, compare=False, default=None)
+
 
 @dataclass(unsafe_hash=True)
 class TypeParameters:
