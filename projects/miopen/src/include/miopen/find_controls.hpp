@@ -47,11 +47,6 @@ MIOPEN_EXPORT extern bool
 
 } // namespace debug
 
-class FindEnforce;
-class FindMode;
-
-MIOPEN_INTERNALS_EXPORT bool IsValidCombination(const FindEnforce& enforce, const FindMode& mode);
-
 enum class FindEnforceAction
 {
     First_ = 1, // 0 is returned for non-numeric env.vars.
@@ -81,8 +76,6 @@ public:
     FindEnforce();
     explicit FindEnforce(FindEnforceAction action_) : action(action_) {}
 
-    FindEnforceAction GetAction() const { return action; }
-
     template <class Context>
     bool IsDbClean(const Context& context) const
     {
@@ -92,9 +85,8 @@ public:
     template <class Context>
     bool IsSearch(const Context& context) const
     {
-        return IsEnabled(context) && (action == FindEnforceAction::Search ||
-                                      action == FindEnforceAction::SearchDbUpdate ||
-                                      action == FindEnforceAction::DbUpdate);
+        return IsEnabled(context) &&
+               (action == FindEnforceAction::Search || action == FindEnforceAction::SearchDbUpdate);
     }
 
     template <class Context>
@@ -139,23 +131,12 @@ private:
     template <class Context>
     bool IsEnabled(const Context& context) const
     {
-        FindEnforce enforce{};
-
-        // If no enforcement is active, always allow
-        if(!enforce.IsSomethingEnforced(context))
-            return true;
-
-        // Check if the combination is valid/safe
-        if(IsValidCombination(enforce, *this))
+        if(FindEnforce{}.IsSomethingEnforced(context))
         {
-            MIOPEN_LOG_I("Allowing MIOPEN_FIND_MODE with MIOPEN_FIND_ENFORCE combination");
-            return true;
+            MIOPEN_LOG_NQI("MIOPEN_FIND_MODE is set to NORMAL due to MIOPEN_FIND_ENFORCE");
+            return false;
         }
-
-        // Unsafe combination - force Normal mode
-        MIOPEN_LOG_NQI(
-            "MIOPEN_FIND_MODE is set to NORMAL due to unsafe combination with MIOPEN_FIND_ENFORCE");
-        return false;
+        return true;
     }
 
 public:
@@ -191,7 +172,7 @@ public:
     {
         // TrustVerify uses user db as groud truth, disable if no user db
 #if MIOPEN_DISABLE_USERDB
-        return false;
+        return false
 #else
         return (value == Values::TrustVerify || value == Values::TrustVerifyFull) &&
                IsEnabled(context);

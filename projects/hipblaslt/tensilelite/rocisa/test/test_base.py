@@ -111,8 +111,8 @@ def test_copy():
     print("This is a deepcopied function:", deepcopiedFunction(isa))
 
 def test_functions():
-    print("GLC:", rocisa.getGlcBitName(True))
-    print("SLC:", rocisa.getSlcBitName(False))
+    print("GLC:", rocisa.getGlcBitName())
+    print("SLC:", rocisa.getSlcBitName())
 
 test_rocisa()
 test_item()

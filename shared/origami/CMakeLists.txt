@@ -13,6 +13,9 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Set cpack license file here to avoid rocm-cmake warning
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+
 include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})

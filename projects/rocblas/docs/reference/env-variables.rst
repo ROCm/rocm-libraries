@@ -39,7 +39,7 @@ tables.
     * - | ``ROCBLAS_DEVICE_MEMORY_SIZE``
         | Sets how much memory to preallocate.
       - Unset by default.
-      - :ref:`rocblas_device_memory_size`
+      - :ref:`Preallocate memory <memory-alloc>`
       - | **0 or unset**: Lets rocBLAS manage the device memory.
         | **Bigger than 0**: Sets the default handle device memory size to the specified size (in bytes).
 
@@ -53,7 +53,7 @@ tables.
     * - | ``ROCBLAS_STREAM_ORDER_ALLOC``
         | Allows memory allocation and deallocation to be stream ordered.
       - 0
-      - :ref:`stream order alloc`
+      - :ref:`Device memory allocation <memory-alloc>`
       - | **0**: Disable
         | **1**: Enable
 
@@ -70,4 +70,4 @@ Logging environment variables
 The logging environment variables in rocBLAS are collected in the following
 table. For information on how to use these variables, see :ref:`logging`.
 
-.. include:: ../data/reference/env-variables/logging-env.rst
+.. include:: ../data/reference/logging-env.rst

@@ -33,7 +33,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadInstruction, DSLoadU16, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
-  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, \
+  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
@@ -256,7 +256,7 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
-  freeSgprVarPool                        = set()
+  freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
@@ -284,7 +284,7 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  tmpvgpr: List[int]                     = field(init=False) # vgpr dict for localread
   numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
@@ -317,6 +317,7 @@ class StateValues:
 
     self.preloadGuard = []
     self.tmpvgpr = {}
+    self.freeSgprVarPool = set()
 
 @dataclass
 class StateVgprs:
@@ -566,10 +567,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numPack = 999
     for n in range(numPack):
       if srcPackItems:
-        numPacked += 1
         item = srcPackItems.pop(0)
         dstPackItems.append(item)
-        itemStr = str(item)
+        numPacked += 1
+        itemStr = str(item.comment)
         for string in searchStrings:
           if string in itemStr:
             return numPacked
@@ -1124,7 +1125,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif isinstance(inst, SMFMAInstruction):
           srcRegs = [inst.a, inst.b, inst.metadata]
         else:
-          srcRegs = inst.srcs
+          if hasattr(inst, 'srcs'):
+            srcRegs = inst.srcs
+          else:
+            srcRegs = []
 
         return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
 
@@ -1230,8 +1234,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # if start to schedule localwrite, but still have localreads not scheduled yet,
         # reject to use 1LDSB, since it will write and read same lds buffer at same time.
         if mfmaIndex > self.states.sync1LdsMfmaIndex and localReadItemsThisLoop and oneBufferScheduling:
-          #TODO: can we remove this restriction?
-          self.states.overflowedResources = 5
+          # If DTLA and DTLB we can ignore this, since the global reads will be scheduled following
+          # the local reads, and there is an lgkmcnt(0) to wait for the remaining local reads
+          if not ((iteration == isBarrier - 1) and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
+            self.states.overflowedResources = 5
         for j in range(readLeft):
           if localReadItemsThisLoop:
             item = localReadItemsThisLoop.pop(0)
@@ -2094,12 +2100,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
         module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 1 1 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
       else:
         module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
         module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 0 0 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
@@ -3726,13 +3732,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numVgprBufferPackB = 1
 
     if kernel["UnrollMajorLDSA"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollA = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollA = 1
 
     if kernel["UnrollMajorLDSB"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollB = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollB = 1
@@ -5043,7 +5049,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # reads Per Iteration
     ########################################
     if kernel["EnableMatrixInstruction"]:
-      if kernel["UnrollMajorLDSA"]:
+      if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
@@ -5059,7 +5065,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tileM = kernel["MIWaveTile"][1] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTile"][0]
         numM = kernel["InnerUnroll"]*(tileM * self.states.numReadsPerUnrollMetadata) // tensorParametersM["localReadInstruction"].numOffsets
 
-      if kernel["UnrollMajorLDSB"]:
+      if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
@@ -5848,9 +5854,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return fileString
 
 
-  def setRocIsa(self, data):
+  def setRocIsa(self, data, outOptions):
     ti = rocIsa.getInstance()
     ti.setData(data)
+    ti.setOutputOptions(outOptions)
 
   def updateBranchPlaceHolder(self, module, placeholders, targets, operations):
     phs = [ ph for ph in placeholders ]

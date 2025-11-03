@@ -7,6 +7,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -130,7 +131,7 @@ protected:
 
         CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
-        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu.memory(), yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu, yTensor));
     }
 
     hipdnnEnginePluginHandle_t _handle = nullptr;
@@ -138,7 +139,8 @@ protected:
 
 std::vector<ConvTestCase> getTestCases()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
+    ;
 
     return {
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},

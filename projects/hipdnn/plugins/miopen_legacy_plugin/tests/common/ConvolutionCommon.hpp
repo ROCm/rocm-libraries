@@ -7,6 +7,7 @@
 #include <ostream>
 #include <vector>
 
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 namespace test_conv_common
@@ -87,7 +88,7 @@ struct ConvTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
     {
-        using namespace hipdnn_sdk::test_utilities;
+        using namespace hipdnn_sdk::utilities;
 
         ss << "(x:";
         vecToStream(ss, tc.xDims);
@@ -112,7 +113,7 @@ struct ConvTestCase
 
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -139,7 +140,7 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
 
 inline std::vector<ConvTestCase> getConvTestCases5D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1

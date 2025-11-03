@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -42,7 +43,7 @@ template <typename InputDataType, typename ScaleBiasDataType, typename MeanVaria
 struct BatchnormTrainTensorBundle
 {
     BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
-                               unsigned int seed = 1,
+                               unsigned int seed = getGlobalTestSeed(),
                                const TensorLayout& layout = TensorLayout::NCHW,
                                bool useOptionalTensors = false)
         : derivedDims(getDerivedShape(dims))
@@ -171,7 +172,7 @@ template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 struct BatchnormBwdTensorBundle
 {
     BatchnormBwdTensorBundle(const std::vector<int64_t>& dims,
-                             unsigned int seed = 1,
+                             unsigned int seed = getGlobalTestSeed(),
                              const TensorLayout& layout = TensorLayout::NCHW)
         : derivedDims(getDerivedShape(dims))
         , xTensor(dims, layout)

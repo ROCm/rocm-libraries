@@ -1,6 +1,8 @@
-import torch.nn.functional as functional;
+import torch.nn.functional as functional
+import torch
 from tensor import TensorAttributes
 from common import register_node
+from common import DTypeConverter
 
 @register_node
 class BatchnormInference:
@@ -28,10 +30,12 @@ class BatchnormInference:
                  scale: TensorAttributes,
                  bias: TensorAttributes,
                  y: TensorAttributes,
+                 compute_data_type: torch.dtype = torch.float ,
                  name: str = ""):
         self.inputs = BatchnormInference.Input(x, mean, inv_variance, scale, bias)
         self.outputs = BatchnormInference.Output(y)
         self.name = name
+        self.compute_data_type = compute_data_type
 
     def as_dict(self):
         return {
@@ -46,9 +50,10 @@ class BatchnormInference:
                 "y_tensor_uid": self.outputs.y.uid
             },
             "type": BatchnormInference.type_str,
+            "compute_data_type": DTypeConverter.to_string(self.compute_data_type),
             "name": self.name
         }
-    def execute(self):
+    def execute(self, using_gpu: bool):
         inputs = self.inputs
 
         # pytorch and hipdnn disagree on the dimension of mean, inv_variance, etc...
@@ -62,11 +67,24 @@ class BatchnormInference:
         inputs.bias.tensor.resize_(new_dims)
         inputs.inv_variance.tensor.resize_(new_dims)
 
+        if using_gpu:
+            inputs.x.to_gpu()
+            inputs.mean.to_gpu()
+            inputs.inv_variance.to_gpu()
+            inputs.scale.to_gpu()
+            inputs.bias.to_gpu()
+
+
         saved_exception = None
         
         try:
             self.outputs.y.tensor = functional.batch_norm(
-                inputs.x.tensor, inputs.mean.tensor, inputs.inv_variance.tensor, inputs.scale.tensor, inputs.bias.tensor, training=False
+                inputs.x.tensor,
+                inputs.mean.tensor,
+                inputs.inv_variance.tensor,
+                inputs.scale.tensor,
+                inputs.bias.tensor,
+                training=False
             )
         except Exception as e:
             saved_exception = e
@@ -76,6 +94,14 @@ class BatchnormInference:
             inputs.scale.tensor.resize_(original_dims)
             inputs.bias.tensor.resize_(original_dims)
             inputs.inv_variance.tensor.resize_(original_dims)
+
+            if using_gpu:
+                inputs.x.to_cpu()
+                inputs.mean.to_cpu()
+                inputs.inv_variance.to_cpu()
+                inputs.scale.to_cpu()
+                inputs.bias.to_cpu()
+
 
         if saved_exception is not None:
             raise saved_exception
@@ -91,4 +117,5 @@ class BatchnormInference:
                                   tensors[inputs["scale_tensor_uid"]],
                                   tensors[inputs["bias_tensor_uid"]],
                                   tensors[outputs["y_tensor_uid"]],
+                                  d["compute_data_type"],
                                   d["name"])

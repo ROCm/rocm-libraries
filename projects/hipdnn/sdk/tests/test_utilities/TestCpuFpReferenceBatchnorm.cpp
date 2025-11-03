@@ -2,18 +2,99 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
+#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
+#include "GoldenReferenceCpu.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
+
+namespace fs = std::filesystem;
+
+template <class T>
+class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
+{
+public:
+    void testSuite()
+    {
+        return goldenReferenceTestSuite(batchnorm::getToleranceInference<T>(),
+                                        batchnorm::getToleranceInference<T>());
+    }
+};
+
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32
+    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
+{
+};
+
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16
+    : public TestCpuBatchnormFwdInferenceGoldenReference<half>
+{
+};
+
+class TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16
+    : public TestCpuBatchnormFwdInferenceGoldenReference<hip_bfloat16>
+{
+};
+
+class TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32
+    : public TestCpuBatchnormFwdInferenceGoldenReference<float>
+{
+};
+
+// Nchw Fp32------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+
+// Nchw Fp16------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
+
+// Nchw Bfp16------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16,
+                         getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
+
+// Ncdhw Fp32------------
+TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
+{
+    testSuite();
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
+                         getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
+
+//--------------------------
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
 {
@@ -104,6 +185,25 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNhwc)
                                                                      varianceTensor,
                                                                      outputTensor,
                                                                      BATCHNORM_DEFAULT_EPSILON);
+}
+
+TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormFwdInferenceNhwc)
+{
+    Tensor<half> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    Tensor<half> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    Tensor<hip_bfloat16> biasTensor({1, 3});
+    Tensor<hip_bfloat16> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> varianceTensor({1, 3});
+
+    CpuFpReferenceBatchnormImpl<half, hip_bfloat16, float, double>::batchnormFwdInference(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        meanTensor,
+        varianceTensor,
+        outputTensor,
+        BATCHNORM_DEFAULT_EPSILON);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
@@ -328,6 +428,27 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormBackwardNchw)
                                                            dxTensor,
                                                            dscaleTensor,
                                                            dbiasTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormBackwardNchw)
+{
+    Tensor<half> xTensor({6, 3, 32, 32});
+    Tensor<half> dyTensor({6, 3, 32, 32});
+    Tensor<half> dxTensor({6, 3, 32, 32});
+    Tensor<hip_bfloat16> scaleTensor({1, 3});
+    Tensor<float> meanTensor({1, 3});
+    Tensor<float> invVarianceTensor({1, 3});
+    Tensor<hip_bfloat16> dscaleTensor({1, 3});
+    Tensor<hip_bfloat16> dbiasTensor({1, 3});
+
+    CpuFpReferenceBatchnormImpl<half, hip_bfloat16, float, double>::batchnormBwd(dyTensor,
+                                                                                 xTensor,
+                                                                                 meanTensor,
+                                                                                 invVarianceTensor,
+                                                                                 scaleTensor,
+                                                                                 dxTensor,
+                                                                                 dscaleTensor,
+                                                                                 dbiasTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBackwardNchw)
@@ -820,6 +941,33 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingNchw)
                                                                       0.1,
                                                                       &savedMean,
                                                                       &savedInvVariance);
+}
+
+TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormFwdTrainingNchw)
+{
+    Tensor<half> inputTensor({2, 3, 4, 4});
+    Tensor<half> outputTensor({2, 3, 4, 4});
+    Tensor<hip_bfloat16> scaleTensor({1, 3});
+    Tensor<hip_bfloat16> biasTensor({1, 3});
+    Tensor<float> savedMean({1, 3});
+    Tensor<float> savedInvVariance({1, 3});
+
+    inputTensor.fillWithValue(1.0);
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(staticCast<hip_bfloat16>(1.0), 0, i);
+        biasTensor.setHostValue(staticCast<hip_bfloat16>(0.0), 0, i);
+    }
+
+    CpuFpReferenceBatchnormImpl<half, hip_bfloat16, float, double>::batchnormFwdTraining(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        staticCast<hip_bfloat16>(BATCHNORM_DEFAULT_EPSILON),
+        staticCast<hip_bfloat16>(0.1),
+        &savedMean,
+        &savedInvVariance);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
