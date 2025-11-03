@@ -10,8 +10,8 @@ from common import DTypeConverter
 import argparse
 
 def save_batchnorm_inference_execution(x_size: list[int], 
-                                       io_type: torch.dtype, 
-                                       intermediate_type: torch.dtype, 
+                                       io_data_type: torch.dtype, 
+                                       intermediate_data_type: torch.dtype, 
                                        min_val, 
                                        max_val, 
                                        base_filename: str,
@@ -20,18 +20,18 @@ def save_batchnorm_inference_execution(x_size: list[int],
     derived_sizes = [1 for _ in x_size]
     derived_sizes[channel_idx] = x_size[channel_idx]
 
-    x            = TensorAttributes.random(min_val, max_val, io_type, x_size)
-    mean         = TensorAttributes.random(min_val, max_val, intermediate_type, derived_sizes)
-    inv_variance = TensorAttributes.random(min_val, max_val, intermediate_type, derived_sizes)
-    scale        = TensorAttributes.random(min_val, max_val, intermediate_type, derived_sizes)
-    bias         = TensorAttributes.random(min_val, max_val, intermediate_type, derived_sizes)
+    x            = TensorAttributes.random(min_val, max_val, io_data_type, x_size)
+    mean         = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
+    inv_variance = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
+    scale        = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
+    bias         = TensorAttributes.random(min_val, max_val, intermediate_data_type, derived_sizes)
     y            = TensorAttributes.empty()
 
     node = BatchnormInference(x, mean, inv_variance, scale, bias, y)
 
     node.execute(using_gpu)
 
-    graph = Graph([node], io_type=io_type, compute_type=io_type, intermediate_type=intermediate_type)
+    graph = Graph([node], io_data_type=io_data_type, compute_data_type=io_data_type, intermediate_data_type=intermediate_data_type)
     graph.save(base_filename)
 
 def main():
