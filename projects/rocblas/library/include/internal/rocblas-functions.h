@@ -23605,6 +23605,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_syrk_ex(rocblas_handle    handle,
                                               rocblas_datatype  c_type,
                                               rocblas_int       ldc,
                                               rocblas_datatype  execution_type);
+//! @}
 
 /*! @{
     \brief <b> BLAS EX API </b>

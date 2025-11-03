@@ -361,7 +361,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - WorkGroupMapping: [0]
+        - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         #- AssertFree0ElementMultiple: [8]
         #- AssertFree1ElementMultiple: [8]
