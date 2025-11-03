@@ -244,6 +244,11 @@ def runPerformanceCommand (platform, project)
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
+                    
+                    #Generate Resource Usage Report
+                    ./scripts/rrperf compare --format resource_md \\
+                        \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
+                            > resource_comparison_${platform.gpu}.md
                 """
             }
             else
@@ -281,6 +286,12 @@ def runPerformanceCommand (platform, project)
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
+                        
+                        #Generate Resource Usage Report
+                        ./scripts/rrperf compare --format resource_md \\
+                            ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
+                            ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
+                            > resource_comparison_${platform.gpu}.md
                     else
                         touch performance_comparison_${platform.gpu}.html
                         touch performance_comparison_${platform.gpu}.md
@@ -342,6 +353,34 @@ def runPerformanceCommand (platform, project)
             }
             if (!commentExists) {
                 def comment = pullRequest.comment(commentString)
+            }
+
+            // Resource Usage Report Comment
+            def resourceCommentTitle = "# Resource Usage Report for ${platform.gpu}"
+            def resourceCommentString = "${resourceCommentTitle}\n\n"
+            
+            // Check if resource comparison file exists
+            def resourceFile = new File("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md")
+            if (resourceFile.exists()) {
+                def resourceResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+                resourceCommentString += "## Results${estimateString}\n\n"
+                resourceCommentString += "${resourceResults}\n\n"
+                resourceCommentString += "<details><summary>Links</summary>\n\n"
+                resourceCommentString += "* [Performance Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+                resourceCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+                resourceCommentString += "</details>\n\n"
+
+                boolean resourceCommentExists = false
+                for (prComment in getPrComments(pullRequest)) {
+                    if (prComment.body.contains(resourceCommentTitle))
+                    {
+                        resourceCommentExists = true
+                        prComment.body = resourceCommentString
+                    }
+                }
+                if (!resourceCommentExists) {
+                    def resourceComment = pullRequest.comment(resourceCommentString)
+                }
             }
         }
         else
