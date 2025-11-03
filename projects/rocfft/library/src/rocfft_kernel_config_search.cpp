@@ -159,7 +159,7 @@ std::string test_kernel_src(const std::string&               kernel_name,
 {
     StockhamGeneratorSpecs specs{factorization,
                                  {},
-                                 {static_cast<unsigned int>(rocfft_precision_single)},
+                                 static_cast<unsigned int>(rocfft_precision_single),
                                  wgs,
                                  PrintScheme(compute_scheme)};
 

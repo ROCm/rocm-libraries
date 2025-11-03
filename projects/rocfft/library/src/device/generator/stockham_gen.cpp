@@ -52,7 +52,7 @@ struct GeneratedLauncher
                       const std::vector<unsigned int>& pp_factors_other,
                       const unsigned int&              pp_current_dim,
                       const unsigned int&              pp_off_dim,
-                      bool                             double_precision,
+                      const unsigned int&              precision_type,
                       const std::string&               sbrc_type,
                       const std::string&               sbrc_transpose_type)
         : scheme(scheme)
@@ -69,7 +69,7 @@ struct GeneratedLauncher
         , direct_to_from_reg(kernel.direct_to_from_reg)
         , sbrc_type(sbrc_type)
         , sbrc_transpose_type(sbrc_transpose_type)
-        , double_precision(double_precision)
+        , precision_type(precision_type)
     {
     }
 
@@ -90,7 +90,8 @@ struct GeneratedLauncher
     // SBRC transpose type
     std::string sbrc_type;
     std::string sbrc_transpose_type;
-    bool        double_precision;
+
+    unsigned int precision_type;
 
     // output a json object that the python generator can parse to know
     // how to build the function pool
@@ -129,7 +130,7 @@ struct GeneratedLauncher
         add_member("direct_to_from_reg", direct_to_from_reg ? "true" : "false");
         add_member("sbrc_type", quote_str(sbrc_type));
         add_member("sbrc_transpose_type", quote_str(sbrc_transpose_type));
-        add_member("double_precision", double_precision ? "true" : "false");
+        add_member("precision_type", std::to_string(precision_type));
         add_member("pp_child_scheme", quote_str(pp_child_scheme));
         add_member("pp_factors_curr", vec_to_list(pp_factors_curr));
         add_member("pp_factors_other", vec_to_list(pp_factors_other));
@@ -149,7 +150,7 @@ struct LaunchSuffix
     std::string sbrc_transpose_type;
 };
 
-void make_launcher(const std::vector<unsigned int>& precision_types,
+void make_launcher(const unsigned int&              precision_type,
                    const std::vector<LaunchSuffix>& launcher_suffixes,
                    StockhamKernel&                  kernel,
                    const std::string&               pp_child_scheme,
@@ -159,21 +160,19 @@ void make_launcher(const std::vector<unsigned int>& precision_types,
                    const unsigned int&              pp_off_dim,
                    std::vector<GeneratedLauncher>&  generated_launchers)
 {
-    for(auto precision_type : precision_types)
+
+    for(auto&& launcher : launcher_suffixes)
     {
-        for(auto&& launcher : launcher_suffixes)
-        {
-            generated_launchers.emplace_back(kernel,
-                                             launcher.scheme,
-                                             pp_child_scheme,
-                                             pp_factors_curr,
-                                             pp_factors_other,
-                                             pp_current_dim,
-                                             pp_off_dim,
-                                             precision_type == rocfft_precision_double,
-                                             launcher.sbrc_type,
-                                             launcher.sbrc_transpose_type);
-        }
+        generated_launchers.emplace_back(kernel,
+                                         launcher.scheme,
+                                         pp_child_scheme,
+                                         pp_factors_curr,
+                                         pp_factors_other,
+                                         pp_current_dim,
+                                         pp_off_dim,
+                                         precision_type,
+                                         launcher.sbrc_type,
+                                         launcher.sbrc_transpose_type);
     }
 }
 
@@ -255,7 +254,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
         if(params_1.current_dim == 0 && params_2.current_dim == 2)
         {
             StockhamPartialPassKernelRR kernelRR(specs1, params_1);
-            make_launcher(specs1.precisions,
+            make_launcher(specs1.precision,
                           {{"pp_stoc", specs1.scheme, "", ""}},
                           kernelRR,
                           "CS_KERNEL_STOCKHAM_PP",
@@ -266,7 +265,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           launchers);
 
             StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
-            make_launcher(specs2.precisions,
+            make_launcher(specs2.precision,
                           {{"pp_sbcc", specs2.scheme, "", ""}},
                           kernelCC,
                           "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
@@ -279,7 +278,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
         else if(params_1.current_dim == 2 && params_2.current_dim == 0)
         {
             StockhamPartialPassKernelRR kernelCC(specs1, params_1);
-            make_launcher(specs1.precisions,
+            make_launcher(specs1.precision,
                           {{"pp_sbcc", specs1.scheme, "", ""}},
                           kernelCC,
                           "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
@@ -290,7 +289,7 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           launchers);
 
             StockhamPartialPassKernelCC kernelRR(specs2, params_2, false);
-            make_launcher(specs2.precisions,
+            make_launcher(specs2.precision,
                           {{"pp_stoc", specs2.scheme, "", ""}},
                           kernelRR,
                           "CS_KERNEL_STOCKHAM_PP",
@@ -341,7 +340,7 @@ void stockham_variants(const std::string&            kernel_name,
     if(specs.scheme == "CS_KERNEL_STOCKHAM")
     {
         StockhamKernelRR kernel(specs);
-        make_launcher(specs.precisions,
+        make_launcher(specs.precision,
                       {{"stoc", specs.scheme, "", ""}},
                       kernel,
                       "CS_NONE",
@@ -354,7 +353,7 @@ void stockham_variants(const std::string&            kernel_name,
     else if(specs.scheme == "CS_KERNEL_STOCKHAM_BLOCK_CC")
     {
         StockhamKernelCC kernel(specs, false, false);
-        make_launcher(specs.precisions,
+        make_launcher(specs.precision,
                       {{"sbcc", specs.scheme, "", ""}},
                       kernel,
                       "CS_NONE",
@@ -405,7 +404,7 @@ void stockham_variants(const std::string&            kernel_name,
                             "SBRC_3D_FFT_ERC_TRANS_Z_XY",
                             "TILE_UNALIGNED"});
 
-        make_launcher(specs.precisions,
+        make_launcher(specs.precision,
                       suffixes,
                       kernel,
                       "CS_NONE",
@@ -419,7 +418,7 @@ void stockham_variants(const std::string&            kernel_name,
     {
         StockhamKernelCR kernel(specs);
 
-        make_launcher(specs.precisions,
+        make_launcher(specs.precision,
                       {{"sbcr", specs.scheme, "", ""}},
                       kernel,
                       "CS_NONE",
@@ -433,20 +432,16 @@ void stockham_variants(const std::string&            kernel_name,
     {
         StockhamKernelFused2D fused2d(specs, specs2d);
 
-        // output 2D launchers
-        for(auto prec_type : specs.precisions)
-        {
-            launchers.emplace_back(fused2d,
-                                   specs.scheme,
-                                   "CS_NONE",
-                                   std::vector<unsigned int>(),
-                                   std::vector<unsigned int>(),
-                                   0,
-                                   0,
-                                   (prec_type == rocfft_precision_double),
-                                   "",
-                                   "");
-        }
+        launchers.emplace_back(fused2d,
+                               specs.scheme,
+                               "CS_NONE",
+                               std::vector<unsigned int>(),
+                               std::vector<unsigned int>(),
+                               0,
+                               0,
+                               specs.precision,
+                               "",
+                               "");
     }
     else
         throw std::runtime_error("unhandled scheme");
@@ -454,15 +449,14 @@ void stockham_variants(const std::string&            kernel_name,
     output_json(launchers, kernel_name, output);
 }
 
-static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
+static size_t max_bytes_per_element(const unsigned int& precision)
 {
     // generate for the maximum element size in the available
     // precisions
     size_t element_size = 0;
-    for(auto p : precisions)
-    {
-        element_size = std::max(element_size, complex_type_size(static_cast<rocfft_precision>(p)));
-    }
+    element_size
+        = std::max(element_size, complex_type_size(static_cast<rocfft_precision>(precision)));
+
     return element_size;
 }
 
@@ -698,8 +692,8 @@ int main()
         threads_per_transform = parse_uints_csv(*arg);
 
         ++arg;
-        std::vector<unsigned int> precisions;
-        precisions = parse_uints_csv(*arg);
+        unsigned int precision;
+        precision = std::stoul(*arg);
 
         // create spec and pass to stockham_variants, writes partial output to stdout
         std::cout << DELIM;
@@ -733,12 +727,12 @@ int main()
             if(direct_to_from_reg.size() != 2)
                 throw std::runtime_error("CS_3D_PP requires two direct_to_from_reg configuration");
 
-            StockhamGeneratorSpecs specs1(factors1, {}, precisions, workgroup_size[0], scheme);
+            StockhamGeneratorSpecs specs1(factors1, {}, precision, workgroup_size[0], scheme);
             specs1.direct_to_from_reg    = direct_to_from_reg[0];
             specs1.threads_per_transform = threads_per_transform[0];
             specs1.wgs_is_derived        = true;
 
-            StockhamGeneratorSpecs specs2(factors2, {}, precisions, workgroup_size[1], scheme);
+            StockhamGeneratorSpecs specs2(factors2, {}, precision, workgroup_size[1], scheme);
             specs2.direct_to_from_reg    = direct_to_from_reg[1];
             specs2.threads_per_transform = threads_per_transform[1];
             specs2.wgs_is_derived        = true;
@@ -769,17 +763,17 @@ int main()
             ++arg;
             factors = parse_uints_csv(*arg);
 
-            StockhamGeneratorSpecs specs(factors, factors2d, precisions, workgroup_size[0], scheme);
+            StockhamGeneratorSpecs specs(factors, factors2d, precision, workgroup_size[0], scheme);
             specs.half_lds           = half_lds;
             specs.direct_to_from_reg = direct_to_from_reg[0];
 
-            specs.bytes_per_element = max_bytes_per_element(precisions);
+            specs.bytes_per_element = max_bytes_per_element(precision);
 
             specs.threads_per_transform = threads_per_transform.front();
 
             // second dimension for 2D_SINGLE
             StockhamGeneratorSpecs specs2d(
-                factors2d, factors, precisions, workgroup_size[0], scheme);
+                factors2d, factors, precision, workgroup_size[0], scheme);
 
             if(!threads_per_transform.empty())
                 specs2d.threads_per_transform = threads_per_transform.back();

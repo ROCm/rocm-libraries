@@ -32,6 +32,7 @@ import subprocess
 import sys
 import json
 import threading
+import copy
 
 import kernels.configs.config_sbrc as config_sbrc
 import kernels.configs.config_sbrr as config_sbrr
@@ -40,7 +41,6 @@ import kernels.configs.config_sbcr as config_sbcr
 import kernels.configs.config_2d_single as config_2d_single
 import kernels.configs.config_pp_3d as config_pp_3d
 
-from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace as NS
 from operator import mul
@@ -85,17 +85,39 @@ def cjoin(xs):
 #
 # Helpers
 #
-def unique(kernels):
-    """Merge kernel lists without duplicated meta.length; ignore later ones."""
+def merge_kernel_list(kernels, all_precisions):
+    """Merge precision list with kernel list. Check for duplicated kernel and invalid precision entries."""
     r, s = list(), set()
     for kernel in kernels:
-        if isinstance(kernel.length, list):
-            key = tuple(kernel.length) + (kernel.scheme, kernel.lds_size_bytes)
+        if hasattr(kernel, 'precision'):
+            precisions = kernel.precision
         else:
-            key = (kernel.length, kernel.scheme, kernel.lds_size_bytes)
-        if key not in s:
-            s.add(key)
-            r.append(kernel)
+            precisions = all_precisions
+
+        for p in precisions:
+            if p not in all_precisions:
+                print("Error: invalid precision in kernel configuration: \n" +
+                      str(kernel))
+                sys.exit(1)
+
+            kernel_cpy = copy.copy(kernel)
+            kernel_cpy.precision = p
+
+            if isinstance(kernel_cpy.length, list):
+                length_key = tuple(kernel_cpy.length)
+            else:
+                length_key = kernel_cpy.length
+
+            key = (length_key, kernel_cpy.scheme, kernel_cpy.precision,
+                   kernel_cpy.lds_size_bytes)
+
+            if key not in s:
+                s.add(key)
+                r.append(kernel_cpy)
+            else:
+                print("Error: duplicated entry in kernel configuration: " +
+                      str(kernel))
+                sys.exit(1)
     return r
 
 
@@ -116,8 +138,8 @@ class FFTKernel(BaseNode):
         f = 'FFTKernel('
         use_3steps_large_twd = getattr(self.function.meta,
                                        'use_3steps_large_twd', None)
-        # assume half-precision needs the same thing as single
-        precision = 'sp' if self.function.meta.precision == 'half' else self.function.meta.precision
+        # assume half-precision needs the same large twiddle table as single
+        precision = 'sp' if self.function.meta.precision == 'hp' else self.function.meta.precision
         if use_3steps_large_twd is not None:
             f += str(use_3steps_large_twd[precision])
         else:
@@ -191,7 +213,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     precisions = {
         'sp': 'rocfft_precision_single',
         'dp': 'rocfft_precision_double',
-        'half': 'rocfft_precision_half',
+        'hp': 'rocfft_precision_half',
     }
     var_kernel = Variable('kernel', 'FFTKernel')
     var_pp_kernel_1 = Variable('pp_kernel_1', 'FFTKernel')
@@ -248,8 +270,10 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
-                if (f_pp_1.meta.length != f_pp_2.meta.length):
-                    # we hit a new kernel with different length
+                if (f_pp_1.meta.length != f_pp_2.meta.length or
+                    (f_pp_1.meta.length == f_pp_2.meta.length
+                     and f_pp_1.meta.precision != f_pp_2.meta.precision)):
+                    # we hit a new kernel with different length/precision
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
                     skip_to_next_iter = True
@@ -317,6 +341,8 @@ def kernel_name(ns):
     elif ns.scheme == 'CS_KERNEL_STOCKHAM_BLOCK_CR':
         postfix = '_sbcr'
 
+    postfix += f'_{ns.precision}'
+
     if hasattr(ns, 'lds_size_bytes'):
         postfix += f'_lds{ns.lds_size_bytes}'
 
@@ -328,10 +354,8 @@ def list_small_kernels():
     kernels1d = config_sbrr.sbrr_kernels
 
     kernels = [
-        NS(**kernel.__dict__,
-           scheme='CS_KERNEL_STOCKHAM',
-           precision=['sp', 'dp'] if not hasattr(kernel, 'double_precision')
-           or kernel.double_precision else ['sp']) for kernel in kernels1d
+        NS(**kernel.__dict__, scheme='CS_KERNEL_STOCKHAM')
+        for kernel in kernels1d
     ]
 
     return kernels
@@ -381,10 +405,7 @@ def list_2d_kernels():
     expanded.extend(
         NS(**kernel.__dict__,
            scheme='CS_KERNEL_2D_SINGLE',
-           runtime_compile=True,
-           precision=['sp', 'dp'] if not hasattr(kernel, 'double_precision')
-           or kernel.double_precision else ['sp'])
-        for kernel in fused_2d_kernels)
+           runtime_compile=True) for kernel in fused_2d_kernels)
 
     return expanded
 
@@ -412,7 +433,7 @@ def default_runtime_compile(kernels, default_val):
     ]
 
 
-def generate_kernel_functions(kernels, precisions, launchers_json):
+def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
     """Generate CPU functions used to populate function pool with
     each kernel in `kernels`, and its variations.
     """
@@ -449,7 +470,7 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
             pp_current_dim = launcher.pp_current_dim
             pp_off_dim = launcher.pp_off_dim
             sbrc_transpose_type = launcher.sbrc_transpose_type
-            precision = 'dp' if launcher.double_precision else 'sp'
+            precision = precisions_type_dict[launcher.precision_type]
             runtime_compile = kernel.runtime_compile
             use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd',
                                            None)
@@ -463,33 +484,29 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
                 threads_per_transform, 0
             ]
 
-            precisions = [precision]
-            if precision == 'sp':
-                precisions.append('half')
-            for p in precisions:
-                f = Function(arguments=ArgumentList(data, back),
-                             meta=NS(factors=factors,
-                                     length=length,
-                                     params=params,
-                                     precision=p,
-                                     runtime_compile=runtime_compile,
-                                     scheme=scheme,
-                                     workgroup_size=workgroup_size,
-                                     transforms_per_block=transforms_per_block,
-                                     threads_per_transform=tpt_list,
-                                     transpose=sbrc_transpose_type,
-                                     use_3steps_large_twd=use_3steps_large_twd,
-                                     lds_size_bytes=kernel.lds_size_bytes,
-                                     pp_child_scheme=pp_child_scheme,
-                                     pp_factors_curr=pp_factors_curr,
-                                     pp_factors_other=pp_factors_other,
-                                     pp_current_dim=pp_current_dim,
-                                     pp_off_dim=pp_off_dim))
+            f = Function(arguments=ArgumentList(data, back),
+                         meta=NS(factors=factors,
+                                 length=length,
+                                 params=params,
+                                 precision=precision,
+                                 runtime_compile=runtime_compile,
+                                 scheme=scheme,
+                                 workgroup_size=workgroup_size,
+                                 transforms_per_block=transforms_per_block,
+                                 threads_per_transform=tpt_list,
+                                 transpose=sbrc_transpose_type,
+                                 use_3steps_large_twd=use_3steps_large_twd,
+                                 lds_size_bytes=kernel.lds_size_bytes,
+                                 pp_child_scheme=pp_child_scheme,
+                                 pp_factors_curr=pp_factors_curr,
+                                 pp_factors_other=pp_factors_other,
+                                 pp_current_dim=pp_current_dim,
+                                 pp_off_dim=pp_off_dim))
 
-                if (scheme == 'CS_3D_PP'):
-                    pp_kernel_functions.append(f)
-                else:
-                    kernel_functions.append(f)
+            if (scheme == 'CS_3D_PP'):
+                pp_kernel_functions.append(f)
+            else:
+                kernel_functions.append(f)
 
     return kernel_functions, pp_kernel_functions
 
@@ -502,7 +519,7 @@ def read_subprocess(proc_output, output):
     output[0] = json_string
 
 
-def generate_kernels(kernels, precisions, stockham_gen):
+def generate_kernels(precisions_dict, kernels, stockham_gen):
     """Generate and write kernels from the kernel list.
 
     Entries in the kernel list are simple namespaces.  These are
@@ -510,8 +527,6 @@ def generate_kernels(kernels, precisions, stockham_gen):
 
     A list of CPU functions is returned.
     """
-
-    pre_enum = {'sp': 0, 'dp': 1}
 
     # run stockham_gen to retrieve JSON output via stdout, used for additional kernel details
     proc = subprocess.Popen(args=[stockham_gen],
@@ -534,24 +549,21 @@ def generate_kernels(kernels, precisions, stockham_gen):
         if kernel_idx < num_kernels:
             k = kernels[kernel_idx]
 
-            kernel_precisions = k.precision if hasattr(
-                k, 'precision') else precisions
-
             # 2D single kernels always specify threads per transform
             if isinstance(k.length, list):
                 proc.stdin.write(','.join([str(f)
                                            for f in k.factors[0]]) + " ")
-                proc.stdin.write(','.join([str(f)
-                                           for f in k.factors[1]]) + " ")
-                proc.stdin.write(
-                    ','.join([str(pre_enum[pre])
-                              for pre in kernel_precisions]) + " ")
+                proc.stdin.write(','.join([str(f) for f in k.factors[1]]))
+
+                proc.stdin.write(f' {str(precisions_dict[k.precision])}' + " ")
+
                 proc.stdin.write(','.join(
                     [str(f) for f in k.threads_per_transform]))
             else:
-                proc.stdin.write(','.join([str(f) for f in k.factors]) + " ")
-                proc.stdin.write(','.join(
-                    [str(pre_enum[pre]) for pre in kernel_precisions]))
+                proc.stdin.write(','.join([str(f) for f in k.factors]))
+
+                proc.stdin.write(f' {precisions_dict[k.precision]}')
+
                 # 1D kernels might not, and need to default to 'uwide'
                 threads_per_transform = getattr(
                     k, 'threads_per_transform', {
@@ -620,7 +632,11 @@ def generate_kernels(kernels, precisions, stockham_gen):
     json_string = json_result[0]
     kernel_launchers = json.loads(json_string)
 
-    return generate_kernel_functions(kernels, precisions, kernel_launchers)
+    # Invert precisions dict for easy lookup
+    precisions_type_dict = {v: k for k, v in precisions_dict.items()}
+
+    return generate_kernel_functions(precisions_type_dict, kernels,
+                                     kernel_launchers)
 
 
 def cli():
@@ -635,9 +651,6 @@ def cli():
         type=int,
         help='Number of files to generate for parallel compilation.')
 
-    list_parser = subparsers.add_parser(
-        'list', help='List names of kernels that will be generated.')
-
     generate_parser = subparsers.add_parser('generate',
                                             help='Generate kernels.')
     generate_parser.add_argument('stockham_gen',
@@ -649,7 +662,11 @@ def cli():
         assert (args.num_files >
                 0), 'Number of files for function_pool should be positive'
 
-    precisions = ['dp', 'sp']
+    # List of supported precisions to build
+    # sp: single-precision
+    # dp: double-precision
+    # hp: half-precision
+    precisions_dict = {'sp': 0, 'dp': 1, 'hp': 2}
 
     #
     # kernel list
@@ -668,7 +685,10 @@ def cli():
         if not hasattr(k, 'lds_size_bytes'):
             k.lds_size_bytes = 65536
 
-    kernels = unique(kernels)
+    #
+    # merge kernel list with additional precision entries if required
+    #
+    kernels = merge_kernel_list(kernels, list(precisions_dict))
 
     #
     # set runtime compile
@@ -682,7 +702,7 @@ def cli():
     #
 
     if args.command == 'generate':
-        functions, pp_functions = generate_kernels(kernels, precisions,
+        functions, pp_functions = generate_kernels(precisions_dict, kernels,
                                                    args.stockham_gen)
         func_files = generate_cpu_function_pool_pieces(functions, pp_functions,
                                                        args.num_files)
