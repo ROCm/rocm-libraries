@@ -23,6 +23,24 @@ hipsparseXcsrmv()
   :outline:
 .. doxygenfunction:: hipsparseZcsrmv
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrmv_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrmv_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXcsrsv2_zeroPivot()
 =============================
 
@@ -72,6 +90,24 @@ hipsparseXcsrsv2_solve()
   :outline:
 .. doxygenfunction:: hipsparseZcsrsv2_solve
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrsv2_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrsv2_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXhybmv()
 =================
 
@@ -83,6 +119,24 @@ hipsparseXhybmv()
   :outline:
 .. doxygenfunction:: hipsparseZhybmv
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_hybmv_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_hybmv_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXbsrmv()
 =================
 
@@ -93,6 +147,24 @@ hipsparseXbsrmv()
 .. doxygenfunction:: hipsparseCbsrmv
   :outline:
 .. doxygenfunction:: hipsparseZbsrmv
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_bsrmv_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_bsrmv_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
 
 hipsparseXbsrxmv()
 ==================
@@ -154,6 +226,24 @@ hipsparseXbsrsv2_solve()
   :outline:
 .. doxygenfunction:: hipsparseZbsrsv2_solve
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_bsrsv2_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_bsrsv2_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXgemvi_bufferSize()
 ============================
 
@@ -175,3 +265,21 @@ hipsparseXgemvi()
 .. doxygenfunction:: hipsparseCgemvi
   :outline:
 .. doxygenfunction:: hipsparseZgemvi
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_gemvi_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_gemvi_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:

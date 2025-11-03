@@ -61,6 +61,22 @@ hipsparseXbsrilu02()
   :outline:
 .. doxygenfunction:: hipsparseZbsrilu02
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsrilu02_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsrilu02_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseXcsrilu02_zeroPivot()
 ==============================
 
@@ -121,6 +137,22 @@ hipsparseXcsrilu02()
   :outline:
 .. doxygenfunction:: hipsparseZcsrilu02
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csrilu02_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csrilu02_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseXbsric02_zeroPivot()
 =============================
 
@@ -158,6 +190,22 @@ hipsparseXbsric02()
 .. doxygenfunction:: hipsparseCbsric02
   :outline:
 .. doxygenfunction:: hipsparseZbsric02
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsric02_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsric02_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseXcsric02_zeroPivot()
 =============================
@@ -208,6 +256,22 @@ hipsparseXcsric02()
   :outline:
 .. doxygenfunction:: hipsparseZcsric02
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csric02_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csric02_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseXgtsv2_bufferSizeExt()
 ===============================
 
@@ -230,6 +294,22 @@ hipsparseXgtsv2()
   :outline:
 .. doxygenfunction:: hipsparseZgtsv2
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseXgtsv2_nopivot_bufferSizeExt()
 =======================================
 
@@ -251,6 +331,22 @@ hipsparseXgtsv2_nopivot()
 .. doxygenfunction:: hipsparseCgtsv2_nopivot
   :outline:
 .. doxygenfunction:: hipsparseZgtsv2_nopivot
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_no_pivot_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_no_pivot_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseXgtsv2StridedBatch_bufferSizeExt()
 ===========================================
@@ -295,6 +391,22 @@ hipsparseXgtsvInterleavedBatch()
 .. doxygenfunction:: hipsparseCgtsvInterleavedBatch
   :outline:
 .. doxygenfunction:: hipsparseZgtsvInterleavedBatch
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_interleaved_batch_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_gtsv_interleaved_batch_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseXgpsvInterleavedBatch_bufferSizeExt()
 ==============================================

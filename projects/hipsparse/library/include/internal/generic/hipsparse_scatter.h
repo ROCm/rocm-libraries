@@ -67,9 +67,6 @@ extern "C" {
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX or \p vecY pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_scatter.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

@@ -90,9 +90,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p csrVal, \p csrRowPtr or \p csrColInd
 *              pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2dense.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

@@ -28,6 +28,24 @@ hipsparseXcsrgeam()
   :outline:
 .. doxygenfunction:: hipsparseZcsrgeam
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXcsrgeam2_bufferSizeExt()
 ==================================
 
@@ -55,6 +73,24 @@ hipsparseXcsrgeam2()
   :outline:
 .. doxygenfunction:: hipsparseZcsrgeam2
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam2_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam2_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXcsrgemmNnz()
 ======================
 
@@ -70,6 +106,24 @@ hipsparseXcsrgemm()
 .. doxygenfunction:: hipsparseCcsrgemm
   :outline:
 .. doxygenfunction:: hipsparseZcsrgemm
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
 
 hipsparseXcsrgemm2_bufferSizeExt()
 ==================================
@@ -97,3 +151,21 @@ hipsparseXcsrgemm2()
 .. doxygenfunction:: hipsparseCcsrgemm2
   :outline:
 .. doxygenfunction:: hipsparseZcsrgemm2
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm2_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm2_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:

@@ -91,9 +91,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p nnzPerRow, \p csrVal \p csrRowPtr or \p csrColInd
 *              pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_dense2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -77,9 +77,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p cooRowInd or \p csrRowPtr
 *              pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_coo2csr.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,

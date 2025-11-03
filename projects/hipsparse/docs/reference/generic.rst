@@ -17,20 +17,84 @@ hipsparseAxpby()
 
 .. doxygenfunction:: hipsparseAxpby
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_axpby_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_axpby_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseGather()
 =================
 
 .. doxygenfunction:: hipsparseGather
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_gather_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_gather_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseScatter()
 ==================
 
 .. doxygenfunction:: hipsparseScatter
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_scatter_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_scatter_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseRot()
 ==============
 
 .. doxygenfunction:: hipsparseRot
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_rot_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_rot_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseSparseToDense_bufferSize()
 ===================================
@@ -41,6 +105,22 @@ hipsparseSparseToDense()
 ========================
 
 .. doxygenfunction:: hipsparseSparseToDense
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_sparse_to_dense_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_sparse_to_dense_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseDenseToSparse_bufferSize()
 ===================================
@@ -57,6 +137,22 @@ hipsparseDenseToSparse_convert()
 
 .. doxygenfunction:: hipsparseDenseToSparse_convert
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_dense_to_sparse_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_dense_to_sparse_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseSpVV_bufferSize()
 ==========================
 
@@ -66,6 +162,22 @@ hipsparseSpVV()
 ===============
 
 .. doxygenfunction:: hipsparseSpVV
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spvv_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spvv_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseSpMV_bufferSize()
 ==========================
@@ -82,6 +194,22 @@ hipsparseSpMV()
 
 .. doxygenfunction:: hipsparseSpMV
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spmv_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spmv_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseSpMM_bufferSize()
 ==========================
 
@@ -96,6 +224,22 @@ hipsparseSpMM()
 ===============
 
 .. doxygenfunction:: hipsparseSpMM
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spmm_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spmm_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseSpGEMM_createDescr()
 =============================
@@ -122,6 +266,22 @@ hipsparseSpGEMM_copy()
 
 .. doxygenfunction:: hipsparseSpGEMM_copy
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spgemm_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spgemm_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseSpGEMMreuse_workEstimation()
 =====================================
 
@@ -142,6 +302,22 @@ hipsparseSpGEMMreuse_compute()
 
 .. doxygenfunction:: hipsparseSpGEMMreuse_compute
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spgemm_reuse_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spgemm_reuse_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseSDDMM_bufferSize()
 ===========================
 
@@ -156,6 +332,22 @@ hipsparseSDDMM()
 ================
 
 .. doxygenfunction:: hipsparseSDDMM
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_sddmm_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_sddmm_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
 
 hipsparseSpSV_createDescr()
 ===========================
@@ -182,6 +374,22 @@ hipsparseSpSV_solve()
 
 .. doxygenfunction:: hipsparseSpSV_solve
 
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spsv_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spsv_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */
+
 hipsparseSpSM_createDescr()
 ===========================
 
@@ -206,3 +414,19 @@ hipsparseSpSM_solve()
 =====================
 
 .. doxygenfunction:: hipsparseSpSM_solve
+
+.. tabs::
+
+  .. tab:: C++
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spsm_cpp.cpp
+      :language: cpp
+      :start-after: //! [doc example start]
+      :end-before: //! [doc example end]
+
+  .. tab:: C
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/generic/example_hipsparse_spsm_c.c
+      :language: c
+      :start-after: /*! [doc example start] */
+      :end-before: /*! [doc example end] */

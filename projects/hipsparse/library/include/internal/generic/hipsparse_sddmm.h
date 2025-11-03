@@ -276,11 +276,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
-*
-*  \par Example
-*  This example performs sampled dense-dense matrix product, \f$C := \alpha ( A \cdot B ) \circ spy(C) + \beta C\f$
-*  where \f$\circ\f$ is the hadamard product
-*  \snippet example_hipsparse_sddmm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

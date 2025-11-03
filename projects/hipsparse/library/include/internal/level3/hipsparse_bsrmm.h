@@ -120,9 +120,6 @@ extern "C" {
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \p transB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
- *
- *  \par Example
- *  \snippet example_hipsparse_bsrmm.cpp doc example
  */
 /**@{*/
 HIPSPARSE_EXPORT

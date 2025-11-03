@@ -76,9 +76,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY pointer is
 *              invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_rot.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

@@ -83,9 +83,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz,
 *              \p lda, \p ldc, \p alpha, \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB,
 *              \p beta or \p C is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_gemmi.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
