@@ -1091,7 +1091,7 @@ struct onesweep_iteration_helper
     static constexpr unsigned int ValueLDSSize
         = BlockSize * NValue + (NValue == ItemsPerThread ? 0 : 1);
 
-    // Compiler had a hard type with non-trivial types.
+    // Compiler had a hard time with non-trivial types.
     using v_pack = type_wrapper<Value>;
 
     union data_storage
@@ -1275,7 +1275,7 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    // It only seems worse on mi308 in some cases.
+                    // It only seems worse on gfx942 in some cases.
                     if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
@@ -1368,7 +1368,7 @@ struct onesweep_iteration_helper
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
-                    // It only seems worse on mi308 in some cases.
+                    // It only seems worse on gfx942 in some cases.
                     if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
