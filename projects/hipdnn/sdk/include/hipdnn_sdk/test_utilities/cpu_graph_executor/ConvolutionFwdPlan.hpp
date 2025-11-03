@@ -70,14 +70,14 @@ public:
         auto shallowYTensor = createShallowTensor<InputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        // TODO: Figure out pre / post padding.  Probably have to re-write ConvolutionFwdInference
         CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convFwdInference(
             *shallowXTensor,
             *shallowWTensor,
             *shallowYTensor,
             _params.stride,
             _params.dilation,
-            _params.prePadding);
+            _params.prePadding,
+            _params.postPadding);
     }
 
 private:

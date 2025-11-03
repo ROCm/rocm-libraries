@@ -151,6 +151,9 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     variantPack[multiplyConstantTensorAttr->get_uid()] = multiplyConstantTensor.memory().hostData();
     variantPack[finalOutputTensorAttr->get_uid()] = yTensor.memory().hostData();
 
+    auto validationResult = graph->validate();
+    ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
     // Execute the graph using CPU graph executor
     CpuReferenceGraphExecutor graphExecutor;
     // Serialize the frontend graph to flatbuffer format

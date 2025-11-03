@@ -70,9 +70,9 @@ TEST(TestLoadGraphAndTensors, Valid)
 
     auto res = loadGraphAndTensors(filepath);
 
-    EXPECT_EQ(res.graph().compute_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().io_type(), data_objects::DataType::FLOAT);
-    EXPECT_EQ(res.graph().intermediate_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().compute_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().io_data_type(), data_objects::DataType::FLOAT);
+    EXPECT_EQ(res.graph().intermediate_data_type(), data_objects::DataType::FLOAT);
     EXPECT_EQ(res.graph().nodes()->size(), 1);
     EXPECT_EQ(res.graph().tensors()->size(), 6);
 
