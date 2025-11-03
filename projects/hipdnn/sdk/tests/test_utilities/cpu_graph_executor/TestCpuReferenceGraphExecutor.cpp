@@ -295,6 +295,117 @@ public:
             }
         }
     }
+
+    template <typename InputType, typename AccumulatorType>
+    static void runPointwiseBinaryTest(hipdnn_frontend::PointwiseMode mode,
+                                       hipdnn_sdk::data_objects::DataType inputDataType,
+                                       hipdnn_sdk::data_objects::DataType accumulatorDataType,
+                                       float in0TensorValue = 0.0f,
+                                       float in1TensorValue = 0.0f,
+                                       std::optional<float> reluLowerClip = std::nullopt,
+                                       std::optional<float> reluUpperClip = std::nullopt,
+                                       std::optional<float> reluLowerClipSlope = std::nullopt,
+                                       std::optional<float> swishBeta = std::nullopt,
+                                       std::optional<float> eluAlpha = std::nullopt,
+                                       std::optional<float> softplusBeta = std::nullopt)
+    {
+        std::vector<int64_t> inputDims = {1, 3, 4, 4};
+        std::vector<int64_t> outputDims = {1, 3, 4, 4};
+
+        auto [graph, tensorBundle, variantPack] = buildPointwiseBinaryGraph(inputDims,
+                                                                            inputDims,
+                                                                            outputDims,
+                                                                            inputDataType,
+                                                                            inputDataType,
+                                                                            accumulatorDataType,
+                                                                            inputDataType,
+                                                                            mode,
+                                                                            1,
+                                                                            TensorLayout::NCHW,
+                                                                            reluLowerClip,
+                                                                            reluUpperClip,
+                                                                            reluLowerClipSlope,
+                                                                            swishBeta,
+                                                                            eluAlpha,
+                                                                            softplusBeta);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+        auto graphWrap
+            = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        const auto& nodeWrap = graphWrap.getNodeWrapper(0);
+        const auto& attributes
+            = nodeWrap.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+        tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(in0TensorValue);
+        tensorBundle.tensors[attributes.in_1_tensor_uid().value()]->fillTensorWithValue(
+            in1TensorValue);
+
+        CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+
+        const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
+
+        if(mode == hipdnn_frontend::PointwiseMode::RELU_BWD)
+        {
+            if(reluLowerClip.has_value() && reluUpperClip.has_value())
+            {
+                ConstTensorView<InputType> outView(*outTensor);
+                for(const auto& val : outView)
+                {
+                    if(in0TensorValue < reluLowerClip.value()
+                       || in0TensorValue > reluUpperClip.value())
+                    {
+                        EXPECT_EQ(val, 0.0f);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(val, in1TensorValue);
+                    }
+                }
+            }
+            else if(reluUpperClip.has_value() && reluLowerClip == std::nullopt)
+            {
+
+                ConstTensorView<InputType> view(*outTensor);
+                for(const auto& val : view)
+                {
+                    if(in0TensorValue > reluUpperClip.value())
+                    {
+                        EXPECT_EQ(val, 0.0f);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(val, in1TensorValue);
+                    }
+                }
+            }
+            else if(reluLowerClipSlope.has_value())
+            {
+                ConstTensorView<InputType> view(*outTensor);
+                for(const auto& val : view)
+                {
+                    if(in0TensorValue < 0)
+                    {
+                        EXPECT_NEAR(val, in1TensorValue * reluLowerClipSlope.value(), 1e-5f);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(val, in1TensorValue);
+                    }
+                }
+            }
+            else
+            {
+                ConstTensorView<InputType> view(*outTensor);
+                for(const auto& val : view)
+                {
+                    EXPECT_TRUE(val >= 0.0f);
+                }
+            }
+        }
+    }
 };
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllFloats)
@@ -408,7 +519,7 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
                                                                               DataType::FLOAT);
 }
 
-TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFloats)
+TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFwdFloats)
 {
     //all below 0, all get clamped to 0
     TestCpuReferenceGraphExecutor::runPointwiseUnaryTest<float, float>(
@@ -419,7 +530,7 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFloats)
         hipdnn_frontend::PointwiseMode::RELU_FWD, DataType::FLOAT, DataType::FLOAT, 10.0f);
 }
 
-TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluClampFloats)
+TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFwdClampFloats)
 {
     // buffer data all below lower bounds.
     TestCpuReferenceGraphExecutor::runPointwiseUnaryTest<float, float>(
@@ -491,6 +602,116 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluUpperBoundClippedFloat)
         0.9f,
         std::nullopt,
         0.3f);
+}
+
+TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryReluBwdFloats)
+{
+    //all below 0, all get clamped to 0
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD, DataType::FLOAT, DataType::FLOAT, -10.0f);
+
+    //all above 0, no change.
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD, DataType::FLOAT, DataType::FLOAT, 10.0f);
+}
+
+TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryReluBwdClampFloats)
+{
+    // buffer data all below lower bounds.
+    float in0TensorValue = -1.0f; //X
+    float in1TensorValue = 5.0f; //Dy
+    // all below bounds will go to 0
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        0.1f,
+        0.3f);
+
+    // buffer data all above upper bounds.
+    in0TensorValue = 1.0f; //X
+    in1TensorValue = 2.0f; //Dy
+    //all above bounds wil go to 0
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        0.1f,
+        0.3f);
+
+    // buffer data all inside bounds
+    in0TensorValue = 0.2f; //X
+    in1TensorValue = 1.0f; //Dy
+    // all inside bounds, all 1
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        0.1f,
+        0.3f);
+}
+
+TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryReluBwdLeakyFloat)
+{
+
+    //all below 0
+    float in0TensorValue = -1.0f; //X
+    float in1TensorValue = 5.0f; //Dy
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        std::nullopt,
+        std::nullopt,
+        0.1f);
+
+    //all above 0
+    in0TensorValue = 1.0f; //X
+    in1TensorValue = 2.0f; //Dy
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        std::nullopt,
+        std::nullopt,
+        0.1f);
+}
+
+TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryReluBwdUpperBoundClippedFloat)
+{
+    //all bewlow upper bound is active
+    float in0TensorValue = 1.0f; //X
+    float in1TensorValue = 5.0f; //Dy
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        std::nullopt,
+        10.0f);
+
+    //all above upper bound, zeros out
+    in0TensorValue = 20.0f; //X
+    in1TensorValue = 2.0f; //Dy
+    TestCpuReferenceGraphExecutor::runPointwiseBinaryTest<float, float>(
+        hipdnn_frontend::PointwiseMode::RELU_BWD,
+        DataType::FLOAT,
+        DataType::FLOAT,
+        in0TensorValue,
+        in1TensorValue,
+        std::nullopt,
+        10.0f);
 }
 
 // Single-node pointwise operation tests

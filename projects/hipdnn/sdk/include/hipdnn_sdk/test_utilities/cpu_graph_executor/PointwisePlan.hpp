@@ -103,8 +103,28 @@ public:
             auto shallowIn1Tensor = createShallowTensor<DataType>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
+               || _params.reluLowerClipSlope.has_value())
+            {
+                CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                    _params.mode,
+                    *shallowOut0Tensor,
+                    *shallowIn0Tensor,
+                    *shallowIn1Tensor,
+                    static_cast<DataType>(
+                        _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
+                    static_cast<DataType>(_params.reluUpperClip.has_value()
+                                              ? _params.reluUpperClip.value()
+                                              : std::numeric_limits<float>::max()),
+                    static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                              ? _params.reluLowerClipSlope.value()
+                                              : 0.0f));
+            }
+            else
+            {
+                CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            }
         }
         else
         {
