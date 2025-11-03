@@ -67,24 +67,24 @@ int main(int argc, char* argv[])
     std::vector<int>   hcsrRowPtr = {0, 3, 6, 9, 12, 15, 19};
     std::vector<int>   hcsrColInd = {0, 1, 3, 1, 2, 5, 0, 3, 4, 2, 4, 5, 0, 4, 5, 0, 1, 4, 5};
     std::vector<float> hcsrVal    = {1.0f,
-                                     2.0f,
-                                     3.0f,
-                                     4.0f,
-                                     5.0f,
-                                     1.0f,
-                                     6.0f,
-                                     7.0f,
-                                     8.0f,
-                                     3.0f,
-                                     2.0f,
-                                     2.0f,
-                                     1.0f,
-                                     4.0f,
-                                     3.0f,
-                                     7.0f,
-                                     2.0f,
-                                     1.0f,
-                                     4.0f};
+                                  2.0f,
+                                  3.0f,
+                                  4.0f,
+                                  5.0f,
+                                  1.0f,
+                                  6.0f,
+                                  7.0f,
+                                  8.0f,
+                                  3.0f,
+                                  2.0f,
+                                  2.0f,
+                                  1.0f,
+                                  4.0f,
+                                  3.0f,
+                                  7.0f,
+                                  2.0f,
+                                  1.0f,
+                                  4.0f};
 
     int                  m           = 6;
     int                  n           = 6;
