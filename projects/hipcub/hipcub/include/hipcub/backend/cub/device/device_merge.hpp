@@ -33,6 +33,9 @@
 
 #include <cub/device/device_merge.cuh> // IWYU pragma: export
 
+#include <cuda/std/cstdint> // IWYU pragma: export
+using ::cuda::std::int64_t;
+
 BEGIN_HIPCUB_NAMESPACE
 
 struct DeviceMerge
@@ -46,9 +49,9 @@ struct DeviceMerge
     static hipError_t MergeKeys(void*          d_temp_storage,
                                 std::size_t&   temp_storage_bytes,
                                 KeyIteratorIn1 keys_in1,
-                                int            num_keys1,
+                                int64_t        num_keys1,
                                 KeyIteratorIn2 keys_in2,
-                                int            num_keys2,
+                                int64_t        num_keys2,
                                 KeyIteratorOut keys_out,
                                 CompareOp      compare_op = {},
                                 hipStream_t    stream     = 0)
@@ -77,10 +80,10 @@ struct DeviceMerge
                                  std::size_t&     temp_storage_bytes,
                                  KeyIteratorIn1   keys_in1,
                                  ValueIteratorIn1 values_in1,
-                                 int              num_keys1,
+                                 int64_t          num_keys1,
                                  KeyIteratorIn2   keys_in2,
                                  ValueIteratorIn2 values_in2,
-                                 int              num_keys2,
+                                 int64_t          num_keys2,
                                  KeyIteratorOut   keys_out,
                                  ValueIteratorOut values_out,
                                  CompareOp        compare_op = {},
