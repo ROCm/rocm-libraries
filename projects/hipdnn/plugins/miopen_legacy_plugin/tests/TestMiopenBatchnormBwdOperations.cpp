@@ -174,11 +174,9 @@ protected:
         CpuFpReferenceValidation<IntermediateType> cpuRefValidationIntermediate(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
-        EXPECT_TRUE(cpuRefValidationInput.allClose(dxTensorCpu.memory(), dxTensor.memory()));
-        EXPECT_TRUE(
-            cpuRefValidationIntermediate.allClose(dscaleTensorCpu.memory(), dscaleTensor.memory()));
-        EXPECT_TRUE(
-            cpuRefValidationIntermediate.allClose(dbiasTensorCpu.memory(), dbiasTensor.memory()));
+        EXPECT_TRUE(cpuRefValidationInput.allClose(dxTensorCpu, dxTensor));
+        EXPECT_TRUE(cpuRefValidationIntermediate.allClose(dscaleTensorCpu, dscaleTensor));
+        EXPECT_TRUE(cpuRefValidationIntermediate.allClose(dbiasTensorCpu, dbiasTensor));
     }
 
     hipdnnEnginePluginHandle_t _handle = nullptr;

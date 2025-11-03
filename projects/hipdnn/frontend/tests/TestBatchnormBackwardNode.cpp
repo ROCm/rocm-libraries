@@ -122,7 +122,7 @@ TEST(TestBatchnormBackwardNode, InferPropertiesNode)
     EXPECT_EQ(dbiasTensor->get_stride(), (std::vector<int64_t>{2, 1, 2, 2}));
 }
 
-TEST(TestBatchnormBackwardNode, GatherHipdnnTensorIds)
+TEST(TestBatchnormBackwardNode, GatherHipdnnTensors)
 {
     BatchnormBackwardAttributes batchnormAttributes;
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
@@ -145,109 +145,12 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
 
-    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
-    EXPECT_TRUE(duplicateIds.empty());
-}
-
-TEST(TestBatchnormBackwardNode, GatherHipdnnTensorsCollectsDuplicates)
-{
-    BatchnormBackwardAttributes batchnormAttributes;
-    batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
-
-    auto peerStat1 = std::make_shared<TensorAttributes>();
-    peerStat1->set_uid(9).set_name("PeerStat1");
-
-    // Introduce duplicate
-    auto duplicatePeerStat1 = std::make_shared<TensorAttributes>();
-    duplicatePeerStat1->set_uid(9).set_name("DuplicatePeerStat1");
-
-    auto peerStat2 = std::make_shared<TensorAttributes>();
-    peerStat2->set_uid(10).set_name("PeerStat2");
-
-    batchnormAttributes.set_peer_stats({peerStat1, duplicatePeerStat1, peerStat2});
-
-    GraphAttributes graphAttributes;
-    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
-
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
-
-    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
-    EXPECT_TRUE(duplicateIds.find(9) != duplicateIds.end());
-}
-
-TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)
-{
-    BatchnormBackwardAttributes batchnormAttributes;
-    batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_x(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
-    batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
-
-    auto peerStat1 = std::make_shared<TensorAttributes>();
-    auto peerStat2 = std::make_shared<TensorAttributes>();
-
-    batchnormAttributes.set_peer_stats({peerStat1, peerStat2});
-
-    GraphAttributes graphAttributes;
-    BatchnormBackwardNode node(std::move(batchnormAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, ErrorCode::OK);
-
-    // Collect all tensor attributes from input map, output map, and peer_stats vector
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size()
-                    + node.attributes.peer_stats.size());
-
-    // Add tensors from input map
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    // Add tensors from output map
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    // Add tensors from peer_stats vector
-    for(const auto& peerStat : node.attributes.peer_stats)
-    {
-        tensors.emplace_back(peerStat);
-    }
-
-    // Check that all tensors have unique IDs
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 10);
 }
 
 TEST(TestBatchnormBackwardNode, PackNode)

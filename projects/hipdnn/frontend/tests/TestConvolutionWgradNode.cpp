@@ -435,7 +435,7 @@ TEST(TestConvolutionWgradNode, PackNode)
     EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
+TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
 {
     ConvWgradAttributes convAttributes;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -458,55 +458,13 @@ TEST(TestConvolutionWgradNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-}
-
-TEST(TestConvolutionWgradNode, PopulateHipdnnTensorIds)
-{
-    ConvWgradAttributes convAttributes;
-    convAttributes.set_x(std::make_shared<TensorAttributes>());
-    convAttributes.set_dy(std::make_shared<TensorAttributes>());
-    convAttributes.set_dw(std::make_shared<TensorAttributes>());
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-
-    GraphAttributes graphAttributes;
-    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
-
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size());
-
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(dwTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3);
 }
 
 TEST(TestConvolutionWgradNode, StrideInferenceNchwLayoutSuccess)

@@ -14,7 +14,7 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk_test_utils;
 
-TEST(TestConvolutionFwdInferenceSignatureKey, EqualityOperator)
+TEST(TestConvolutionFwdSignatureKey, EqualityOperator)
 {
     ConvolutionFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT};
     ConvolutionFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT};
@@ -33,7 +33,7 @@ TEST(TestConvolutionFwdInferenceSignatureKey, EqualityOperator)
     EXPECT_FALSE(key7 == key8);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, HashFunction)
+TEST(TestConvolutionFwdSignatureKey, HashFunction)
 {
     ConvolutionFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT};
     ConvolutionFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT};
@@ -49,7 +49,7 @@ TEST(TestConvolutionFwdInferenceSignatureKey, HashFunction)
     EXPECT_TRUE(hash3 != hash4);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, Copy)
+TEST(TestConvolutionFwdSignatureKey, Copy)
 {
     ConvolutionFwdSignatureKey original{DataType::FLOAT, DataType::HALF};
     ConvolutionFwdSignatureKey copied{original};
@@ -59,7 +59,7 @@ TEST(TestConvolutionFwdInferenceSignatureKey, Copy)
     EXPECT_EQ(copied.accumulatorDataType, DataType::HALF);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
+TEST(TestConvolutionFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
     ConvolutionFwdSignatureKey expectedKey{DataType::FLOAT, DataType::FLOAT};
     std::vector<int64_t> xDims = {1, 1, 2, 2};
