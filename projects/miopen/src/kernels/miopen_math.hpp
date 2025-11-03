@@ -71,21 +71,16 @@ __forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y)
 {
     return hexp(__hmul(__half(y), hlog(__half(x))));
 }
-__forceinline__ __device__ _Float16 tan(_Float16 x)
-{
-    __half h = __half(x);
-    return __hdiv(hsin(h), hcos(h));
-}
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
-    // tanh(x) = (e^(2x) - 1) / (e^(2x) + 1)
-    __half h     = __half(x);
-    __half two   = __half(2.0f);
-    __half one   = __half(1.0f);
-    __half e2x   = hexp(__hmul(two, h));
-    __half num   = __hsub(e2x, one);
-    __half denom = __hadd(e2x, one);
-    return __hdiv(num, denom);
+    // As OpenCL implementation in ROCm/amd/device-libs/ocml/src/tanhH.cl
+    __half hx      = __half(x);
+    float x_scaled = float(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
+    float a        = __builtin_amdgcn_exp2f(x_scaled);
+    float b        = __builtin_amdgcn_exp2f(-x_scaled);
+    _Float16 one   = _Float16(__builtin_copysignf(1.0f, float(x)));
+    _Float16 ret   = _Float16((a - b) * __builtin_amdgcn_rcpf(a + b));
+    return __habs(hx) > __half(4.5f) ? one : ret;
 }
 
 } // namespace miopen
