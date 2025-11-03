@@ -119,6 +119,7 @@ add_library(miopen_legacy_plugin_private
     MiopenConvDescriptor.cpp
     MiopenUtils.cpp
     MiopenTensor.cpp
+    MiopenLegacyPlugin.cpp
 )
 target_compile_definitions(miopen_legacy_plugin_private PRIVATE 
     COMPONENT_NAME="miopen_legacy_plugin"
@@ -135,7 +136,7 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
 endif()
 
 add_library(miopen_legacy_plugin SHARED
-    MiopenLegacyPlugin.cpp
+    MiopenLegacyPluginPublic.cpp
 )
 target_compile_definitions(miopen_legacy_plugin PRIVATE 
     COMPONENT_NAME="miopen_legacy_plugin"

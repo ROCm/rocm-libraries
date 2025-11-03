@@ -40,7 +40,7 @@ protected:
             GTEST_SKIP();
         }
 
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreate(&_handle);
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreatePvt(&_handle);
         ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
