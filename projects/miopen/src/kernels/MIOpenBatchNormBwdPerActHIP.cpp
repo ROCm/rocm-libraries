@@ -57,26 +57,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int yglb_sz = MIO_BN_GRP1 * gridDim.y;
     int cidx             = in_cstride * xgid;
 
-    unsigned int index, adjIndex;
-    FLOAT_ACCUM mean, invVar;
-    FLOAT_ACCUM xhat, dyelem;
-    FLOAT_ACCUM pvt_scale, pvt_dscale;
-    FLOAT_ACCUM pvt_dbias;
-    FLOAT_ACCUM tmp1, tmp2, tmp3;
-    FLOAT_ACCUM dxhat    = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-    FLOAT_ACCUM dxhathat = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-
     // move across the sections of an image in the mini_batch stack
     for(int idx = ygid; idx < in_cstride; idx += yglb_sz)
     {
-        adjIndex   = cidx + idx;
-        mean       = savedMean[adjIndex];
-        invVar     = savedInvVariance[adjIndex];
-        pvt_scale  = scale[adjIndex];
-        pvt_dscale = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        pvt_dbias  = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        dxhat      = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        dxhathat   = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        unsigned int adjIndex = cidx + idx;
+        unsigned int index;
+        FLOAT_ACCUM mean       = savedMean[adjIndex];
+        FLOAT_ACCUM invVar     = savedInvVariance[adjIndex];
+        FLOAT_ACCUM pvt_scale  = scale[adjIndex];
+        FLOAT_ACCUM pvt_dscale = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM pvt_dbias  = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM dxhat      = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM dxhathat   = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM xhat, dyelem;
+        FLOAT_ACCUM tmp1, tmp2, tmp3;
 
         for(int n = 0; n < N; n++)
         {
@@ -131,29 +125,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int yglb_sz = MIO_BN_GRP1 * gridDim.y;
     int cidx             = in_cstride * xgid;
 
-    unsigned int index, adjIndex;
-    FLOAT_ACCUM mean, invVar;
-    FLOAT_ACCUM xhat, dyelem;
-    FLOAT_ACCUM pvt_scale, pvt_dscale;
-    FLOAT_ACCUM pvt_dbias;
-    FLOAT_ACCUM tmp1, tmp2, tmp3;
-    FLOAT_ACCUM dxhat    = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-    FLOAT_ACCUM dxhathat = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-    FLOAT_ACCUM variance = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-
     // move across the sections of the image mini_batch stack
     for(int idx = ygid; idx < in_cstride; idx += yglb_sz)
     {
-        mean     = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        adjIndex = cidx + idx; // gamma and beta tensor index
+        FLOAT_ACCUM mean      = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        unsigned int adjIndex = cidx + idx; // gamma and beta tensor index
+        unsigned int index;
         for(int n = 0; n < MIO_BN_N; n++)
         {
             index = in_nstride * n + adjIndex;
             mean += CVT_FLOAT2ACCUM(in[index]);
         }
         mean /= CVT_INTEGRAL2ACCUM(N);
-        variance = CVT_FP32_2ACCUM(static_cast<float>(0.0));
 
+        FLOAT_ACCUM variance = CVT_FP32_2ACCUM(static_cast<float>(0.0));
         for(int n = 0; n < MIO_BN_N; n++)
         {
             index             = in_nstride * n + adjIndex;
@@ -161,13 +146,15 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             variance += (xdiff * xdiff);
         }
         variance /= CVT_INTEGRAL2ACCUM(N);
-        invVar = rsqrt(variance + epsilon);
+        FLOAT_ACCUM invVar = rsqrt(variance + epsilon);
 
-        pvt_scale  = scale[adjIndex];
-        pvt_dscale = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        pvt_dbias  = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        dxhat      = CVT_FP32_2ACCUM(static_cast<float>(0.0));
-        dxhathat   = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM pvt_scale  = scale[adjIndex];
+        FLOAT_ACCUM pvt_dscale = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM pvt_dbias  = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM dxhat      = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM dxhathat   = CVT_FP32_2ACCUM(static_cast<float>(0.0));
+        FLOAT_ACCUM xhat, dyelem;
+        FLOAT_ACCUM tmp1, tmp2, tmp3;
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
