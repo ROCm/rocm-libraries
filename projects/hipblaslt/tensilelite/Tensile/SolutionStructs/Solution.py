@@ -1857,6 +1857,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
         return
 
+      if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
+        reject(state, printRejectionReason, "Currently TDM only supports TN")
+
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
