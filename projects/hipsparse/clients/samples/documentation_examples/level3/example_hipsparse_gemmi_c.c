@@ -25,22 +25,22 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
             fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
             fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 /*! [doc example start] */
@@ -55,9 +55,9 @@ int main(int argc, char* argv[])
     float alpha = 0.5;
     float beta  = 0.25;
 
-    int hcscColPtr[] = {0, 2, 5, 7, 8, 10};
-    int hcscRowInd[] = {0, 2, 0, 1, 3, 1, 3, 2, 0, 2};
-    float hcsc_val[] = {1, 6, 2, 4, 9, 5, 2, 7, 3, 8};
+    int   hcscColPtr[] = {0, 2, 5, 7, 8, 10};
+    int   hcscRowInd[] = {0, 2, 0, 1, 3, 1, 3, 2, 0, 2};
+    float hcsc_val[]   = {1, 6, 2, 4, 9, 5, 2, 7, 3, 8};
 
     float* hA = (float*)malloc(nnz_A * sizeof(float));
     float* hC = (float*)malloc(nnz_C * sizeof(float));
@@ -69,8 +69,7 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz_B));
     HIP_CHECK(hipMalloc((void**)&dcsc_val, sizeof(float) * nnz_B));
 
-    HIP_CHECK(
-        hipMemcpy(dcscColPtr, hcscColPtr, sizeof(int) * (n + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcscColPtr, hcscColPtr, sizeof(int) * (n + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcscRowInd, hcscRowInd, sizeof(int) * nnz_B, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsc_val, hcsc_val, sizeof(float) * nnz_B, hipMemcpyHostToDevice));
 

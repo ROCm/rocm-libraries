@@ -21,31 +21,28 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <iostream>
 #include <vector>
-#include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]

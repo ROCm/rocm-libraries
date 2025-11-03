@@ -21,28 +21,26 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
             fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
             fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 /*! [doc example start] */
@@ -68,24 +66,24 @@ int main(int argc, char* argv[])
     int   hcsrRowPtr[7]  = {0, 3, 6, 9, 12, 15, 19};
     int   hcsrColInd[19] = {0, 1, 3, 1, 2, 5, 0, 3, 4, 2, 4, 5, 0, 4, 5, 0, 1, 4, 5};
     float hcsrVal[19]    = {1.0,
-                         2.0,
-                         3.0,
-                         4.0,
-                         5.0,
-                         1.0,
-                         6.0,
-                         7.0,
-                         8.0,
-                         3.0,
-                         2.0,
-                         2.0,
-                         1.0,
-                         4.0,
-                         3.0,
-                         7.0,
-                         2.0,
-                         1.0,
-                         4.0};
+                            2.0,
+                            3.0,
+                            4.0,
+                            5.0,
+                            1.0,
+                            6.0,
+                            7.0,
+                            8.0,
+                            3.0,
+                            2.0,
+                            2.0,
+                            1.0,
+                            4.0,
+                            3.0,
+                            7.0,
+                            2.0,
+                            1.0,
+                            4.0};
 
     int                  m           = 6;
     int                  n           = 6;

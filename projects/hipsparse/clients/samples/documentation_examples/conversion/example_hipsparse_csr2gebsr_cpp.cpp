@@ -21,29 +21,27 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -66,27 +64,27 @@ int main(int argc, char* argv[])
     //     0 0 3 0 2 2
     //     1 0 0 0 4 3
     //     7 2 0 0 1 4
-    std::vector<int> hcsrRowPtr = {0, 3, 6, 9, 12, 15, 19};
-    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 5, 0, 3, 4, 2, 4, 5, 0, 4, 5, 0, 1, 4, 5};
-    std::vector<float> hcsrVal = {1.0f,
-                         2.0f,
-                         3.0f,
-                         4.0f,
-                         5.0f,
-                         1.0f,
-                         6.0f,
-                         7.0f,
-                         8.0f,
-                         3.0f,
-                         2.0f,
-                         2.0f,
-                         1.0f,
-                         4.0f,
-                         3.0f,
-                         7.0f,
-                         2.0f,
-                         1.0f,
-                         4.0f};
+    std::vector<int>   hcsrRowPtr = {0, 3, 6, 9, 12, 15, 19};
+    std::vector<int>   hcsrColInd = {0, 1, 3, 1, 2, 5, 0, 3, 4, 2, 4, 5, 0, 4, 5, 0, 1, 4, 5};
+    std::vector<float> hcsrVal    = {1.0f,
+                                     2.0f,
+                                     3.0f,
+                                     4.0f,
+                                     5.0f,
+                                     1.0f,
+                                     6.0f,
+                                     7.0f,
+                                     8.0f,
+                                     3.0f,
+                                     2.0f,
+                                     2.0f,
+                                     1.0f,
+                                     4.0f,
+                                     3.0f,
+                                     7.0f,
+                                     2.0f,
+                                     1.0f,
+                                     4.0f};
 
     int                  m           = 6;
     int                  n           = 6;
@@ -106,7 +104,8 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz));
     HIP_CHECK(hipMalloc((void**)&dcsrVal, sizeof(float) * nnz));
 
-    HIP_CHECK(hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
 

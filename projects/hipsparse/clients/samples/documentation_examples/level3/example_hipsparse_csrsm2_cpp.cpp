@@ -26,22 +26,22 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -101,7 +101,8 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcsrVal, sizeof(double) * nnz));
     HIP_CHECK(hipMalloc((void**)&dB, sizeof(double) * n * nrhs));
 
-    HIP_CHECK(hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(double) * nnz, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, hB.data(), sizeof(double) * n * nrhs, hipMemcpyHostToDevice));

@@ -21,29 +21,27 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -67,11 +65,12 @@ int main(int argc, char* argv[])
     //     0 0 | 3 0 | 2 2
     //     1 0 | 0 0 | 4 3
     //     7 2 | 0 0 | 1 4
-    std::vector<int> hbsrRowPtr = {0, 3, 6};
-    std::vector<int> hbsrColInd = {0, 1, 2, 0, 1, 2};
-    std::vector<float> hbsrVal = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f, 0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
-                         0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
-                         3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
+    std::vector<int>   hbsrRowPtr = {0, 3, 6};
+    std::vector<int>   hbsrColInd = {0, 1, 2, 0, 1, 2};
+    std::vector<float> hbsrVal
+        = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f, 0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
+           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
+           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
 
     int                  m           = 6;
     int                  n           = 6;
@@ -90,10 +89,13 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
     HIP_CHECK(hipMalloc((void**)&dbsrVal, sizeof(float) * rowBlockDim * colBlockDim * nnzb));
 
-    HIP_CHECK(hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dbsrColInd, hbsrColInd.data(), sizeof(int) * nnzb, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(
-        dbsrVal, hbsrVal.data(), sizeof(float) * rowBlockDim * colBlockDim * nnzb, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dbsrVal,
+                        hbsrVal.data(),
+                        sizeof(float) * rowBlockDim * colBlockDim * nnzb,
+                        hipMemcpyHostToDevice));
 
     int*   dcsrRowPtr = nullptr;
     int*   dcsrColInd = nullptr;

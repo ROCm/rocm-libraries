@@ -25,22 +25,22 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
             fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
             fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 /*! [doc example start] */
@@ -63,7 +63,7 @@ int main(int argc, char* argv[])
 
     int   hbsrRowPtr[] = {0, 2, 4};
     int   hbsrColInd[] = {0, 1, 1, 2};
-    float hbsrVal[] = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
+    float hbsrVal[]    = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
 
     // Set dimension n of B
     const int n = 3;
@@ -72,23 +72,23 @@ int main(int argc, char* argv[])
 
     // Allocate and generate dense matrix B (k x n)
     float hB[] = {1.0,
-                       2.0,
-                       3.0,
-                       4.0,
-                       5.0,
-                       6.0,
-                       7.0,
-                       8.0,
-                       9.0,
-                       10.0,
-                       11.0,
-                       12.0,
-                       13.0,
-                       14.0,
-                       15.0,
-                       16.0,
-                       17.0,
-                       18.0};
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0,
+                  14.0,
+                  15.0,
+                  16.0,
+                  17.0,
+                  18.0};
 
     int*   dbsrRowPtr = NULL;
     int*   dbsrColInd = NULL;

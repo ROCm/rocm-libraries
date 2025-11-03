@@ -21,29 +21,27 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -60,9 +58,9 @@ int main(int argc, char* argv[])
     //     1 2 0 3 0
     // A = 0 4 5 0 0
     //     6 0 0 7 8
-    std::vector<int> hcscRowInd = {2, 0, 1, 0, 1, 2, 0, 2};
-    std::vector<int> hcscColPtr = {0, 2, 4, 5, 7, 8};
-    std::vector<float> hcscVal = {6.0f, 1.0f, 4.0f, 2.0f, 5.0f, 7.0f, 3.0f, 8.0f};
+    std::vector<int>   hcscRowInd = {2, 0, 1, 0, 1, 2, 0, 2};
+    std::vector<int>   hcscColPtr = {0, 2, 4, 5, 7, 8};
+    std::vector<float> hcscVal    = {6.0f, 1.0f, 4.0f, 2.0f, 5.0f, 7.0f, 3.0f, 8.0f};
 
     int m   = 3;
     int n   = 5;
@@ -76,7 +74,8 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcscVal, sizeof(float) * nnz));
 
     HIP_CHECK(hipMemcpy(dcscRowInd, hcscRowInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dcscColPtr, hcscColPtr.data(), sizeof(int) * (n + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dcscColPtr, hcscColPtr.data(), sizeof(int) * (n + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcscVal, hcscVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
 
     size_t bufferSize;

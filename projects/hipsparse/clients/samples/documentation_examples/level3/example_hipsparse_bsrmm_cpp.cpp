@@ -26,22 +26,22 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -62,9 +62,9 @@ int main(int argc, char* argv[])
     const int                  nnzb     = 4;
     const hipsparseDirection_t dir      = HIPSPARSE_DIRECTION_ROW;
 
-    std::vector<int> hbsrRowPtr = {0, 2, 4};
-    std::vector<int> hbsrColInd = {0, 1, 1, 2};
-    std::vector<float> hbsrVal = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
+    std::vector<int>   hbsrRowPtr = {0, 2, 4};
+    std::vector<int>   hbsrColInd = {0, 1, 1, 2};
+    std::vector<float> hbsrVal    = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
 
     // Set dimension n of B
     const int n = 3;
@@ -73,23 +73,23 @@ int main(int argc, char* argv[])
 
     // Allocate and generate dense matrix B (k x n)
     std::vector<float> hB = {1.0f,
-                       2.0f,
-                       3.0f,
-                       4.0f,
-                       5.0f,
-                       6.0f,
-                       7.0f,
-                       8.0f,
-                       9.0f,
-                       10.0f,
-                       11.0f,
-                       12.0f,
-                       13.0f,
-                       14.0f,
-                       15.0f,
-                       16.0f,
-                       17.0f,
-                       18.0f};
+                             2.0f,
+                             3.0f,
+                             4.0f,
+                             5.0f,
+                             6.0f,
+                             7.0f,
+                             8.0f,
+                             9.0f,
+                             10.0f,
+                             11.0f,
+                             12.0f,
+                             13.0f,
+                             14.0f,
+                             15.0f,
+                             16.0f,
+                             17.0f,
+                             18.0f};
 
     int*   dbsrRowPtr = NULL;
     int*   dbsrColInd = NULL;
@@ -97,10 +97,13 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1)));
     HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
     HIP_CHECK(hipMalloc((void**)&dbsrVal, sizeof(float) * nnzb * blockDim * blockDim));
-    HIP_CHECK(hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dbsrColInd, hbsrColInd.data(), sizeof(int) * nnzb, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(
-        dbsrVal, hbsrVal.data(), sizeof(float) * nnzb * blockDim * blockDim, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dbsrVal,
+                        hbsrVal.data(),
+                        sizeof(float) * nnzb * blockDim * blockDim,
+                        hipMemcpyHostToDevice));
 
     // Copy B to the device
     float* dB;

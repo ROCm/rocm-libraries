@@ -26,22 +26,22 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -56,8 +56,8 @@ int main(int argc, char* argv[])
     // 0 0 5 1
     // 0 2 0 0
     // 4 0 0 8
-    std::vector<int> hAptr = {0, 3, 5, 6, 8};
-    std::vector<int> hAcol = {0, 2, 3, 2, 3, 1, 0, 3};
+    std::vector<int>    hAptr = {0, 3, 5, 6, 8};
+    std::vector<int>    hAcol = {0, 2, 3, 2, 3, 1, 0, 3};
     std::vector<double> hAval = {1.0, 3.0, 4.0, 5.0, 1.0, 2.0, 4.0, 8.0};
 
     int m   = 4;

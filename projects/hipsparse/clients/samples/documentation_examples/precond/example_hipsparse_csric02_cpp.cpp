@@ -26,22 +26,22 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -111,7 +111,8 @@ int main(int argc, char* argv[])
         hipMalloc((void**)&dcsrVal,
                   sizeof(float) * nnz)); // Note: Same size as input, values will be overwritten
 
-    HIP_CHECK(hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
 
@@ -167,7 +168,8 @@ int main(int argc, char* argv[])
 
     // Copy the factorized values (L) back to host
     std::vector<float> hcsrVal_result(nnz);
-    HIP_CHECK(hipMemcpy(hcsrVal_result.data(), dcsrVal, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(hcsrVal_result.data(), dcsrVal, sizeof(float) * nnz, hipMemcpyDeviceToHost));
 
     // Print the result (the values of the factorized L)
     printf("\nFactorized CSR values (L factor):\n");

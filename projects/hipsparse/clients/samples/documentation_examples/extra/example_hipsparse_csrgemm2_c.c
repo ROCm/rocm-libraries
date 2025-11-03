@@ -21,28 +21,26 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
             fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
             fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 /*! [doc example start] */
@@ -56,7 +54,7 @@ int main(int argc, char* argv[])
     int nnzD = 6;
 
     float alpha = 1.0;
-    float beta = 1.0;
+    float beta  = 1.0;
 
     // A, B, and C are mxk, kxn, and m×n
 
@@ -65,26 +63,26 @@ int main(int argc, char* argv[])
     // 3 4 0
     // 5 6 7
     // 0 0 9
-    int hcsrRowPtrA[] = {0, 1, 3, 6, 7};
-    int hcsrColIndA[] = {0, 0, 1, 0, 1, 2, 2};
-    float hcsrValA[] = {1.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0};
+    int   hcsrRowPtrA[] = {0, 1, 3, 6, 7};
+    int   hcsrColIndA[] = {0, 0, 1, 0, 1, 2, 2};
+    float hcsrValA[]    = {1.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0};
 
     // B
     // 0 1
     // 1 0
     // 0 1
-    int hcsrRowPtrB[] = {0, 1, 2, 3};
-    int hcsrColIndB[] = {1, 0, 1};
-    float hcsrValB[] = {1.0, 1.0, 1.0};
+    int   hcsrRowPtrB[] = {0, 1, 2, 3};
+    int   hcsrColIndB[] = {1, 0, 1};
+    float hcsrValB[]    = {1.0, 1.0, 1.0};
 
     // D
     // 0 1
     // 2 3
     // 4 5
     // 0 6
-    int hcsrRowPtrD[] = {0, 1, 3, 5, 6};
-    int hcsrColIndD[] = {1, 0, 1, 0, 1, 1};
-    float hcsrValD[] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+    int   hcsrRowPtrD[] = {0, 1, 3, 5, 6};
+    int   hcsrColIndD[] = {1, 0, 1, 0, 1, 1};
+    float hcsrValD[]    = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
 
     // Device memory management: Allocate and copy A, B
     int*   dcsrRowPtrA;
@@ -108,20 +106,14 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcsrValD, nnzD * sizeof(float)));
     HIP_CHECK(hipMalloc((void**)&dcsrRowPtrC, (m + 1) * sizeof(int)));
 
-    HIP_CHECK(
-        hipMemcpy(dcsrRowPtrA, hcsrRowPtrA, (m + 1) * sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsrColIndA, hcsrColIndA, nnzA * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrRowPtrA, hcsrRowPtrA, (m + 1) * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrColIndA, hcsrColIndA, nnzA * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrValA, hcsrValA, nnzA * sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsrRowPtrB, hcsrRowPtrB, (k + 1) * sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsrColIndB, hcsrColIndB, nnzB * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrRowPtrB, hcsrRowPtrB, (k + 1) * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrColIndB, hcsrColIndB, nnzB * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrValB, hcsrValB, nnzB * sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsrRowPtrD, hcsrRowPtrD, (m + 1) * sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsrColIndD, hcsrColIndD, nnzD * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrRowPtrD, hcsrRowPtrD, (m + 1) * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsrColIndD, hcsrColIndD, nnzD * sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dcsrValD, hcsrValD, nnzD * sizeof(float), hipMemcpyHostToDevice));
 
     hipsparseHandle_t handle;
@@ -223,15 +215,13 @@ int main(int argc, char* argv[])
                                        info,
                                        dbuffer));
 
-    int* hcsrRowPtrC = (int*)malloc((m + 1) * sizeof(int));
-    int* hcsrColIndC = (int*)malloc((nnzC) * sizeof(int));
+    int*  hcsrRowPtrC = (int*)malloc((m + 1) * sizeof(int));
+    int*  hcsrColIndC = (int*)malloc((nnzC) * sizeof(int));
     float hcsrValC[nnzC];
 
     // Copy back to the host
-    HIP_CHECK(
-        hipMemcpy(hcsrRowPtrC, dcsrRowPtrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(hcsrColIndC, dcsrColIndC, sizeof(int) * nnzC, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrRowPtrC, dcsrRowPtrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrColIndC, dcsrColIndC, sizeof(int) * nnzC, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(hcsrValC, dcsrValC, sizeof(float) * nnzC, hipMemcpyDeviceToHost));
 
     printf("C\n");

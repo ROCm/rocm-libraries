@@ -21,28 +21,28 @@
  *
  * ************************************************************************ */
 
- // Assuming this provides basic utility functions, remove if not needed for standalone example
+// Assuming this provides basic utility functions, remove if not needed for standalone example
 
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
             fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
             fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 /*! [doc example start] */
@@ -68,7 +68,7 @@ int main(int argc, char* argv[])
     //  0  0 -1  2 -1
     //  0  0  0 -1  2
     float hdl[] = {0.0, -1.0, -1.0, -1.0, -1.0};
-    float hd[] = {2.0, 2.0, 2.0, 2.0, 2.0};
+    float hd[]  = {2.0, 2.0, 2.0, 2.0, 2.0};
     float hdu[] = {-1.0, -1.0, -1.0, -1.0, 0.0};
 
     // Host right-hand side column vectors

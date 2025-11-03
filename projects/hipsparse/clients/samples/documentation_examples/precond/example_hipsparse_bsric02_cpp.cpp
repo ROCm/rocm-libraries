@@ -21,29 +21,27 @@
  *
  * ************************************************************************ */
 
-
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
+#define HIP_CHECK(stat)                                                        \
+    {                                                                          \
+        if(stat != hipSuccess)                                                 \
+        {                                                                      \
             std::cerr << "Error: hip error in line " << __LINE__ << std::endl; \
-            return -1;                                                \
-        }                                                             \
+            return -1;                                                         \
+        }                                                                      \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                        \
+    {                                                                                \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                         \
+        {                                                                            \
             std::cerr << "Error: hipsparse error in line " << __LINE__ << std::endl; \
-            return -1;                                                      \
-        }                                                                   \
+            return -1;                                                               \
+        }                                                                            \
     }
 
 //! [doc example start]
@@ -104,9 +102,11 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
     HIP_CHECK(hipMalloc((void**)&dbsrVal, sizeof(float) * nnzb * bs * bs));
 
-    HIP_CHECK(hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dbsrRowPtr, hbsrRowPtr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dbsrColInd, hbsrColInd.data(), sizeof(int) * nnzb, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dbsrVal, hbsrVal.data(), sizeof(float) * nnzb * bs * bs, hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dbsrVal, hbsrVal.data(), sizeof(float) * nnzb * bs * bs, hipMemcpyHostToDevice));
 
     // 1. Get buffer size
     int bufferSize = 0;
@@ -164,8 +164,8 @@ int main(int argc, char* argv[])
 
     // Copy the factorized values back to host
     std::vector<float> hbsrVal_result(nnzb * bs * bs);
-    HIP_CHECK(
-        hipMemcpy(hbsrVal_result.data(), dbsrVal, sizeof(float) * nnzb * bs * bs, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(
+        hbsrVal_result.data(), dbsrVal, sizeof(float) * nnzb * bs * bs, hipMemcpyDeviceToHost));
 
     // Print the result (the values of the factorized matrix)
     printf("Successfully computed incomplete Cholesky factorization.\n");
