@@ -562,7 +562,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const& problem, Hardware const* hardware) const;
+        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
+                                                      Hardware const* hardware, 
+                                                      uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 
