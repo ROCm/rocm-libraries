@@ -47,8 +47,9 @@ namespace rocsparse
                                                     const X*             x,
                                                     T                    beta,
                                                     Y*                   y,
-                                                    T                    gamma,
-                                                    const Z*             z,
+                                                    rocsparse_int        num_extra,
+                                                    const T*             gamma_device_array,
+                                                    const Z* const*      z_arrays,
                                                     rocsparse_index_base idx_base)
     {
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
@@ -83,9 +84,14 @@ namespace rocsparse
                 {
                     sum = rocsparse::fma<T>(beta, y[row], sum);
                 }
-                if(gamma != static_cast<T>(0))
+                // Add contributions from all extra vectors
+                for(rocsparse_int i = 0; i < num_extra; ++i)
                 {
-                    sum = rocsparse::fma<T>(gamma, z[row], sum);
+                    T gamma = gamma_device_array[i];
+                    if(gamma != static_cast<T>(0))
+                    {
+                        sum = rocsparse::fma<T>(gamma, z_arrays[i][row], sum);
+                    }
                 }
                 y[row] = sum;
             }
@@ -227,8 +233,9 @@ namespace rocsparse
                                                      const X*             x,
                                                      T                    beta,
                                                      Y*                   y,
-                                                     T                    gamma,
-                                                     Z*                   z,
+                                                     rocsparse_int        num_extra,
+                                                     const T*             gamma_device_array,
+                                                     const Z* const*      z_arrays,
                                                      rocsparse_index_base idx_base)
     {
         __shared__ T partialSums[BLOCKSIZE];
@@ -381,9 +388,14 @@ namespace rocsparse
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[local_row], temp_sum);
                     }
-                    if(gamma != static_cast<T>(0))
+                    // Add contributions from all extra vectors
+                    for(rocsparse_int i = 0; i < num_extra; ++i)
                     {
-                        temp_sum = rocsparse::fma<T>(gamma, z[local_row], temp_sum);
+                        T gamma = gamma_device_array[i];
+                        if(gamma != static_cast<T>(0))
+                        {
+                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][local_row], temp_sum);
+                        }
                     }
                     y[local_row] = temp_sum;
                 }
@@ -414,9 +426,14 @@ namespace rocsparse
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[local_row], temp_sum);
                     }
-                    if(gamma != static_cast<T>(0))
+                    // Add contributions from all extra vectors
+                    for(rocsparse_int i = 0; i < num_extra; ++i)
                     {
-                        temp_sum = rocsparse::fma<T>(gamma, z[local_row], temp_sum);
+                        T gamma = gamma_device_array[i];
+                        if(gamma != static_cast<T>(0))
+                        {
+                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][local_row], temp_sum);
+                        }
                     }
 
                     y[local_row] = temp_sum;
@@ -471,9 +488,14 @@ namespace rocsparse
                     {
                         temp_sum = rocsparse::fma<T>(beta, y[r], temp_sum);
                     }
-                    if(gamma != static_cast<T>(0))
+                    // Add contributions from all extra vectors
+                    for(rocsparse_int i = 0; i < num_extra; ++i)
                     {
-                        temp_sum = rocsparse::fma<T>(gamma, z[r], temp_sum);
+                        T gamma = gamma_device_array[i];
+                        if(gamma != static_cast<T>(0))
+                        {
+                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][r], temp_sum);
+                        }
                     }
 
                     y[r] = temp_sum;
@@ -505,9 +527,14 @@ namespace rocsparse
                 // The first workgroup handles the output initialization.
                 const Y out_val = y[row];
                 temp_sum        = (beta - static_cast<T>(1)) * out_val;
-                if(gamma != static_cast<T>(0))
+                // Add contributions from all extra vectors
+                for(rocsparse_int i = 0; i < num_extra; ++i)
                 {
-                    temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
+                    T gamma = gamma_device_array[i];
+                    if(gamma != static_cast<T>(0))
+                    {
+                        temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                    }
                 }
 
                 // All inter thread communication is done using atomics, therefore cache flushes or
@@ -863,8 +890,9 @@ namespace rocsparse
                                                   const X*             x,
                                                   T                    beta,
                                                   Y*                   y,
-                                                  T                    gamma,
-                                                  Z*                   z,
+                                                  rocsparse_int        num_extra,
+                                                  const T*             gamma_device_array,
+                                                  const Z* const*      z_arrays,
                                                   rocsparse_index_base idx_base)
     {
         const int tid = hipThreadIdx_x;
@@ -904,9 +932,14 @@ namespace rocsparse
                 temp_sum = rocsparse::fma<T>(beta, y[row], temp_sum);
             }
 
-            if(gamma != static_cast<T>(0))
+            // Add contributions from all extra vectors
+            for(rocsparse_int i = 0; i < num_extra; ++i)
             {
-                temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
+                T gamma = gamma_device_array[i];
+                if(gamma != static_cast<T>(0))
+                {
+                    temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                }
             }
 
             y[row] = temp_sum;
@@ -934,8 +967,9 @@ namespace rocsparse
                                                             const X*             x,
                                                             T                    beta,
                                                             Y*                   y,
-                                                            T                    gamma,
-                                                            const Z*             z,
+                                                            rocsparse_int        num_extra,
+                                                            const T*             gamma_device_array,
+                                                            const Z* const*      z_arrays,
                                                             rocsparse_index_base idx_base)
     {
         const int lid = hipThreadIdx_x;
@@ -991,9 +1025,14 @@ namespace rocsparse
                 temp_sum = rocsparse::fma<T>(beta, y[row], temp_sum);
             }
 
-            if(gamma != static_cast<T>(0))
+            // Add contributions from all extra vectors
+            for(rocsparse_int i = 0; i < num_extra; ++i)
             {
-                temp_sum = rocsparse::fma<T>(gamma, z[row], temp_sum);
+                T gamma = gamma_device_array[i];
+                if(gamma != static_cast<T>(0))
+                {
+                    temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                }
             }
 
             y[row] = temp_sum;

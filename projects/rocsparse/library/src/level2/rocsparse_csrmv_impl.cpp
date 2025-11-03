@@ -192,36 +192,84 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
     const X* x                 = reinterpret_cast<const X*>(x_);
     Y*       y                 = reinterpret_cast<Y*>(y_);
 
-    // Extract gamma from arrays
-    const T* gamma_device_host = nullptr;
-    if(num_extra > 0 && gamma_ptrs != nullptr && gamma_ptrs[0] != nullptr)
-    {
-        gamma_device_host = reinterpret_cast<const T*>(gamma_ptrs[0]);
-    }
-
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
     // Another quick return.
     if(m == 0 || n == 0 || nnz == 0)
     {
-        // Extract z for axpby_array call in early return case
-        using Z    = Y;
-        const Z* z = nullptr;
-        if(num_extra > 0 && z_vecs != nullptr && z_vecs[0] != nullptr)
+        if(num_extra == 0)
         {
-            z = reinterpret_cast<const Z*>(z_vecs[0]->const_values);
+            // matrix never accessed however still need to update y vector
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         }
-        // matrix never accessed however still need to update y vector
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::axpby_array(handle, ysize, gamma_device_host, z, beta_device_host, y));
+        else
+        {
+            // Extract gamma arrays and z vectors for batched operation
+            using Z                      = Y;
+            T*        gamma_device_array = nullptr;
+            const Z** z_array            = nullptr;
+
+            size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
+
+            bool  temp_alloc       = false;
+            void* temp_storage_ptr = nullptr;
+            if(handle->buffer_size >= buffer_size)
+            {
+                temp_storage_ptr = handle->buffer;
+                temp_alloc       = false;
+            }
+            else
+            {
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
+                temp_alloc = true;
+            }
+
+            gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
+            z_array = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
+                                                  + num_extra * sizeof(T));
+
+            // Fill the preallocated buffers
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
+                handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
+
+            // matrix never accessed however still need to update y vector
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+                handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
+
+            if(temp_alloc)
+            {
+                RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
+            }
+        }
+
         return rocsparse_status_success;
     }
 
     if(handle->pointer_mode == rocsparse_pointer_mode_host
-       && *alpha_device_host == static_cast<T>(0) && *beta_device_host == static_cast<T>(1)
-       && (gamma_device_host == nullptr || *gamma_device_host == static_cast<T>(0)))
+       && *alpha_device_host == static_cast<T>(0) && *beta_device_host == static_cast<T>(1))
     {
-        return rocsparse_status_success;
+        if(num_extra == 0)
+        {
+            return rocsparse_status_success;
+        }
+        else
+        {
+            bool all_gamma_zero = true;
+            for(rocsparse_int i = 0; i < num_extra; ++i)
+            {
+                if(reinterpret_cast<const T*>(gamma_ptrs[i])[0] != static_cast<T>(0))
+                {
+                    all_gamma_zero = false;
+                    break;
+                }
+            }
+
+            if(all_gamma_zero)
+            {
+                return rocsparse_status_success;
+            }
+        }
     }
 
     if(fallback_algorithm)
@@ -272,6 +320,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
                                                                               gamma_ptrs,
                                                                               z_vecs,
                                                                               force_conj));
+
         return rocsparse_status_success;
     }
 
@@ -341,6 +390,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
                                                                          gamma_ptrs,
                                                                          z_vecs,
                                                                          force_conj));
+
         return rocsparse_status_success;
     }
 

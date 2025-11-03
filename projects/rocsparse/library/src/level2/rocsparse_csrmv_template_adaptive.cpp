@@ -493,15 +493,15 @@ namespace rocsparse
                                 const X* __restrict__ x,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 Y* __restrict__ y,
-                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, gamma),
-                                Z* __restrict__ z,
+                                rocsparse_int        num_extra,
+                                const T*             gamma_device_array,
+                                const Z* const*      z_arrays,
                                 rocsparse_index_base idx_base,
                                 bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(gamma);
-        if(alpha != 0 || beta != 1 || gamma != 0)
+        if(alpha != 0 || beta != 1 || num_extra > 0)
         {
             rocsparse::
                 csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, WG_SIZE>(
@@ -517,8 +517,9 @@ namespace rocsparse
                     x,
                     beta,
                     y,
-                    gamma,
-                    z,
+                    num_extra,
+                    gamma_device_array,
+                    z_arrays,
                     idx_base);
         }
     }
@@ -644,19 +645,36 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Extract gamma from arrays
-    const T* gamma_device_host = nullptr;
-    if(num_extra > 0 && gamma_ptrs != nullptr && gamma_ptrs[0] != nullptr)
-    {
-        gamma_device_host = reinterpret_cast<const T*>(gamma_ptrs[0]);
-    }
+    // Extract gamma arrays and z vectors for batched operation
+    using Z                      = Y;
+    T*        gamma_device_array = nullptr;
+    const Z** z_array            = nullptr;
+    bool      temp_alloc         = false;
+    void*     temp_storage_ptr   = nullptr;
 
-    // Extract z vector from dnvec descriptor
-    using Z    = Y;
-    const Z* z = nullptr;
-    if(num_extra > 0 && z_vecs != nullptr && z_vecs[0] != nullptr)
+    if(num_extra > 0)
     {
-        z = reinterpret_cast<const Z*>(z_vecs[0]->const_values);
+        size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
+
+        if(handle->buffer_size >= buffer_size)
+        {
+            temp_storage_ptr = handle->buffer;
+            temp_alloc       = false;
+        }
+        else
+        {
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
+            temp_alloc = true;
+        }
+
+        gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
+        z_array            = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
+                                              + num_extra * sizeof(T));
+
+        // Fill the preallocated buffers
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
+            handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
     }
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -710,8 +728,9 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             x,
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
             y,
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, gamma_device_host),
-            z,
+            num_extra,
+            gamma_device_array,
+            z_array,
             descr->base,
             handle->pointer_mode == rocsparse_pointer_mode_host);
 
@@ -804,6 +823,12 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
+    }
+
+    // Clean up temp_storage_ptr
+    if(temp_alloc)
+    {
+        RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
     }
 
     return rocsparse_status_success;

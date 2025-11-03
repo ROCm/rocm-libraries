@@ -475,21 +475,37 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Extract gamma from arrays
-    const T* gamma_device_host = nullptr;
-    if(num_extra > 0 && gamma_ptrs != nullptr && gamma_ptrs[0] != nullptr)
-    {
-        gamma_device_host = reinterpret_cast<const T*>(gamma_ptrs[0]);
-    }
+    // Extract gamma arrays and z vectors for batched operation
+    using Z                      = Y;
+    T*        gamma_device_array = nullptr;
+    const Z** z_array            = nullptr;
+    bool      temp_alloc         = false;
+    void*     temp_storage_ptr   = nullptr;
 
-    // Extract z vector from dnvec descriptor
-    using Z    = Y;
-    const Z* z = nullptr;
-    if(num_extra > 0 && z_vecs != nullptr && z_vecs[0] != nullptr)
+    if(num_extra > 0)
     {
-        z = reinterpret_cast<const Z*>(z_vecs[0]->const_values);
-    }
+        size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
 
+        if(handle->buffer_size >= buffer_size)
+        {
+            temp_storage_ptr = handle->buffer;
+            temp_alloc       = false;
+        }
+        else
+        {
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
+            temp_alloc = true;
+        }
+
+        gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
+        z_array            = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
+                                              + num_extra * sizeof(T));
+
+        // Fill the preallocated buffers
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
+            handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
+    }
     const J ysize = (trans == rocsparse_operation_none) ? m : n;
 
     const bool skip_diag = (descr->type == rocsparse_matrix_type_symmetric);
@@ -497,8 +513,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
 
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
     {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::axpby_array(handle, ysize, gamma_device_host, z, beta_device_host, y));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+            handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
         LAUNCH_HELPER(LAUNCH_CSRMV)
     }
 
@@ -506,11 +522,17 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     {
         if(descr->type != rocsparse_matrix_type_symmetric)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::axpby_array(handle, ysize, gamma_device_host, z, beta_device_host, y));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+                handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
         }
 
         LAUNCH_HELPER(LAUNCH_CSRMVT)
+    }
+
+    // Clean up temp_storage_ptr
+    if(temp_alloc)
+    {
+        RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
     }
 
     return rocsparse_status_success;

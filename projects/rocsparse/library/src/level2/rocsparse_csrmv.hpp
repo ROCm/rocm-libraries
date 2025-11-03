@@ -36,6 +36,17 @@ namespace rocsparse
         csrmv_alg_nnzsplit
     } csrmv_alg;
 
+    // Helper function to extract gamma arrays and z vectors for batched operations
+    // gamma_device_array and z_array must be preallocated device buffers
+    template <typename T, typename Y>
+    rocsparse_status csrmv_extract_gamma_and_z_arrays(rocsparse_handle             handle,
+                                                      rocsparse_int                num_extra,
+                                                      rocsparse_datatype*          gamma_types,
+                                                      const void**                 gamma_ptrs,
+                                                      rocsparse_const_dnvec_descr* z_vecs,
+                                                      T*         gamma_device_array,
+                                                      const Y**  z_array);
+
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
                                                                rocsparse_operation       trans,
