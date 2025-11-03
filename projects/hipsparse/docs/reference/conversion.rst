@@ -42,7 +42,8 @@ hipsparseXdense2csr()
     .. literalinclude:: ../../clients/samples/documentation_examples/conversion/example_hipsparse_dense2csr_cpp.cpp
       :language: cpp
       :start-after: //! [doc example start]
-      :end-before: //! [doc example end]
+      :end-before: //! [doc example end]  
+      :linenos:
 
   .. tab:: C
 
@@ -50,6 +51,7 @@ hipsparseXdense2csr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXpruneDense2csr_bufferSize()
 =====================================
@@ -87,6 +89,7 @@ hipsparseXpruneDense2csr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -94,6 +97,7 @@ hipsparseXpruneDense2csr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXpruneDense2csrByPercentage_bufferSize()
 ===================================================
@@ -131,6 +135,7 @@ hipsparseXpruneDense2csrByPercentage()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -138,6 +143,7 @@ hipsparseXpruneDense2csrByPercentage()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXdense2csc()
 ========================
@@ -169,6 +175,7 @@ hipsparseXcsr2dense()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -176,6 +183,7 @@ hipsparseXcsr2dense()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsc2dense()
 ========================
@@ -212,6 +220,7 @@ hipsparseXcsr2bsr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -219,6 +228,7 @@ hipsparseXcsr2bsr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXnnz_compress()
 ========================
@@ -239,6 +249,7 @@ hipsparseXnnz_compress()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -246,6 +257,7 @@ hipsparseXnnz_compress()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2coo()
 ========================
@@ -261,6 +273,7 @@ hipsparseXcsr2coo()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -268,6 +281,7 @@ hipsparseXcsr2coo()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2csc()
 ========================
@@ -288,6 +302,7 @@ hipsparseXcsr2csc()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -295,6 +310,7 @@ hipsparseXcsr2csc()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2cscEx2_bufferSize()
 =================================
@@ -314,6 +330,7 @@ hipsparseXcsr2cscEx2()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -321,6 +338,7 @@ hipsparseXcsr2cscEx2()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2hyb()
 ========================
@@ -341,6 +359,7 @@ hipsparseXcsr2hyb()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -348,6 +367,7 @@ hipsparseXcsr2hyb()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2gebsc_bufferSize()
 ==================================
@@ -379,6 +399,7 @@ hipsparseXgebsr2gebsc()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -386,6 +407,7 @@ hipsparseXgebsr2gebsc()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2gebsr_bufferSize()
 =================================
@@ -412,6 +434,7 @@ hipsparseXcsr2gebsrNnz()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -419,6 +442,7 @@ hipsparseXcsr2gebsrNnz()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2gebsr()
 ========================
@@ -439,6 +463,7 @@ hipsparseXcsr2gebsr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -446,6 +471,7 @@ hipsparseXcsr2gebsr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXbsr2csr()
 ========================
@@ -466,6 +492,7 @@ hipsparseXbsr2csr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -473,6 +500,7 @@ hipsparseXbsr2csr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2csr()
 ========================
@@ -493,6 +521,7 @@ hipsparseXgebsr2csr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -500,6 +529,7 @@ hipsparseXgebsr2csr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsr2csr_compress()
 =============================
@@ -520,6 +550,7 @@ hipsparseXcsr2csr_compress()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -527,6 +558,7 @@ hipsparseXcsr2csr_compress()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXpruneCsr2csr_bufferSize()
 ==========================================
@@ -609,6 +641,7 @@ hipsparseXcoo2csr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -616,6 +649,7 @@ hipsparseXcoo2csr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseCreateIdentityPermutation()
 ==========================================
@@ -630,6 +664,7 @@ hipsparseCreateIdentityPermutation()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -637,6 +672,7 @@ hipsparseCreateIdentityPermutation()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsrsort_bufferSizeExt()
 =================================
@@ -652,6 +688,7 @@ hipsparseXcsrsort_bufferSizeExt()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -659,6 +696,7 @@ hipsparseXcsrsort_bufferSizeExt()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsrsort()
 ========================
@@ -673,6 +711,7 @@ hipsparseXcsrsort()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -680,6 +719,7 @@ hipsparseXcsrsort()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcscsort_bufferSizeExt()
 =================================
@@ -695,6 +735,7 @@ hipsparseXcscsort_bufferSizeExt()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -702,6 +743,7 @@ hipsparseXcscsort_bufferSizeExt()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcscsort()
 ========================
@@ -716,6 +758,7 @@ hipsparseXcscsort()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -723,6 +766,7 @@ hipsparseXcscsort()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcoosort_bufferSizeExt()
 =================================
@@ -738,6 +782,7 @@ hipsparseXcoosort_bufferSizeExt()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -745,6 +790,7 @@ hipsparseXcoosort_bufferSizeExt()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcoosortByRow()
 ========================
@@ -759,6 +805,7 @@ hipsparseXcoosortByRow()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -766,6 +813,7 @@ hipsparseXcoosortByRow()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcoosortByColumn()
 =================================
@@ -781,6 +829,7 @@ hipsparseXcoosortByColumn()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -788,6 +837,7 @@ hipsparseXcoosortByColumn()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2gebsr_bufferSize()
 ==========================================
@@ -814,6 +864,7 @@ hipsparseXgebsr2gebsrNnz()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -821,6 +872,7 @@ hipsparseXgebsr2gebsrNnz()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgebsr2gebsr()
 ========================
@@ -841,6 +893,7 @@ hipsparseXgebsr2gebsr()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -848,6 +901,7 @@ hipsparseXgebsr2gebsr()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXcsru2csr_bufferSizeExt()
 ==================================

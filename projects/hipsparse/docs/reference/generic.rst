@@ -25,6 +25,7 @@ hipsparseAxpby()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -32,6 +33,7 @@ hipsparseAxpby()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseGather()
 =================
@@ -46,6 +48,7 @@ hipsparseGather()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -53,6 +56,7 @@ hipsparseGather()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseScatter()
 ==================
@@ -67,6 +71,7 @@ hipsparseScatter()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -74,6 +79,7 @@ hipsparseScatter()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseRot()
 ==============
@@ -88,6 +94,7 @@ hipsparseRot()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -95,6 +102,7 @@ hipsparseRot()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSparseToDense_bufferSize()
 ===================================
@@ -114,6 +122,7 @@ hipsparseSparseToDense()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -121,6 +130,7 @@ hipsparseSparseToDense()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseDenseToSparse_bufferSize()
 ===================================
@@ -145,6 +155,7 @@ hipsparseDenseToSparse_convert()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -152,6 +163,7 @@ hipsparseDenseToSparse_convert()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpVV_bufferSize()
 ==========================
@@ -171,6 +183,7 @@ hipsparseSpVV()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -178,6 +191,7 @@ hipsparseSpVV()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpMV_bufferSize()
 ==========================
@@ -202,6 +216,7 @@ hipsparseSpMV()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -209,6 +224,7 @@ hipsparseSpMV()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpMM_bufferSize()
 ==========================
@@ -233,6 +249,7 @@ hipsparseSpMM()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -240,6 +257,7 @@ hipsparseSpMM()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpGEMM_createDescr()
 =============================
@@ -274,6 +292,7 @@ hipsparseSpGEMM_copy()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -281,6 +300,7 @@ hipsparseSpGEMM_copy()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpGEMMreuse_workEstimation()
 =====================================
@@ -310,6 +330,7 @@ hipsparseSpGEMMreuse_compute()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -317,6 +338,7 @@ hipsparseSpGEMMreuse_compute()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSDDMM_bufferSize()
 ===========================
@@ -341,6 +363,7 @@ hipsparseSDDMM()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -348,6 +371,7 @@ hipsparseSDDMM()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpSV_createDescr()
 ===========================
@@ -382,6 +406,7 @@ hipsparseSpSV_solve()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -389,6 +414,7 @@ hipsparseSpSV_solve()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseSpSM_createDescr()
 ===========================
@@ -423,6 +449,7 @@ hipsparseSpSM_solve()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -430,3 +457,4 @@ hipsparseSpSM_solve()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:

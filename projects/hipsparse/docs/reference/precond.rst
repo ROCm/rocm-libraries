@@ -69,6 +69,7 @@ hipsparseXbsrilu02()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -76,6 +77,15 @@ hipsparseXbsrilu02()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
+
+  .. tab:: Fortran
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsrilu02_fortran.f90
+      :language: fortran
+      :start-after: ! [doc example start]
+      :end-before: ! [doc example end]
+      :linenos:
 
 hipsparseXcsrilu02_zeroPivot()
 ==============================
@@ -145,6 +155,7 @@ hipsparseXcsrilu02()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -152,6 +163,15 @@ hipsparseXcsrilu02()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
+
+  .. tab:: Fortran
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csrilu02_fortran.f90
+      :language: fortran
+      :start-after: ! [doc example start]
+      :end-before: ! [doc example end]
+      :linenos:
 
 hipsparseXbsric02_zeroPivot()
 =============================
@@ -199,6 +219,7 @@ hipsparseXbsric02()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -206,6 +227,16 @@ hipsparseXbsric02()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
+
+
+  .. tab:: Fortran
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_bsric02_fortran.f90
+      :language: fortran
+      :start-after: ! [doc example start]
+      :end-before: ! [doc example end]
+      :linenos:
 
 hipsparseXcsric02_zeroPivot()
 =============================
@@ -264,6 +295,7 @@ hipsparseXcsric02()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -271,6 +303,15 @@ hipsparseXcsric02()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
+
+  .. tab:: Fortran
+
+    .. literalinclude:: ../../clients/samples/documentation_examples/precond/example_hipsparse_csric02_fortran.f90
+      :language: fortran
+      :start-after: ! [doc example start]
+      :end-before: ! [doc example end]
+      :linenos:
 
 hipsparseXgtsv2_bufferSizeExt()
 ===============================
@@ -302,6 +343,7 @@ hipsparseXgtsv2()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -309,6 +351,7 @@ hipsparseXgtsv2()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgtsv2_nopivot_bufferSizeExt()
 =======================================
@@ -340,6 +383,7 @@ hipsparseXgtsv2_nopivot()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -347,6 +391,7 @@ hipsparseXgtsv2_nopivot()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgtsv2StridedBatch_bufferSizeExt()
 ===========================================
@@ -400,6 +445,7 @@ hipsparseXgtsvInterleavedBatch()
       :language: cpp
       :start-after: //! [doc example start]
       :end-before: //! [doc example end]
+      :linenos:
 
   .. tab:: C
 
@@ -407,6 +453,7 @@ hipsparseXgtsvInterleavedBatch()
       :language: c
       :start-after: /*! [doc example start] */
       :end-before: /*! [doc example end] */
+      :linenos:
 
 hipsparseXgpsvInterleavedBatch_bufferSizeExt()
 ==============================================

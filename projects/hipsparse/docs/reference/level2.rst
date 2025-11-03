@@ -41,6 +41,14 @@ hipsparseXcsrmv()
          :end-before: /*! [doc example end] */
          :linenos:
 
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrmv_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXcsrsv2_zeroPivot()
 =============================
 
@@ -108,6 +116,14 @@ hipsparseXcsrsv2_solve()
          :end-before: /*! [doc example end] */
          :linenos:
 
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_csrsv2_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXhybmv()
 =================
 
@@ -137,6 +153,14 @@ hipsparseXhybmv()
          :end-before: /*! [doc example end] */
          :linenos:
 
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_hybmv_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXbsrmv()
 =================
 
@@ -164,6 +188,14 @@ hipsparseXbsrmv()
          :language: c
          :start-after: /*! [doc example start] */
          :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level2/example_hipsparse_bsrmv_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
          :linenos:
 
 hipsparseXbsrxmv()

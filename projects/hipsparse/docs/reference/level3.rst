@@ -42,6 +42,14 @@ hipsparseXbsrmm()
          :end-before: /*! [doc example end] */
          :linenos:
 
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrmm_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXcsrmm()
 =================
 
@@ -69,6 +77,14 @@ hipsparseXcsrmm()
          :language: c
          :start-after: /*! [doc example start] */
          :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrmm_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
          :linenos:
 
 hipsparseXcsrmm2()
@@ -194,6 +210,14 @@ hipsparseXcsrsm2_solve()
          :end-before: /*! [doc example end] */
          :linenos:
 
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrsm2_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXgemmi()
 =================
 
@@ -221,4 +245,12 @@ hipsparseXgemmi()
          :language: c
          :start-after: /*! [doc example start] */
          :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_gemmi_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
          :linenos:

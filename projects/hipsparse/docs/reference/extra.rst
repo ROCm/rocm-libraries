@@ -46,6 +46,15 @@ hipsparseXcsrgeam()
          :end-before: /*! [doc example end] */
          :linenos:
 
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXcsrgeam2_bufferSizeExt()
 ==================================
 
@@ -91,6 +100,15 @@ hipsparseXcsrgeam2()
          :end-before: /*! [doc example end] */
          :linenos:
 
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgeam2_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXcsrgemmNnz()
 ======================
 
@@ -125,6 +143,15 @@ hipsparseXcsrgemm()
          :end-before: /*! [doc example end] */
          :linenos:
 
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+         
 hipsparseXcsrgemm2_bufferSizeExt()
 ==================================
 
@@ -168,4 +195,12 @@ hipsparseXcsrgemm2()
          :language: c
          :start-after: /*! [doc example start] */
          :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/extra/example_hipsparse_csrgemm2_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
          :linenos:
