@@ -315,12 +315,16 @@ void rocsolver_logger::release_event(hipEvent_t event)
     // Ensure cache has enough space
     if(event_cache_head >= event_cache.size())
     {
-        event_cache.resize(event_cache_head + 1);
+        // Extend length of cache and increment head
+        event_cache.push_back(event);
+        ++event_cache_head;
     }
-
-    // Store event at head position and increment head
-    event_cache[event_cache_head] = event;
-    ++event_cache_head;
+    else
+    {
+        // Store event at head position and increment head
+        event_cache[event_cache_head] = event;
+        ++event_cache_head;
+    }
 }
 #endif
 
