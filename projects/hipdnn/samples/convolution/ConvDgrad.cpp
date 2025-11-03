@@ -22,18 +22,18 @@ void SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
-    std::cout << "Running convolution forward graph " << inputType << " [" << layout << "]"
+    std::cout << "Running convolution backward data graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     constexpr int64_t n = 16; // Batch size
 
-    // Input
-    constexpr int64_t c = 16; // Number of channels
+    // Input (dx dimensions)
+    constexpr int64_t c = 16; // Number of dx channels
     constexpr int64_t h = 16; // Height
     constexpr int64_t w = 16; // Width
 
     // Filter
-    constexpr int64_t k = 16; // Number of filters
+    constexpr int64_t k = 16; // Number of dy channels
     constexpr int64_t r = 3; // Height
     constexpr int64_t s = 3; // Width
     constexpr int64_t u = 1; // Height stride
@@ -43,20 +43,25 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilH = 1; // Height dilation
     constexpr int64_t dilW = 1; // Width dilation
 
-    auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(inputType);
+    // Output (dy dimensions) - computed based on input and conv parameters
+    const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
+    const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
-    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
+    auto graph = std::make_shared<graph::Graph>();
+    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto dyAttr = createTensor({n, k, outH, outW}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
-    graph::ConvFpropAttributes convAttributes;
-    convAttributes.set_name("conv_forward_node");
-    convAttributes.set_padding({padH, padW});
+    graph::ConvDgradAttributes convAttributes;
+    convAttributes.set_name("conv_backward_data_node");
+    convAttributes.set_pre_padding({padH, padW});
+    convAttributes.set_post_padding({padH, padW});
     convAttributes.set_stride({u, v});
     convAttributes.set_dilation({dilH, dilW});
 
-    auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
-    yAttr->set_output(true);
+    auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
+    dxAttr->set_output(true);
 
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
@@ -73,18 +78,18 @@ void SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
 
-    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
+    utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
     utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    utilities::Tensor<InputType> yTensor(yAttr->get_dim(), layout);
+    utilities::Tensor<InputType> dxTensor(dxAttr->get_dim(), layout);
 
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    yTensor.fillWithValue(static_cast<InputType>(0.0f));
+    dxTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
-    variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
+    variantPack[dyAttr->get_uid()] = dyTensor.memory().deviceData();
     variantPack[wAttr->get_uid()] = wTensor.memory().deviceData();
-    variantPack[yAttr->get_uid()] = yTensor.memory().deviceData();
+    variantPack[dxAttr->get_uid()] = dxTensor.memory().deviceData();
 
     int64_t workspaceSize;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
@@ -92,14 +97,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
-    yTensor.memory().markDeviceModified();
+    dxTensor.memory().markDeviceModified();
 
-    auto yHostPtr = yTensor.memory().hostData();
+    auto dxHostPtr = dxTensor.memory().hostData();
 
-    std::cout << "First 10 y values: ";
+    std::cout << "First 10 dx values: ";
     for(int i = 0; i < 10; ++i)
     {
-        std::cout << static_cast<float>(yHostPtr[i]) << " ";
+        std::cout << static_cast<float>(dxHostPtr[i]) << " ";
     }
     std::cout << '\n';
 
@@ -107,22 +112,23 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
+        utilities::Tensor<InputType> dxRefTensor(dxAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convFwdInference(
-            xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
+        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdData(
+            dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
+        auto tolerance = test_utilities::conv::getToleranceBwd<InputType>();
 
-        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto dxValidator
+            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(yRefTensor, yTensor);
+        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
 
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
     }
 
-    std::cout << "Convolution forward graph execution complete for " << inputType << ".\n\n";
+    std::cout << "Convolution backward data graph execution complete for " << inputType << ".\n\n";
 }
 
 int main(int argc, char* argv[])
@@ -137,6 +143,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All convolution forward runs completed.\n";
+    std::cout << "All convolution backward data runs completed.\n";
     return 0;
 }
