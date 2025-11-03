@@ -58,6 +58,8 @@ inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
 {
     __syncthreads();
 
+    // TODO consider parallelizing loop over multple threads rather than only using a couple of
+    // threads in the group.
     if(lid == 0 || lid == 1)
     {
         for(int k = 0; k < label_length; k++)
@@ -117,15 +119,10 @@ inline __device__ void AtomicLogAddExp(const int& j1,
     beta_temp += *(alpha_log + bidx_ts);
 
     float* addr = gradients + gidx;
-
-    unsigned int prev_val_int, cur_val_int;
-    memcpy(&cur_val_int, addr, sizeof(cur_val_int));
-
+    float prev_val, cur_val = *addr;
     do
     {
-        prev_val_int = cur_val_int;
-        float prev_val;
-        memcpy(&prev_val, &prev_val_int, sizeof(prev_val));
+        prev_val = cur_val;
 
         float a       = max(prev_val, beta_temp);
         float b       = min(prev_val, beta_temp);
@@ -137,14 +134,8 @@ inline __device__ void AtomicLogAddExp(const int& j1,
                             // cppcheck-suppress unpreciseMathCall
                             : max(a + logf(expf(b - a) + 1), negative_cutoff_val);
 
-        unsigned int new_val_int;
-        memcpy(&new_val_int, &new_val, sizeof(new_val));
-
-        // We want atomicCAS operates on global memory, so use a reinterpret cast rather
-        // then using memcpy to a threads private storage.
-        // cppcheck-suppress invalidPointerCast
-        cur_val_int = atomicCAS(reinterpret_cast<unsigned int*>(addr), prev_val_int, new_val_int);
-    } while(cur_val_int != prev_val_int);
+        cur_val = atomicCAS(addr, prev_val, new_val);
+    } while(cur_val != prev_val);
 }
 
 inline __device__ void CTCAlpha(const FLOAT* probs_logits,
@@ -384,10 +375,9 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 
 template <bool OptLclMemBeta, bool OptLclMemLb>
 __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
-                                            const unsigned int gid,
                                             const unsigned int grp_id,
                                             const FLOAT* probs_logits,
-                                            FLOAT* workSpace,
+                                            FLOAT* workspace,
                                             int* dim_data,
                                             FLOAT* losses,
                                             FLOAT* gradients,
@@ -420,14 +410,14 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
 
         for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
         {
-            *(workSpace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
+            *(workspace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
         }
 
         if constexpr(!OptLclMemBeta)
         {
             for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
             {
-                *(workSpace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
+                *(workspace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
             }
         }
 
@@ -448,7 +438,7 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
                  input_len,
                  bid,
                  label_repeat,
-                 &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                 &workspace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
                  &losses[bid]);
 
         if constexpr(OptLclMemBeta)
@@ -470,8 +460,8 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
         }
         else
         {
-            beta_buf0 = &workSpace[BETA_OFFSET + bid * 2 * MAX_S_LEN];
-            beta_buf1 = &workSpace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN];
+            beta_buf0 = &workspace[BETA_OFFSET + bid * 2 * MAX_S_LEN];
+            beta_buf1 = &workspace[BETA_OFFSET + (bid * 2 + 1) * MAX_S_LEN];
         }
         CTCGradient(probs_logits,
                     label_prime,
@@ -479,7 +469,7 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
                     input_len,
                     bid,
                     label_repeat,
-                    &workSpace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
+                    &workspace[ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN],
                     beta_buf0,
                     beta_buf1,
                     &losses[bid],
@@ -489,34 +479,30 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
 
 template <bool OptLclMemBeta, bool OptLclMemLb>
 __forceinline__ __device__ void CTCLoss(const unsigned int lid,
-                                        const unsigned int gid,
                                         const unsigned int grp_id,
                                         const FLOAT* probs_logits,
-                                        FLOAT* workSpace,
+                                        FLOAT* workspace,
                                         int* dim_data,
                                         FLOAT* losses,
                                         FLOAT* gradients);
 
 template <>
 __forceinline__ __device__ void CTCLoss<false, false>(const unsigned int lid,
-                                                      const unsigned int gid,
                                                       const unsigned int grp_id,
                                                       const FLOAT* probs_logits,
-                                                      FLOAT* workSpace,
+                                                      FLOAT* workspace,
                                                       int* dim_data,
                                                       FLOAT* losses,
                                                       FLOAT* gradients)
 {
-    CTCLossImpl<false, false>(
-        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients);
+    CTCLossImpl<false, false>(lid, grp_id, probs_logits, workspace, dim_data, losses, gradients);
 }
 
 template <>
 __forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
-                                                     const unsigned int gid,
                                                      const unsigned int grp_id,
                                                      const FLOAT* probs_logits,
-                                                     FLOAT* workSpace,
+                                                     FLOAT* workspace,
                                                      int* dim_data,
                                                      FLOAT* losses,
                                                      FLOAT* gradients)
@@ -524,25 +510,23 @@ __forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
     CTCLossImpl<true, false>(
-        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients, beta0, beta1);
+        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients, beta0, beta1);
 }
 
 template <>
 __forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
-                                                     const unsigned int gid,
                                                      const unsigned int grp_id,
                                                      const FLOAT* probs_logits,
-                                                     FLOAT* workSpace,
+                                                     FLOAT* workspace,
                                                      int* dim_data,
                                                      FLOAT* losses,
                                                      FLOAT* gradients)
 {
     __shared__ int lb_prime[MAX_S_LEN];
     CTCLossImpl<false, true>(lid,
-                             gid,
                              grp_id,
                              probs_logits,
-                             workSpace,
+                             workspace,
                              dim_data,
                              losses,
                              gradients,
@@ -553,10 +537,9 @@ __forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
 
 template <>
 __forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
-                                                    const unsigned int gid,
                                                     const unsigned int grp_id,
                                                     const FLOAT* probs_logits,
-                                                    FLOAT* workSpace,
+                                                    FLOAT* workspace,
                                                     int* dim_data,
                                                     FLOAT* losses,
                                                     FLOAT* gradients)
@@ -564,39 +547,28 @@ __forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
     __shared__ int lb_prime[MAX_S_LEN];
-    CTCLossImpl<true, true>(lid,
-                            gid,
-                            grp_id,
-                            probs_logits,
-                            workSpace,
-                            dim_data,
-                            losses,
-                            gradients,
-                            beta0,
-                            beta1,
-                            lb_prime);
+    CTCLossImpl<true, true>(
+        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients, beta0, beta1, lb_prime);
 }
 
 extern "C" __global__ void CTCLossGPU([[maybe_unused]] const FLOAT* probs,
-                                      FLOAT* workSpace,
+                                      FLOAT* workspace,
                                       int* dim_data,
                                       FLOAT* losses,
                                       FLOAT* gradients)
 {
-    const unsigned int lid    = threadIdx.x;
-    const unsigned int gid    = blockIdx.x * blockDim.x + lid;
-    const unsigned int grp_id = gid / WORK_PER_GRP;
-
     const FLOAT* probs_logits;
     if constexpr(SOFTMAX_APPLIED == 1)
     {
-        probs_logits = &workSpace[PROBLOG_OFFSET];
+        probs_logits = &workspace[PROBLOG_OFFSET];
     }
     else
     {
         probs_logits = probs;
     }
 
+    const unsigned int lid    = threadIdx.x;
+    const unsigned int grp_id = blockIdx.x;
     CTCLoss<OPT_LCL_MEM_BETA, OPT_LCL_MEM_LB>(
-        lid, gid, grp_id, probs_logits, workSpace, dim_data, losses, gradients);
+        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients);
 }

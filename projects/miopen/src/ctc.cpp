@@ -88,7 +88,9 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
             if(j > 0)
             {
                 if(labels[labels_offset[i] + j] == labels[labels_offset[i] + j - 1])
+                {
                     repeat[i]++;
+                }
             }
         }
 
@@ -103,7 +105,9 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
     int problog_offset  = lb_prime_offset + batch_size * max_S_len;
 
     if(probsDesc.GetType() == miopenHalf)
+    {
         problog_offset *= 2;
+    }
 
     int alpha_offset = problog_offset + class_sz * batch_size * max_time_step;
     int beta_offset  = alpha_offset + max_time_step * batch_size * max_S_len;
@@ -168,27 +172,29 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                        0,
                        problog_offset);
         if(handle.IsProfilingEnabled())
+        {
             time += handle.GetKernelTime();
+        }
     }
 
     if(!kernels.empty())
     {
         auto kernel = kernels.front();
-
         kernel(probs, workSpace, workSpace, losses, gradients);
     }
     else
     {
-        size_t work_per_grp = batch_size <= 64 ? 256 : batch_size <= 128 ? 128 : 64;
-        assert(512 >= work_per_grp && work_per_grp > 0);
-
-        constexpr size_t max_active_threads = static_cast<size_t>(64 * 4 * 64);
-        size_t glb_sz = batch_size < (max_active_threads / work_per_grp) ? batch_size * work_per_grp
-                                                                         : max_active_threads;
-        size_t grp_num = glb_sz / work_per_grp;
+        // Work out group-size first, then global-size as the amount of work-groups, to
+        // ensure a uniform number of total threads.
+        size_t group_size = batch_size <= 64 ? 256 : (batch_size <= 128) ? 128 : 64;
+        constexpr size_t max_active_threads = static_cast<size_t>(64 * 4 * 64); // 16384
+        size_t max_num_groups               = max_active_threads / group_size;
+        size_t global_size =
+            (batch_size < max_num_groups) ? batch_size * group_size : max_active_threads;
+        size_t num_groups = global_size / group_size;
 
         constexpr size_t max_local_mem = 65536;
-        size_t lcl_mem_per_grp         = max_local_mem / 2 / (512 / work_per_grp);
+        size_t lcl_mem_per_grp         = max_local_mem / 2 / (512 / group_size);
 
         int blank_label;
         if(blank_label_id < 0)
@@ -204,21 +210,20 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
             blank_label = blank_label_id;
         }
 
-        std::string params =
-            " -DCLASS_SZ=" + std::to_string(class_sz) +
-            " -DBATCH_SZ=" + std::to_string(batch_size) +
-            " -DMAX_TSTEP=" + std::to_string(max_time_step) +
-            " -DMAX_LB_LEN=" + std::to_string(max_label_len) +
-            " -DTOTAL_LB_LEN=" + std::to_string(total_label_len) +
-            " -DMAX_S_LEN=" + std::to_string(max_S_len) +
-            " -DLB_PRIME_OFFSET=" + std::to_string(lb_prime_offset) +
-            " -DPROBLOG_OFFSET=" + std::to_string(problog_offset) +
-            " -DALPHA_OFFSET=" + std::to_string(alpha_offset) +
-            " -DBETA_OFFSET=" + std::to_string(beta_offset) +
-            " -DWORK_PER_GRP=" + std::to_string(work_per_grp) +
-            " -DGRP_NUM=" + std::to_string(grp_num) + " -DBLANK_LB=" + std::to_string(blank_label) +
-            " -DSOFTMAX_APPLIED=" + std::to_string(static_cast<int>(apply_softmax_layer)) +
-            " -DUSE_HIP_BACKEND=1";
+        std::string params = " -DCLASS_SZ=" + std::to_string(class_sz) +
+                             " -DBATCH_SZ=" + std::to_string(batch_size) +
+                             " -DMAX_TSTEP=" + std::to_string(max_time_step) +
+                             " -DMAX_LB_LEN=" + std::to_string(max_label_len) +
+                             " -DTOTAL_LB_LEN=" + std::to_string(total_label_len) +
+                             " -DMAX_S_LEN=" + std::to_string(max_S_len) +
+                             " -DLB_PRIME_OFFSET=" + std::to_string(lb_prime_offset) +
+                             " -DPROBLOG_OFFSET=" + std::to_string(problog_offset) +
+                             " -DALPHA_OFFSET=" + std::to_string(alpha_offset) +
+                             " -DBETA_OFFSET=" + std::to_string(beta_offset) +
+                             " -DWORK_PER_GRP=" + std::to_string(group_size) +
+                             " -DGRP_NUM=" + std::to_string(num_groups) +
+                             " -DBLANK_LB=" + std::to_string(blank_label) + " -DSOFTMAX_APPLIED=" +
+                             std::to_string(static_cast<int>(apply_softmax_layer));
 
         if(apply_softmax_layer || probsDesc.IsPacked())
         {
@@ -249,18 +254,24 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         params += " -DOPT_LCL_MEM_LB=" + std::to_string(static_cast<int>(opt_lcl_mem_lb));
 
         if(probsDesc.GetType() == miopenHalf)
+        {
             params += " -DMIOPEN_USE_FP16=1 -DOPT_ATOMIC_LOGADDEXP=0";
+        }
         else
+        {
             params += " -DMIOPEN_USE_FP32=1 -DOPT_ATOMIC_LOGADDEXP=1";
+        }
 
-        const std::vector<size_t> vld{work_per_grp, 1, 1};
-        const std::vector<size_t> vgd{glb_sz, 1, 1};
+        const std::vector<size_t> vld{group_size, 1, 1};
+        const std::vector<size_t> vgd{global_size, 1, 1};
         std::string program_name = "MIOpenCTCLoss.cpp";
         handle.AddKernel(kernel_name, network_config, program_name, kernel_name, vld, vgd, params)(
             probs, workSpace, workSpace, losses, gradients);
     }
     if(handle.IsProfilingEnabled())
+    {
         handle.AccumKernelTime(time);
+    }
 }
 
 size_t CTCLossDescriptor::GetCTCLossWorkspaceSize(const Handle& handle,
@@ -352,8 +363,9 @@ size_t CTCLossDescriptor::GetCTCLossWorkspaceSize(const Handle& handle,
 
     size_t total_size = wksp_sz_dat * sizeof(float) + wksp_sz_lb * sizeof(int);
     if(total_size > handle.GetMaxMemoryAllocSize())
+    {
         MIOPEN_THROW(miopenStatusBadParm, "Error: Workspace size exceeds GPU memory capacity");
-
+    }
     return total_size;
 }
 
