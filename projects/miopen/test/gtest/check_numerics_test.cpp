@@ -29,6 +29,7 @@
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/bfloat16.hpp>
+#include <half/half.hpp>
 #include <gtest/gtest.h>
 #include <limits>
 #include <vector>
