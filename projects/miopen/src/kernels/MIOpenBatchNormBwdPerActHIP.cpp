@@ -54,8 +54,9 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         return;
     }
 
-    unsigned int yglb_sz = MIO_BN_GRP1 * gridDim.y;
-    int cidx             = in_cstride * xgid;
+    unsigned int yglb_sz      = MIO_BN_GRP1 * gridDim.y;
+    int cidx                  = in_cstride * xgid;
+    FLOAT_ACCUM N_float_accum = CVT_INTEGRAL2ACCUM(N);
 
     // move across the sections of an image in the mini_batch stack
     for(int idx = ygid; idx < in_cstride; idx += yglb_sz)
@@ -87,11 +88,11 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 
         for(int n = 0; n < N; n++)
         {
-            index = in_nstride * n + adjIndex;
-            xhat  = (CVT_FLOAT2ACCUM(in[index]) - mean) * invVar;
-            tmp1  = fma(xhat, dxhathat, dxhat);
-            tmp2  = fma(CVT_INTEGRAL2ACCUM(N), CVT_FLOAT2ACCUM(dy_in[index]) * pvt_scale, -tmp1);
-            tmp3  = invVar / (CVT_INTEGRAL2ACCUM(N));
+            index         = in_nstride * n + adjIndex;
+            xhat          = (CVT_FLOAT2ACCUM(in[index]) - mean) * invVar;
+            tmp1          = fma(xhat, dxhathat, dxhat);
+            tmp2          = fma(N_float_accum, CVT_FLOAT2ACCUM(dy_in[index]) * pvt_scale, -tmp1);
+            tmp3          = invVar / N_float_accum;
             dx_out[index] = CVT_ACCUM2FLOAT(tmp3 * tmp2);
         }
 
@@ -122,8 +123,9 @@ extern "C" __global__ void __launch_bounds__(blockSize)
         return;
     }
 
-    unsigned int yglb_sz = MIO_BN_GRP1 * gridDim.y;
-    int cidx             = in_cstride * xgid;
+    unsigned int yglb_sz      = MIO_BN_GRP1 * gridDim.y;
+    int cidx                  = in_cstride * xgid;
+    FLOAT_ACCUM N_float_accum = CVT_INTEGRAL2ACCUM(N);
 
     // move across the sections of the image mini_batch stack
     for(int idx = ygid; idx < in_cstride; idx += yglb_sz)
@@ -136,7 +138,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             index = in_nstride * n + adjIndex;
             mean += CVT_FLOAT2ACCUM(in[index]);
         }
-        mean /= CVT_INTEGRAL2ACCUM(N);
+        mean /= N_float_accum;
 
         FLOAT_ACCUM variance = CVT_FP32_2ACCUM(static_cast<float>(0.0));
         for(int n = 0; n < MIO_BN_N; n++)
@@ -145,7 +147,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
             FLOAT_ACCUM xdiff = CVT_FLOAT2ACCUM(in[index]) - mean;
             variance += (xdiff * xdiff);
         }
-        variance /= CVT_INTEGRAL2ACCUM(N);
+        variance /= N_float_accum;
         FLOAT_ACCUM invVar = rsqrt(variance + epsilon);
 
         FLOAT_ACCUM pvt_scale  = scale[adjIndex];
@@ -171,11 +173,11 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            index = in_nstride * n + adjIndex;
-            xhat  = (CVT_FLOAT2ACCUM(in[index]) - mean) * invVar;
-            tmp1  = fma(xhat, dxhathat, dxhat);
-            tmp2  = fma(CVT_INTEGRAL2ACCUM(N), CVT_FLOAT2ACCUM(dy_in[index]) * pvt_scale, -tmp1);
-            tmp3  = invVar / (CVT_INTEGRAL2ACCUM(N));
+            index         = in_nstride * n + adjIndex;
+            xhat          = (CVT_FLOAT2ACCUM(in[index]) - mean) * invVar;
+            tmp1          = fma(xhat, dxhathat, dxhat);
+            tmp2          = fma(N_float_accum, CVT_FLOAT2ACCUM(dy_in[index]) * pvt_scale, -tmp1);
+            tmp3          = invVar / N_float_accum;
             dx_out[index] = CVT_ACCUM2FLOAT(tmp3 * tmp2);
         }
 
