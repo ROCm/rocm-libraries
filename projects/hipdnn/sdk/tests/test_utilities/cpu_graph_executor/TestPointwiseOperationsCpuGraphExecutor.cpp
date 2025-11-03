@@ -200,6 +200,7 @@ protected:
 
 using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
 TYPED_TEST_SUITE(TestReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
+
 // =============================================================================
 // ReLU Forward Tests
 // =============================================================================

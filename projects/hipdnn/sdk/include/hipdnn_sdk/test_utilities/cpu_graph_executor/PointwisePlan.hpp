@@ -72,6 +72,53 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
+        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
+           || _params.reluLowerClipSlope.has_value())
+        {
+            executeParameterized(variantPack);
+        }
+        else
+        {
+            executeNonParameterized(variantPack);
+        }
+    }
+
+private:
+    void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        auto shallowIn0Tensor = createShallowTensor<DataType>(
+            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+
+        auto shallowOut0Tensor = createShallowTensor<DataType>(
+            _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
+
+        if(isUnaryPointwiseMode(_params.mode))
+        {
+
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
+        }
+        else if(isBinaryPointwiseMode(_params.mode))
+        {
+            if(!_params.in1Tensor.has_value())
+            {
+                throw std::runtime_error("Binary pointwise operation requires in1 tensor");
+            }
+
+            auto shallowIn1Tensor = createShallowTensor<DataType>(
+                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported pointwise operation mode");
+        }
+    }
+
+    void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
+    {
         auto shallowIn0Tensor = createShallowTensor<DataType>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
@@ -103,28 +150,19 @@ public:
             auto shallowIn1Tensor = createShallowTensor<DataType>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
-               || _params.reluLowerClipSlope.has_value())
-            {
-                CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                    _params.mode,
-                    *shallowOut0Tensor,
-                    *shallowIn0Tensor,
-                    *shallowIn1Tensor,
-                    static_cast<DataType>(
-                        _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
-                    static_cast<DataType>(_params.reluUpperClip.has_value()
-                                              ? _params.reluUpperClip.value()
-                                              : std::numeric_limits<float>::max()),
-                    static_cast<DataType>(_params.reluLowerClipSlope.has_value()
-                                              ? _params.reluLowerClipSlope.value()
-                                              : 0.0f));
-            }
-            else
-            {
-                CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
-                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
-            }
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                _params.mode,
+                *shallowOut0Tensor,
+                *shallowIn0Tensor,
+                *shallowIn1Tensor,
+                static_cast<DataType>(
+                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
         }
         else
         {
@@ -132,7 +170,6 @@ public:
         }
     }
 
-private:
     PointwiseParams _params;
 };
 
@@ -248,5 +285,4 @@ public:
         return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }
 };
-
 }
