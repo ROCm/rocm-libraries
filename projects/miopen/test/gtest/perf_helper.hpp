@@ -167,16 +167,16 @@ struct PerfHelper
 
             // Write the perf data to the file
             file << std::get<0>(firstHalfElement) + test_info << "," // KernelAndTestInfo
-                 << std::get<1>(secondHalfElement) / std::get<1>(firstHalfElement)
+                 << std::get<1>(firstHalfElement) / std::get<1>(secondHalfElement)
                  << "," // min_exec_time_ratio
-                 << std::get<2>(secondHalfElement) / std::get<2>(firstHalfElement)
+                 << std::get<2>(firstHalfElement) / std::get<2>(secondHalfElement)
                  << "," // max_exec_time_ratio
-                 << std::get<3>(secondHalfElement) / std::get<3>(firstHalfElement)
+                 << std::get<3>(firstHalfElement) / std::get<3>(secondHalfElement)
                  << "," // mean_exec_time_ratio
-                 << std::get<4>(secondHalfElement) / std::get<4>(firstHalfElement)
+                 << std::get<4>(firstHalfElement) / std::get<4>(secondHalfElement)
                  << "," // median_exec_time_ratio
                  << std::get<5>(firstHalfElement) << "," << std::get<5>(secondHalfElement)
-                 << "\n"; // SD_reference, SD_actual
+                 << "\n"; // SD_ocl, SD_hip
         }
 
         file.close();
