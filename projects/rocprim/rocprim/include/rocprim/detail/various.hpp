@@ -648,6 +648,28 @@ constexpr void constexpr_for_gte(F&& f)
     }
 }
 
+template<class T, unsigned int ItemsPerThread, class WordType = int>
+struct __align__(sizeof(WordType)) thread_items_pack
+{
+private:
+    WordType data[ceiling_div(sizeof(T) * ItemsPerThread, sizeof(WordType))];
+
+public:
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    static auto create(T(&thread_items)[ItemsPerThread])
+    {
+        thread_items_pack ret;
+        __builtin_memcpy(&ret, &thread_items, sizeof(T) * ItemsPerThread);
+        return ret; // Move constructor is called here
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T* unpack_to_decayed()
+    {
+        return reinterpret_cast<T*>(&data);
+    }
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

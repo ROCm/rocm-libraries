@@ -440,14 +440,17 @@ private:
                                                  bool           dir,
                                                  BinaryFunction compare_function)
     {
+        using pack_type   = rocprim::detail::thread_items_pack<Key, ItemsPerThread>;
+        auto packed_items = pack_type::create(k); // First copy
+        auto shuffle_ret  = warp_swizzle_shuffle(packed_items, mask); // Second copy
+        auto k1           = shuffle_ret.unpack_to_decayed();
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; ++item)
         {
-            Key  k1   = warp_swizzle_shuffle(k[item], mask);
-            bool swap = compare_function(dir ? k[item] : k1, dir ? k1 : k[item]);
+            bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
             if(swap)
             {
-                k[item] = k1;
+                k[item] = k1[item];
                 v[item] = warp_swizzle_shuffle(v[item], mask);
             }
         }
@@ -469,14 +472,17 @@ private:
     ROCPRIM_DEVICE ROCPRIM_INLINE void
         warp_swap(Key (&k)[ItemsPerThread], int mask, bool dir, BinaryFunction compare_function)
     {
+        using pack_type   = rocprim::detail::thread_items_pack<Key, ItemsPerThread>;
+        auto packed_items = pack_type::create(k); // First copy
+        auto shuffle_ret  = warp_swizzle_shuffle(packed_items, mask); // Second copy
+        auto k1           = shuffle_ret.unpack_to_decayed();
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; ++item)
         {
-            Key  k1   = warp_swizzle_shuffle(k[item], mask);
-            bool swap = compare_function(dir ? k[item] : k1, dir ? k1 : k[item]);
+            bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
             if(swap)
             {
-                k[item] = k1;
+                k[item] = k1[item];
             }
         }
     }
