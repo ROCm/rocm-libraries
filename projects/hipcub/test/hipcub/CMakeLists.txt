@@ -257,7 +257,6 @@ add_hipcub_test_parallel("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_se
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
 add_hipcub_test_parallel("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp.in)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
-add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
 add_hipcub_test("hipcub.DeviceTransform" test_hipcub_device_transform.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)

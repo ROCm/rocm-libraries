@@ -26,7 +26,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
-* Removed deprecated `hipcub:max` and `hipcub:min`. Use `hip::std::max` and `hip::std::min` instead.
+* Removed `DeviceSpmv`, which was deprecated from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
+* Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
 * Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
 * Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
 
