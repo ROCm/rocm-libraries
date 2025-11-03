@@ -87,7 +87,13 @@ else()
     message(STATUS "Building miopen legacy plugin as a dependency")
 endif()
 
-set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+if(WIN32)
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
+else()
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
+endif()
+
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")

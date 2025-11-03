@@ -47,9 +47,6 @@ add_library(hipdnn_backend SHARED
     HipdnnBackend.cpp
 )
 
-set_target_properties(hipdnn_backend PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-set_target_properties(hipdnn_backend PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-
 target_include_directories(hipdnn_backend 
     SYSTEM PUBLIC 
         ${HIP_INCLUDE_DIRS}

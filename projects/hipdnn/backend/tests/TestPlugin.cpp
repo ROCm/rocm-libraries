@@ -78,7 +78,11 @@ protected:
 
 bool TestPluginCallback::s_callbackCalled = false;
 
-const std::filesystem::path TEST_PLUGIN_DIR = "lib/test_plugins";
+#if defined(_WIN32)
+const auto TEST_PLUGIN_DIR = std::filesystem::path("bin/test_plugins");
+#else
+const auto TEST_PLUGIN_DIR = std::filesystem::path("lib/test_plugins");
+#endif
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;

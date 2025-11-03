@@ -32,8 +32,12 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
     // Create an SimpleEnginePluginManager instance
     SimpleEnginePluginManager pluginManager;
 
-    // Create a list of paths to plugins
+// Create a list of paths to plugins
+#if defined(_WIN32)
+    std::set<std::filesystem::path> pluginPaths = {"../bin/test_plugins/" TEST_ENGINE_PLUGIN1_NAME};
+#else
     std::set<std::filesystem::path> pluginPaths = {"../lib/test_plugins/" TEST_ENGINE_PLUGIN1_NAME};
+#endif
 
     // Load the plugins
     pluginManager.loadPlugins(pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
