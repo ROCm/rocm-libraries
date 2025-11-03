@@ -225,16 +225,6 @@ public:
         return true;
     }
 
-    std::optional<float>
-        convertFlatbuffersOptionalToStdOptional(::flatbuffers::Optional<float> fbOptional) const
-    {
-        if(fbOptional)
-        {
-            return {*fbOptional};
-        }
-        return std::nullopt;
-    }
-
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin::IGraph& graph,
                       const hipdnn_sdk::data_objects::Node& node) const override
@@ -259,17 +249,16 @@ public:
 
         //grab the node values
 
-        PointwiseParams params(
-            nodeAttributes->operation(),
-            *in0Tensor,
-            in1Tensor,
-            *out0Tensor,
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_lower_clip()),
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_upper_clip()),
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->relu_lower_clip_slope()),
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->swish_beta()),
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->elu_alpha()),
-            convertFlatbuffersOptionalToStdOptional(nodeAttributes->softplus_beta()));
+        PointwiseParams params(nodeAttributes->operation(),
+                               *in0Tensor,
+                               in1Tensor,
+                               *out0Tensor,
+                               nodeAttributes->relu_lower_clip(),
+                               nodeAttributes->relu_upper_clip(),
+                               nodeAttributes->relu_lower_clip_slope(),
+                               nodeAttributes->swish_beta(),
+                               nodeAttributes->elu_alpha(),
+                               nodeAttributes->softplus_beta());
 
         // Throw if these values get set so its clear to any future users they are not supported.
         // Throwing here also makes it clear that we need to update PointwisePlan::execute
