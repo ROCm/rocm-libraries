@@ -13,10 +13,10 @@
 #define CONFIG_RTTI_H
 
 #include <thrust/detail/config/device_system.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#include <thrust/detail/config/libcxx.h>
 
 // clang-format off
+#if _THRUST_HAS_DEVICE_SYSTEM_STD && __has_include(_THRUST_STD_INCLUDE(__cccl/rtti.h))
 #  include _THRUST_STD_INCLUDE(__cccl/rtti.h)
 // clang-format on
 
