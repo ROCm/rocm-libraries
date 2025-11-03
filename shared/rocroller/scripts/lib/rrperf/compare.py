@@ -300,21 +300,20 @@ def resource_usage_changes(summary):
             ldsBytesA = getattr(A, "ldsBytes", 0)
             ldsBytesB = getattr(B, "ldsBytes", 0)
 
-            if (
-                all(
-                    v is not None
-                    for v in [
-                        sgprA,
-                        sgprB,
-                        vgprA,
-                        vgprB,
-                        agprA,
-                        agprB,
-                        ldsBytesA,
-                        ldsBytesB,
-                    ]
-                )
-                and sgprA != sgprB
+            if all(
+                v is not None
+                for v in [
+                    sgprA,
+                    sgprB,
+                    vgprA,
+                    vgprB,
+                    agprA,
+                    agprB,
+                    ldsBytesA,
+                    ldsBytesB,
+                ]
+            ) and (
+                sgprA != sgprB
                 or vgprA != vgprB
                 or agprA != agprB
                 or ldsBytesA != ldsBytesB
