@@ -80,10 +80,8 @@ public:
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
-        if(params.mode == hipdnn_frontend::PointwiseMode::RELU_FWD)
-        {
-            PointwiseReluTestHelper::verifyReluForwardOutput<T>(*outTensor, params);
-        }
+        EXPECT_EQ(params.mode, hipdnn_frontend::PointwiseMode::RELU_FWD);
+        EXPECT_TRUE(PointwiseReluTestHelper::verifyReluForwardOutput<T>(*outTensor, params));
     }
 
     template <typename T>
@@ -122,14 +120,12 @@ public:
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
-        if(params.mode == hipdnn_frontend::PointwiseMode::RELU_BWD)
-        {
-            PointwiseReluTestHelper::verifyReluBackwardOutput<T>(*outTensor, params);
-        }
+        EXPECT_EQ(params.mode, hipdnn_frontend::PointwiseMode::RELU_BWD);
+        EXPECT_TRUE(PointwiseReluTestHelper::verifyReluBackwardOutput<T>(*outTensor, params));
     }
 
     template <typename InputType>
-    static void verifyReluForwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
+    static bool verifyReluForwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
     {
         Tensor<InputType> input0(params.inputDims);
         input0.fillTensorWithValue(params.in0TensorValue);
@@ -154,11 +150,11 @@ public:
         }
 
         CpuFpReferenceValidation<InputType> validator;
-        EXPECT_TRUE(validator.allClose(output, outTensor));
+        return validator.allClose(output, outTensor);
     }
 
     template <typename InputType>
-    static void verifyReluBackwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
+    static bool verifyReluBackwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
     {
         Tensor<InputType> input0(params.inputDims);
         Tensor<InputType> input1(params.inputDims);
@@ -187,7 +183,7 @@ public:
         }
 
         CpuFpReferenceValidation<InputType> validator;
-        EXPECT_TRUE(validator.allClose(output, outTensor));
+        return validator.allClose(output, outTensor);
     }
 };
 
