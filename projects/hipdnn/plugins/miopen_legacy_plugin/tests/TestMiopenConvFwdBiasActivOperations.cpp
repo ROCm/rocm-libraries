@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <optional>
+#include <string_view>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
@@ -56,45 +59,10 @@ protected:
                                   hipdnn_sdk::data_objects::DataType dataType,
                                   DataType tolerance)
     {
-        int64_t tensorUid = 1;
-        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
-
         PinnedTensor<DataType> xTensor(testCase.conv.xDims, _layout);
-        const auto xTensorUid = tensorUid++;
-        deviceBuffers.push_back(generateRandomDeviceBuffer(xTensor,
-                                                           static_cast<int>(xTensorUid),
-                                                           static_cast<DataType>(-1.0f),
-                                                           static_cast<DataType>(1.0f),
-                                                           testCase.conv.seed));
-
         PinnedTensor<DataType> wTensor(testCase.conv.wDims, _layout);
-        const auto wTensorUid = tensorUid++;
-        deviceBuffers.push_back(generateRandomDeviceBuffer(wTensor,
-                                                           static_cast<int>(wTensorUid),
-                                                           static_cast<DataType>(-1.0f),
-                                                           static_cast<DataType>(1.0f),
-                                                           testCase.conv.seed));
-
-        // Virtual y_conv tensor
-        tensorUid++;
-
-        PinnedTensor<DataType> biasTensor(getDerivedShape(testCase.conv.wDims), _layout);
-        int64_t biasTensorUid;
-        if(testCase.doBias)
-        {
-            biasTensorUid = tensorUid++;
-            deviceBuffers.push_back(generateRandomDeviceBuffer(biasTensor,
-                                                               static_cast<int>(biasTensorUid),
-                                                               static_cast<DataType>(-1.0f),
-                                                               static_cast<DataType>(1.0f),
-                                                               testCase.conv.seed));
-            // Virtual y_bias tensor
-            tensorUid++;
-        }
-
+        PinnedTensor<DataType> biasTensor(getDerivedShape(testCase.conv.yDims), _layout);
         PinnedTensor<DataType> yTensor(testCase.conv.yDims, _layout);
-        const auto yTensorUid = tensorUid;
-        deviceBuffers.push_back(generateEmptyDeviceBuffer(yTensor, static_cast<int>(yTensorUid)));
 
         auto fusionBuilder = createValidConvFwdBiasActivGraph(xTensor.dims(),
                                                               xTensor.strides(),
@@ -116,19 +84,19 @@ protected:
                                                               testCase.activ.softplusBeta,
                                                               dataType);
 
-        hipdnnPluginConstData_t opGraph;
-        opGraph.ptr = fusionBuilder.GetBufferPointer();
-        opGraph.size = fusionBuilder.GetSize();
+        hipdnnPluginConstData_t opGraphData;
+        opGraphData.ptr = fusionBuilder.GetBufferPointer();
+        opGraphData.size = fusionBuilder.GetSize();
 
         auto engineConfigBuilder = createValidEngineConfig(1);
-        hipdnnPluginConstData_t engineConfig;
-        engineConfig.ptr = engineConfigBuilder.GetBufferPointer();
-        engineConfig.size = engineConfigBuilder.GetSize();
+        hipdnnPluginConstData_t engineConfigData;
+        engineConfigData.ptr = engineConfigBuilder.GetBufferPointer();
+        engineConfigData.size = engineConfigBuilder.GetSize();
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
         status = hipdnnEnginePluginCreateExecutionContext(
-            _handle, &engineConfig, &opGraph, &executionContext);
+            _handle, &engineConfigData, &opGraphData, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         size_t workspaceSize;
@@ -137,6 +105,59 @@ protected:
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 
+        // Prepare device buffers
+        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
+
+        const auto opGraph = GetGraph(fusionBuilder.GetBufferPointer());
+        const auto tensors = opGraph->tensors();
+        ASSERT_NE(tensors, nullptr);
+
+        auto getTensorUid = [tensors](std::string_view name) -> std::optional<int64_t> {
+            for(unsigned i = 0; i < tensors->size(); i++)
+            {
+                const auto tensor = tensors->Get(i);
+                if(tensor->name()->str() == name)
+                {
+                    return tensor->uid();
+                }
+            }
+            return {};
+        };
+
+        const auto xTensorUid = getTensorUid("x");
+        ASSERT_TRUE(xTensorUid.has_value());
+        deviceBuffers.push_back(generateRandomDeviceBuffer(xTensor,
+                                                            static_cast<int>(xTensorUid.value()),
+                                                            static_cast<DataType>(-1.0f),
+                                                            static_cast<DataType>(1.0f),
+                                                            testCase.conv.seed));
+
+        const auto wTensorUid = getTensorUid("w");
+        ASSERT_TRUE(wTensorUid.has_value());
+        deviceBuffers.push_back(generateRandomDeviceBuffer(wTensor,
+                                                            static_cast<int>(wTensorUid.value()),
+                                                            static_cast<DataType>(-1.0f),
+                                                            static_cast<DataType>(1.0f),
+                                                            testCase.conv.seed));
+
+        std::optional<int64_t> biasTensorUid;
+        if(testCase.doBias)
+        {
+            biasTensorUid = getTensorUid("bias");
+            ASSERT_TRUE(biasTensorUid.has_value());
+            deviceBuffers.push_back(generateRandomDeviceBuffer(biasTensor,
+                                                                static_cast<int>(biasTensorUid.value()),
+                                                                static_cast<DataType>(-1.0f),
+                                                                static_cast<DataType>(1.0f),
+                                                                testCase.conv.seed));
+        }
+
+        const auto yTensorUid = getTensorUid("y");
+        ASSERT_TRUE(yTensorUid.has_value());
+        deviceBuffers.push_back(
+            generateEmptyDeviceBuffer(yTensor, static_cast<int>(yTensorUid.value())));
+
+        // Execute graph
         status = hipdnnEnginePluginExecuteOpGraph(_handle,
                                                   executionContext,
                                                   workspace.get(),
@@ -149,16 +170,17 @@ protected:
         status = hipdnnEnginePluginDestroyExecutionContext(_handle, executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
+        // Validate results on CPU
         Tensor<DataType> yTensorCpu(yTensor.dims(), _layout);
 
         std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorUid] = xTensor.memory().hostData();
-        variantPack[wTensorUid] = wTensor.memory().hostData();
+        variantPack[xTensorUid.value()] = xTensor.memory().hostData();
+        variantPack[wTensorUid.value()] = wTensor.memory().hostData();
         if(testCase.doBias)
         {
-            variantPack[biasTensorUid] = biasTensor.memory().hostData();
+            variantPack[biasTensorUid.value()] = biasTensor.memory().hostData();
         }
-        variantPack[yTensorUid] = yTensorCpu.memory().hostData();
+        variantPack[yTensorUid.value()] = yTensorCpu.memory().hostData();
 
         CpuReferenceGraphExecutor().execute(
             fusionBuilder.GetBufferPointer(), fusionBuilder.GetSize(), variantPack);
