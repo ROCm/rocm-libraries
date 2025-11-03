@@ -307,26 +307,25 @@ def resource_usage_changes(summary):
                 or ldsBytesA != ldsBytesB
             ):
                 changes = []
-                if sgprA != sgprB:
-                    diff = sgprB - sgprA
-                    sign = "+" if diff > 0 else ""
-                    changes.append(f"SGPR: {sgprA} -> {sgprB} ({sign}{diff})")
+                register_pairs = [
+                    ("SGPR", sgprA, sgprB),
+                    ("VGPR", vgprA, vgprB),
+                    ("AGPR", agprA, agprB),
+                ]
 
-                if vgprA != vgprB:
-                    diff = vgprB - vgprA
-                    sign = "+" if diff > 0 else ""
-                    changes.append(f"VGPR: {vgprA} -> {vgprB} ({sign}{diff})")
-
-                if agprA != agprB:
-                    diff = agprB - agprA
-                    sign = "+" if diff > 0 else ""
-                    changes.append(f"AGPR: {agprA} -> {agprB} ({sign}{diff})")
+                for register_type, value_a, value_b in register_pairs:
+                    if value_a != value_b:
+                        diff = value_b - value_a
+                        sign = "+" if diff > 0 else ""
+                        changes.append(
+                            f"{register_type}: {value_a} -> {value_b} ({sign}{diff})"
+                        )
 
                 if ldsBytesA != ldsBytesB:
                     diff = ldsBytesB - ldsBytesA
                     sign = "+" if diff > 0 else ""
                     changes.append(
-                        f"LDS: {ldsBytesA}->{ldsBytesB} bytes ({sign}{diff})"
+                        f"LDS: {ldsBytesA} -> {ldsBytesB} bytes ({sign}{diff})"
                     )
 
                 resource_diffs[

@@ -245,7 +245,6 @@ def runPerformanceCommand (platform, project)
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
                     
-                    #Generate Resource Usage Report
                     ./scripts/rrperf compare --format resource_md \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > resource_comparison_${platform.gpu}.md
@@ -287,7 +286,6 @@ def runPerformanceCommand (platform, project)
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
                         
-                        #Generate Resource Usage Report
                         ./scripts/rrperf compare --format resource_md \\
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
@@ -355,11 +353,9 @@ def runPerformanceCommand (platform, project)
                 def comment = pullRequest.comment(commentString)
             }
 
-            // Resource Usage Report Comment
             def resourceCommentTitle = "# Resource Usage Report for ${platform.gpu}"
             def resourceCommentString = "${resourceCommentTitle}\n\n"
             
-            // Check if resource comparison file exists
             def resourceFile = new File("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md")
             if (resourceFile.exists()) {
                 def resourceResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
