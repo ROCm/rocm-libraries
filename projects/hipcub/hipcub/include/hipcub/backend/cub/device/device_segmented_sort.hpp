@@ -35,16 +35,8 @@
 
 #include <cub/device/device_segmented_sort.cuh> // IWYU pragma: export
 
-#ifdef __HIP_PLATFORM_AMD__
-    #include <hip/std/cstdint> // IWYU pragma: export
-using ::hip::std::int64_t;
-#elif defined(__HIP_PLATFORM_NVIDIA__)
-    #include <cuda/std/cstdint> // IWYU pragma: export
+#include <cuda/std/cstdint> // IWYU pragma: export
 using ::cuda::std::int64_t;
-#else
-    #include <cstdint>
-using ::std::int64_t;
-#endif
 
 BEGIN_HIPCUB_NAMESPACE
 
