@@ -21,7 +21,7 @@ using namespace hipdnn_sdk::utilities;
 namespace hipdnn_sdk_test_utils
 {
 
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   PointwiseUnaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseUnaryGraph(const std::vector<int64_t>& inputDims,
@@ -104,7 +104,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
 
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   PointwiseBinaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseBinaryGraph(const std::vector<int64_t>& input1Dims,
