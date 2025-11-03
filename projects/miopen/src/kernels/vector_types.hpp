@@ -48,6 +48,12 @@ struct mapped_vector_type<T, 1>
 };
 
 // float
+
+template <>
+struct mapped_vector_type<float, 8>
+{
+    using type = float __attribute__((ext_vector_type(8)));
+};
 template <>
 struct mapped_vector_type<float, 4>
 {
@@ -57,7 +63,31 @@ struct mapped_vector_type<float, 4>
 template <>
 struct mapped_vector_type<float, 2>
 {
-    using type = float __attribute__((ext_vector_type(2)));
+    using type = float __attribute__((ext_vector_type(2))); //::float2;
+};
+
+template <typename Vec>
+struct mapped_vector_info;
+
+template <>
+struct mapped_vector_info<float __attribute__((ext_vector_type(4)))>
+{
+    using UnderlyingType         = float;
+    static constexpr size_t size = 4;
+};
+
+template <>
+struct mapped_vector_info<float __attribute__((ext_vector_type(2)))>
+{
+    using UnderlyingType         = float;
+    static constexpr size_t size = 2;
+};
+
+template <>
+struct mapped_vector_info<float>
+{
+    using UnderlyingType         = float;
+    static constexpr size_t size = 1;
 };
 
 // half
@@ -111,6 +141,26 @@ struct mapped_vector_type<int, 2>
 {
     using type = int2;
 };
+
+// Fill mapped vector with the same value.
+template <typename MappedVectorType, typename T>
+__forceinline__ __device__ __host__ MappedVectorType fill(const T val)
+{
+    using VectorInfo = mapped_vector_info<MappedVectorType>;
+    MappedVectorType retval;
+    auto* retvalPtr = reinterpret_cast<typename VectorInfo::UnderlyingType*>(&retval);
+    for(auto i = 0; i < VectorInfo::size; ++i)
+    {
+        retvalPtr[i] = typename VectorInfo::UnderlyingType(val);
+    }
+    return retval;
+};
+
+template <typename MappedVectorType>
+__forceinline__ __device__ __host__ MappedVectorType ones()
+{
+    return fill<MappedVectorType>(1);
+}
 
 } // namespace miopen
 

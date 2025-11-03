@@ -30,6 +30,7 @@
 #define BNORM_SPATIAL_ACTIVATION_FUNCTIONS_HPP
 
 #include "configuration.hpp"
+#include "miopen_math.hpp"
 
 namespace miopen {
 namespace batchnorm {
@@ -51,7 +52,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
                                                              FpPrecType const&,
                                                              FpPrecType const&)
 {
-    return max(tmp, static_cast<FpPrecType>(0.));
+    return miopen::max(tmp, static_cast<FpPrecType>(0.));
 }
 
 template <typename FpPrecType,
@@ -61,7 +62,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const&)
 {
-    return min(_alpha, max(tmp, static_cast<FpPrecType>(0.)));
+    return miopen::min(_alpha, miopen::max(tmp, static_cast<FpPrecType>(0.)));
 }
 
 template <typename FpPrecType,
@@ -71,7 +72,8 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const& _beta)
 {
-    return max(static_cast<FpPrecType>(_alpha), min(static_cast<FpPrecType>(_beta), tmp));
+    return miopen::max(static_cast<FpPrecType>(_alpha),
+                       miopen::min(static_cast<FpPrecType>(_beta), tmp));
 }
 
 } // namespace batchnorm

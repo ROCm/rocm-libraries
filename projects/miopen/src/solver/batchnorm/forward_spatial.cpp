@@ -299,7 +299,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        auto use_hip = variant == 0 || variant == 1 || variant == 3;
+        auto use_hip = variant == 0 || variant == 1 || variant == 3 || variant == 2;
         auto kernel  = KernelInfo{};
 
         auto build_params = KernelBuildParameters{

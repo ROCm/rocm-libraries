@@ -181,6 +181,7 @@ template <typename MiopenConfig,
           int NHW,
           int CHW,
           int Vectorize,
+          int VecSize,
           int StashMethod,
           int LoopUnrollMaxN,
           int LoopUnrollMaxHW,
@@ -242,7 +243,7 @@ struct proto_config
 #else
     static constexpr bool use_amdgcn = false;
 #endif
-    static constexpr unsigned int vec_size = vectorize ? 4 : 1;
+    static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;
     static constexpr unsigned int vec_size_y =
@@ -296,6 +297,7 @@ using config = miopen::batchnorm::detail::proto_config<
     MIO_BN_NHW,
     MIO_BN_CHW,
     MIO_BN_VECTORIZE,
+    MIO_BN_VEC_SIZE,
     MIO_BN_STASH_METHOD,
     MIO_BN_LOOP_UNROLL_MAXN,
     MIO_BN_LOOP_UNROLL_MAXHW,

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <hip/hip_bfloat16.h>
+#include "vector_types.hpp"
 
 namespace miopen {
 
@@ -46,6 +47,9 @@ __forceinline__ __device__ float pow(float x, float y) { return powf(x, y); }
 __forceinline__ __device__ float fabs(float x) { return fabsf(x); }
 __forceinline__ __device__ float fmax(float x, float y) { return fmaxf(x, y); }
 __forceinline__ __device__ float fmin(float x, float y) { return fminf(x, y); }
+__forceinline__ __device__ float fma(float a, float b, float c) { return ::fma(a, b, c); }
+__forceinline__ __device__ bool isnan(float a) { return ::isnan(a); }
+__forceinline__ __device__ bool isinf(float a) { return ::isinf(a); }
 
 //=============================================================================
 // Half precision overloads
@@ -75,6 +79,14 @@ __forceinline__ __device__ _Float16 tanh(_Float16 x)
 
     return __ocml_fabs_f16(x) > 4.5f ? one : ret;
 }
+
+__forceinline__ __device__ _Float16 fma(_Float16 a, _Float16 b, _Float16 c)
+{
+    return __hfma(__half(a), __half(b), __half(c));
+}
+
+__forceinline__ __device__ bool isnan(_Float16 a) { return __hisnan(__half(a)); }
+__forceinline__ __device__ bool isinf(_Float16 a) { return __hisinf(__half(a)); }
 
 //=============================================================================
 // BFloat16 overloads
@@ -141,6 +153,18 @@ __forceinline__ __device__ ushort tanh(ushort x)
     return __bfloat16_as_ushort(__hdiv(numerator, denominator));
 }
 
+__forceinline__ __device__ ushort fma(ushort a, ushort b, ushort c)
+{
+    __hip_bfloat16 bf_a = __ushort_as_bfloat16(a);
+    __hip_bfloat16 bf_b = __ushort_as_bfloat16(b);
+    __hip_bfloat16 bf_c = __ushort_as_bfloat16(c);
+
+    return __hfma(bf_a, bf_b, bf_c);
+}
+
+__forceinline__ __device__ bool isnan(ushort a) { return __hisnan(__ushort_as_bfloat16(a)); }
+__forceinline__ __device__ bool isinf(ushort a) { return __hisinf(__ushort_as_bfloat16(a)); }
+
 //=============================================================================
 // Double precision overloads
 //=============================================================================
@@ -157,5 +181,166 @@ __forceinline__ __device__ double pow(double x, double y) { return ::pow(x, y); 
 __forceinline__ __device__ double fabs(double x) { return ::fabs(x); }
 __forceinline__ __device__ double fmax(double x, double y) { return ::fmax(x, y); }
 __forceinline__ __device__ double fmin(double x, double y) { return ::fmin(x, y); }
+__forceinline__ __device__ double fma(double a, double b, double c) { return ::fma(a, b, c); }
+__forceinline__ __device__ bool isnan(double a) { return ::isnan(a); }
+__forceinline__ __device__ bool isinf(double a) { return ::isinf(a); }
+
+//=============================================================================
+// 4-element vector overloads
+//=============================================================================
+
+template <typename FpType> // do std::enable_if?
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+exp(typename mapped_vector_type<FpType, 4>::type x)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = ::exp(x.x);
+    out.y                                            = ::exp(x.y);
+    out.z                                            = ::exp(x.z);
+    out.w                                            = ::exp(x.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+log(typename mapped_vector_type<FpType, 4>::type x)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = log(x.x);
+    out.y                                            = log(x.y);
+    out.z                                            = log(x.z);
+    out.w                                            = log(x.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+sqrt(typename mapped_vector_type<FpType, 4>::type x)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = sqrt(x.x);
+    out.y                                            = sqrt(x.y);
+    out.z                                            = sqrt(x.z);
+    out.w                                            = sqrt(x.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+rsqrt(typename mapped_vector_type<FpType, 4>::type x)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = rsqrt(x.x);
+    out.y                                            = rsqrt(x.y);
+    out.z                                            = rsqrt(x.z);
+    out.w                                            = rsqrt(x.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+fma(typename mapped_vector_type<FpType, 4>::type a,
+    typename mapped_vector_type<FpType, 4>::type b,
+    typename mapped_vector_type<FpType, 4>::type c)
+{
+    typename mapped_vector_type<FpType, 4>::type out;
+    out.x = fma(a.x, b.x, c.x);
+    out.y = fma(a.y, b.y, c.y);
+    out.z = fma(a.z, b.z, c.z);
+    out.w = fma(a.w, b.w, c.w);
+
+    return out;
+}
+
+// __forceinline__ __device__ double sin(double x) { return ::sin(x); }
+// __forceinline__ __device__ double cos(double x) { return ::cos(x); }
+// __forceinline__ __device__ double tan(double x) { return ::tan(x); }
+// __forceinline__ __device__ double tanh(double x) { return ::tanh(x); }
+// __forceinline__ __device__ double pow(double x, double y) { return ::pow(x, y); }
+// __forceinline__ __device__ double fabs(double x) { return ::fabs(x); }
+
+// TODO: consult with OpenCL spec if that is indeed how these funcs are implemented
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+fmax(typename mapped_vector_type<FpType, 4>::type x, typename mapped_vector_type<FpType, 4>::type y)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = fmax(x.x, y.x);
+    out.y                                            = fmax(x.y, y.y);
+    out.z                                            = fmax(x.z, y.z);
+    out.w                                            = fmax(x.w, y.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
+fmin(typename mapped_vector_type<FpType, 4>::type x, typename mapped_vector_type<FpType, 4>::type y)
+{
+    typename mapped_vector_type<FpType, 4>::type out = x;
+    out.x                                            = fmin(x.x, y.x);
+    out.y                                            = fmin(x.y, y.y);
+    out.z                                            = fmin(x.z, y.z);
+    out.w                                            = fmin(x.w, y.w);
+    return out;
+}
+
+__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
+fma(typename mapped_vector_type<float, 4>::type a,
+    typename mapped_vector_type<float, 4>::type b,
+    typename mapped_vector_type<float, 4>::type c)
+{
+    typename mapped_vector_type<float, 4>::type out;
+    out.x = fma(a.x, b.x, c.x);
+    out.y = fma(a.y, b.y, c.y);
+    out.z = fma(a.z, b.z, c.z);
+    out.w = fma(a.w, b.w, c.w);
+
+    return out;
+}
+
+__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
+fmax(typename mapped_vector_type<float, 4>::type x, typename mapped_vector_type<float, 4>::type y)
+{
+    typename mapped_vector_type<float, 4>::type out = x;
+    out.x                                           = fmax(x.x, y.x);
+    out.y                                           = fmax(x.y, y.y);
+    out.z                                           = fmax(x.z, y.z);
+    out.w                                           = fmax(x.w, y.w);
+    return out;
+}
+
+__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
+fmin(typename mapped_vector_type<float, 4>::type x, typename mapped_vector_type<float, 4>::type y)
+{
+    typename mapped_vector_type<float, 4>::type out = x;
+    out.x                                           = fmin(x.x, y.x);
+    out.y                                           = fmin(x.y, y.y);
+    out.z                                           = fmin(x.z, y.z);
+    out.w                                           = fmin(x.w, y.w);
+    return out;
+}
+
+__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
+rsqrt(typename mapped_vector_type<float, 4>::type x)
+{
+    typename mapped_vector_type<float, 4>::type out = x;
+    out.x                                           = rsqrt(x.x);
+    out.y                                           = rsqrt(x.y);
+    out.z                                           = rsqrt(x.z);
+    out.w                                           = rsqrt(x.w);
+    return out;
+}
+
+template <typename FpType>
+__forceinline__ __device__ FpType min(FpType x, FpType y)
+{
+    return fmin(x, y);
+}
+
+template <typename FpType>
+__forceinline__ __device__ FpType max(FpType x, FpType y)
+{
+    return fmax(x, y);
+}
 
 } // namespace miopen
