@@ -132,7 +132,7 @@ public:
 };
 // End of extended numeric_limits
 
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
 template<class T>
 using is_int128 = std::is_same<__int128_t, typename std::remove_cv<T>::type>;
 template<class T>
@@ -142,7 +142,7 @@ template<class T>
 using is_int128 = std::false_type;
 template<class T>
 using is_uint128 = std::false_type;
-#endif // HIPCUB_IS_INT128_ENABLED
+#endif // _CCCL_HAS_INT128()
 
 template<class T>
 using is_half = std::is_same<test_utils::half, typename std::remove_cv<T>::type>;

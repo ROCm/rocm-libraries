@@ -254,7 +254,7 @@ inline void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& ex
     }
 }
 
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
 inline void assert_bit_eq(const std::vector<__int128_t>& result,
                           const std::vector<__int128_t>& expected)
 {
@@ -328,7 +328,7 @@ inline void assert_bit_eq(const std::vector<__uint128_t>& result,
         }
     }
 }
-#endif //HIPCUB_IS_INT128_ENABLED
+#endif //_CCCL_HAS_INT128()
 
 /// Compile-time assertion for type equality of two objects.
 template<class ExpectedT, class ActualT>
