@@ -23,7 +23,7 @@
 
 ### Dependencies
 > [!TIP]
-> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md).
+> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not availble for Windows. Refer to the [Windoows](#windows) section for details on building under Windows.
 
 #### Required Dependencies
 | Dependency | Version | Description |
