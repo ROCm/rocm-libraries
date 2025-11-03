@@ -94,6 +94,25 @@ struct ActivTestCase
     }
 };
 
+inline std::vector<ActivTestCase> createBwdActivationTestCases()
+{
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+
+    std::vector<ActivTestCase> cases;
+
+    // RELU backward
+    cases.emplace_back(PM::RELU_BWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    return cases;
+}
+
 inline std::vector<ActivTestCase> getActivationTestCases()
 {
     return {

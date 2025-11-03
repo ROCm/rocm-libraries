@@ -96,6 +96,10 @@
 "shared: tensile":
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
+  
+"project: rocwmma":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocwmma/**/*'
 
 documentation:
 - changed-files:
