@@ -306,6 +306,15 @@ def resource_usage_changes(summary):
                 or agprA != agprB
                 or ldsBytesA != ldsBytesB
             ):
+                # Have diff viewer show red if *any* resource increased, green otherwise
+                any_increase = (
+                    sgprB > sgprA
+                    or vgprB > vgprA
+                    or agprB > agprA
+                    or ldsBytesB > ldsBytesA
+                )
+                line_sign = "-" if any_increase else "+"
+
                 changes = []
                 register_pairs = [
                     ("SGPR", sgprA, sgprB),
@@ -331,7 +340,7 @@ def resource_usage_changes(summary):
                 resource_diffs[
                     A.problem_token(priority_problems()) + A.run_invariant_token
                 ] = (
-                    f"  {' | '.join(changes)}"
+                    f"{line_sign} {' | '.join(changes)}"
                     f"\n\t| {A.problem_token(priority_problems())}"
                     f"| {A.solution_token} "
                     f"| {token}\n"
