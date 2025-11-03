@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <MiopenLegacyPlugin.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -61,16 +62,16 @@ protected:
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContext(
+        status = hipdnnEnginePluginCreateExecutionContextPvt(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         auto deviceBuffers = _graphAndTensors.deviceBuffers();
 
-        status = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                  executionContext,
-                                                  nullptr,
-                                                  deviceBuffers.data(),
-                                                  static_cast<uint32_t>(deviceBuffers.size()));
+        status = hipdnnEnginePluginExecuteOpGraphPvt(_handle,
+                                                     executionContext,
+                                                     nullptr,
+                                                     deviceBuffers.data(),
+                                                     static_cast<uint32_t>(deviceBuffers.size()));
         EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
         for(auto uid : _graphAndTensors.outputTensorUids)
         {

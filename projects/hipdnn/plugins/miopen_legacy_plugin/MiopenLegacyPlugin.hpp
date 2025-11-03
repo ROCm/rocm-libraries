@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#pragma once
+
 #include <hip/hip_runtime.h>
 #include <hipdnn_sdk/plugin/PluginApi.h>
 
