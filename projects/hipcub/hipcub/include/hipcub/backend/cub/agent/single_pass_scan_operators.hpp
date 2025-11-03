@@ -46,10 +46,9 @@ using BlockScanRunningPrefixOp = cub::BlockScanRunningPrefixOp<T, ScanOpT>;
 template<typename T,
          typename ScanOpT,
          typename ScanTileStateT,
-         int LEGACY_PTX_ARCH        = 0,
          typename DelayConstructorT = cub::detail::default_delay_constructor_t<T>>
 using TilePrefixCallbackOp
-    = cub::TilePrefixCallbackOp<T, ScanOpT, ScanTileStateT, LEGACY_PTX_ARCH, DelayConstructorT>;
+    = cub::TilePrefixCallbackOp<T, ScanOpT, ScanTileStateT, DelayConstructorT>;
 
 template<typename ValueT,
          typename KeyT,
