@@ -82,12 +82,12 @@ const auto& GetTestParamsFP16()
 
 } // namespace
 
-using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
-using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP16 = GPU_UnitTestConvSolverBwd_FP16;
-using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16 = GPU_UnitTestConvSolverWrw_FP16;
-using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP32 = GPU_UnitTestConvSolverFwd_FP32;
-using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP32 = GPU_UnitTestConvSolverBwd_FP32;
-using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32 = GPU_UnitTestConvSolverWrw_FP32;
+using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP16  = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16  = GPU_UnitTestConvSolverWrw_FP16;
+using GPU_UnitTestConvSolverWinoRage2x3Fwd_FP32  = GPU_UnitTestConvSolverFwd_FP32;
+using GPU_UnitTestConvSolverWinoRage2x3Bwd_FP32  = GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverWinoRage2x3Wrw_FP32  = GPU_UnitTestConvSolverWrw_FP32;
 using GPU_UnitTestConvSolverWinoRage2x3Fwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverWinoRage2x3Bwd_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
 using GPU_UnitTestConvSolverWinoRage2x3Wrw_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
