@@ -41,6 +41,7 @@
 #include <../test/verify.hpp>
 
 #include <miopen/errors.hpp>
+#include <miopen/par_for.hpp>
 #include <miopen/miopen.h>
 
 template <typename T>
@@ -63,7 +64,7 @@ int mloGLUForwardContiguousDim0RunHost(const Tgpu* input,
 
     if(parallel)
     {
-        par_for(output_numel, [&](const size_t& o) {
+        miopen::par_for(output_numel, [&](const size_t& o) {
             Tcheck valA   = static_cast<Tcheck>(inputFirstHalf[o]);
             Tcheck valB   = static_cast<Tcheck>(inputSecondHalf[o]);
             Tcheck val    = valA * sigmoid(valB);
@@ -101,7 +102,7 @@ int mloGLUBackwardCongiguousDim0RunHost(const Tgpu* input,
 
     if(parallel)
     {
-        par_for(outputGrad_numel, [&](const auto& o) {
+        miopen::par_for(outputGrad_numel, [&](const auto& o) {
             Tcheck inputFirstHalf_v = static_cast<Tcheck>(inputFirstHalf[o]);
             Tcheck sigmoid_v        = sigmoid(static_cast<Tcheck>(inputSecondHalf[o]));
             Tcheck grad_v           = static_cast<Tcheck>(outputGrad[o]);
@@ -273,8 +274,11 @@ int GLUDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
-    inflags.AddInputFlag(
-        "multithreaded", 'm', "0", "Run CPU forward/backward in multithreaded mode (Default=0)", "int");
+    inflags.AddInputFlag("multithreaded",
+                         'm',
+                         "0",
+                         "Run CPU forward/backward in multithreaded mode (Default=0)",
+                         "int");
 
     return miopenStatusSuccess;
 }
@@ -405,7 +409,8 @@ template <typename Tgpu, typename Tref>
 int GLUDriver<Tgpu, Tref>::RunForwardCPU()
 {
     MIOPEN_THROW_IF(dim != 0, "This driver only supports dim = 0");
-    mloGLUForwardContiguousDim0RunHost<Tgpu, Tref>(in.data(), outputTensor, outhost.data(), multithreaded);
+    mloGLUForwardContiguousDim0RunHost<Tgpu, Tref>(
+        in.data(), outputTensor, outhost.data(), multithreaded);
 
     return miopenStatusSuccess;
 }
