@@ -241,3 +241,85 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
     PointwisePlanBuilder<DataType::FLOAT> planBuilder;
     EXPECT_FALSE(planBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 }
+
+TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSwishBetaValueSet)
+{
+    std::vector<int64_t> inputDims = {1, 3, 4, 4};
+    std::vector<int64_t> outputDims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(inputDims,
+                                   outputDims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::RELU_FWD, // support op
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   1.0f);
+
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+
+    PointwisePlanBuilder<DataType::FLOAT> planBuilder;
+    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
+}
+
+TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfEluAlphaValueSet)
+{
+    std::vector<int64_t> inputDims = {1, 3, 4, 4};
+    std::vector<int64_t> outputDims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(inputDims,
+                                   outputDims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::RELU_FWD, // support op
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   1.0f);
+
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+
+    PointwisePlanBuilder<DataType::FLOAT> planBuilder;
+    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
+}
+
+TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
+{
+    std::vector<int64_t> inputDims = {1, 3, 4, 4};
+    std::vector<int64_t> outputDims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(inputDims,
+                                   outputDims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::RELU_FWD, // support op
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+
+                                   1.0f);
+
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+
+    PointwisePlanBuilder<DataType::FLOAT> planBuilder;
+    EXPECT_THROW(planBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::runtime_error);
+}

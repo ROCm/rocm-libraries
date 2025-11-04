@@ -39,24 +39,35 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Prebuilt stage - downloads and extracts tarball
+# Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
 # Example build command for default tarball build (gfx94X, 7.0.0rc20250909): 
 # docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
 #
-# Example build command for overriding tarball build args (gfx950, 7.0.0rc20250908):
+# Example build command to select tarball for asic family gfx950-dcgpu, build tag 7.0.0rc20250908:
 # docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:fullbuild .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz
+#
+# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_PREBUILT_ID=gfx120X-all-7.9.0rc20251005 .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+#
+# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
 # ============================================================================
 FROM base AS install_therock_prebuilt
 
 ARG THEROCK_ASIC=gfx94X
 ARG THEROCK_GIT_TAG=7.0.0rc20250909
-ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz
+ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
+ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
 
 RUN mkdir -p /opt/rocm
 WORKDIR /tmp
 
-RUN wget https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
+RUN wget --progress=dot:giga https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
 RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
 
 # ============================================================================
