@@ -13,12 +13,12 @@
 #define LIBCXX_WRAPPER_STD__CCCL_DIAGNOSTIC_H
 
 // TODO(libhipcxx): remove this file and replace all the THRUST* macros with _CCCL* macros in rocThrust
-// once libhipcxx gets ready
+// once libhipcxx v3.0.1 gets ready
 
 #include <thrust/detail/config/libcxx.h>
 #include <thrust/detail/libcxx_wrapper/std/__cccl/compiler.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD && _LIBCUDACXX_CUDA_API_VERSION_PATCH >= 1
 
 #  include _THRUST_STD_INCLUDE(__cccl/diagnostic.h)
 
@@ -46,7 +46,7 @@
 #  define THRUST_SUPPRESS_DEPRECATED_PUSH      _CCCL_SUPPRESS_DEPRECATED_PUSH
 #  define THRUST_SUPPRESS_DEPRECATED_POP       _CCCL_SUPPRESS_DEPRECATED_POP
 
-#else
+#else // !_THRUST_HAS_DEVICE_SYSTEM_STD || _LIBCUDACXX_CUDA_API_VERSION_PATCH < 1
 
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/preprocessor.h>
 

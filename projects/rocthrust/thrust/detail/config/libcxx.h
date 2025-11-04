@@ -36,8 +36,8 @@
 // Version that we depend on. We can ignore patch for now
 // since we're only interested in breaking (major) and
 // features (minor).
-#define _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR 2
-#define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 8
+#define _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR 3
+#define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 0
 
 // Set default values if not explictly set
 #ifndef USE_LIBCUDACXX
