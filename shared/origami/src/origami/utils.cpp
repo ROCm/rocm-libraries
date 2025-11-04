@@ -218,7 +218,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
     // Count the number of similar latencies
     constexpr double epsilon = 1e-9;
     //variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
-    const int top_N_heuristic = read_heuristics_variance_env_var();
+    static const int top_N_heuristic = read_heuristics_variance_env_var();
     for (const auto& res : valid_results) {
         bool within_top;
         const double diff = std::abs(std::get<0>(res) - best_latency);
