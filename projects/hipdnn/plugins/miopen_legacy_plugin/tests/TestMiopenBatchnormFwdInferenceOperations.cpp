@@ -103,7 +103,7 @@ INSTANTIATE_TEST_SUITE_P(,
 //--------------------------
 
 template <typename InputType, typename IntermediateType>
-class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<Batchnorm2dTestCase>
+class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<BatchnormTestCase>
 {
 protected:
     TensorLayout _layout;
@@ -129,11 +129,11 @@ protected:
         }
     }
 
-    void runFwdBatchnormGraph(Batchnorm2dTestCase testCase,
+    void runFwdBatchnormGraph(const BatchnormTestCase& testCase,
                               hipdnn_sdk::data_objects::DataType inputDataType,
                               InputType tolerance)
     {
-        auto dims = std::vector<int64_t>{testCase.n, testCase.c, testCase.h, testCase.w};
+        auto dims = testCase.dims;
 
         auto derivedDims = getDerivedShape(dims);
 
@@ -323,7 +323,7 @@ public:
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::FLOAT,
                          batchnorm::getToleranceInference<float>());
@@ -331,7 +331,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, Correctness)
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::BFLOAT16,
                          batchnorm::getToleranceInference<hip_bfloat16>());
@@ -339,7 +339,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, Correctness)
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp16, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::HALF,
                          batchnorm::getToleranceInference<half>());
@@ -348,7 +348,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp16, Correctness)
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp64, DISABLED_Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::DOUBLE,
                          batchnorm::getToleranceInference<double>());
@@ -356,7 +356,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp64, DISABLED_Correctn
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::FLOAT,
                          batchnorm::getToleranceInference<float>());
@@ -364,7 +364,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, Correctness)
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::BFLOAT16,
                          batchnorm::getToleranceInference<hip_bfloat16>());
@@ -372,7 +372,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, Correctness)
 
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp16, Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::HALF,
                          batchnorm::getToleranceInference<half>());
@@ -381,7 +381,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp16, Correctness)
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp64, DISABLED_Correctness)
 {
-    auto testCase = GetParam();
+    const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
                          hipdnn_sdk::data_objects::DataType::DOUBLE,
                          batchnorm::getToleranceInference<double>());

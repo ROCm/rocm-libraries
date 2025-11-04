@@ -512,22 +512,50 @@ public:
         return ret;
     }
 
-    fft_status set_callbacks(void*  load_cb_host,
-                             void*  load_cb_data,
-                             void*  store_cb_host,
-                             void*  store_cb_data,
-                             size_t load_cb_shared_mem_bytes  = 0,
-                             size_t store_cb_shared_mem_bytes = 0) override
+    // Return the number of expected callback entries for supplied
+    // fields.
+    static size_t expected_callback_count(const std::vector<fft_field>& fields)
+    {
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+        return std::accumulate(fields.begin(),
+                               fields.end(),
+                               static_cast<size_t>(0),
+                               [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
+    }
+
+    fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                             std::vector<void*>* load_cb_data,
+                             std::vector<void*>* store_cb_func,
+                             std::vector<void*>* store_cb_data,
+                             size_t              load_cb_shared_mem_bytes  = 0,
+                             size_t              store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
+            auto expected_load_cb_count  = expected_callback_count(ifields);
+            auto expected_store_cb_count = expected_callback_count(ofields);
+            check_callback_vec(load_cb_func, expected_load_cb_count, true);
+            check_callback_vec(load_cb_data, expected_load_cb_count, false);
+            check_callback_vec(store_cb_func, expected_store_cb_count, true);
+            check_callback_vec(store_cb_data, expected_store_cb_count, false);
+
             auto roc_status = rocfft.execution_info_set_load_callback(
-                info, &load_cb_host, &load_cb_data, load_cb_shared_mem_bytes);
+                info,
+                load_cb_func ? load_cb_func->data() : nullptr,
+                load_cb_data ? load_cb_data->data() : nullptr,
+                load_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
 
             roc_status = rocfft.execution_info_set_store_callback(
-                info, &store_cb_host, &store_cb_data, store_cb_shared_mem_bytes);
+                info,
+                store_cb_func ? store_cb_func->data() : nullptr,
+                store_cb_data ? store_cb_data->data() : nullptr,
+                store_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
         }
