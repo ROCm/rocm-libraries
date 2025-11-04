@@ -60,6 +60,7 @@ inline void free_ptr_use(void* ptr)
         mem_used -= mem_allocated[ptr];
         mem_allocated.erase(ptr);
     }
+    free(ptr);
 }
 
 size_t host_bytes_allocated()
@@ -215,7 +216,7 @@ void* host_calloc(size_t nmemb, size_t size)
     if(host_mem_safe(nmemb * size))
     {
         void* ptr = calloc(nmemb, size);
-        alloc_ptr_use(ptr, size);
+        alloc_ptr_use(ptr, nmemb * size);
         return ptr;
     }
     else
@@ -224,6 +225,5 @@ void* host_calloc(size_t nmemb, size_t size)
 
 void host_free(void* ptr)
 {
-    free(ptr);
     free_ptr_use(ptr);
 }

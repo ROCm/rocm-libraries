@@ -130,6 +130,14 @@ void init_enum(nb::module_ m)
         .value("UNUSED_PRESERVE", rocisa::UnusedBit::UNUSED_PRESERVE)
         .export_values();
 
+    nb::enum_<rocisa::CacheScope>(m_enum, "CacheScope")
+        .value("SCOPE_NONE", rocisa::CacheScope::SCOPE_NONE)
+        .value("SCOPE_CU", rocisa::CacheScope::SCOPE_CU)
+        .value("SCOPE_SE", rocisa::CacheScope::SCOPE_SE)
+        .value("SCOPE_DEV", rocisa::CacheScope::SCOPE_DEV)
+        .value("SCOPE_SYS", rocisa::CacheScope::SCOPE_SYS)
+        .export_values();
+
     nb::enum_<rocisa::CvtType>(m_enum, "CvtType")
         .value("CVT_F16_to_F32", rocisa::CvtType::CVT_F16_to_F32)
         .value("CVT_F32_to_F16", rocisa::CvtType::CVT_F32_to_F16)

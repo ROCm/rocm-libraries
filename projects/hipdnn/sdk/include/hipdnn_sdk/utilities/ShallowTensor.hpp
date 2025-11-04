@@ -64,12 +64,12 @@ public:
         return _memory.count();
     }
 
-    const IMigratableMemory<T>& memory() const override
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
     }
@@ -84,6 +84,13 @@ public:
                               [[maybe_unused]] unsigned int seed = std::random_device{}()) override
     {
         throwNotSupported();
+    }
+
+    size_t fillWithData([[maybe_unused]] const void* data,
+                        [[maybe_unused]] size_t maxBytesCopied) override
+    {
+        throwNotSupported();
+        return 0;
     }
 
 private:

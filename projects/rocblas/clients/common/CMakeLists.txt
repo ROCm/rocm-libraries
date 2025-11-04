@@ -145,6 +145,7 @@ set(rocblas_testing_common_source
     blas3/common_geam.cpp
     blas_ex/common_gemmt.cpp
     blas_ex/common_geam_ex.cpp
+    blas_ex/common_syrk_ex.cpp
 )
 
 add_library(rocblas_clients_common OBJECT ${rocblas_testing_common_tensile_source} ${rocblas_common_source})
