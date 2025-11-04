@@ -1,4 +1,4 @@
-/*! \file
+/*! \file unique_ptr.h
  *  \brief A smart pointer that owns and manages another object through a
  *         pointer and disposes of that object when the \p unique_ptr goes
  *         out of scope.
@@ -26,9 +26,28 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
+/*! \brief Default deleter for \p unique_ptr.
+ *
+ *  The default deleter used by \p unique_ptr when no custom deleter is specified.
+ *  Uses \p thrust::device_free to deallocate memory. For non-trivially destructible
+ *  types, invokes destructors on the device before deallocation.
+ *
+ *  \tparam T The type of object to delete (single object form).
+ *
+ *  \see thrust::unique_ptr
+ *  \see thrust::device_free
+ */
 template <class T, class = void>
 struct default_delete;
 
+/*! \brief Default deleter specialization for single objects.
+ *
+ *  This specialization handles deletion of single objects allocated in device memory.
+ *  For non-trivially destructible types, the destructor is invoked on the device
+ *  before memory deallocation.
+ *
+ *  \tparam T The type of object to delete.
+ */
 template <class T>
 struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
 {
@@ -70,6 +89,13 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
   }
 };
 
+/*! \brief Default deleter specialization for arrays of non-trivially destructible types.
+ *
+ *  This specialization handles deletion of arrays where element destructors must be called.
+ *  Stores the array size to ensure all element destructors are properly invoked on the device.
+ *
+ *  \tparam T The array element type (non-trivially destructible).
+ */
 template <class T>
 struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>>>
 {
@@ -122,12 +148,16 @@ private:
   size_t m_size;
 };
 
-// For arrays of trivially destructible element types we intentionally do NOT
-// store the element count. Their destruction is a no-op, so only the raw
-// deallocation is required. Omitting the size keeps this deleter
-// specialization an empty (zero-size) type, allowing unique_ptr<T[]>
-// instantiations that use it to remain a zero-cost abstraction (the deleter
-// need not increase the overall object size).
+/*! \brief Default deleter specialization for arrays of trivially destructible types.
+ *
+ *  For arrays of trivially destructible element types, this specialization intentionally
+ *  does NOT store the element count. Their destruction is a no-op, so only the raw
+ *  deallocation is required. Omitting the size keeps this deleter specialization an
+ *  empty (zero-size) type, allowing \p unique_ptr<T[]> instantiations that use it to
+ *  remain a zero-cost abstraction (the deleter need not increase the overall object size).
+ *
+ *  \tparam T The array element type (trivially destructible).
+ */
 template <class T>
 struct default_delete<T[], std::enable_if_t<std::is_trivially_destructible_v<T>>>
 {
@@ -864,8 +894,8 @@ public:
     return m_deleter;
   }
 
-  /*! \brief Returns a constreference to the deleter object which would be used for destruction of the managed array.
-   *  \return A reference to the stored deleter.
+  /*! \brief Returns a const reference to the deleter object which would be used for destruction of the managed array.
+   *  \return A const reference to the stored deleter.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
   {
