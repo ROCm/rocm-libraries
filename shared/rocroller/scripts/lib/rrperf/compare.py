@@ -296,20 +296,7 @@ def resource_usage_changes(
             ldsBytesA = A.ldsBytes
             ldsBytesB = B.ldsBytes
 
-            # Below `all` check can be removed once develop branch reports these fields too.
-            if all(
-                v is not None
-                for v in [
-                    sgprA,
-                    sgprB,
-                    vgprA,
-                    vgprB,
-                    agprA,
-                    agprB,
-                    ldsBytesA,
-                    ldsBytesB,
-                ]
-            ) and (
+            if (
                 sgprA != sgprB
                 or vgprA != vgprB
                 or agprA != agprB
