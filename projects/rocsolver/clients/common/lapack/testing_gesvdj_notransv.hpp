@@ -808,7 +808,7 @@ void testing_gesvdj_notransv(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_notransv_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,
@@ -851,7 +851,7 @@ void testing_gesvdj_notransv(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_notransv_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,

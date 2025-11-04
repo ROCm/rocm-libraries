@@ -877,7 +877,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
@@ -917,7 +917,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,

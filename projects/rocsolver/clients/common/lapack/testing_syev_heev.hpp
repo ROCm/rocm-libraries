@@ -532,7 +532,7 @@ void testing_syev_heev(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syev_heev_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                               stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
@@ -572,7 +572,7 @@ void testing_syev_heev(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syev_heev_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                               stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,

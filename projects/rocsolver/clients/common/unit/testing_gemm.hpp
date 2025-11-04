@@ -320,7 +320,7 @@ void testing_gemm(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
                                    incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
@@ -355,7 +355,7 @@ void testing_gemm(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
                                    incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,

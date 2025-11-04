@@ -787,7 +787,7 @@ void testing_gesvdj(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_getPerfData<STRIDED, T>(handle, leftv, rightv, m, n, dA, lda, stA, abstol,
                                            dResidual, max_sweeps, dSweeps, dS, stS, dU, ldu, stU,
@@ -830,7 +830,7 @@ void testing_gesvdj(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_getPerfData<STRIDED, T>(handle, leftv, rightv, m, n, dA, lda, stA, abstol,
                                            dResidual, max_sweeps, dSweeps, dS, stS, dU, ldu, stU,

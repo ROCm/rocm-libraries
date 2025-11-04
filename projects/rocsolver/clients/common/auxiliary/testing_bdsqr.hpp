@@ -628,7 +628,7 @@ void testing_bdsqr(Arguments& argus)
     }
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
     {
         host_strided_batch_vector<T> hV(size_V, 1, size_V, 1);
         host_strided_batch_vector<T> hU(size_U, 1, size_U, 1);

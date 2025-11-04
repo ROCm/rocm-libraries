@@ -748,7 +748,7 @@ void testing_syevx_heevx(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevx_heevx_getPerfData<STRIDED, T>(handle, evect, erange, uplo, n, dA, lda, stA, vl,
                                                 vu, il, iu, abstol, dNev, dW, stW, dZ, ldz, stZ,
@@ -795,7 +795,7 @@ void testing_syevx_heevx(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevx_heevx_getPerfData<STRIDED, T>(handle, evect, erange, uplo, n, dA, lda, stA, vl,
                                                 vu, il, iu, abstol, dNev, dW, stW, dZ, ldz, stZ,

@@ -593,7 +593,7 @@ void testing_syevj_heevj(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevj_heevj_getPerfData<STRIDED, T>(
                 handle, esort, evect, uplo, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,
@@ -635,7 +635,7 @@ void testing_syevj_heevj(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevj_heevj_getPerfData<STRIDED, T>(
                 handle, esort, evect, uplo, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,

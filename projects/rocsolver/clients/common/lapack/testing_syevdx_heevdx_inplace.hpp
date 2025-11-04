@@ -602,7 +602,7 @@ void testing_syevdx_heevdx_inplace(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevdx_heevdx_inplace_getPerfData<STRIDED, T>(
                 handle, evect, erange, uplo, n, dA, lda, stA, vl, vu, il, iu, abstol, hNevRes, dW,
@@ -643,7 +643,7 @@ void testing_syevdx_heevdx_inplace(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevdx_heevdx_inplace_getPerfData<STRIDED, T>(
                 handle, evect, erange, uplo, n, dA, lda, stA, vl, vu, il, iu, abstol, hNevRes, dW,

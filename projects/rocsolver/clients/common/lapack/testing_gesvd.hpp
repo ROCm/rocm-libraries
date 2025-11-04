@@ -805,7 +805,7 @@ void testing_gesvd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvd_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, dS, stS, dU, ldu, stU, dV, ldv, stV, dE,
@@ -847,7 +847,7 @@ void testing_gesvd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvd_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, dS, stS, dU, ldu, stU, dV, ldv, stV, dE,
