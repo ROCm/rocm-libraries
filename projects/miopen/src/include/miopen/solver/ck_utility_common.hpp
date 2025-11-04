@@ -52,7 +52,7 @@ static inline bool is_ck_whitelist(const Handle& handle)
 
 static inline bool is_wmma_capable(const std::string& device_name)
 {
-    return StartsWith(device_name, "gfx110") || StartsWith(device_name, "gfx120");
+    return StartsWith(device_name, "gfx11") || StartsWith(device_name, "gfx12");
 }
 
 static inline bool is_wmma_capable(const Handle& handle)
