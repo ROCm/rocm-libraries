@@ -14,7 +14,7 @@ namespace origami {
 static int read_heuristics_variance_env_var()
 {
     const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
-    if (!env) return 1;
+    if (!env) return 1; // Set default variance to 1%
 
     try {
         int val = std::stoi(env);
