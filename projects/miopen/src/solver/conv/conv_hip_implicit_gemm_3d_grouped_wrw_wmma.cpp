@@ -359,10 +359,6 @@ bool ConvHipImplicitGemm3DGroupWrwWmma::CheckCKApplicability(
 void PerformanceConfigHipImplicitGemm3DGroupWrwWmma::HeuristicInit(
     [[maybe_unused]] const ProblemDescription& problem)
 {
-    index     = 0;
-    split_k   = 1;
-    kernel_id = "";
-
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
