@@ -37,11 +37,11 @@ from rrperf.compare import compare
 FILE_DIR = Path(__file__).parent.resolve()
 
 
-def test_resource_change_detection():
+def test_any_increase_resource_usage():
     result_io = io.StringIO()
     samples_dir = FILE_DIR / "samples"
     original_dir = samples_dir / "1"
-    modified_dir = samples_dir / "1_modified_resource_usage"
+    modified_dir = samples_dir / "1_increase_usage"
     assert original_dir.exists()
     assert modified_dir.exists()
     compare(
@@ -50,10 +50,27 @@ def test_resource_change_detection():
         output=result_io,
     )
     result = result_io.getvalue()
-    assert "SGPR: 102 -> 104 (+2) | VGPR: 206 -> 205 (-1)" in result
+    assert "- SGPR: 102 -> 104 (+2) | VGPR: 206 -> 205 (-1)" in result
 
 
-def test_no_resource_change_detection():
+def test_decrease_resource_usage():
+    result_io = io.StringIO()
+    samples_dir = FILE_DIR / "samples"
+    original_dir = samples_dir / "1"
+    modified_dir = samples_dir / "1_decrease_usage"
+    assert original_dir.exists()
+    assert modified_dir.exists()
+    compare(
+        directories=[str(original_dir), str(modified_dir)],
+        format="resource_md",
+        output=result_io,
+    )
+    result = result_io.getvalue()
+    print(result)
+    assert "+ VGPR: 206 -> 199 (-7) | LDS: 131072 -> 131070 bytes (-2)" in result
+
+
+def test_same_dir():
     result_io = io.StringIO()
     samples_dir = FILE_DIR / "samples"
     original_dir = samples_dir / "1"
@@ -65,6 +82,6 @@ def test_no_resource_change_detection():
         format="resource_md",
         output=result_io,
     )
-    result = result_io.getvalue().lower()
-    assert "sgpr" not in result
-    assert "vgpr" not in result
+    result_lower = result_io.getvalue().lower()
+    assert "sgpr" not in result_lower
+    assert "vgpr" not in result_lower

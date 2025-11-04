@@ -98,8 +98,8 @@ kernelExecute:
 checked: true
 correct: true
 rnorm: 9.0751436555681984e-06
-sgprCount: 102
-vgprCount: 206
+sgprCount: 104
+vgprCount: 205
 agprCount: 256
 ldsBytes: 131072
 ...

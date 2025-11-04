@@ -99,7 +99,7 @@ checked: true
 correct: true
 rnorm: 9.0751436555681984e-06
 sgprCount: 102
-vgprCount: 206
+vgprCount: 199
 agprCount: 256
-ldsBytes: 131072
+ldsBytes: 131070
 ...
