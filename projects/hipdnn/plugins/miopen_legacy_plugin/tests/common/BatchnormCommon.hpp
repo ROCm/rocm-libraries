@@ -94,9 +94,7 @@ inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 
     return {
         {{1, 3, 14, 14}, seed},
-        // MIOpen segfaults for this case, re-enable when fix is released:
-        // https://github.com/ROCm/rocm-libraries/pull/1197
-        // {1, 256, 1, 1, seed}, // Would produce near-zero variance in theory
+        {{1, 256, 1, 1}, seed},
         {{2, 3, 1, 1}, seed},
         {{32, 1, 14, 14}, seed},
         {{32, 3, 1, 14}, seed},
