@@ -293,6 +293,7 @@ def runPerformanceCommand (platform, project)
                     else
                         touch performance_comparison_${platform.gpu}.html
                         touch performance_comparison_${platform.gpu}.md
+                        touch resource_comparison_${platform.gpu}.md
                         echo "Skipped ${env.CHANGE_TARGET} compare for ${platform.gpu}, no archived performance_${platform.gpu}_last.zip found."
                     fi
                 """
@@ -329,53 +330,55 @@ def runPerformanceCommand (platform, project)
                         reportName: "Performance Report for ${platform.gpu}",
                         reportTitles: "Report"])
 
-            def commentTitle = "# Performance Report for ${platform.gpu}"
-            def commentString = "${commentTitle}\n\n"
-            def results = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
-            def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
-            commentString += "## Results${estimateString}\n\n"
-            commentString += "${results}\n\n"
-            commentString += "<details><summary>Links</summary>\n\n"
-            commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
-            commentString += "* [Job Link](${env.BUILD_URL}) \n"
-            commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
-            commentString += "</details>\n\n"
+            {
+                def commentTitle = "# Performance Report for ${platform.gpu}"
+                def commentString = "${commentTitle}\n\n"
+                def results = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+                def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
+                commentString += "## Results${estimateString}\n\n"
+                commentString += "${results}\n\n"
+                commentString += "<details><summary>Links</summary>\n\n"
+                commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+                commentString += "* [Job Link](${env.BUILD_URL}) \n"
+                commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
+                commentString += "</details>\n\n"
 
-            boolean commentExists = false
-            for (prComment in getPrComments(pullRequest)) {
-                if (prComment.body.contains(commentTitle))
-                {
-                    commentExists = true
-                    prComment.body = commentString
-                }
-            }
-            if (!commentExists) {
-                def comment = pullRequest.comment(commentString)
-            }
-
-            def resourceCommentTitle = "# Resource Usage Report for ${platform.gpu}"
-            def resourceCommentString = "${resourceCommentTitle}\n\n"
-            
-            def resourceFile = new File("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md")
-            if (resourceFile.exists()) {
-                def resourceResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
-                resourceCommentString += "## Results${estimateString}\n\n"
-                resourceCommentString += "${resourceResults}\n\n"
-                resourceCommentString += "<details><summary>Links</summary>\n\n"
-                resourceCommentString += "* [Performance Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
-                resourceCommentString += "* [Job Link](${env.BUILD_URL}) \n"
-                resourceCommentString += "</details>\n\n"
-
-                boolean resourceCommentExists = false
+                boolean commentExists = false
                 for (prComment in getPrComments(pullRequest)) {
-                    if (prComment.body.contains(resourceCommentTitle))
+                    if (prComment.body.contains(commentTitle))
                     {
-                        resourceCommentExists = true
-                        prComment.body = resourceCommentString
+                        commentExists = true
+                        prComment.body = commentString
                     }
                 }
-                if (!resourceCommentExists) {
-                    def resourceComment = pullRequest.comment(resourceCommentString)
+                if (!commentExists) {
+                    def comment = pullRequest.comment(commentString)
+                }
+            }
+            
+            {
+                def commentTitle = "# Resource Report for ${platform.gpu}"
+                def commentString = "${commentTitle}\n\n"
+                def results = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+                def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
+                commentString += "## Results${estimateString}\n\n"
+                commentString += "${results}\n\n"
+                commentString += "<details><summary>Links</summary>\n\n"
+                commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+                commentString += "* [Job Link](${env.BUILD_URL}) \n"
+                commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
+                commentString += "</details>\n\n"
+
+                boolean commentExists = false
+                for (prComment in getPrComments(pullRequest)) {
+                    if (prComment.body.contains(commentTitle))
+                    {
+                        commentExists = true
+                        prComment.body = commentString
+                    }
+                }
+                if (!commentExists) {
+                    def comment = pullRequest.comment(commentString)
                 }
             }
         }
