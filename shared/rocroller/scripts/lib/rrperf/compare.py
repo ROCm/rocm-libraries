@@ -239,14 +239,6 @@ def summary_as_df(summary, ResultType):
                     ),
                     "genA(ns)": A.kernelGenerate,
                     "genB(ns)": B.kernelGenerate,
-                    "sgprA": getattr(A, "sgprCount", 0),
-                    "sgprB": getattr(B, "sgprCount", 0),
-                    "vgprA": getattr(A, "vgprCount", 0),
-                    "vgprB": getattr(B, "vgprCount", 0),
-                    "agprA": getattr(A, "agprCount", 0),
-                    "agprB": getattr(B, "agprCount", 0),
-                    "ldsBytesA": getattr(A, "ldsBytes", 0),
-                    "ldsBytesB": getattr(B, "ldsBytes", 0),
                 }
             )
             rows.append(row)
@@ -484,6 +476,8 @@ def html_overview_table(html_file, summary, problems):
     for run in summary:
         for i, result in enumerate(summary[run]):
             token, comparison = summary[run][result]
+            A: RRPerfResult
+            B: RRPerfResult
             A, B = comparison.results
             relative_diff = (
                 (comparison.median[1] - comparison.median[0]) / comparison.median[0]
@@ -495,15 +489,6 @@ def html_overview_table(html_file, summary, problems):
                 if comparison.problem in problems
                 else i
             )
-
-            sgprA = getattr(A, "sgprCount", 0)
-            sgprB = getattr(B, "sgprCount", 0)
-            vgprA = getattr(A, "vgprCount", 0)
-            vgprB = getattr(B, "vgprCount", 0)
-            agprA = getattr(A, "agprCount", 0)
-            agprB = getattr(B, "agprCount", 0)
-            ldsBytesA = getattr(A, "ldsBytes", 0)
-            ldsBytesB = getattr(B, "ldsBytes", 0)
 
             print(
                 f"""
@@ -519,14 +504,14 @@ def html_overview_table(html_file, summary, problems):
                     <td> {B.path.parent.stem} </td>
                     <td> {A.kernelGenerate:,.0f} </td>
                     <td> {B.kernelGenerate:,.0f} </td>
-                    <td> {sgprA} </td>
-                    <td> {sgprB} </td>
-                    <td> {vgprA} </td>
-                    <td> {vgprB} </td>
-                    <td> {agprA} </td>
-                    <td> {agprB} </td>
-                    <td> {ldsBytesA:,} </td>
-                    <td> {ldsBytesB:,} </td>
+                    <td> {A.sgprCount} </td>
+                    <td> {B.sgprCount} </td>
+                    <td> {A.vgprCount} </td>
+                    <td> {B.vgprCount} </td>
+                    <td> {A.agprCount} </td>
+                    <td> {B.agprCount} </td>
+                    <td> {A.ldsBytes:,} </td>
+                    <td> {B.ldsBytes:,} </td>
                 </tr>""",
                 file=html_file,
             )
