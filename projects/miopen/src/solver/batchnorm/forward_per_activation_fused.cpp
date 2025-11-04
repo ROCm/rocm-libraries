@@ -90,8 +90,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         input_type             = input_desc.GetType();
         std::tie(n, c, h, w)   = tien<4>(input_desc.GetLengths());
         size_t in_cstride      = static_cast<size_t>(h) * w;
-        size_t in_nstride = c * in_cstride;
-        size_t in_nchw    = n * in_nstride;
+        size_t in_nstride      = c * in_cstride;
+        size_t in_nchw         = n * in_nstride;
 
         xlocalsize = 1024;
         ylocalsize = 1;
@@ -122,7 +122,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             ygridsize = 1;
         }
 
-        kernel.g_wk       = {xgridsize, ygridsize, zgridsize};
+        kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
         unsigned int ldsgcn   = xlocalsize / 64;
         unsigned int ldsnogcn = xlocalsize;

@@ -40,20 +40,20 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
     const mio_bn_config::fp_type beta,
     const mio_bn_config::fp_type gamma,
     double epsilon, /* input fuzz param > 0 */
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
     double expAvgFactor,
 #endif
     const typename mio_bn_config::fp_type* __restrict in,        /* x input */
     typename mio_bn_config::fp_type* __restrict out,             /* y output */
     const typename mio_bn_config::fp_prec_type* __restrict bias, /* beta 1xCxHxW */
     const typename mio_bn_config::fp_prec_type* __restrict scale /* gamma 1xCxHxW */
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
     ,
     typename mio_bn_config::fp_prec_type* __restrict runningMean,    /*input and output, same
                                                                         descriptor as bias*/
     typename mio_bn_config::fp_prec_type* __restrict runningVariance /*input and output*/
 #endif
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
     ,
     typename mio_bn_config::fp_prec_type* __restrict savedInvVariance, /*output only*/
     typename mio_bn_config::fp_prec_type* __restrict savedMean         /*output only*/
@@ -90,7 +90,7 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
     variance                 = fma(-mean, mean, variance);
     fp_prec_type invVariance = rsqrt(variance + epsilon);
 
-#if (MIO_RUNNING_RESULT == 1)
+#if(MIO_RUNNING_RESULT == 1)
     using StashUpdater = miopen::batchnorm::StashUpdaterPA<fp_prec_c_type>;
     StashUpdater updater(static_cast<fp_prec_c_type>(mean),
                          static_cast<fp_prec_c_type>(variance),
@@ -100,7 +100,7 @@ extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
         runningMean, runningVariance, updater, xgid);
 #endif
 
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
     miopen::batchnorm::saved_stash<fp_prec_c_type, fp_prec_c_type>(
         savedMean, savedInvVariance, mean, invVariance, xgid);
 #endif
