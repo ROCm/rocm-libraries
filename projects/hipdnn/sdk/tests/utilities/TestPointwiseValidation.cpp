@@ -139,7 +139,8 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
                                                         PointwiseMode::SIGMOID_FWD,
                                                         PointwiseMode::TANH_FWD,
                                                         PointwiseMode::ABS,
-                                                        PointwiseMode::NEG};
+                                                        PointwiseMode::NEG,
+                                                        PointwiseMode::IDENTITY};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
