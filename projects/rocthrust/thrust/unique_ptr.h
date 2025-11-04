@@ -487,6 +487,9 @@ public:
   }
 
   /*! \brief Checks if the \p unique_ptr owns an object.
+   *
+   *  Equivalent to `get() != nullptr`.
+   *
    *  \return `true` if an object is owned, `false` otherwise.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
@@ -507,8 +510,18 @@ public:
     return *m_ptr;
   }
 
-  // In host code, attempting to use this will produce a clear diagnostic
-  // instead of silently allowing an invalid dereference of device memory.
+  /*! \brief Disabled for device pointers - cannot dereference device memory from host.
+   *
+   *  \warning This operator is intentionally disabled because dereferencing
+   *  device memory from host code is invalid. Use `operator*()` to copy the
+   *  object to host first (`T host_obj = *ptr`), or access members inside
+   *  device code.
+   *
+   *  Attempting to use this operator will produce a compile-time error with
+   *  a clear diagnostic message.
+   *
+   *  \return This function does not return; it triggers a compile-time error.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
   {
     static_assert(false,
@@ -545,6 +558,10 @@ public:
   }
 
   /*! \brief Swaps the managed object and deleter with another \p unique_ptr.
+   *
+   *  Exchanges the contents of `*this` and \p u. This operation is `noexcept`
+   *  and swaps both the stored pointer and the deleter.
+   *
    *  \param u The \p unique_ptr to swap with.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
