@@ -33,7 +33,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
-        .set_compute_data_type(intermediateType);
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dy = createTensor({n, c, h, w}, inputType, layout);
     auto x = createTensor({n, c, h, w}, inputType, layout);
@@ -131,11 +131,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
         auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
-        bool dxValid = dxValidator.allClose(dxRefTensor.memory(), dxTensor.memory());
-        bool dscaleValid
-            = dscaleDbiasValidator.allClose(dscaleRefTensor.memory(), dscaleTensor.memory());
-        bool dbiasValid
-            = dscaleDbiasValidator.allClose(dbiasRefTensor.memory(), dbiasTensor.memory());
+        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
+        bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
+        bool dbiasValid = dscaleDbiasValidator.allClose(dbiasRefTensor, dbiasTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";

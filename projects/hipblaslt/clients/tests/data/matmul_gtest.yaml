@@ -416,6 +416,16 @@ Tests:
     - { M:  960, N: 1024, K: 1024 }
     - { M: 1024, N: 1024, K: 1024 }
 
+- name: matmul_k0
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: 4
+  N: 4
+  K: 0
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+
 #OCP F8
 - name: matmul_f8_bf8_dst_fp32
   category: pre_checkin
@@ -496,7 +506,7 @@ Tests:
     - { M:  512, N:  512, K:  512 }
     - { M:  960, N: 1024, K: 1024 }
     - { M: 1024, N: 1024, K: 1024 }
-  gpu_arch: '942'
+  gpu_arch: '9(0a|42)'
 
 - name: matmul_small2
   category: pre_checkin
@@ -522,6 +532,20 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   activation_type: relu
+  bias_vector: [0, 1]
+  unit_check: 1
+
+- name: matmul_bias_sigmoid
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: sigmoid
   bias_vector: [0, 1]
   unit_check: 1
 

@@ -23,6 +23,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         hipdnn_sdk::data_objects::DataType inputDataType,
         hipdnn_sdk::data_objects::DataType scaleBiasDataType,
         hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+        hipdnn_sdk::data_objects::DataType computeDataType,
         bool useOptionalTensors)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
@@ -56,6 +57,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
     bnAttrs.set_epsilon(epsilonTensor);
+    bnAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
 
     std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> momentumTensorAttr;
     std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> prevRunningMeanTensorAttr;
@@ -157,6 +159,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     buildBatchnormFwdInferenceGraph(hipdnn_sdk::data_objects::DataType inputDataType,
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+                                    hipdnn_sdk::data_objects::DataType computeDataType,
                                     const std::vector<int64_t>& dims,
                                     const TensorLayout& layout,
                                     bool isOutputVirtual = false)
@@ -204,6 +207,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     hipdnn_frontend::graph::BatchnormInferenceAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_inference");
+    bnAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
 
     auto yTensorAttr = graph->batchnorm_inference(
         xTensorAttr, meanTensorAttr, varianceTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
@@ -228,7 +232,8 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
         hipdnn_sdk::data_objects::DataType inputDataType,
         hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType)
+        hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+        hipdnn_sdk::data_objects::DataType computeDataType)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormBwdTest");
@@ -269,6 +274,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     bnBwdAttrs.set_name("batchnorm_bwd");
     bnBwdAttrs.set_mean(meanTensorAttr);
     bnBwdAttrs.set_inv_variance(invVarianceTensorAttr);
+    bnBwdAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
 
     auto outputTensorsAttr
         = graph->batchnorm_backward(dyTensorAttr, xTensorAttr, scaleTensorAttr, bnBwdAttrs);

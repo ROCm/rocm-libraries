@@ -8,6 +8,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -33,7 +34,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
-        .set_compute_data_type(intermediateType);
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -97,7 +98,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                        static_cast<IntermediateType>(1.0f));
 
     momentumTensor.memory().hostData()[0] = 0.1f;
-    epsilonTensor.memory().hostData()[0] = 1e-5f;
+    epsilonTensor.memory().hostData()[0] = utilities::BATCHNORM_DEFAULT_EPSILON;
 
     std::unordered_map<int64_t, void*> variantPack;
 

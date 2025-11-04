@@ -16,11 +16,14 @@ class MiopenConvDescriptor
 public:
     MiopenConvDescriptor() = default;
     MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes);
+                         const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+                         int groupCount);
     MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes);
+                         const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+                         int groupCount);
     MiopenConvDescriptor(size_t spatialDimCount,
-                         const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes);
+                         const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+                         int groupCount);
 
     MiopenConvDescriptor(const MiopenConvDescriptor&) = delete;
     MiopenConvDescriptor& operator=(const MiopenConvDescriptor&) = delete;
@@ -40,7 +43,8 @@ private:
                                   const flatbuffers::Vector<int64_t>* attrPostPadding,
                                   const flatbuffers::Vector<int64_t>* attrStride,
                                   const flatbuffers::Vector<int64_t>* attrDilation,
-                                  hipdnn_sdk::data_objects::ConvMode convMode);
+                                  hipdnn_sdk::data_objects::ConvMode convMode,
+                                  int groupCount);
 };
 
 }

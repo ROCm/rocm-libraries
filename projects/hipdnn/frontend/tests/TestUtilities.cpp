@@ -6,6 +6,8 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <memory>
+#include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
