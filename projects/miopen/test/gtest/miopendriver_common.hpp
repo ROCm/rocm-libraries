@@ -74,8 +74,8 @@ static inline miopen::fs::path MIOpenDriverExePath()
     if(dladdr(reinterpret_cast<void*>(miopenCreate), &info) != 0)
     {
         path = miopen::fs::canonical(miopen::fs::path{info.dli_fname});
-        
-        std::cout << info.dli_fname << std::endl;
+
+        std::cout << "dladdr info.dli_fname: " << info.dli_fname << std::endl;
 
         if(path.empty())
             return path;
