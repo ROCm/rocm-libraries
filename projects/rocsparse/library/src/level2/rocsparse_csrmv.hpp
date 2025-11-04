@@ -44,8 +44,8 @@ namespace rocsparse
                                                       rocsparse_datatype*          gamma_types,
                                                       const void**                 gamma_ptrs,
                                                       rocsparse_const_dnvec_descr* z_vecs,
-                                                      T*         gamma_device_array,
-                                                      const Y**  z_array);
+                                                      T*        gamma_device_array,
+                                                      const Y** z_array);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
