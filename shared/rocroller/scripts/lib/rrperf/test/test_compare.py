@@ -26,13 +26,13 @@
 """Tests for rrperf.compare module with focus on resource tracking."""
 
 import io
-from pathlib import Path
 import sys
+from pathlib import Path
+
+from rrperf.compare import compare
 
 repo_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
-
-from rrperf.compare import compare
 
 FILE_DIR = Path(__file__).parent.resolve()
 
