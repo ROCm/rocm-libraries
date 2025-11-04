@@ -335,7 +335,7 @@ def runPerformanceCommand (platform, project)
             def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
             def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
             perfCommentString += "## Results${estimateString}\n\n"
-            perfCommentString += "<details open>${perfResults}\n\n</details>"
+            perfCommentString += "<details open>\n${perfResults}\n</details>\n"
             perfCommentString += "<details><summary>Links</summary>\n\n"
             perfCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
             perfCommentString += "* [Job Link](${env.BUILD_URL}) \n"
@@ -358,7 +358,7 @@ def runPerformanceCommand (platform, project)
             def resCommentString = "${resCommentTitle}\n\n"
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
             resCommentString += "## Results${estimateString}\n\n"
-            resCommentString += "<details open>${resResults}\n\n</details>"
+            resCommentString += "<details open>\n${resResults}\n</details>\n"
             resCommentString += "<details><summary>Links</summary>\n\n"
             resCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
             resCommentString += "* [Job Link](${env.BUILD_URL}) \n"
