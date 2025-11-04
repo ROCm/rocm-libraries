@@ -17,6 +17,7 @@ function(add_hipdnn_sample NAME SOURCE)
 endfunction()
 
 add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
+add_hipdnn_sample(bn_inference_activation_bwd batchnorm/BnInferenceActivationBwd.cpp)
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 
