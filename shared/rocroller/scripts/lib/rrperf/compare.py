@@ -41,7 +41,7 @@ import pandas as pd
 import rrperf
 import rrperf.args as args
 import scipy.stats
-from rrperf.problems import GEMMResult
+from rrperf.problems import GEMMResult, RRPerfResult
 from rrperf.specs import MachineSpecs
 
 
@@ -283,23 +283,28 @@ def significant_changes(summary, threshold=0.05):
     return result_diff
 
 
-def resource_usage_changes(summary):
+def resource_usage_changes(
+    summary: dict[str, dict[str, tuple[str, ComparisonResult]]],
+) -> str:
     """Report resource usage changes between runs."""
     resource_diffs = dict()
     for run in summary:
         for result in summary[run]:
             token, comparison = summary[run][result]
+            A: RRPerfResult
+            B: RRPerfResult
             A, B = comparison.results
 
-            sgprA = getattr(A, "sgprCount", 0)
-            sgprB = getattr(B, "sgprCount", 0)
-            vgprA = getattr(A, "vgprCount", 0)
-            vgprB = getattr(B, "vgprCount", 0)
-            agprA = getattr(A, "agprCount", 0)
-            agprB = getattr(B, "agprCount", 0)
-            ldsBytesA = getattr(A, "ldsBytes", 0)
-            ldsBytesB = getattr(B, "ldsBytes", 0)
+            sgprA = A.sgprCount
+            sgprB = B.sgprCount
+            vgprA = A.vgprCount
+            vgprB = B.vgprCount
+            agprA = A.agprCount
+            agprB = B.agprCount
+            ldsBytesA = A.ldsBytes
+            ldsBytesB = B.ldsBytes
 
+            # Below `all` check can be removed once develop branch reports these fields too.
             if all(
                 v is not None
                 for v in [
