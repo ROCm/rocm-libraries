@@ -1,11 +1,11 @@
 .. meta::
-  :description: hipFFT documentation and API reference library
-  :keywords: FFT, hipFFT, rocFFT, ROCm, API, documentation
+  :description: hipFFT documentation, hipFFTW documentation, and API reference library
+  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation
 
-.. _hipfft-overview:
+.. _overview-of-hipfft-and-hipfftw:
 
 ********************************************************************
-hipFFT overview
+Overview of hipFFT and hipFFTW
 ********************************************************************
 
 hipFFT is a GPU FFT marshalling library that supports
@@ -15,6 +15,19 @@ hipFFT exports an interface that does not require the client to
 change, regardless of the chosen backend. It sits between the
 application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
+
+hipFFTW exports an interface that is a subset of FFTW_'s interface. Applications using
+the latter for computing discrete Fourier transforms (on CPUs) can use hipFFTW as a
+drop-in substitution to leverage GPU computations instead with minimal
+modifications to their source code. Namely, it is recommended to replace
+inclusions of ``fftw3.h`` with inclusions of ``hipfft/hipfftw.h`` and link
+with hipFFTW instead of fftw3 or fftw3f. For more details, see the
+:doc:`hipFFTW API reference <../reference/hipfftw-api-usage>`.
+
+.. note::
+   hipFFTW supports single- and double-precision calculations; long-double and
+   quad-precision floating point operations are not supported.
+
 
 =====================
 Basic hipFFT usage
@@ -443,7 +456,7 @@ The following concepts and API calls are used:
 
 *  ``hipfftXt``: This API lets users execute FFTs across multiple GPUs by managing multi-GPU plans.
    ``hipfftXt`` provides an extended version of the hipFFT API to handle GPU-specific operations, such as memory allocation
-   and execution across multiple devices. For more details, see the :doc:`API reference <../reference/fft-api-usage>`.
+   and execution across multiple devices. For more details, see the :doc:`hipFFT API reference <../reference/hipfft-api-usage>`.
 
 *  :cpp:func:`hipfftCreate`: Creates a hipFFT plan that contains the FFT configuration. This plan is used to configure
    the FFT transform operation.
@@ -533,8 +546,8 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
          throw std::runtime_error("hipfftXtSetGPUs failed.");
 
       // Make the 2D plan for FFT (this defines the 2D FFT using the specified dimensions)
-      size_t workSize[gpus.size()];
-      hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize);
+      std::vector<size_t> workSize(gpus.size());
+      hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
       if(hipfft_rt != HIPFFT_SUCCESS)
          throw std::runtime_error("hipfftMakePlan2d failed.");
 
@@ -594,6 +607,6 @@ For detailed API usage, see :ref:`hipfft-api-usage`.
       return 0;
    }
 
-
 .. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
 .. _cuFFT: https://developer.nvidia.com/cufft
+.. _FFTW: https://www.fftw.org/

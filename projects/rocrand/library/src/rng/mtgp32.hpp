@@ -230,19 +230,24 @@ void save_head_tail(T (&output)[output_width],
     save_head_tail_impl(output, index, data, n, head_size, tail_size, vec_n_up);
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_mtgp(dim3 block_idx,
-                                       dim3 thread_idx,
-                                       dim3 grid_dim,
-                                       dim3 /*block_dim*/,
-                                       mtgp32_device_engine* engines,
-                                       T*                    data,
-                                       const size_t          n,
-                                       Distribution          distribution)
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_mtgp(dim3 block_idx,
+                   dim3 thread_idx,
+                   dim3 grid_dim,
+                   dim3 /*block_dim*/,
+                   mtgp32_device_engine* engines,
+                   T*                    data,
+                   const size_t          n,
+                   Distribution          distribution)
 {
-    static_assert(is_single_tile_config<ConfigProvider, T>(IsDynamic),
+    static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                   "This kernel should only be used with single tile configs");
-    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T>(IsDynamic);
+    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
     constexpr unsigned int input_width  = Distribution::input_width;
     constexpr unsigned int output_width = Distribution::output_width;
 
@@ -498,26 +503,36 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         // The host generator uses a block of size one to emulate a device generator that uses a shared memory state
         const dim3 threads
             = std::is_same_v<system_type, system::device_system> ? config.threads : dim3(1);
-        status
-            = dynamic_dispatch(m_order,
-                               [&, this](auto is_dynamic)
-                               {
-                                   return system_type::template launch<
-                                       generate_mtgp<ConfigProvider, is_dynamic, T, Distribution>,
-                                       ConfigProvider,
-                                       T,
-                                       is_dynamic>(dim3(config.blocks),
-                                                   dim3(threads),
-                                                   0,
-                                                   m_stream,
-                                                   m_engines,
-                                                   data,
-                                                   data_size,
-                                                   distribution);
-                               });
+        status = dynamic_dispatch(
+            m_order,
+            [&, this](auto is_dynamic)
+            {
+                auto generate_mtgp_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_mtgp<ConfigProvider, is_dynamic, T, Distribution, arch>(args...);
+                };
+                return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                    generate_mtgp_kernel,
+                    target_arch,
+                    dim3(config.blocks),
+                    dim3(threads),
+                    0,
+                    m_stream,
+                    m_engines,
+                    data,
+                    data_size,
+                    distribution);
+            });
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)
