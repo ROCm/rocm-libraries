@@ -69,7 +69,6 @@ namespace rocRoller
                 throw std::runtime_error("Failed to read ELF file: " + filename);
             }
             file.close();
-            std::cout << buffer.data() << std::endl;
 
             auto status = amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &data);
             AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to create COMGR data object");
