@@ -22,30 +22,29 @@ using namespace test_bn_common;
 namespace
 {
 
-template <typename DataType, typename IntermediateType, typename TestCaseType>
-class BatchnormForwardInference : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
+template <typename DataType, typename IntermediateType>
+class BatchnormForwardInference
+    : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
-        const TestCaseType& testCase = this->GetParam();
+        const BatchnormTestCase& testCase = this->GetParam();
 
-        auto derivedDims = getDerivedShape(testCase.getDims());
+        auto derivedDims = getDerivedShape(testCase.dims);
 
         hipdnn_frontend::graph::Graph graphObj;
 
         graphObj.set_name("BatchnormInferenceTest");
+        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
-        auto xAttr
-            = graph::makeTensorAttributes("X",
-                                          dataType,
-                                          testCase.getDims(),
-                                          generateStrides(testCase.getDims(), layout.strideOrder));
+        auto xAttr = graph::makeTensorAttributes(
+            "X", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
@@ -98,8 +97,8 @@ protected:
         }
 
         yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(testCase.getDims());
-        yTensorAttr->set_stride(generateStrides(testCase.getDims(), layout.strideOrder));
+        yTensorAttr->set_dim(testCase.dims);
+        yTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         yTensorAttr->set_output(true);
 
         this->registerValidator(yTensorAttr, tolerance);
@@ -108,44 +107,33 @@ protected:
     }
 };
 
-using IntegrationGpuBatchnormForwardInferenceNchwFp32
-    = BatchnormForwardInference<float, float, Batchnorm2dTestCase>;
-
-using IntegrationGpuBatchnormForwardInferenceNchwFp32
-    = BatchnormForwardInference<float, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNchwFp32 = BatchnormForwardInference<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceNchwBfp16
-    = BatchnormForwardInference<hip_bfloat16, float, Batchnorm2dTestCase>;
+    = BatchnormForwardInference<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNchwFp16
-    = BatchnormForwardInference<half, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNchwFp16 = BatchnormForwardInference<half, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNhwcFp32
-    = BatchnormForwardInference<float, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNhwcFp32 = BatchnormForwardInference<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceNhwcBfp16
-    = BatchnormForwardInference<hip_bfloat16, float, Batchnorm2dTestCase>;
+    = BatchnormForwardInference<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNhwcFp16
-    = BatchnormForwardInference<half, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNhwcFp16 = BatchnormForwardInference<half, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNcdhwFp32
-    = BatchnormForwardInference<float, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNcdhwFp32 = BatchnormForwardInference<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceNcdhwBfp16
-    = BatchnormForwardInference<hip_bfloat16, float, Batchnorm3dTestCase>;
+    = BatchnormForwardInference<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNcdhwFp16
-    = BatchnormForwardInference<half, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNcdhwFp16 = BatchnormForwardInference<half, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNdhwcFp32
-    = BatchnormForwardInference<float, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNdhwcFp32 = BatchnormForwardInference<float, float>;
 
 using IntegrationGpuBatchnormForwardInferenceNdhwcBfp16
-    = BatchnormForwardInference<hip_bfloat16, float, Batchnorm3dTestCase>;
+    = BatchnormForwardInference<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormForwardInferenceNdhwcFp16
-    = BatchnormForwardInference<half, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormForwardInferenceNdhwcFp16 = BatchnormForwardInference<half, float>;
 
 } // namespace
 

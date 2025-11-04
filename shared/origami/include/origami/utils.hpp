@@ -94,25 +94,18 @@ namespace origami
                                                         = {},
                                                         bool print = false);
 
-        size_t select_best_wgmxcc(const hardware_t& hardware,
-                                  size_t            M,
-                                  size_t            N,
-                                  size_t            K,
-                                  size_t            batch,
-                                  size_t            MT_M,
-                                  size_t            MT_N,
-                                  size_t            MT_K,
-                                  bool              print);
-
-        int32_t select_best_wgm(const hardware_t& hardware,
-                                size_t            M,
-                                size_t            N,
-                                size_t            K,
-                                size_t            batch,
-                                size_t            MT_M,
-                                size_t            MT_N,
-                                size_t            MT_K,
-                                bool              print);
+        std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware,
+                                                    size_t            M,
+                                                    size_t            N,
+                                                    size_t            K,
+                                                    size_t            batch,
+                                                    size_t            MT_M,
+                                                    size_t            MT_N,
+                                                    size_t            MT_K,
+                                                    int               nta,
+                                                    int               ntb,
+                                                    size_t            skGrid,
+                                                    bool              print);
 
         double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,
