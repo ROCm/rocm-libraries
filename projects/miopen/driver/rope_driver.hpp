@@ -31,15 +31,18 @@
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "random.hpp"
+#include <../test/tensor_holder.hpp>
+#include <../test/verify.hpp>
+
+#include <miopen/miopen.h>
+#include <miopen/tensor.hpp>
+#include <miopen/par_for.hpp>
+
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 #include <numeric>
 #include <vector>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
@@ -61,7 +64,7 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 
     if(parallel)
     {
-        par_for(input_numel, [&](std::size_t o) {
+        miopen::par_for(input_numel, [&](std::size_t o) {
             size_t freq_idx = o % rotary_numel;
             Tcheck input    = static_cast<Tcheck>(x[o]);
             Tcheck input_rotate_half =
@@ -116,7 +119,7 @@ int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 
     if(parallel)
     {
-        par_for(input_numel, [&](std::size_t o) {
+        miopen::par_for(input_numel, [&](std::size_t o) {
             size_t freq_idx = o % rotary_numel;
 
             Tcheck output_grad = static_cast<Tcheck>(dy[o]);
