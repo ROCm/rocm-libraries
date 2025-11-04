@@ -361,7 +361,7 @@ void MiopenBatchnormPlanBuilder::buildPlan(
         buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
         return;
     }
-    else if(opGraph.nodeCount() == 3)
+    if(opGraph.nodeCount() == 3)
     {
         HIPDNN_LOG_INFO(
             "Building batchnorm inference + activation + batchnorm backward fusion plan");

@@ -113,7 +113,7 @@ inline std::vector<ActivTestCase> createBwdActivationTestCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> getActivationTestCases()
+inline std::vector<ActivTestCase> createFwdActivationTestCases()
 {
     return {
         //Standard ReLU Max(0, x)
@@ -140,6 +140,7 @@ inline std::vector<ActivTestCase> getActivationTestCases()
                       std::nullopt,
                       std::nullopt,
                       std::nullopt),
+                      
         ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::IDENTITY,
                       std::nullopt,
                       std::nullopt,
