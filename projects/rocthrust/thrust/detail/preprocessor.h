@@ -19,11 +19,11 @@
 #  pragma system_header
 #endif // no system header
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
-#if _THRUST_HAS_DEVICE_SYSTEM_STD && __has_include(_THRUST_STD_INCLUDE(__cccl/preprocessor.h))
 #  include _THRUST_STD_INCLUDE(__cccl/preprocessor.h)
-#endif
 // clang-format on
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
