@@ -106,7 +106,7 @@ size_t select_best_grid_size(size_t M, size_t N, size_t K, size_t batch, bool tr
                              const hardware_t& hardware, size_t MT_M, size_t MT_N, size_t MT_K,
                              size_t MI_M, size_t MI_N, size_t MI_K, size_t element_size_A,
                              size_t element_size_B, size_t element_size_out,
-                             data_type_t mi_datatype, size_t mx_block_size, double H_L2, size_t WGM,
+                             data_type_t mi_datatype, size_t mx_block_size, double H_L2, int WGM,
                              size_t biggest_allowable_split, size_t max_cus) {
     // compute how many 32×32 tiles are needed in each dim,
     // then multiply to get total grid size:
@@ -151,7 +151,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
                                                       size_t element_size_B,    // In bits
                                                       size_t element_size_out,  // In bits
                                                       data_type_t mi_datatype, size_t mx_block_size,
-                                                      double H_L2, bool print, size_t defaultWGM,
+                                                      double H_L2, bool print, int defaultWGM,
                                                       size_t max_cus) {
     std::vector<result_tuple> valid_results;
     valid_results.reserve(MT_list.size());
@@ -166,10 +166,10 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
         size_t MI_M = std::get<3>(mt);
         size_t MI_N = std::get<4>(mt);
         size_t MI_K = std::get<5>(mt);
-        size_t occupancy = std::get<6>(mt);
-        size_t WGM = std::get<7>(mt);
-        size_t non_temporal_a = std::get<8>(mt);
-        size_t non_temporal_b = std::get<9>(mt);
+        int occupancy = std::get<6>(mt);
+        int WGM = std::get<7>(mt);
+        int non_temporal_a = std::get<8>(mt);
+        int non_temporal_b = std::get<9>(mt);
 
         if (hardware_t::is_debug_enabled()) {
             std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
