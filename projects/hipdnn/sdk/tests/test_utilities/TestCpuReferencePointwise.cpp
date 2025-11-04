@@ -1203,6 +1203,29 @@ protected:
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected, output));
     }
+
+    void testUnaryIdentityOperation()
+    {
+        Tensor<Input1Type> input({2, 2});
+        Tensor<OutputType> output({2, 2});
+
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0); // 1.0
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 1); // -2.0
+        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 1, 0); // 3.0
+        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_4), 1, 1); // -4.0
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
+            PointwiseMode::IDENTITY, output, input);
+
+        Tensor<OutputType> expected({2, 2});
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 0); // 1.0
+        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2), 0, 1); // -2.0
+        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_3), 1, 0); // 3.0
+        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_4), 1, 1); // -4.0
+
+        CpuFpReferenceValidation<OutputType> validator;
+        EXPECT_TRUE(validator.allClose(expected, output));
+    }
 };
 
 using TestTypes = ::testing::Types<float, half, hip_bfloat16, double>;
@@ -1344,6 +1367,11 @@ TYPED_TEST(CpuReferencePointwiseFixture, Unary3DOperation)
 TYPED_TEST(CpuReferencePointwiseFixture, UnarySingleElementTensor)
 {
     this->testUnarySingleElementTensor();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryIdentityOperation)
+{
+    this->testUnaryIdentityOperation();
 }
 
 // Mixed-type binary test instantiations
@@ -1503,4 +1531,9 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeReluForward)
 TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeParameterizedReluBackward)
 {
     this->testParameterizedReluBackwardOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeIdentityOperation)
+{
+    this->testUnaryIdentityOperation();
 }
