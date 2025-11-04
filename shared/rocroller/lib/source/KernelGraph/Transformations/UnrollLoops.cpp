@@ -768,6 +768,8 @@ namespace rocRoller
                        toString(loopSize),
                        toString(loopSizeRoundedDown));
 
+            auto tailLoop = cloneForLoop(graph, loop);
+
             // Set original loop to end at a multiple of the unroll amount.
             {
                 auto newCondition = loopVariable < loopSizeRoundedDown;
@@ -775,8 +777,6 @@ namespace rocRoller
                 loopOp.condition = newCondition;
                 graph.control.setElement(loop, loopOp);
             }
-
-            auto tailLoop = cloneForLoop(graph, loop);
 
             // Modify the init of the tail loop to start at the remainder.
             {

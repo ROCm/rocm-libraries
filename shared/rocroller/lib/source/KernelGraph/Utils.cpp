@@ -281,10 +281,10 @@ namespace rocRoller
             // size of the original ForLoop coordinate.
             auto clonedForLoopOp = graph.control.get<CG::ForLoopOp>(clonedForLoopOpTag).value();
 
-            auto [cloneLoopIterator, clonedLoopCondition]
+            auto [clonedLoopIterator, clonedLoopCondition]
                 = split<Expression::LessThan>(clonedForLoopOp.condition);
 
-            auto newCondition = cloneLoopIterator < loopCondition;
+            auto newCondition = clonedLoopIterator < loopCondition;
             copyComment(newCondition, maybeForLoopOp->condition);
             clonedForLoopOp.condition = newCondition;
             graph.control.setElement(clonedForLoopOpTag, clonedForLoopOp);
