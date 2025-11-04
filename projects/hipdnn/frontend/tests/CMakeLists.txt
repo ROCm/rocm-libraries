@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_frontend_tests
     main.cpp
+    TestAttributes.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp

@@ -23,9 +23,9 @@ public:
     static void verifyGraph(const hipdnn_sdk::data_objects::GraphT& graph)
     {
         EXPECT_EQ(graph.name, "test");
-        EXPECT_EQ(graph.compute_type, DataType::FLOAT);
-        EXPECT_EQ(graph.intermediate_type, DataType::HALF);
-        EXPECT_EQ(graph.io_type, DataType::BFLOAT16);
+        EXPECT_EQ(graph.compute_data_type, DataType::FLOAT);
+        EXPECT_EQ(graph.intermediate_data_type, DataType::HALF);
+        EXPECT_EQ(graph.io_data_type, DataType::BFLOAT16);
         EXPECT_EQ(graph.tensors.size(), 0);
         EXPECT_EQ(graph.nodes.size(), 0);
     }
