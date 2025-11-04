@@ -598,7 +598,7 @@ void testing_geblttrf_npvt_interleaved(Arguments& argus)
                                               hCRes, hInfo, hInfoRes, &max_error, argus.singular);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         geblttrf_npvt_interleaved_getPerfData<T>(
             handle, nb, nblocks, dA, inca, lda, stA, dB, incb, ldb, stB, dC, incc, ldc, stC, dInfo,
             bc, hA, hB, hC, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

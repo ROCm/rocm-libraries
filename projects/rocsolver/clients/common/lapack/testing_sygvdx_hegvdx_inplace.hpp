@@ -773,7 +773,7 @@ void testing_sygvdx_hegvdx_inplace(Arguments& argus)
                 hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_inplace_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, hNevRes, dW, stW, dInfo, bc, hA, hB, hNev, hW, hInfo, &gpu_time_used,
@@ -816,7 +816,7 @@ void testing_sygvdx_hegvdx_inplace(Arguments& argus)
                 hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_inplace_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, hNevRes, dW, stW, dInfo, bc, hA, hB, hNev, hW, hInfo, &gpu_time_used,

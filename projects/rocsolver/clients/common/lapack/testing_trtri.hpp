@@ -412,7 +412,7 @@ void testing_trtri(Arguments& argus)
                                        hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             trtri_getPerfData<STRIDED, T>(handle, uplo, diag, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);
@@ -449,7 +449,7 @@ void testing_trtri(Arguments& argus)
                                        hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             trtri_getPerfData<STRIDED, T>(handle, uplo, diag, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);

@@ -298,7 +298,7 @@ void testing_laswp(Arguments& argus)
         laswp_getError<T>(handle, n, dA, lda, k1, k2, dIpiv, inc, hA, hAr, hIpiv, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         laswp_getPerfData<T>(handle, n, dA, lda, k1, k2, dIpiv, inc, hA, hIpiv, &gpu_time_used,
                              &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
                              argus.perf);

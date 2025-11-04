@@ -409,7 +409,7 @@ void testing_getf2_getrf_npvt(Arguments& argus)
                                                          argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getf2_getrf_npvt_getPerfData<STRIDED, GETRF, T>(
                 handle, m, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,
@@ -449,7 +449,7 @@ void testing_getf2_getrf_npvt(Arguments& argus)
                                                          argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getf2_getrf_npvt_getPerfData<STRIDED, GETRF, T>(
                 handle, m, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,

@@ -471,7 +471,7 @@ void testing_getri_outofplace(Arguments& argus)
                                                   &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getri_outofplace_getPerfData<STRIDED, T>(
                 handle, n, dA, lda, stA, dIpiv, stP, dC, ldc, stC, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
@@ -518,7 +518,7 @@ void testing_getri_outofplace(Arguments& argus)
                                                   &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getri_outofplace_getPerfData<STRIDED, T>(
                 handle, n, dA, lda, stA, dIpiv, stP, dC, ldc, stC, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

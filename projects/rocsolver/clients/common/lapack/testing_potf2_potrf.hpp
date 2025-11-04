@@ -426,7 +426,7 @@ void testing_potf2_potrf(Arguments& argus)
                                                     argus.singular, hashA, hashARes);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             potf2_potrf_getPerfData<STRIDED, POTRF, T>(
                 handle, uplo, n, dA, lda, stA, dInfo, bc, hA, hInfo, &gpu_time_used, &cpu_time_used,
                 hot_calls, argus.profile, argus.profile_kernels, argus.perf, argus.singular);
@@ -464,7 +464,7 @@ void testing_potf2_potrf(Arguments& argus)
                                                     argus.singular, hashA, hashARes);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             potf2_potrf_getPerfData<STRIDED, POTRF, T>(
                 handle, uplo, n, dA, lda, stA, dInfo, bc, hA, hInfo, &gpu_time_used, &cpu_time_used,
                 hot_calls, argus.profile, argus.profile_kernels, argus.perf, argus.singular);

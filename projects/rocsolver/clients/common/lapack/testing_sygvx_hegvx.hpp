@@ -887,7 +887,7 @@ void testing_sygvx_hegvx(Arguments& argus)
                 argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvx_hegvx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, dNev, dW, stW, dZ, ldz, stZ, dIfail, stF, dInfo, bc, hA, hB, hNev, hW, hZ,
@@ -936,7 +936,7 @@ void testing_sygvx_hegvx(Arguments& argus)
                 argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvx_hegvx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, dNev, dW, stW, dZ, ldz, stZ, dIfail, stF, dInfo, bc, hA, hB, hNev, hW, hZ,

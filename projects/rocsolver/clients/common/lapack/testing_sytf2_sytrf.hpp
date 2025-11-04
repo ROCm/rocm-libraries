@@ -498,7 +498,7 @@ void testing_sytf2_sytrf(Arguments& argus)
                                                     hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytf2_sytrf_getPerfData<STRIDED, SYTRF, T>(
                 handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
@@ -542,7 +542,7 @@ void testing_sytf2_sytrf(Arguments& argus)
                                                     hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytf2_sytrf_getPerfData<STRIDED, SYTRF, T>(
                 handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

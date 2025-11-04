@@ -307,7 +307,7 @@ void testing_orgxl_ungxl(Arguments& argus)
         orgxl_ungxl_getError<GQL, T>(handle, m, n, k, dA, lda, dIpiv, hA, hAr, hIpiv, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         orgxl_ungxl_getPerfData<GQL, T>(handle, m, n, k, dA, lda, dIpiv, hA, hIpiv, &gpu_time_used,
                                         &cpu_time_used, hot_calls, argus.profile,
                                         argus.profile_kernels, argus.perf);

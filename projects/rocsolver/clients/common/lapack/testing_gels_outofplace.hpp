@@ -571,7 +571,7 @@ void testing_gels_outofplace(Arguments& argus)
                                                  hXRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gels_outofplace_getPerfData<STRIDED, T>(
                 handle, trans, m, n, nrhs, dA, lda, stA, dB, ldb, stB, dX, ldx, stX, dInfo, bc, hA,
                 hB, hX, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -620,7 +620,7 @@ void testing_gels_outofplace(Arguments& argus)
                                                  hXRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gels_outofplace_getPerfData<STRIDED, T>(
                 handle, trans, m, n, nrhs, dA, lda, stA, dB, ldb, stB, dX, ldx, stX, dInfo, bc, hA,
                 hB, hX, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

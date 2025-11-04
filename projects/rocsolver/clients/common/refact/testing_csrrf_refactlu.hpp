@@ -498,7 +498,7 @@ void testing_csrrf_refactlu(Arguments& argus)
                                    hpivP, hpivQ, hvalTres, &max_error, testcase);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         csrrf_refactlu_getPerfData<T>(handle, n, nnzA, dptrA, dindA, dvalA, nnzT, dptrT, dindT,
                                       dvalT, dpivP, dpivQ, rfinfo, hptrA, hindA, hvalA, hptrT, hindT,
                                       hvalT, hpivP, hpivQ, &gpu_time_used, &cpu_time_used, hot_calls,

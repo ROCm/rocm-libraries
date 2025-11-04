@@ -477,7 +477,7 @@ void testing_csrrf_sumlu(Arguments& argus)
                                 hptrT, hindT, hvalT, hptrTres, hindTres, hvalTres, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         csrrf_sumlu_getPerfData<T>(handle, n, nnzL, dptrL, dindL, dvalL, nnzU, dptrU, dindU, dvalU,
                                    nnzT, dptrT, dindT, dvalT, hptrL, hindL, hvalL, hptrU, hindU,
                                    hvalU, hptrT, hindT, hvalT, &gpu_time_used, &cpu_time_used,

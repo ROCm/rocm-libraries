@@ -529,7 +529,7 @@ void testing_geblttrs_npvt(Arguments& argus)
                                                hXRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geblttrs_npvt_getPerfData<STRIDED, T>(handle, nb, nblocks, nrhs, dA, lda, stA, dB, ldb,
                                                   stB, dC, ldc, stC, dX, ldx, stX, bc, hA, hB, hC, hX,
                                                   hXRes, &gpu_time_used, &cpu_time_used, hot_calls,
@@ -578,7 +578,7 @@ void testing_geblttrs_npvt(Arguments& argus)
                                                hXRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geblttrs_npvt_getPerfData<STRIDED, T>(handle, nb, nblocks, nrhs, dA, lda, stA, dB, ldb,
                                                   stB, dC, ldc, stC, dX, ldx, stX, bc, hA, hB, hC, hX,
                                                   hXRes, &gpu_time_used, &cpu_time_used, hot_calls,

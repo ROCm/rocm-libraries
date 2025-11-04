@@ -400,7 +400,7 @@ void testing_potri(Arguments& argus)
                                        hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             potri_getPerfData<STRIDED, T>(handle, uplo, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);
@@ -437,7 +437,7 @@ void testing_potri(Arguments& argus)
                                        hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             potri_getPerfData<STRIDED, T>(handle, uplo, n, dA, lda, stA, dInfo, bc, hA, hInfo,
                                           &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf, argus.singular);

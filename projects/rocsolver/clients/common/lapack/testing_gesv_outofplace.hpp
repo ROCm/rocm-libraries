@@ -502,7 +502,7 @@ void testing_gesv_outofplace(Arguments& argus)
                                                  hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gesv_outofplace_getPerfData<STRIDED, T>(
                 handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, dX, ldx, stX, dInfo, bc,
                 hA, hIpiv, hB, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -554,7 +554,7 @@ void testing_gesv_outofplace(Arguments& argus)
                                                  hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gesv_outofplace_getPerfData<STRIDED, T>(
                 handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, dX, ldx, stX, dInfo, bc,
                 hA, hIpiv, hB, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

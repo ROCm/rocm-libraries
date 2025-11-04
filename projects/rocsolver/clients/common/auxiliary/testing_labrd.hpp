@@ -433,7 +433,7 @@ void testing_labrd(Arguments& argus)
                           hARes, hD, hE, hTauq, hTaup, hX, hXRes, hY, hYRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         labrd_getPerfData<T>(handle, m, n, nb, dA, lda, dD, dE, dTauq, dTaup, dX, ldx, dY, ldy, hA,
                              hD, hE, hTauq, hTaup, hX, hY, &gpu_time_used, &cpu_time_used,
                              hot_calls, argus.profile, argus.profile_kernels, argus.perf);

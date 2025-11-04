@@ -465,7 +465,7 @@ void testing_gesv(Arguments& argus)
                                       argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gesv_getPerfData<STRIDED, T>(handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB,
                                          dInfo, bc, hA, hIpiv, hB, hInfo, &gpu_time_used,
                                          &cpu_time_used, hot_calls, argus.profile,
@@ -513,7 +513,7 @@ void testing_gesv(Arguments& argus)
                                       argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gesv_getPerfData<STRIDED, T>(handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB,
                                          dInfo, bc, hA, hIpiv, hB, hInfo, &gpu_time_used,
                                          &cpu_time_used, hot_calls, argus.profile,

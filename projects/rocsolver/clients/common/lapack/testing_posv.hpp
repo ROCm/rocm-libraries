@@ -449,7 +449,7 @@ void testing_posv(Arguments& argus)
                                       hA, hB, hBRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             posv_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dB, ldb, stB, dInfo,
                                          bc, hA, hB, hInfo, &gpu_time_used, &cpu_time_used,
                                          hot_calls, argus.profile, argus.profile_kernels,
@@ -491,7 +491,7 @@ void testing_posv(Arguments& argus)
                                       hA, hB, hBRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             posv_getPerfData<STRIDED, T>(handle, uplo, n, nrhs, dA, lda, stA, dB, ldb, stB, dInfo,
                                          bc, hA, hB, hInfo, &gpu_time_used, &cpu_time_used,
                                          hot_calls, argus.profile, argus.profile_kernels,

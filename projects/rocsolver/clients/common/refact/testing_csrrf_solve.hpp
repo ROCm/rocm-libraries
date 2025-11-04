@@ -502,7 +502,7 @@ void testing_csrrf_solve(Arguments& argus)
                                 &max_error, testcase, mode);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         csrrf_solve_getPerfData<T>(handle, n, nrhs, nnzT, dptrT, dindT, dvalT, dpivP, dpivQ, dB,
                                    ldb, rfinfo, hptrT, hindT, hvalT, hpivP, hpivQ, hB, hX,
                                    &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

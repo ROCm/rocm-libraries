@@ -361,7 +361,7 @@ void testing_orgbr_ungbr(Arguments& argus)
         orgbr_ungbr_getError<T>(handle, storev, m, n, k, dA, lda, dIpiv, hA, hAr, hIpiv, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         orgbr_ungbr_getPerfData<T>(handle, storev, m, n, k, dA, lda, dIpiv, hA, hIpiv,
                                    &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                                    argus.profile_kernels, argus.perf);

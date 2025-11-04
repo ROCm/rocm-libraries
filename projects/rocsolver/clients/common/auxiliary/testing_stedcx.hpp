@@ -489,7 +489,7 @@ void testing_stedcx(Arguments& argus)
                            hD, hE, hnev, hnevRes, hW, hWRes, hC, hCRes, hinfo, hinfoRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stedcx_getPerfData<T>(handle, evect, erange, n, vl, vu, il, iu, dD, dE, dnev, dW, dC, ldc,
                               dinfo, hD, hE, hnev, hW, hC, hinfo, &gpu_time_used, &cpu_time_used,
                               hot_calls, argus.profile, argus.profile_kernels, argus.perf);

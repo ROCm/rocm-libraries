@@ -559,7 +559,7 @@ void testing_gebd2_gebrd(Arguments& argus)
                                                     hTauq, hTaup, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gebd2_gebrd_getPerfData<STRIDED, GEBRD, T>(
                 handle, m, n, dA, lda, stA, dD, stD, dE, stE, dTauq, stQ, dTaup, stP, bc, hA, hD,
                 hE, hTauq, hTaup, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -611,7 +611,7 @@ void testing_gebd2_gebrd(Arguments& argus)
                                                     hTauq, hTaup, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gebd2_gebrd_getPerfData<STRIDED, GEBRD, T>(
                 handle, m, n, dA, lda, stA, dD, stD, dE, stE, dTauq, stQ, dTaup, stP, bc, hA, hD,
                 hE, hTauq, hTaup, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

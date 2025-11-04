@@ -512,7 +512,7 @@ void testing_csrrf_splitlu(Arguments& argus)
                                   hptrUres, hindUres, hvalUres, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         csrrf_splitlu_getPerfData<T>(handle, n, nnzT, dptrT, dindT, dvalT, nnzL, dptrL, dindL, dvalL,
                                      nnzU, dptrU, dindU, dvalU, hptrT, hindT, hvalT, hptrL, hindL,
                                      hvalL, hptrU, hindU, hvalU, &gpu_time_used, &cpu_time_used,

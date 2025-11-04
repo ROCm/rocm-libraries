@@ -344,7 +344,7 @@ void testing_larf(Arguments& argus)
         larf_getError<T>(handle, side, m, n, dx, inc, dt, dA, lda, xx, hx, ht, hA, hAr, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         larf_getPerfData<T>(handle, side, m, n, dx, inc, dt, dA, lda, xx, hx, ht, hA,
                             &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                             argus.profile_kernels, argus.perf);

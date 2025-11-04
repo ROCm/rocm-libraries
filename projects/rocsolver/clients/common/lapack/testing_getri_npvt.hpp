@@ -394,7 +394,7 @@ void testing_getri_npvt(Arguments& argus)
                                             hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getri_npvt_getPerfData<STRIDED, T>(handle, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo,
                                                &gpu_time_used, &cpu_time_used, hot_calls,
                                                argus.profile, argus.profile_kernels, argus.perf,
@@ -433,7 +433,7 @@ void testing_getri_npvt(Arguments& argus)
                                             hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getri_npvt_getPerfData<STRIDED, T>(handle, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo,
                                                &gpu_time_used, &cpu_time_used, hot_calls,
                                                argus.profile, argus.profile_kernels, argus.perf,

@@ -433,7 +433,7 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
@@ -476,7 +476,7 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,

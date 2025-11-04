@@ -491,7 +491,7 @@ void testing_stebz(Arguments& argus)
                           &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stebz_getPerfData<T>(handle, erange, eorder, n, vl, vu, il, iu, abstol, dD, dE, dnev,
                              dnsplit, dW, dIblock, dIsplit, dinfo, hD, hE, hnev, hnsplit, hW,
                              hIblock, hIsplit, hinfo, &gpu_time_used, &cpu_time_used, hot_calls,

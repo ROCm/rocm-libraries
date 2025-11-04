@@ -407,7 +407,7 @@ void testing_ormxl_unmxl(Arguments& argus)
                                      hIpiv, hC, hCr, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         ormxl_unmxl_getPerfData<MQL, T>(handle, side, trans, m, n, k, dA, lda, dIpiv, dC, ldc, hA,
                                         hIpiv, hC, &gpu_time_used, &cpu_time_used, hot_calls,
                                         argus.profile, argus.profile_kernels, argus.perf);

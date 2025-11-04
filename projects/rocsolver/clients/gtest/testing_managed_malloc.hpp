@@ -304,7 +304,7 @@ void testing_managed_malloc(Arguments& argus)
                                    dXRes, ldx, dY, dYRes, ldy, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         managed_malloc_getPerfData<T>(handle, m, n, nb, dA, dARes, lda, dD, dE, dTauq, dTaup, dX,
                                       dXRes, ldx, dY, dYRes, ldy, &gpu_time_used, &cpu_time_used,
                                       hot_calls, argus.profile, argus.profile_kernels, argus.perf);

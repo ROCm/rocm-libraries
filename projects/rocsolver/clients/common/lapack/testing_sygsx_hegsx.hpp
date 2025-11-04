@@ -485,7 +485,7 @@ void testing_sygsx_hegsx(Arguments& argus)
                                                     stB, bc, hA, hARes, hB, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygsx_hegsx_getPerfData<STRIDED, SYGST, T>(
                 handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc, hA, hB, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
@@ -522,7 +522,7 @@ void testing_sygsx_hegsx(Arguments& argus)
                                                     stB, bc, hA, hARes, hB, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygsx_hegsx_getPerfData<STRIDED, SYGST, T>(
                 handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc, hA, hB, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);

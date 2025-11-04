@@ -430,7 +430,7 @@ void testing_lasyf(Arguments& argus)
                           hIpiv, hIpivRes, hInfo, hInfoRes, &max_error, argus.singular);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         lasyf_getPerfData<T>(handle, uplo, n, nb, dKB, dA, lda, dIpiv, dInfo, hKB, hA, hIpiv, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf, argus.singular);

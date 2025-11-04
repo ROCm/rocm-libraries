@@ -376,7 +376,7 @@ void testing_geqr2_geqrf(Arguments& argus)
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geqr2_geqrf_getPerfData<STRIDED, GEQRF, T>(
                 handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
@@ -413,7 +413,7 @@ void testing_geqr2_geqrf(Arguments& argus)
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geqr2_geqrf_getPerfData<STRIDED, GEQRF, T>(
                 handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
@@ -450,7 +450,7 @@ void testing_geqr2_geqrf(Arguments& argus)
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geqr2_geqrf_getPerfData<STRIDED, GEQRF, T>(
                 handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);

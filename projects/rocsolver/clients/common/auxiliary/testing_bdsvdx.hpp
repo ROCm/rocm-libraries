@@ -560,7 +560,7 @@ void testing_bdsvdx(Arguments& argus)
                            hIfailRes, hInfo, hInfoRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         bdsvdx_getPerfData<T>(handle, uplo, svect, srange, n, dD, dE, vl, vu, il, iu, dNsv, dS, dZ,
                               ldz, dIfail, dInfo, hD, hE, hNsv, hS, hZ, hInfo, &gpu_time_used,
                               &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

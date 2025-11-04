@@ -296,7 +296,7 @@ void testing_sterf(Arguments& argus)
         sterf_getError<T>(handle, n, dD, dE, dInfo, hD, hDRes, hE, hERes, hInfo, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         sterf_getPerfData<T>(handle, n, dD, dE, dInfo, hD, hE, hInfo, &gpu_time_used, &cpu_time_used,
                              hot_calls, argus.profile, argus.profile_kernels, argus.perf);
 

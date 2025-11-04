@@ -537,7 +537,7 @@ void testing_stein(Arguments& argus)
                           hInfo, hInfoRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stein_getPerfData<T>(handle, n, nev, dD, dE, dNev, dW, dIblock, dIsplit, dZ, ldz, dIfail,
                              dInfo, hD, hE, hNev, hW, hIblock, hIsplit, hZ, hIfail, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

@@ -711,7 +711,7 @@ void testing_sygvj_hegvj(Arguments& argus)
                                              hWRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvj_hegvj_getPerfData<STRIDED, T>(handle, itype, evect, uplo, n, dA, lda, stA, dB,
                                                 ldb, stB, abstol, dResidual, max_sweeps, dSweeps, dW,
                                                 stW, dInfo, bc, hA, hB, hW, hInfo, &gpu_time_used,
@@ -754,7 +754,7 @@ void testing_sygvj_hegvj(Arguments& argus)
                                              hWRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvj_hegvj_getPerfData<STRIDED, T>(handle, itype, evect, uplo, n, dA, lda, stA, dB,
                                                 ldb, stB, abstol, dResidual, max_sweeps, dSweeps, dW,
                                                 stW, dInfo, bc, hA, hB, hW, hInfo, &gpu_time_used,

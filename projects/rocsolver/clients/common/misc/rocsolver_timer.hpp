@@ -63,20 +63,25 @@ public:
 
     double get_combined(averages avg = median)
     {
+        const auto n = m_times.size();
+        if(n == 0)
+            return 0;
+
         switch(avg)
         {
         case median:
         {
-            auto mid = m_times.size() / 2;
-            std::nth_element(m_times.begin(), m_times.begin() + mid, m_times.end());
-            return m_times[mid];
+            const auto mid = n / 2;
+            std::sort(m_times.begin(), m_times.end());
+            return n % 2 == 0 ? (m_times[mid - 1] + m_times[mid]) / 2 : m_times[mid];
         }
         case mean:
         {
-            auto sum = std::accumulate(m_times.begin(), m_times.end(), 0.0);
-            return sum / std::size(m_times);
+            const auto sum = std::accumulate(m_times.begin(), m_times.end(), 0.0);
+            return sum / n;
         }
         }
+
         return 0;
     }
 
