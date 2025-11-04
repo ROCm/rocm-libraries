@@ -36,12 +36,6 @@ function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX S
 endfunction()
 
 function(findAndCheckClangFormat)
-
-    if(WIN32)
-        message(STATUS "Skipping clang-format check on Windows")
-        return()
-    endif()
-
     find_program(CLANG_FORMAT_BINARY
         NAMES
             clang-format-${EXPECTED_CLANG_FORMAT_VERSION}
@@ -128,11 +122,6 @@ function(findAndCheckLlvmTools)
 endfunction()
 
 function(findAndCheckLlvmSymbolizer)
-    if(WIN32)
-        message(STATUS "Skipping llvm-symbolizer check on Windows")
-        return()
-    endif()
-
     find_program(LLVM_SYMBOLIZER_EXE
         NAMES
             llvm-symbolizer-${EXPECTED_LLVM_VERSION}
