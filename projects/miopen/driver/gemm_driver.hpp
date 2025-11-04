@@ -109,10 +109,14 @@ void callCpuGemmStridedBatched(bool isColMajor,
         }
     };
 
-    if(parallel) {
+    if(parallel)
+    {
         par_ford(m)(work);
-    } else {
-        for(int mi = 0; mi < m; mi++) {
+    }
+    else
+    {
+        for(int mi = 0; mi < m; mi++)
+        {
             work(mi);
         }
     }
