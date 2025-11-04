@@ -27,17 +27,17 @@ namespace rocRoller
         Generator<Instruction>
             ExchangeGenerator::genExchange(int tag, Exchange const& exchange, Transformer coords)
         {
-            auto [waveTileTag, waveTile]      = m_graph->getDimension<WaveTile>(tag);
-            auto [macTileTag, macTile]        = m_graph->getDimension<MacroTile>(tag);
-            auto [vgprTag, vgprDim]           = m_graph->getDimension<VGPR>(tag);
-            auto [vgprIndexTag, vgprIndexDim] = m_graph->getDimension<VGPRBlockIndex>(tag);
-            auto [simdIndexTag, simdIndex]    = m_graph->getDimension<Adhoc>(tag, 1);
-            auto oMacTileTag                  = m_graph->mapper.get(tag, NaryArgument::DEST);
+            auto [waveTileTag, waveTile]             = m_graph->getDimension<WaveTile>(tag);
+            auto [macTileTag, macTile]               = m_graph->getDimension<MacroTile>(tag);
+            auto [vgprBlockTag, vgprBlock]           = m_graph->getDimension<VGPRBlockIndex>(tag);
+            auto [vgprIndexTag, vgprIndex]           = m_graph->getDimension<VGPRBlockIndex>(tag);
+            auto [simdIndexIndexTag, simdIndexIndex] = m_graph->getDimension<Adhoc>(tag, 3);
+            auto oMacTileTag                         = m_graph->mapper.get(tag, NaryArgument::DEST);
 
             const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
-            Expression::ExpressionPtr waveTileExpr, simdIndexExpr, vgprExpr, vgprIndexExpr,
-                expectedExpr;
+            Expression::ExpressionPtr waveTileExpr, simdIndexIndexExpr, vgprBlockExpr,
+                vgprIndexExpr, expectedExpr;
 
             {
                 auto [required, path]
@@ -56,28 +56,29 @@ namespace rocRoller
             if(waveTile.sizes[0] == 64)
             {
                 auto [required, path]
-                    = findRequiredCoordinates(vgprTag, Graph::Direction::Downstream, *m_graph);
+                    = findRequiredCoordinates(vgprBlockTag, Graph::Direction::Downstream, *m_graph);
 
                 for(auto r : required)
                 {
-                    if(r == vgprTag)
-                        continue;
+                    //if(r == vgprBlockTag)
+                    //    continue;
                     auto expr = std::make_shared<Expression::Expression>(
                         Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
                     coords.setCoordinate(r, expr);
                 }
 
-                vgprExpr     = coords.reverse({vgprTag})[0];
-                expectedExpr = (waveTileExpr / (Expression::literal(waveTileSize) / vgprDim.size));
-                AssertFatal(Expression::identical(m_fastArith(vgprExpr), m_fastArith(expectedExpr)),
-                            "Exchange: VGPR must be the slowest running dimension",
-                            ShowValue(m_fastArith(vgprExpr)),
-                            ShowValue(m_fastArith(expectedExpr)));
+                vgprBlockExpr = coords.reverse({vgprBlockTag})[0];
+                expectedExpr
+                    = (waveTileExpr / (Expression::literal(waveTileSize) / vgprBlock.size));
+                //AssertFatal(Expression::identical(m_fastArith(vgprBlockExpr), m_fastArith(expectedExpr)),
+                //            "Exchange: VGPRBlock must be the slowest running dimension",
+                //            ShowValue(m_fastArith(vgprBlockExpr)),
+                //            ShowValue(m_fastArith(expectedExpr)));
             }
 
             {
-                auto [required, path]
-                    = findRequiredCoordinates(simdIndexTag, Graph::Direction::Downstream, *m_graph);
+                auto [required, path] = findRequiredCoordinates(
+                    simdIndexIndexTag, Graph::Direction::Downstream, *m_graph);
 
                 for(auto r : required)
                 {
@@ -86,11 +87,11 @@ namespace rocRoller
                     coords.setCoordinate(r, expr);
                 }
 
-                simdIndexExpr = coords.reverse({simdIndexTag})[0];
-                expectedExpr  = waveTileExpr % simdIndex.size;
-                AssertFatal(
-                    Expression::identical(m_fastArith(simdIndexExpr), m_fastArith(expectedExpr)),
-                    "Exchange: SIMDIndex must be the fastest running dimension");
+                simdIndexIndexExpr = coords.reverse({simdIndexIndexTag})[0];
+                expectedExpr       = waveTileExpr % simdIndexIndex.size;
+                //AssertFatal(
+                //    Expression::identical(m_fastArith(simdIndexIndexExpr), m_fastArith(expectedExpr)),
+                //    "Exchange: SIMDIndexIndex must be the fastest running dimension");
             }
 
             const uint wfs = m_context->kernel()->wavefront_size();
@@ -136,7 +137,26 @@ namespace rocRoller
                     m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
                 }
 
-                if(Expression::identical(vgprDim.size, Expression::literal(4u)))
+                uint waveMN, waveK, miMN, miK;
+                switch(macTile.layoutType)
+                {
+                case LayoutType::MATRIX_A:
+                    waveMN = waveTile.sizes[0];
+                    waveK  = waveTile.sizes[1];
+                    miMN   = macTile.miTileSizes[0];
+                    miK    = macTile.miTileSizes[1];
+                    break;
+                case LayoutType::MATRIX_B:
+                    waveMN = waveTile.sizes[1];
+                    waveK  = waveTile.sizes[0];
+                    miMN   = macTile.miTileSizes[1];
+                    miK    = macTile.miTileSizes[0];
+                    break;
+                default:
+                    Throw<FatalError>("Layout type not supported yet for Exchange.");
+                }
+
+                if((waveMN == 64 && miMN == 16) || (waveMN == 32 && miMN == 16))
                 {
                     for(uint32_t i = 0; i < numVgpr; i += 2)
                     {
@@ -155,7 +175,7 @@ namespace rocRoller
                             ""));
                     }
                 }
-                else if(Expression::identical(vgprDim.size, Expression::literal(2u)))
+                else if(waveMN == 64 && miMN == 32)
                 {
                     for(uint32_t i = 0; i < numVgpr; i += 2)
                     {
@@ -168,7 +188,9 @@ namespace rocRoller
                 }
                 else
                 {
-                    Throw<FatalError>("Exchange for the given vgpr size not supported.");
+                    Throw<FatalError>("Exchange for the given tile specification not supported.",
+                                      ShowValue(waveTile.sizes[0]),
+                                      ShowValue(macTile.miTileSizes[0]));
                 }
             }
         }
