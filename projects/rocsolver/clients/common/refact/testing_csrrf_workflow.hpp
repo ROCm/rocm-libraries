@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 /*
  * ===========================================================================

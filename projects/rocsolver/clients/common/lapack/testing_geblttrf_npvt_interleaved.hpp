@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename U>
 void geblttrf_npvt_interleaved_checkBadArgs(const rocblas_handle handle,
@@ -460,7 +461,7 @@ void geblttrf_npvt_interleaved_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -478,13 +479,13 @@ void geblttrf_npvt_interleaved_getPerfData(const rocblas_handle handle,
                                                            dB, incb, ldb, stB, dC, incc, ldc, stC,
                                                            bc, hA, hB, hC, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_geblttrf_npvt_interleaved(handle, nb, nblocks, dA.data(), inca, lda, stA,
                                             dB.data(), incb, ldb, stB, dC.data(), incc, ldc, stC,
                                             dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>

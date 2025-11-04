@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "common_host_helpers.hpp"
 #include <hip/hip_runtime.h>
 #include <vector>
 
@@ -62,15 +63,19 @@ public:
 
     double get_combined(averages avg = median)
     {
-        switch(value)
+        switch(avg)
         {
         case median:
-            int mid = m_times.size() / 2;
+        {
+            auto mid = m_times.size() / 2;
             std::nth_element(m_times.begin(), m_times.begin() + mid, m_times.end());
             return m_times[mid];
+        }
         case mean:
+        {
             auto sum = std::accumulate(m_times.begin(), m_times.end(), 0.0);
             return sum / std::size(m_times);
+        }
         }
         return 0;
     }

@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void gesv_checkBadArgs(const rocblas_handle handle,
@@ -328,7 +329,7 @@ void gesv_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -345,12 +346,12 @@ void gesv_getPerfData(const rocblas_handle handle,
         gesv_initData<false, true, T>(handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, bc,
                                       hA, hIpiv, hB, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_gesv(STRIDED, handle, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP, dB.data(),
                        ldb, stB, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>

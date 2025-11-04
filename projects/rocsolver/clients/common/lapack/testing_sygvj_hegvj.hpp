@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename SS, typename U>
 void sygvj_hegvj_checkBadArgs(const rocblas_handle handle,
@@ -521,7 +522,7 @@ void sygvj_hegvj_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -538,13 +539,13 @@ void sygvj_hegvj_getPerfData(const rocblas_handle handle,
         sygvj_hegvj_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB,
                                              bc, hA, hB, A, B, false, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sygvj_hegvj(STRIDED, handle, itype, evect, uplo, n, dA.data(), lda, stA,
                               dB.data(), ldb, stB, abstol, dResidual.data(), max_sweeps,
                               dSweeps.data(), dW.data(), stW, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>

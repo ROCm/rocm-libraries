@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void geblttrf_npvt_checkBadArgs(const rocblas_handle handle,
@@ -443,7 +444,7 @@ void geblttrf_npvt_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -460,12 +461,12 @@ void geblttrf_npvt_getPerfData(const rocblas_handle handle,
         geblttrf_npvt_initData<false, true, T>(handle, nb, nblocks, dA, lda, dB, ldb, dC, ldc, bc,
                                                hA, hB, hC, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_geblttrf_npvt(STRIDED, handle, nb, nblocks, dA.data(), lda, stA, dB.data(), ldb,
                                 stB, dC.data(), ldc, stC, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>

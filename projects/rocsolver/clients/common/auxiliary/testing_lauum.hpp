@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T>
 void lauum_checkBadArgs(const rocblas_handle handle,
@@ -164,7 +165,7 @@ void lauum_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -180,11 +181,11 @@ void lauum_getPerfData(const rocblas_handle handle,
     {
         lauum_initData<false, true, T>(handle, uplo, n, dA, lda, hA);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_lauum(handle, uplo, n, dA.data(), lda);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
