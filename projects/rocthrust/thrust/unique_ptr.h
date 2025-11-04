@@ -243,10 +243,20 @@ struct unique_ptr_deleter_sfinae<Deleter&>
  *  1. Manages a single object
  *  2. Manages a dynamically-allocated array of objects
  *
+ *  \par Nested Types
+ *  - `pointer` - The type of the stored pointer (defaults to `thrust::device_ptr<T>`)
+ *  - `element_type` - The type of the managed object (`T`)
+ *  - `deleter_type` - The type of the deleter (`D`)
  *
  *  \tparam T The type of the managed object.
  *  \tparam D The type of the deleter.
  *
+ *  \see thrust::default_delete
+ *  \see thrust::make_unique
+ *  \see thrust::device_ptr
+ *  \see thrust::device_malloc
+ *  \see thrust::device_new
+ *  \see thrust::device_free
  *  \see https://en.cppreference.com/w/cpp/memory/unique_ptr
  */
 
