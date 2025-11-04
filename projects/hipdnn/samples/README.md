@@ -2,16 +2,31 @@
 
 ## How to Build
 
-1. **Prerequisites:** First install hipDNN following the [Building documentation](../docs/Building.md).
+1. **Prerequisites:** 
+   - Build and install hipDNN following the [Building documentation](../docs/Building.md)
+   - Ensure ROCm is installed (typically in `/opt/rocm`)
+   - A ROCm-compatible GPU is required to run the samples
+   - Have `ninja` build tool available: `apt install ninja-build`
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
    mkdir build && cd build
-   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ ..
+   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
    ninja
    ```
 
 The sample executables will be created in the `build` directory.
+
+## Running Samples
+
+All samples accept the following command line options:
+- `--cpu-validation` - Enable CPU reference validation of results
+- `--help` - Displays help message
+
+Example:
+```bash
+./build/conv_forward --cpu-validation
+```
 
 ## Available Samples
 
@@ -26,47 +41,85 @@ The current samples include:
 
 Executes a single-node batch normalization inference graph on a 4D input tensor.
 
-- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)`. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions (`N, H, W`):
+- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)` to enable broadcasting over the batch (N) and spatial (H, W) dimensions. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions:
     ```python
-    y = scale * (x - mean) * inv_variance + bias
+    y = scale * ((x - mean) * inv_variance) + bias
     ```
-    where `y` would then be propagated as input to the subsequent layer.
 
 ### [**`BnTraining`**](./batchnorm/BnTraining.cpp)
 
 Executes the forward pass of a batch normalization training graph on a 4D input tensor.
-- For an input `x` of shape `(N, C, H, W)`, the mean and variance are calculated over the `N`, `H`, and `W` dimensions for each of the `C` channels or mini-batches, resulting in a `mean` and `inv_variance` of shape `(1, C, 1, 1)`. It then transforms the input and updates the running statistics:
+- For an input `x` of shape `(N, C, H, W)`, the mean and variance are calculated over the `N`, `H`, and `W` dimensions for each of the `C` channels, resulting in a `mean` and `inv_variance` of shape `(1, C, 1, 1)`. It then transforms the input and updates the running statistics:
     ```python
-    y = scale * (x - mean) * inv_variance + bias
+    y = scale * ((x - mean) * inv_variance) + bias
     next_running_mean = (1 - momentum) * prev_running_mean + momentum * batch_mean
     next_running_variance = (1 - momentum) * prev_running_variance + momentum * batch_variance
     ```
-- The graph outputs the normalized tensor `y`, along with the mini-batch statistics (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
+- The graph outputs the normalized tensor `y`, along with the batch mean/variance (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
 
-### [**`BnBackwards`**](./batchnorm/BnBackwards.cpp)
+### [**`BnBackward`**](./batchnorm/BnBackward.cpp)
 
 Executes the backward pass of a batch normalization graph to compute gradients of the loss function.
-- Given the upstream differentiable gradient `dy` of shape `(N, C, H, W)`, the downstream learnable gradients are computed with the chain-rule over the batch and spatial dimensions (`N, H, W`) with saved mini-batch statistics:
+- Given the upstream gradient `dy` of shape `(N, C, H, W)`, the downstream learnable gradients are computed with the chain-rule over the batch and spatial dimensions (`N, H, W`) using saved batch statistics:
     ```python
     dbias = sum(dy)
     x_hat = (x - mean) * inv_variance
     dscale = sum(dy * x_hat)
-    d_x = scale * inv_variance * (dy - (dbias / nhw) - (x_hat * dscale / nhw))
+    dx = (scale * inv_variance) * (dy - (dbias + x_hat * dscale) / nhw)
     ```
-    where `nhw = N * H * W`.
+    where `nhw = N * H * W` is the number of elements averaged per channel.
+
+### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
+
+Executes the forward pass of a 2D convolution operation on a 4D input tensor.
+
+- For an input tensor `x` of shape `(N, C, H_in, W_in)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution operation computes the output tensor `y` of shape `(N, K, H_out, W_out)`. At a high-level, each output element is computed by the following summation over input channels and filter spatial positions:
+
+    ```python
+    y[n, k, p, q] = sum(sum(sum(x[n, c, h, w] * w[k, c, r, s] 
+                                for c in range(C)) 
+                            for r in range(R)) 
+                        for s in range(S))
+    ```
+
+    where the input spatial indices `(h, w)` are determined by the output position `(p, q)`, stride, padding, and dilation:
     
-- For training, `d_x` would subsequently be passed to the preceding layer, and `d_scale` and `d_bias` can be used by an optimizer to update the learnable parameters `scale` and `bias`.
-
-### [**`ConvForward`**](./convolution/ConvForward.cpp)
-
-Executes the forward pass of a convolution operation on a 4D input tensor.
-
-- For an input tensor `x` of shape `(N, C, H, W)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution operation computes the output tensor `y` of shape `(N, K, P, Q)`:
     ```python
-    y[n, k, p, q] = sum(x[n, c, h, w] * w[k, c, r, s])
+    h = p * stride_h - pad_h + r * dilation_h
+    w = q * stride_w - pad_w + s * dilation_w
     ```
-    where the summation iterates over the input channels `C` and the spatial dimensions of the filter `(R, S)`, and the indices `(h, w)` are determined by the convolution stride, padding, and dilation. For each output position `(p, q)`, the corresponding input indices `(h, w)` are computed as:
+    
+    The output spatial dimensions are calculated as:
+    
     ```python
-    h = p * stride_height - padding_height + r * dilation_height
-    w = q * stride_width - padding_width + s * dilation_width
+    H_out = floor((H_in + 2*pad_h - dilation_h*(R - 1) - 1) / stride_h) + 1
+    W_out = floor((W_in + 2*pad_w - dilation_w*(S - 1) - 1) / stride_w) + 1
+    ```
+
+### [**`ConvDgrad`**](./convolution/ConvDgrad.cpp)
+
+Executes the backward pass (data gradient) of a 2D convolution operation to compute input gradients.
+
+- For an output gradient tensor `dy` of shape `(N, K, H_out, W_out)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution backward data operation computes the input gradient tensor `dx` of shape `(N, C, H_in, W_in)`. At a high-level, each input gradient element is computed by accumulating contributions from all output gradients that were influenced by that input position:
+
+    ```python
+    dx[n, c, h, w] = sum(sum(sum(dy[n, k, p, q] * w[k, c, r, s] 
+                                 for k in range(K)) 
+                             for r in range(R)) 
+                         for s in range(S))
+    ```
+
+    where for each input position `(h, w)` and filter position `(r, s)`, the corresponding output position `(p, q)` that contribute is computed as:
+    
+    ```python
+    p = (h + pad_h - r * dilation_h) / stride_h  # must be integer in [0, H_out)
+    q = (w + pad_w - s * dilation_w) / stride_w  # must be integer in [0, W_out)
+    ```
+    Only positions where both divisions yield integers within the valid output range contribute to the gradient.
+
+    The input gradient dimensions are calculated as the inverse of the forward convolution:
+    
+    ```python
+    H_in = stride_h * (H_out - 1) + dilation_h * (R - 1) + 1 - 2*pad_h
+    W_in = stride_w * (W_out - 1) + dilation_w * (S - 1) + 1 - 2*pad_w
     ```
