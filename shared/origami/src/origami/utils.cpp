@@ -468,12 +468,12 @@ std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware,
         size_t q = numWGs / hardware.NUM_XCD;
         size_t r = numWGs % hardware.NUM_XCD;
 
-        std::vector<size_t> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
-        size_t bestWGM = 1;
-        size_t bestL2 = std::numeric_limits<size_t>::max();
+        std::vector<int> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
+        int bestWGM = 1;
+        int bestL2 = std::numeric_limits<int>::max();
         for (auto wgm : wgmList)
         {
-            auto slabTiles = numMT_M * std::min(wgm, numMT_N);
+            auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
             auto slabCount = safe_ceil_div(numMT_N, wgm);
             auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
             auto wgmL2Estimate = 0;
