@@ -40,10 +40,6 @@
 #define NUM_PERF_RUNS_TEST 100
 #endif
 
-#ifndef warpSize
-#define warpSize 32
-#endif
-
 void BatchNormInferenceGPU(const miopen::Handle& handle,
                            miopenBatchNormMode_t bn_mode,
                            miopenActivationMode_t activ_mode,
@@ -81,7 +77,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         if(xgridsize < xlocalsize)
         {
             // round up the xlocalsize to the nearest wavefront size
-            xlocalsize = AlignUp(xgridsize, warpSize);
+            xlocalsize = AlignUp(xgridsize, handle.GetWavefrontWidth());
             // Set xgridsize to the xlocalsize, to launch only one block
             xgridsize = xlocalsize;
         }

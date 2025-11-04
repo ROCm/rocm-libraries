@@ -63,7 +63,7 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
     return true;
 }
 
-ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*context*/,
+ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context,
                                                     const FusionDescription& problem) const
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
@@ -104,7 +104,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
     if(xgridsize < xlocalsize)
     {
         // round up the xlocalsize to the nearest wavefront size
-        xlocalsize = AlignUp(xgridsize, 32);
+        xlocalsize = AlignUp(xgridsize, context.GetStream().GetWavefrontWidth());
         // launch only one block
         xgridsize = xlocalsize;
     }
