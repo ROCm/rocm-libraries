@@ -42,7 +42,7 @@ def parse_args():
                         help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
-    parser.add_argument('--no-offload-compress', required=False, default=True, action='store_true', help='Do not apply offload compression (deafult: True)')                        
+    parser.add_argument('--no-offload-compress', required=False, default=False, action='store_true', help='Do not apply offload compression (defult: False)')                        
     return parser.parse_args()
 
 def os_detect():
@@ -161,7 +161,7 @@ def config_cmd():
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_DIR={build_dir}" )
 
     if args.no_offload_compress:
-        cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=ON" )
+        cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )
         
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
 
