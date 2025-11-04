@@ -28,14 +28,21 @@
 
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>
+#include <miopen/kernel_info.hpp>
 
 #include <vector>
 
 namespace miopen {
 namespace conv {
 
-InvokerFactory MakeGcnAsm1x1USSInvokerFactory(
-    int N, int C, int K, int n_groups, int out_H, int out_W, std::size_t workspace_sz);
+InvokerFactory MakeGcnAsm1x1USSInvokerFactory(const solver::KernelInfo& ss_kernel_info,
+                                              int N,
+                                              int C,
+                                              int K,
+                                              int n_groups,
+                                              int out_H,
+                                              int out_W,
+                                              std::size_t workspace_sz);
 
 } // namespace conv
 } // namespace miopen
