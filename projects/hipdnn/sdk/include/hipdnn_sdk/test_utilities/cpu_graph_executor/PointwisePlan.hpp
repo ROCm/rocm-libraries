@@ -242,10 +242,9 @@ public:
         const auto* out0Tensor = tensorMap.at(nodeAttributes->out_0_tensor_uid());
 
         // Get optional tensors
-        const auto* in1Tensor
-            = (nodeAttributes->in_1_tensor_uid() && *nodeAttributes->in_1_tensor_uid() != 0)
-                  ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
-                  : nullptr;
+        const auto* in1Tensor = (nodeAttributes->in_1_tensor_uid().has_value()
+                                     ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
+                                     : nullptr);
 
         //grab the node values
 
