@@ -38,6 +38,7 @@
 
 #include <miopen/gemm_v2.hpp>
 #include <miopen/miopen.h>
+#include <miopen/ford.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -111,7 +112,7 @@ void callCpuGemmStridedBatched(bool isColMajor,
 
     if(parallel)
     {
-        par_ford(m)(work);
+        miopen::par_ford(m)(work);
     }
     else
     {
