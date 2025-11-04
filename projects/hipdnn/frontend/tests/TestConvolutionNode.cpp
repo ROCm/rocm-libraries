@@ -514,10 +514,11 @@ TEST(TestConvolutionNode, StrideInferenceNchwLayoutSuccess)
 
     auto inferredStrides = yTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    // Should maintain the same stride order as input (NCHW)
-    EXPECT_GT(inferredStrides[1], inferredStrides[2]); // C stride > H stride
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // H stride > W stride
-    EXPECT_EQ(inferredStrides[3], 1); // W stride should be 1 (contiguous)
+    // NCHW strides
+    EXPECT_EQ(inferredStrides[0], 65536); // N stride: 64 * 32 * 32
+    EXPECT_EQ(inferredStrides[1], 1024); // C stride: 32 * 32
+    EXPECT_EQ(inferredStrides[2], 32); // H stride: 32
+    EXPECT_EQ(inferredStrides[3], 1); // W stride: 1
 }
 
 TEST(TestConvolutionNode, StrideInferenceNhwcLayoutSuccess)
@@ -525,8 +526,8 @@ TEST(TestConvolutionNode, StrideInferenceNhwcLayoutSuccess)
     ConvFpropAttributes convAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({1, 32, 32, 3});
-    xTensor->set_stride({3072, 96, 3, 1}); // NHWC layout
+    xTensor->set_dim({1, 3, 32, 32}); // Dims in NCHW order
+    xTensor->set_stride({3072, 1, 96, 3}); // NHWC strides (channels last)
     convAttributes.set_x(xTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
@@ -534,7 +535,7 @@ TEST(TestConvolutionNode, StrideInferenceNhwcLayoutSuccess)
     convAttributes.set_w(wTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_dim({1, 32, 32, 64});
+    yTensor->set_dim({1, 64, 32, 32}); // Dims in NCHW order
     convAttributes.set_y(yTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -551,11 +552,11 @@ TEST(TestConvolutionNode, StrideInferenceNhwcLayoutSuccess)
 
     auto inferredStrides = yTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    // Should maintain the same stride order as input (NHWC)
-    EXPECT_GT(inferredStrides[0], inferredStrides[1]); // N stride > H stride
-    EXPECT_GT(inferredStrides[1], inferredStrides[2]); // H stride > W stride
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // W stride > C stride
-    EXPECT_EQ(inferredStrides[3], 1); // C stride should be 1 (contiguous)
+    // NHWC strides (channels last)
+    EXPECT_EQ(inferredStrides[0], 65536); // N stride: 32 * 32 * 64
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 2048); // H stride: 32 * 64
+    EXPECT_EQ(inferredStrides[3], 64); // W stride: 64
 }
 
 TEST(TestConvolutionNode, StrideInferencePreExistingStridesNotOverwritten)
@@ -719,7 +720,7 @@ TEST(TestConvolutionNode, PackNode)
     EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionNode, GatherHipdnnTensorIds)
+TEST(TestConvolutionNode, GatherHipdnnTensor)
 {
     ConvFpropAttributes convAttributes;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -742,56 +743,14 @@ TEST(TestConvolutionNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-}
+    node.gather_hipdnn_tensors(allTensors);
 
-TEST(TestConvolutionNode, PopulateHipdnnTensorIds)
-{
-    ConvFpropAttributes convAttributes;
-    convAttributes.set_x(std::make_shared<TensorAttributes>());
-    convAttributes.set_w(std::make_shared<TensorAttributes>());
-    convAttributes.set_y(std::make_shared<TensorAttributes>());
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-
-    GraphAttributes graphAttributes;
-    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
-    ;
-
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size());
-
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3);
 }
 
 TEST(TestConvolutionNode, StrideInferenceWithLargeKernel5x5)
@@ -1066,12 +1025,12 @@ TEST(TestConvolutionNode, StrideInferenceWithNhwcLayoutAndComplexParams)
     ConvFpropAttributes convAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({2, 56, 56, 128});
-    xTensor->set_stride({401408, 1, 7168, 56}); // NHWC layout
+    xTensor->set_dim({2, 128, 56, 56}); // Dims in NCHW order
+    xTensor->set_stride({401408, 1, 7168, 128}); // NHWC strides (channels last)
     convAttributes.set_x(xTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
-    wTensor->set_dim({56, 56, 5, 5}); // 5x5 kernel
+    wTensor->set_dim({56, 128, 5, 5}); // Dims in KCRS order
     convAttributes.set_w(wTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -1093,20 +1052,15 @@ TEST(TestConvolutionNode, StrideInferenceWithNhwcLayoutAndComplexParams)
     EXPECT_EQ(inferredDims.size(), 4);
     EXPECT_EQ(inferredDims[0], 2); // Batch size
     EXPECT_EQ(inferredDims[1], 56); // Output channels
-    EXPECT_EQ(inferredDims[2], 28); // Height: (56 + 2 + 1 - 5) / 2 + 1 = 28
-    EXPECT_EQ(inferredDims[3], 64); // Width: (128 + 2 + 1 - 5) / 2 + 1 = 64
+    EXPECT_EQ(inferredDims[2], 28); // Height: (56 + 1 + 2 - 5) / 2 + 1 = 28
+    EXPECT_EQ(inferredDims[3], 28); // Width: (56 + 2 + 1 - 5) / 2 + 1 = 28
 
-    // Check inferred strides (should maintain NHWC order)
+    // Check inferred strides (NHWC - channels last)
     auto inferredStrides = yTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    EXPECT_GT(inferredStrides[0], inferredStrides[2]); // N stride > H stride
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // H stride > W stride
-    EXPECT_GT(inferredStrides[3], inferredStrides[1]); // W stride > C stride
-    EXPECT_EQ(inferredStrides[1], 1); // C stride should be 1 (contiguous)
-
-    EXPECT_EQ(inferredStrides[0], 100352); // N stride: 56 * 28 * 64 = 100352
-    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1
-    EXPECT_EQ(inferredStrides[2], 3584); // H stride: 56 * 64 = 3584
+    EXPECT_EQ(inferredStrides[0], 43904); // N stride: 28 * 28 * 56
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 1568); // H stride: 28 * 56
     EXPECT_EQ(inferredStrides[3], 56); // W stride: 56
 }
 
@@ -1528,13 +1482,13 @@ TEST(TestConvolutionNode, InferPropertiesGroupedConvNhwcLayout)
     ConvFpropAttributes convAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({1, 64, 28, 28}); // NHWC layout, 64 input channels
-    xTensor->set_stride({50176, 1, 1792, 64}); // NHWC strides
+    xTensor->set_dim({1, 64, 28, 28}); // Dims in NCHW order
+    xTensor->set_stride({50176, 1, 1792, 64}); // NHWC strides (channels last)
     convAttributes.set_x(xTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
-    wTensor->set_dim({128, 16, 28, 28}); // 16 input channels per group (4 groups)
-    wTensor->set_stride({12544, 1, 448, 16}); // NHWC strides for weights
+    wTensor->set_dim({128, 16, 3, 3}); // Dims in KCRS order, 16 input channels per group (4 groups)
+    wTensor->set_stride({144, 1, 48, 16}); // KRSC strides (channels last)
     convAttributes.set_w(wTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -1556,16 +1510,16 @@ TEST(TestConvolutionNode, InferPropertiesGroupedConvNhwcLayout)
     EXPECT_EQ(inferredDims.size(), 4);
     EXPECT_EQ(inferredDims[0], 1); // Batch size
     EXPECT_EQ(inferredDims[1], 128); // Output channels
-    EXPECT_EQ(inferredDims[2], 3); // Height: (28 + 1 + 1 - 28) / 1 + 1 = 3
-    EXPECT_EQ(inferredDims[3], 3); // Width: (28 + 1 + 1 - 28) / 1 + 1 = 3
+    EXPECT_EQ(inferredDims[2], 28); // Height: (28 + 1 + 1 - 3) / 1 + 1 = 28
+    EXPECT_EQ(inferredDims[3], 28); // Width: (28 + 1 + 1 - 3) / 1 + 1 = 28
 
-    // Check inferred strides maintain NHWC layout
+    // Check inferred strides maintain NHWC layout (channels last)
     auto inferredStrides = yTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    EXPECT_GT(inferredStrides[0], inferredStrides[2]); // N > H
-    EXPECT_EQ(inferredStrides[1], 1); // C should be contiguous
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // H > W
-    EXPECT_GT(inferredStrides[3], inferredStrides[1]); // W > C
+    EXPECT_EQ(inferredStrides[0], 100352); // N stride: 28 * 28 * 128
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 3584); // H stride: 28 * 128
+    EXPECT_EQ(inferredStrides[3], 128); // W stride: 128
 }
 
 TEST(TestConvolutionNode, InferPropertiesGroupedConv3D)
@@ -1619,13 +1573,14 @@ TEST(TestConvolutionNode, InferPropertiesGroupedConv3DNhwcLayout)
     ConvFpropAttributes convAttributes;
 
     auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_dim({1, 48, 8, 16, 16}); // NDHWC layout, 48 input channels
-    xTensor->set_stride({98304, 1, 12288, 768, 48}); // NDHWC strides
+    xTensor->set_dim({1, 48, 8, 16, 16}); // Dims in NCDHW order
+    xTensor->set_stride({98304, 1, 12288, 768, 48}); // NDHWC strides (channels last)
     convAttributes.set_x(xTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
-    wTensor->set_dim({96, 16, 3, 3, 3}); // 16 input channels per group (3 groups)
-    wTensor->set_stride({432, 1, 144, 48, 16}); // NDHWC strides for weights
+    wTensor->set_dim(
+        {96, 16, 3, 3, 3}); // Dims in KCDHW order, 16 input channels per group (3 groups)
+    wTensor->set_stride({432, 1, 144, 48, 16}); // KDHWC strides (channels last)
     convAttributes.set_w(wTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -1651,14 +1606,14 @@ TEST(TestConvolutionNode, InferPropertiesGroupedConv3DNhwcLayout)
     EXPECT_EQ(inferredDims[3], 16); // Height: (16 + 1 + 1 - 3) / 1 + 1 = 16
     EXPECT_EQ(inferredDims[4], 16); // Width: (16 + 1 + 1 - 3) / 1 + 1 = 16
 
-    // Check inferred strides maintain NDHWC layout
+    // Check inferred strides maintain NDHWC layout (channels last)
     auto inferredStrides = yTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 5);
-    EXPECT_GT(inferredStrides[0], inferredStrides[2]); // N > D
-    EXPECT_EQ(inferredStrides[1], 1); // C should be contiguous
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // D > H
-    EXPECT_GT(inferredStrides[3], inferredStrides[4]); // H > W
-    EXPECT_GT(inferredStrides[4], inferredStrides[1]); // W > C
+    EXPECT_EQ(inferredStrides[0], 196608); // N stride: 8 * 16 * 16 * 96
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 24576); // D stride: 16 * 16 * 96
+    EXPECT_EQ(inferredStrides[3], 1536); // H stride: 16 * 96
+    EXPECT_EQ(inferredStrides[4], 96); // W stride: 96
 }
 
 TEST(TestConvolutionNode, PreValidateOutputDimsMismatchBatch)

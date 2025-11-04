@@ -26,17 +26,17 @@ template <typename Tuple, typename Derived>
 class TestCkTileGemmQuantBase : public ::testing::Test
 {
     protected:
-    using ALayout                            = std::tuple_element_t<0, Tuple>;
-    using BLayout                            = std::tuple_element_t<1, Tuple>;
-    using CLayout                            = std::tuple_element_t<2, Tuple>;
-    using ADataType                          = std::tuple_element_t<3, Tuple>;
-    using BDataType                          = std::tuple_element_t<4, Tuple>;
-    using QDataType                          = std::tuple_element_t<5, Tuple>;
-    using CDataType                          = std::tuple_element_t<6, Tuple>;
-    static constexpr auto QuantType          = std::tuple_element_t<7, Tuple>::value;
-    using GemmConfig                         = std::tuple_element_t<8, Tuple>;
-    static constexpr uint32_t QuantGroupSize = std::tuple_element_t<9, Tuple>::value;
-    using AccDataType                        = float; // accumulate always in float
+    using ALayout                   = std::tuple_element_t<0, Tuple>;
+    using BLayout                   = std::tuple_element_t<1, Tuple>;
+    using CLayout                   = std::tuple_element_t<2, Tuple>;
+    using ADataType                 = std::tuple_element_t<3, Tuple>;
+    using BDataType                 = std::tuple_element_t<4, Tuple>;
+    using QDataType                 = std::tuple_element_t<5, Tuple>;
+    using CDataType                 = std::tuple_element_t<6, Tuple>;
+    static constexpr auto QuantType = std::tuple_element_t<7, Tuple>::value;
+    using GemmConfig                = std::tuple_element_t<8, Tuple>;
+    using QuantGroupSize            = std::tuple_element_t<9, Tuple>;
+    using AccDataType               = float; // accumulate always in float
 
     // Get the quant-type specific data types from traits
     using QuantTraits     = QuantTypeTraits<QuantType>;
@@ -53,6 +53,10 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     static constexpr ck_tile::index_t M_Warp_Tile = GemmConfig::M_Warp_Tile;
     static constexpr ck_tile::index_t N_Warp_Tile = GemmConfig::N_Warp_Tile;
     static constexpr ck_tile::index_t K_Warp_Tile = GemmConfig::K_Warp_Tile;
+    static constexpr bool PreshuffleQuant         = GemmConfig::PreshuffleQuant;
+    static constexpr bool PreshuffleB             = GemmConfig::PreshuffleB;
+    static constexpr bool TiledMMAPermuteN        = GemmConfig::TiledMMAPermuteN;
+    static constexpr bool DoubleSmemBuffer        = GemmConfig::DoubleSmemBuffer;
 
     public:
     void SetUp() override { static_cast<Derived*>(this)->SetUpQuantTypeSpecific(); }
@@ -62,10 +66,9 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     // Common test execution logic
     void invoke_quant_gemm(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        constexpr bool kPadM       = false;
-        constexpr bool kPadN       = false;
-        constexpr bool kPadK       = false;
-        constexpr bool kPreshuffle = false;
+        constexpr bool kPadM = false;
+        constexpr bool kPadN = false;
+        constexpr bool kPadK = false;
 
         using CodegenGemmShape =
             ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
@@ -77,11 +80,16 @@ class TestCkTileGemmQuantBase : public ::testing::Test
         using CodegenGemmTraits = ck_tile::TileGemmQuantTraits<kPadM,
                                                                kPadN,
                                                                kPadK,
-                                                               kPreshuffle,
+                                                               PreshuffleQuant,
+                                                               PreshuffleB,
                                                                ALayout,
                                                                BLayout,
                                                                CLayout,
-                                                               QuantType>;
+                                                               QuantType,
+                                                               ALayout,
+                                                               BLayout,
+                                                               GemmConfig::TransposeC,
+                                                               DoubleSmemBuffer>;
 
         // Let the derived class create the appropriate pipeline and epilogue
         static_cast<Derived*>(this)

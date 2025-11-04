@@ -1026,14 +1026,11 @@ struct partition_kernel_impl_
                                  bool[items_per_thread],
                                  bool[sizeof...(UnaryPredicates)][items_per_thread]>;
 
+        const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+        const uint32_t flat_block_id        = block_id.get(flat_block_thread_id, storage.block_id);
+
         size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
         load_selected_count(prev_selected_count, prev_selected_count_values);
-
-        const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto flat_block_id        = block_id.get(flat_block_thread_id, storage.block_id);
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
-
-        // const auto flat_block_id = ::rocprim::detail::block_id<0>();
 
         const auto         block_offset = flat_block_id * items_per_block;
         const unsigned int valid_in_global_last_block
@@ -1131,6 +1128,14 @@ struct partition_kernel_impl_
             selected_in_block = prefix_op.get_reduction();
             selected_prefix   = prefix_op.get_prefix();
         }
+        // Temporary workaround: In ROCm versions 7.0.2, for large data sizes, on Linux,
+        // gfx1151 devices may hang here without an extra syncthreads call.
+        // Logically, this should not be necessary, since the work performed within prefix_op
+        // (to compute the reduction and prefix) has already been performed within the block-level
+        // exclusive_scan call above.
+#if defined(__gfx1151__) && !defined(_WIN32)
+        ::rocprim::syncthreads();
+#endif
 
         // Scatter selected and rejected values
         partition_scatter<OnlySelected, block_size>(keys,

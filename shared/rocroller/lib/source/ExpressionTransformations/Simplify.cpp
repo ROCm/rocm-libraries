@@ -413,10 +413,7 @@ namespace rocRoller
                 }
 
                 Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
+                cpy.arg  = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -472,29 +469,61 @@ namespace rocRoller
                 return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
+            {
+                auto cpy        = expr;
+                auto rhsVarType = resultVariableType(cpy.rhs);
+
+                // Nothing to combine
+                if(cpy.width == 0)
+                    return call(cpy.rhs);
+                // Src overrides entire dst
+                else if(cpy.dstOffset == 0 && cpy.width == rhsVarType.getElementSize() * 8)
+                    return call(bfe(rhsVarType.dataType, cpy.lhs, cpy.srcOffset, cpy.width));
+
+                cpy.lhs = call(expr.lhs);
+                cpy.rhs = call(expr.rhs);
+
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(BitFieldExtract const& expr) const
+            {
+                auto cpy = expr;
+
+                AssertFatal(cpy.width > 0, "BitfieldExtract with width 0");
+
+                // Extracting the entire arg with no offset
+                if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
+                    return call(convert(cpy.outputDataType, cpy.arg));
+
+                cpy.arg = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Concatenate const& expr) const
+            {
+                auto cpy = expr;
+
+                if(cpy.operands.size() == 1)
+                    return call(cpy.operands[0]);
+
+                // TODO: Check if two consecutive 32-bit literals can be combined into a single 64-bit literal
+                // TODO: Check if two consecutive BitfieldCombines can be merged into their 64-bit src
+                // TODO: Check if two consecutive BitfieldExtracts can be merged into their 64-bit src
+
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
+            }
+
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -502,18 +531,9 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 

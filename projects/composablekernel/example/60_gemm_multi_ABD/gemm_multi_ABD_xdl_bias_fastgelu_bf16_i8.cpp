@@ -28,8 +28,9 @@ using BF16 = ck::bhalf_t;
 using I8   = int8_t;
 using F32  = float;
 
-using Row = ck::tensor_layout::gemm::RowMajor;
-using Col = ck::tensor_layout::gemm::ColumnMajor;
+using Row    = ck::tensor_layout::gemm::RowMajor;
+using Col    = ck::tensor_layout::gemm::ColumnMajor;
+using Bypass = ck::tensor_layout::BypassLayoutVerification;
 
 using A0DataType       = BF16;
 using AsDataType       = ck::Tuple<A0DataType>;
@@ -81,10 +82,11 @@ int main(int argc, char* argv[])
     ck::index_t N = 768;
     ck::index_t K = 6144;
 
-    ck::index_t StrideA = K;
-    ck::index_t StrideB = N;
-    ck::index_t StrideD = 0;
-    ck::index_t StrideE = N;
+    ck::index_t StrideA  = K;
+    ck::index_t StrideB  = N;
+    ck::index_t StrideB1 = 0;
+    ck::index_t StrideD  = 0;
+    ck::index_t StrideE  = N;
 
     if(argc == 1)
     {
@@ -126,17 +128,17 @@ int main(int argc, char* argv[])
 
             if(std::is_same<decltype(layout), ck::tensor_layout::gemm::RowMajor>::value)
             {
-                return HostTensorDescriptor({row, col}, {stride, 1_uz});
+                return HostTensorDescriptor({row, col}, {stride, 1_uz}, Bypass{});
             }
             else
             {
-                return HostTensorDescriptor({row, col}, {1_uz, stride});
+                return HostTensorDescriptor({row, col}, {1_uz, stride}, Bypass{});
             }
         };
 
     Tensor<A0DataType> a0_m_k(f_host_tensor_descriptor(M, K, StrideA, A0Layout{}));
     Tensor<B0DataType> b0_k_n(f_host_tensor_descriptor(K, N, StrideB, B0Layout{}));
-    Tensor<B1DataType> b1_k_n(f_host_tensor_descriptor(K, N, 0, B1Layout{}));
+    Tensor<B1DataType> b1_k_n(f_host_tensor_descriptor(K, N, StrideB1, B1Layout{}));
     Tensor<D0DataType> d_m_n(f_host_tensor_descriptor(M, N, StrideD, D0Layout{}));
     Tensor<EDataType> e_m_n_host_result(f_host_tensor_descriptor(M, N, StrideE, ELayout{}));
     Tensor<EDataType> e_m_n_device_result(f_host_tensor_descriptor(M, N, StrideE, ELayout{}));
@@ -196,7 +198,7 @@ int main(int argc, char* argv[])
                                N,
                                K,
                                std::array<ck::index_t, NumATensor>{StrideA},
-                               std::array<ck::index_t, NumBTensor>{StrideB, 0},
+                               std::array<ck::index_t, NumBTensor>{StrideB, StrideB1},
                                std::array<ck::index_t, NumDTensor>{StrideD},
                                StrideE,
                                a_element_op,

@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_BY_KEY_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_BY_KEY_HPP_
 
+#include "device_config_helper.hpp"
 #include "device_scan_common.hpp"
 #include "lookback_scan_state.hpp"
 
@@ -32,7 +33,7 @@
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../types/tuple.hpp"
-#include "device_config_helper.hpp"
+#include "../detail/ordered_block_id.hpp"
 
 #include <type_traits>
 
@@ -76,17 +77,20 @@ struct load_values_flagged
     //   restart the scan from that value
     template<typename KeyIterator, typename ValueIterator, typename CompareFunction>
     ROCPRIM_DEVICE
-    void load(KeyIterator        keys_input,
-              ValueIterator      values_input,
-              CompareFunction    compare,
-              const result_type  initial_value,
-              const unsigned int flat_block_id,
-              const size_t       starting_block,
-              const size_t       number_of_blocks,
-              const unsigned int flat_thread_id,
-              const size_t       size,
-              rocprim::tuple<result_type, bool> (&wrapped_values)[items_per_thread],
-              storage_type& storage)
+    void load(
+        KeyIterator        keys_input,
+        ValueIterator      values_input,
+        CompareFunction    compare,
+        const result_type  initial_value,
+        const unsigned int flat_block_id,
+        const size_t       starting_block,
+        const size_t       number_of_blocks,
+        const unsigned int flat_thread_id,
+        const size_t       size,
+        bool               use_last_keys,
+        const typename std::iterator_traits<KeyIterator>::value_type* const __restrict__ last_keys,
+        rocprim::tuple<result_type, bool> (&wrapped_values)[items_per_thread],
+        storage_type& storage)
     {
         constexpr static unsigned int items_per_block = items_per_thread * block_size;
         const unsigned int            block_offset    = flat_block_id * items_per_block;
@@ -98,13 +102,14 @@ struct load_values_flagged
         bool        flags[items_per_thread];
 
         auto not_equal = [compare](const auto& a, const auto& b) mutable { return !compare(a, b); };
+        const auto global_block_id = starting_block + flat_block_id;
 
         const auto flag_segment_boundaries = [&]()
         {
-            if(Exclusive)
+            if constexpr(Exclusive)
             {
                 const key_type tile_successor
-                    = starting_block + flat_block_id < number_of_blocks - 1
+                    = global_block_id < number_of_blocks - 1
                           ? static_cast<key_type>(block_keys[items_per_block])
                           : static_cast<key_type>(*block_keys);
                 block_discontinuity{}.flag_tails(flags,
@@ -114,10 +119,12 @@ struct load_values_flagged
                                                  storage.keys.flag);
             }
             else
-            {
-                const key_type tile_predecessor = starting_block + flat_block_id > 0
-                                                      ? static_cast<key_type>(block_keys[-1])
-                                                      : static_cast<key_type>(*block_keys);
+            { // Inclusive
+                const key_type tile_predecessor
+                    = global_block_id > 0
+                          ? (use_last_keys ? static_cast<key_type>(last_keys[global_block_id - 1])
+                                           : static_cast<key_type>(block_keys[-1]))
+                          : static_cast<key_type>(*block_keys);
                 block_discontinuity{}.flag_heads(flags,
                                                  tile_predecessor,
                                                  keys,
@@ -126,7 +133,7 @@ struct load_values_flagged
             }
         };
 
-        if(starting_block + flat_block_id < number_of_blocks - 1)
+        if(global_block_id < number_of_blocks - 1)
         {
             block_load_keys{}.load(block_keys, keys, storage.keys.load);
 
@@ -255,7 +262,8 @@ struct unwrap_store
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         device_scan_by_key_kernel_impl(KeyInputIterator,
                                        InputIterator,
@@ -267,7 +275,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        const size_t,
                                        const size_t,
                                        const size_t,
-                                       const rocprim::tuple<ResultType, bool>* const)
+                                       const rocprim::tuple<ResultType, bool>* const,
+                                       bool,
+                                       const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__,
+                                       WrappedBlockId)
             -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
     {
         // No need to build the kernel with sleep on a device that does not require it
@@ -282,7 +293,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
@@ -294,7 +306,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         const size_t                                  size,
         const size_t                                  starting_block,
         const size_t                                  number_of_blocks,
-        const rocprim::tuple<ResultType, bool>* const previous_last_value)
+        const rocprim::tuple<ResultType, bool>* const previous_last_value,
+        bool use_last_keys,
+        const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
+        WrappedBlockId ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
     {
         using result_type = ResultType;
@@ -328,13 +343,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 
         ROCPRIM_SHARED_MEMORY union
         {
+            typename WrappedBlockId::storage_type  ordered_bid;
             typename load_flagged::storage_type    load;
             typename block_scan_type::storage_type scan;
             typename store_unwrap::storage_type    store;
         } storage;
 
         const auto flat_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto flat_block_id  = ::rocprim::detail::block_id<0>();
+        const auto flat_block_id
+            = ordered_bid.get(flat_thread_id,
+                              storage.ordered_bid); // ::rocprim::detail::block_id<0>();
+
+        ::rocprim::syncthreads();
 
         // Load input
         wrapped_type wrapped_values[items_per_thread];
@@ -347,6 +367,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             number_of_blocks,
                             flat_thread_id,
                             size,
+                            use_last_keys,
+                            last_keys,
                             wrapped_values,
                             storage.load);
 
@@ -362,7 +384,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
             // multi grid launch
             if(previous_last_value != nullptr)
             {
-                if(Exclusive)
+                if constexpr(Exclusive)
                 {
                     rocprim::get<0>(wrapped_initial_value) = rocprim::get<0>(*previous_last_value);
                 }

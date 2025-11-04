@@ -1,5 +1,8 @@
 # Generic Ownership (broadest rules first)
 **/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
+./CMakeLists.txt                                    @ROCm/rocm-math-lib-build-infra
+./CMakePresets.json                                 @ROCm/rocm-math-lib-build-infra
+/cmake/
 
 # CI ownership
 /.azuredevops/                                      @ROCm/external-ci
@@ -32,6 +35,7 @@
 /projects/rocsolver/                                @ROCm/solvers-reviewers
 /projects/rocsparse/                                @ROCm/sparses-reviewers
 /projects/rocthrust/                                @ROCm/prims-rands-reviewers
+/projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
@@ -74,6 +78,11 @@
 /projects/hipblas-common/**/.readthedocs.yaml       @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/docs/                      @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/library/include/           @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+
+/projects/rocwmma/**/*.md                           @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/**/*.rst                          @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/library/include/*                 @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/docs/                             @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
 
 /projects/hipblaslt/**/*.md                         @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/**/*.rst                        @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers

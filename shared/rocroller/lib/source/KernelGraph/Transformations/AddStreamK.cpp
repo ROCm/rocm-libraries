@@ -376,7 +376,7 @@ namespace rocRoller
                 auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
                 if(!maybeTileNumber)
                     return false;
-                if(!empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+                if(!std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
                     return false;
                 if(maybeTileNumber->dim != 0)
                     return false;
@@ -395,6 +395,7 @@ namespace rocRoller
 
             auto tileNumTag = graph.coordinates.addElement(
                 *graph.coordinates.get<MacroTileNumber>(nextTileNumTag)); // Copy existing
+
             graph.coordinates.addElement(Split(), {nextTileNumTag}, {tileNumTag, plusOneTag});
 
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
@@ -728,20 +729,17 @@ namespace rocRoller
             return concatenate("AddStreamK");
         }
 
-        AddStreamK::AddStreamK(std::vector<int> const& dims,
-                               std::string const&      topLoop,
-                               std::string const&      accumulatorLoop,
-                               bool                    twoTile,
-                               ExpressionPtr           numWGs,
-                               CommandParametersPtr    params,
-                               ContextPtr              context)
-            : m_dimensionIndices(dims)
+        AddStreamK::AddStreamK(ContextPtr           context,
+                               CommandParametersPtr params,
+                               std::string const&   topLoop,
+                               std::string const&   accumulatorLoop,
+                               ExpressionPtr        numWGs)
+            : m_context(context)
+            , m_params(params)
+            , m_dimensionIndices(params->loopOverOutputTilesDimensions)
             , m_topLoop(topLoop)
             , m_accumulatorLoop(accumulatorLoop)
-            , m_twoTile(twoTile)
             , m_numWGs(numWGs)
-            , m_params(params)
-            , m_context(context)
         {
         }
 
@@ -763,15 +761,20 @@ namespace rocRoller
             std::vector<int> tileNumbers;
             for(auto d : loopInfo.dimensionIndices)
             {
+                // Skip if no dangling MacroTileNumber at this dimension
+                if(accumInfo.tileNumberCoords.at(d).empty())
+                    continue;
+
                 auto tileNumber = graph.coordinates.addElement(
                     MacroTileNumber(d, argInfo.numTiles[d], nullptr));
 
                 for(auto tileNumTag : accumInfo.tileNumberCoords.at(d))
                 {
                     if(forward
-                       && empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                       && std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                         graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
-                    if(!forward && empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                    if(!forward
+                       && std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                         graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
                 }
 
@@ -881,12 +884,15 @@ namespace rocRoller
                         return false;
                     if(maybeTileNumber->dim != dimension)
                         return false;
-                    if(empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
-                       || empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+                    if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
+                       || std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
                         return true;
                     return false;
                 };
 
+                // NOTE: a dimension might not have any dangling MacroTileNumber.
+                //       This happens when workgroupMapping (RemapOutputTiles)
+                //       applied as M & N dimensions get flattened int a new MacroTileNumber.
                 accumInfo.tileNumberCoords[dimension]
                     = graph.coordinates.findElements(danglingTileNumberPredicate)
                           .to<std::unordered_set>();
@@ -898,13 +904,12 @@ namespace rocRoller
         //
         // Commit
         //
-        void commit(KernelGraph&           graph,
-                    bool                   twoTile,
+        void commit(ContextPtr             context,
+                    CommandParametersPtr   params,
+                    KernelGraph&           graph,
                     LoopInfo const&        loopInfo,
                     AccumulatorInfo const& accumInfo,
-                    ArgumentInfo const&    argInfo,
-                    CommandParametersPtr   params,
-                    ContextPtr             context)
+                    ArgumentInfo const&    argInfo)
         {
             //
             // Find the epilogue operations; detach them.
@@ -966,7 +971,7 @@ namespace rocRoller
             // way of looking at the DataFlow graph to figure out
             // where to stop.
             int dpTopLoop, dpAccumLoop;
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
                 // We disable duplication here so that the fix-up pass
                 // uses the correct registers.
@@ -1203,13 +1208,23 @@ namespace rocRoller
                 Sequence(), {sendInfo.assignSendBoolSGPR}, {sendInfo.preWaitZero});
             graph.control.addElement(Sequence(), {sendInfo.sendCond}, {receiveInfo.preWaitZero});
 
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
-                auto scopeSK
-                    = replaceWith(graph, forTileSKOp, graph.control.addElement(Scope()), false);
-                auto scopeDP = graph.control.addElement(Scope());
+                int scopeSK = graph.control.addElement(Scope());
+                int scopeDP = graph.control.addElement(Scope());
+
+                if(params->streamK == StreamKMode::TwoTileDPFirst)
+                {
+                    scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
+                    graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
+                }
+                else
+                {
+                    scopeSK = replaceWith(graph, forTileSKOp, scopeSK, false);
+                    graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
+                }
+
                 graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
-                graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
 
                 //
                 // Set SK/DP selectors to select DP
@@ -1261,12 +1276,12 @@ namespace rocRoller
             }
         }
 
-        ArgumentInfo setupArguments(ExpressionPtr          numWGs,
-                                    bool                   twoTile,
+        ArgumentInfo setupArguments(ContextPtr             context,
+                                    CommandParametersPtr   params,
+                                    ExpressionPtr          numWGs,
                                     KernelGraph const&     graph,
                                     LoopInfo const&        loopInfo,
-                                    AccumulatorInfo const& accumInfo,
-                                    ContextPtr             context)
+                                    AccumulatorInfo const& accumInfo)
         {
             ArgumentInfo argInfo;
 
@@ -1301,6 +1316,7 @@ namespace rocRoller
                                 = convert(numTilesDT, macTileNumber->size);
                     }
                 }
+
                 argInfo.numTileArgExprs.back() = convert(
                     numTilesDT, graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size);
 
@@ -1330,9 +1346,11 @@ namespace rocRoller
             //   for basic StreamK:   0
             //   fro 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
             //
-
             for(auto d : loopInfo.dimensionIndices)
             {
+                if(argInfo.numTileArgExprs[d] == nullptr)
+                    continue;
+
                 argInfo.numTiles.push_back(k->addArgument({concatenate("numTiles", d),
                                                            numTilesDT,
                                                            DataDirection::ReadOnly,
@@ -1340,6 +1358,7 @@ namespace rocRoller
                 if(d > 0)
                     enableDivideBy(argInfo.numTiles.back(), context);
             }
+
             argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",
                                                        numTilesDT,
                                                        DataDirection::ReadOnly,
@@ -1352,11 +1371,14 @@ namespace rocRoller
                 ExpressionPtr numNonAccTiles = nullptr;
                 for(auto d : loopInfo.dimensionIndices)
                 {
+                    if(argInfo.numTileArgExprs[d] == nullptr)
+                        continue;
+
                     numNonAccTiles = numNonAccTiles ? numNonAccTiles * argInfo.numTileArgExprs[d]
                                                     : argInfo.numTileArgExprs[d];
                 }
 
-                if(twoTile)
+                if(params->streamK.isTwoTileMode())
                 {
                     numSKTilesArgExpr      = (numNonAccTiles % numWGs + numWGs) * numAccTiles;
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
@@ -1378,9 +1400,8 @@ namespace rocRoller
             argInfo.numSKTilesPerWG = k->addArgument(
                 {"numSKTilesPerWG", numTilesDT, DataDirection::ReadOnly, numSKTilesPerWGArgExpr});
 
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
-
                 argInfo.numDPTiles = k->addArgument(
                     {"numDPTiles", numTilesDT, DataDirection::ReadOnly, numDPTilesArgExpr});
 
@@ -1470,9 +1491,11 @@ namespace rocRoller
 
             auto graph     = original;
             auto accumInfo = stage(graph, loopInfo);
+
             auto argInfo
-                = setupArguments(m_numWGs, m_twoTile, graph, loopInfo, accumInfo, m_context);
-            commit(graph, m_twoTile, loopInfo, accumInfo, argInfo, m_params, m_context);
+                = setupArguments(m_context, m_params, m_numWGs, graph, loopInfo, accumInfo);
+
+            commit(m_context, m_params, graph, loopInfo, accumInfo, argInfo);
 
             return graph;
         }

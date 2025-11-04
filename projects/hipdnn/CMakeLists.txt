@@ -3,15 +3,24 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
+# hipDNN dependency versions to use
+set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
+set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
+set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
+set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
 
 set(HIPDNN_VERSION "0.0.1")
 
-if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
+project(
+    hipDNN
+    VERSION ${HIPDNN_VERSION}
+    LANGUAGES CXX)
 
 if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
@@ -21,38 +30,53 @@ if(NOT WIN32)
     endif()
 endif()
 
-project(
-    hipDNN
-    VERSION ${HIPDNN_VERSION}
-    LANGUAGES CXX)
+if(NOT WIN32)
+    # Only set if not already specified by user
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    endif()
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
+
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for official hipDNN engine plugins")
-set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE PATH "Build directory for official hipDNN engine plugins")
-set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for official hipDNN engine plugins (relative to CMAKE_INSTALL_PREFIX)")
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE PATH "Build directory for official hipDNN engine plugins")
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Full install directory for official hipDNN engine plugins. Uses the CMAKE_INSTALL_PREFIX set at configure time (defaults to /opt/rocm/).")
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Relative install directory for official hipDNN engine plugins")
 
-set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/lib/test_plugins" CACHE INTERNAL "Build directory for test plugins")
+set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Build directory for test plugins")
+set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/test_plugins" CACHE INTERNAL "Install directory for test plugins")
+
+set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data" CACHE INTERNAL "Directory for test reference data")
+set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}" CACHE INTERNAL "Install directory for test reference data")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_reference_data/" DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}) # Copies only on calls to cmake
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data" DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR})
 
 option(HIP_DNN_BUILD_BACKEND "Build the backend code" ON)
 option(HIP_DNN_BUILD_FRONTEND "Build the frontend code" ON)
-option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
+option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from schema during build" ON)
+option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 list(
     APPEND
     CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-    ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
+    ${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}/cmake/hip
     ${HIP_DIR}/cmake
 )
 
@@ -64,9 +88,6 @@ list(
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip 
 )
 
 include(cmake/Dependencies.cmake)
@@ -80,12 +101,12 @@ include(cmake/Tests.cmake)
 set(EXTRA_COMPILE_OPTIONS)
 set(EXTRA_LINK_OPTIONS)
 if(CODE_COVERAGE)
-    list(PREPEND EXTRA_COMPILE_OPTIONS 
+    list(PREPEND EXTRA_COMPILE_OPTIONS
         -fprofile-instr-generate
         -fcoverage-mapping
     )
-    list(PREPEND EXTRA_LINK_OPTIONS 
-        -fprofile-instr-generate 
+    list(PREPEND EXTRA_LINK_OPTIONS
+        -fprofile-instr-generate
         -fcoverage-mapping)
 endif()
 
@@ -146,13 +167,13 @@ endif()
 
 if(CODE_COVERAGE)
     findAndCheckLlvmTools()
-    
+
     if(HIP_DNN_BUILD_PLUGINS)
-        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object ./bin/miopen_legacy_plugin_tests)
+        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests)
     endif()
 
-    set(CODE_COVERAGE_IGNORE_REGEX "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/test_utilities.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)")
-    set(CODE_COVERAGE_OBJECTS -object ./lib/libhipdnn_backend.so -object ./bin/hipdnn_backend_tests -object ./bin/hipdnn_frontend_tests -object ./bin/public_hipdnn_backend_tests -object ./bin/hipdnn_sdk_tests ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT})
+    set(CODE_COVERAGE_IGNORE_REGEX "\(.*deps.*\)|\(.*tests.*\)|\(.*sdk/include/hipdnn_sdk/data_objects.*\)|\(.*sdk/include/hipdnn_sdk/plugin/test_utils.*\)")
+    set(CODE_COVERAGE_OBJECTS -object ./${CMAKE_INSTALL_LIBDIR}/libhipdnn_backend.so -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests -object ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests -object ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT})
 
     add_custom_target(
         code_coverage
@@ -163,4 +184,8 @@ if(CODE_COVERAGE)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
     )
+endif()
+
+if(NOT HIP_DNN_SKIP_TESTS)
+    install_hipdnn_ctest_files()
 endif()

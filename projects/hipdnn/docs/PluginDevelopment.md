@@ -50,7 +50,7 @@ For adding new operations to the SDK (schemas, nodes, attributes), see the [How-
 
 The plugin API defines how kernel engine plugins interact with hipDNN:
 
-- **Graph Processing**: Graphs are passed in a serialized format to plugins using FlatBuffers
+- **Graph Processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers
 - **SDK Data Objects**: Plugins use SDK data objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
@@ -152,18 +152,22 @@ Your plugin's CMakeLists.txt should:
 
 When building an external plugin, the hipDNN SDK provides CMake variables to help you install your plugin in the correct location:
 
-```cmake
-find_package(hipdnn_sdk CONFIG REQUIRED)
+- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`): 
+  - Hardcoded at CMake configure time
+  - This is intended for **developer-use only**
+  
+- **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):
+  - **Recommended for installations**
+  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer 
+  - Remains correct when setting the prefix during the CMake install command 
 
-# The SDK provides these variables:
-# HIPDNN_PLUGIN_ENGINE_SUBDIR - Subdirectory path for engine plugins (e.g., "hipdnn_plugins/engines")
-# HIPDNN_INSTALL_PLUGIN_ENGINE_DIR - Install directory relative to CMAKE_INSTALL_PREFIX
-# HIPDNN_PLUGIN_ENGINE_INSTALL_PATH - Full install path for plugins
+```cmake
+find_package(hipdnn_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_sdk
 
 # Example: Configure your plugin to install to the correct location
 install(
     TARGETS your_plugin_name
-    LIBRARY DESTINATION ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}
+    LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 ```
 
@@ -361,8 +365,11 @@ Integration tests validate end-to-end functionality of your plugin:
   - Test different data types, layouts, dimensions, and edge-cases for each
   - Enable tests for all supported ASICs
   - GPU typically required for meaningful validation
+  - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
+    - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
+    - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/BatchnormFwdInferenceIntegrationTest.cpp`](../plugins/miopen_legacy_plugin/integration_tests/BatchnormFwdInferenceIntegrationTest.cpp)
+For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
 Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
 

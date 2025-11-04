@@ -14,9 +14,8 @@
 #include "plugin/EnginePlugin.hpp"
 
 using namespace hipdnn_backend;
+using namespace hipdnn_sdk::utilities;
 
-template <typename T>
-using ScopedResource = hipdnn_sdk::utilities::ScopedResource<T>;
 class SimpleEnginePluginManager : public plugin::PluginManagerBase<plugin::EnginePlugin>
 {
 public:

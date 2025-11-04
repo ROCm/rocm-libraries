@@ -35,21 +35,11 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
 
 enum struct GemmPipelineType
 {
-    WeightPreshuffleV1,
     WeightPreshuffleV2
 };
 
 template <GemmPipelineType PT, typename Problem>
 struct GemmPipelineTypeSelector;
-
-template <typename Problem>
-struct GemmPipelineTypeSelector<GemmPipelineType::WeightPreshuffleV1, Problem>
-{
-    using base_pipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV1<Problem>;
-    using pipeline      = ck_tile::WeightPreshufflePipelineAGmemBGmemCRegV1<Problem>;
-
-    static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffleV1"; }
-};
 
 template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::WeightPreshuffleV2, Problem>
@@ -116,19 +106,6 @@ class TestCkTileGemmPipeline : public ::testing::Test
     template <typename GemmConfig, bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
     {
-        // TODO: This should be parameterized in tests
-        // constexpr ck_tile::index_t M_Tile = 128;
-        // constexpr ck_tile::index_t N_Tile = 128;
-        // constexpr ck_tile::index_t K_Tile = 128;
-
-        // constexpr ck_tile::index_t M_Warp = 1;
-        // constexpr ck_tile::index_t N_Warp = 4;
-        // constexpr ck_tile::index_t K_Warp = 1;
-
-        // constexpr ck_tile::index_t M_Warp_Tile = 32;
-        // constexpr ck_tile::index_t N_Warp_Tile = 32;
-        // constexpr ck_tile::index_t K_Warp_Tile = sizeof(ADataType) == 2 ? 16 : 32;
-
         constexpr bool kPadM      = PadM;
         constexpr bool kPadN      = PadN;
         constexpr bool kPadK      = PadK;
