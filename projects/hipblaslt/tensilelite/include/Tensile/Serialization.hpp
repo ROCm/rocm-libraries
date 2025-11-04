@@ -36,6 +36,7 @@
 #include <Tensile/Serialization/ExactLogicLibrary.hpp>
 #include <Tensile/Serialization/FreeSizeLibrary.hpp>
 #include <Tensile/Serialization/PredictionLibrary.hpp>
+#include <Tensile/Serialization/EmbeddingSimilarityLibrary.hpp>
 #include <Tensile/Serialization/GranularitySelectionLibrary.hpp>
 #include <Tensile/Serialization/HasTraits.hpp>
 #include <Tensile/Serialization/MLFeatures.hpp>

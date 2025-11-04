@@ -27,7 +27,7 @@
 #pragma once
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/TwoTowersEmbeddingLibrary.hpp>
+#include <Tensile/EmbeddingSimilarityLibrary.hpp>
 
 #include <cstddef>
 #include <unordered_set>
@@ -38,9 +38,9 @@ namespace TensileLite
     {
 
         template <typename IO>
-        struct MappingTraits<TwoTowersEmbedding::StandardScaler, IO>
+        struct MappingTraits<EmbeddingSimilarity::StandardScaler, IO>
         {
-            using Scaler = TwoTowersEmbedding::StandardScaler;
+            using Scaler = EmbeddingSimilarity::StandardScaler;
             using iot    = IOTraits<IO>;
 
             static void mapping(IO& io, Scaler& scaler)
@@ -48,7 +48,7 @@ namespace TensileLite
                 std::vector<float> mean, scale;
                 iot::mapRequired(io, "mean", mean);
                 iot::mapRequired(io, "scale", scale);
-                scaler.mean.assign(mean.begin(), mean.end()); // TODO check
+                scaler.mean.assign(mean.begin(), mean.end()); 
                 scaler.scale.assign(scale.begin(), scale.end());
             }
 
@@ -56,58 +56,58 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<TwoTowersEmbedding::TwoTowersEmbedding, IO>
+        struct MappingTraits<EmbeddingSimilarity::Encoder, IO>
         {
-            using TwoTowersEmbedding = TwoTowersEmbedding::TwoTowersEmbedding;
+            using Encoder = EmbeddingSimilarity::Encoder;
+            using iot     = IOTraits<IO>;
+
+            static void mapping(IO& io, Encoder& encoder)
+            {
+                iot::mapRequired(io, "state_dict", encoder.network);
+                iot::mapRequired(io, "scaler", encoder.scaler);
+                iot::mapRequired(io, "apply_log", encoder.apply_log);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<EmbeddingSimilarity::Network, IO>
+        {
+            using Network = EmbeddingSimilarity::Network;
+            using iot       = IOTraits<IO>;
+
+            static void mapping(IO& io, Network& net)
+            {
+                iot::mapRequired(io, "proj_weights", net.proj_weights);
+                iot::mapRequired(io, "proj_bias", net.proj_bias);
+
+                iot::mapRequired(io, "weights", net.weights);
+                iot::mapRequired(io, "bias", net.bias);
+            }
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<EmbeddingSimilarity::SolutionEmbeddings, IO>
+        {
+            using SolutionEmbeddings = EmbeddingSimilarity::SolutionEmbeddings;
             using iot                = IOTraits<IO>;
 
-            static void mapping(IO& io, TwoTowersEmbedding& two_towers)
+            static void mapping(IO& io, SolutionEmbeddings& data)
             {
-                iot::mapRequired(io, "state_dict", two_towers.query_encoder);
-                iot::mapRequired(io, "scaler", two_towers.scaler);
-                iot::mapRequired(io, "apply_log", two_towers.apply_log);
-            }
-
-            const static bool flow = false;
-        };
-
-        template <typename IO>
-        struct MappingTraits<TensileLite::TwoTowersEmbedding::QueryEncoder, IO>
-        {
-            using QueryEncoder = TensileLite::TwoTowersEmbedding::QueryEncoder;
-            using iot          = IOTraits<IO>;
-
-            static void mapping(IO& io, QueryEncoder& encoder)
-            {
-                iot::mapRequired(io, "proj_weights", encoder.proj_weights);
-                iot::mapRequired(io, "proj_bias", encoder.proj_bias);
-
-                iot::mapRequired(io, "weights", encoder.weights);
-                iot::mapRequired(io, "bias", encoder.bias);
-            }
-            const static bool flow = false;
-        };
-
-        template <typename IO>
-        struct MappingTraits<TensileLite::TwoTowersEmbedding::DocEmbeddings, IO>
-        {
-            using DocEmbeddings = TensileLite::TwoTowersEmbedding::DocEmbeddings;
-            using iot           = IOTraits<IO>;
-
-            static void mapping(IO& io, DocEmbeddings& docEmbeddings)
-            {
-                iot::mapRequired(io, "embeddings", docEmbeddings.embeddings);
-                iot::mapRequired(io, "cluster_sols", docEmbeddings.cluster_sols);
-                iot::mapRequired(io, "centroids", docEmbeddings.centroids);
+                iot::mapRequired(io, "embeddings", data.embeddings); 
+                iot::mapRequired(io, "cluster_indices", data.cluster_indices); 
+                iot::mapRequired(io, "centroids", data.centroids); 
             }
 
             const static bool flow = false;
         };
 
         template <typename MyProblem, typename MySolution, typename IO>
-        struct MappingTraits<TwoTowersEmbeddingLibrary<MyProblem, MySolution>, IO>
+        struct MappingTraits<EmbeddingSimilarityLibrary<MyProblem, MySolution>, IO>
         {
-            using Library = TwoTowersEmbeddingLibrary<MyProblem, MySolution>;
+            using Library = EmbeddingSimilarityLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
 
             static void mapping(IO& io, Library& lib)
@@ -117,7 +117,7 @@ namespace TensileLite
                 if(ctx == nullptr)
                 {
                     iot::setError(io,
-                                  "TwoTowersEmbeddingLibrary requires that context be "
+                                  "EmbeddingSimilarityLibrary requires that context be "
                                   "set to a SolutionMap.");
                 }
                 std::vector<int> mappingIndices;
@@ -135,7 +135,7 @@ namespace TensileLite
                     iot::mapRequired(io, "table", mappingIndices);
                     if(mappingIndices.empty())
                         iot::setError(io,
-                                      "TwoTowersEmbeddingLibrary requires non empty "
+                                      "EmbeddingSimilarityLibrary requires non empty "
                                       "mapping index set.");
 
                     for(int index : mappingIndices)
@@ -145,7 +145,7 @@ namespace TensileLite
                         {
                             iot::setError(
                                 io,
-                                concatenate("[TwoTowersEmbeddingLibrary] Invalid solution index: ",
+                                concatenate("[EmbeddingSimilarityLibrary] Invalid solution index: ",
                                             index));
                         }
                         else
@@ -157,46 +157,46 @@ namespace TensileLite
                     }
                 }
 
-                std::shared_ptr<TwoTowersEmbedding::TwoTowersEmbedding> model;
+                std::shared_ptr<EmbeddingSimilarity::Encoder> encoder;
                 if(iot::outputting(io))
                 {
-                    model = std::dynamic_pointer_cast<TwoTowersEmbedding::TwoTowersEmbedding>(
-                        lib.model);
+                    encoder = std::dynamic_pointer_cast<EmbeddingSimilarity::Encoder>(
+                        lib.encoder);
                 }
                 else
                 {
-                    model     = std::make_shared<TwoTowersEmbedding::TwoTowersEmbedding>();
-                    lib.model = model;
+                    encoder     = std::make_shared<EmbeddingSimilarity::Encoder>();
+                    lib.encoder = encoder;
                 }
-                iot::mapRequired(io, "query_tower", *model);
+                iot::mapRequired(io, "encoder", *encoder); 
 
-                std::shared_ptr<TensileLite::TwoTowersEmbedding::DocEmbeddings> embeddings;
+                std::shared_ptr<TensileLite::EmbeddingSimilarity::SolutionEmbeddings> embeddings;
                 if(iot::outputting(io))
                 {
                     embeddings
-                        = std::dynamic_pointer_cast<TensileLite::TwoTowersEmbedding::DocEmbeddings>(
+                        = std::dynamic_pointer_cast<TensileLite::EmbeddingSimilarity::SolutionEmbeddings>(
                             lib.embeddings);
                 }
                 else
                 {
-                    embeddings = std::make_shared<TensileLite::TwoTowersEmbedding::DocEmbeddings>();
+                    embeddings = std::make_shared<TensileLite::EmbeddingSimilarity::SolutionEmbeddings>();
                     lib.embeddings = embeddings;
                 }
-                iot::mapRequired(io, "sol_embeddings", *embeddings);
+                iot::mapRequired(io, "solution_embeddings", *embeddings); 
 
                 // Checks
                 if(embeddings->size() != lib.solutions.size())
                     throw std::runtime_error(
-                        "ERROR: TwoTowersEmbedding library solution embeddings amount "
+                        "ERROR: EmbeddingSimilarity library solution embeddings amount "
                         "does not match solution map size.");
                 if(lib.solutions.size() == 0)
                     throw std::runtime_error(
-                        "ERROR: TwoTowersEmbedding library solution embeddings amount equals 0");
+                        "ERROR: EmbeddingSimilarity library solution embeddings amount equals 0");
 
-                if(lib.model->query_encoder.proj_bias.size() != embeddings->embeddings[0][0].size())
+                if(lib.encoder->network.proj_bias.size() != embeddings->embeddings[0][0].size())
                     throw std::runtime_error(
-                        "ERROR: TwoTowersEmbedding library solution embeddings size "
-                        "does not match model output size.");
+                        "ERROR: EmbeddingSimilarity library solution embeddings size "
+                        "does not match the network output size.");
             }
 
             const static bool flow = false;

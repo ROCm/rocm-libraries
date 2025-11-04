@@ -41,20 +41,20 @@ namespace TensileLite
 {
     /**
      * \ingroup Tensile
-     * \defgroup TwoTowersEmbedding
+     * \defgroup EmbeddingSimilarity
      *
-     * @brief TwoTowersEmbedding model
+     * @brief EmbeddingSimilarity model
      *
      * Encoder used to estimate embedding values for problems in the
-     * library. Used for TwoTowersEmbeddingLibrary.
+     * library. Used for EmbeddingSimilarityLibrary.
      *
-     * See TwoTowersEmbedding.cpp
+     * See EmbeddingSimilarity.cpp
      */
 
     /**
-     * \ingroup TwoTowersEmbedding
+     * \ingroup EmbeddingSimilarity
      */
-    namespace TwoTowersEmbedding
+    namespace EmbeddingSimilarity
     {
 
         using dtype = float;
@@ -67,9 +67,9 @@ namespace TensileLite
             std::vector<dtype> mean, scale;
         };
 
-        struct QueryEncoder
+        struct Network
         {
-            QueryEncoder() = default;
+            Network() = default;
 
             std::vector<dtype> operator()(const std::vector<dtype>& F) const;
 
@@ -77,18 +77,18 @@ namespace TensileLite
 
             std::string description() const
             {
-                return "QueryEncoder";
+                return "Network";
             }
 
-            std::vector<std::vector<TensileLite::TwoTowersEmbedding::dtype>> weights;
-            std::vector<std::vector<TensileLite::TwoTowersEmbedding::dtype>> bias;
-            std::vector<TensileLite::TwoTowersEmbedding::dtype>              proj_weights;
-            std::vector<TensileLite::TwoTowersEmbedding::dtype>              proj_bias;
+            std::vector<std::vector<TensileLite::EmbeddingSimilarity::dtype>> weights;
+            std::vector<std::vector<TensileLite::EmbeddingSimilarity::dtype>> bias;
+            std::vector<TensileLite::EmbeddingSimilarity::dtype>              proj_weights;
+            std::vector<TensileLite::EmbeddingSimilarity::dtype>              proj_bias;
         };
 
-        struct TwoTowersEmbedding
+        struct Encoder
         {
-            TwoTowersEmbedding() = default;
+            Encoder() = default;
 
             std::vector<dtype> forward(std::vector<float>& probkey) const;
 
@@ -96,31 +96,31 @@ namespace TensileLite
 
             std::string description() const
             {
-                return "TwoTowersEmbedding";
+                return "Encoder";
             }
 
             bool           apply_log;
             StandardScaler scaler;
-            QueryEncoder   query_encoder;
+            Network        network;
         };
 
-        struct DocEmbeddings
+        struct SolutionEmbeddings
         {
-            DocEmbeddings() = default;
+            SolutionEmbeddings() = default;
 
             std::string description() const
             {
-                return "DocEmbeddings";
+                return "SolutionEmbeddings";
             }
 
             std::vector<std::vector<float>>              centroids;
             std::vector<std::vector<std::vector<float>>> embeddings;
-            std::vector<std::vector<int>>                cluster_sols;
+            std::vector<std::vector<int>>                cluster_indices; 
 
             std::size_t size() const
             {
                 std::set<int> unique_values;
-                for(const auto& cluster : cluster_sols)
+                for(const auto& cluster : cluster_indices)
                 {
                     unique_values.insert(cluster.begin(), cluster.end());
                 }
@@ -128,5 +128,5 @@ namespace TensileLite
             }
         };
 
-    } // namespace TwoTowersEmbedding
+    } // namespace EmbeddingSimilarity
 } // namespace TensileLite

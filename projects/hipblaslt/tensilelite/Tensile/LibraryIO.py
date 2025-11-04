@@ -292,7 +292,7 @@ def parseLibraryLogicData(
     """Parses the data of a library logic file."""
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
-    elif data.get("LibraryType", "") == "TwoTowersEmbedding":
+    elif data.get("LibraryType", "") == "EmbeddingSimilarity":
         data["Library"]["table"] = [0, len(data["Solutions"])]
 
     if "CUCount" not in data:

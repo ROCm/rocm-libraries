@@ -918,9 +918,6 @@ namespace TensileLite
 
             case ExperimentalOption::MLP:
                 return PerformanceMetric::ExperimentalMLP;
-            
-            case ExperimentalOption::TwoTowers:
-                return PerformanceMetric::ExperimentalTwoTowers;
 
             case ExperimentalOption::StreamK:
                 return PerformanceMetric::ExperimentalStreamK;

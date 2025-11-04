@@ -31,6 +31,6 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorOps.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TwoTowersEmbedding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EmbeddingSimilarity.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )

@@ -53,8 +53,7 @@ namespace TensileLite
     {
         None        = 0,
         MLP         = 1,
-        TwoTowers   = 2,
-        StreamK     = 3,
+        StreamK     = 2,
         Count
     };
 
@@ -67,7 +66,6 @@ namespace TensileLite
         CUEfficiency,
         DeviceEfficiency,
         ExperimentalMLP,
-        ExperimentalTwoTowers,
         ExperimentalStreamK,
         Count
     };
@@ -147,11 +145,6 @@ namespace TensileLite
     template <>
     struct PerformanceMetricInfo<PerformanceMetric::ExperimentalMLP>
         : public BasePerformanceMetricInfo<PerformanceMetric::ExperimentalMLP>
-    {
-    };
-    template <>
-    struct PerformanceMetricInfo<PerformanceMetric::ExperimentalTwoTowers>
-        : public BasePerformanceMetricInfo<PerformanceMetric::ExperimentalTwoTowers>
     {
     };
     template <>

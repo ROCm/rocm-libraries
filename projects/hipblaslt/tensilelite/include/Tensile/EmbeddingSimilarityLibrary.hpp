@@ -34,7 +34,7 @@
 #include <Tensile/MLFeatures.hpp>
 #include <Tensile/ProblemKey.hpp>
 #include <Tensile/SolutionLibrary.hpp>
-#include <Tensile/TwoTowersEmbedding.hpp>
+#include <Tensile/EmbeddingSimilarity.hpp>
 #include <Tensile/Utils.hpp>
 
 namespace TensileLite
@@ -43,23 +43,23 @@ namespace TensileLite
     /**
      * \ingroup SolutionLibrary
      *
-     * Uses a TwoTowersEmbedding network to create embeddings for rank solutions for a given size.
+     * Uses a EmbeddingSimilarity network to create embeddings for rank solutions for a given size.
      */
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TwoTowersEmbeddingLibrary : public SolutionLibrary<MyProblem, MySolution>
+    struct EmbeddingSimilarityLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        using TwoTowersEmbedding = TwoTowersEmbedding::TwoTowersEmbedding;
-        using DocEmbeddings      = TensileLite::TwoTowersEmbedding::DocEmbeddings;
+        using Encoder            = EmbeddingSimilarity::Encoder;
+        using SolutionEmbeddings = TensileLite::EmbeddingSimilarity::SolutionEmbeddings;
 
         std::map<int, std::shared_ptr<MySolution>> solutionmap;
         std::vector<std::shared_ptr<MySolution>>   solutions;
-        std::shared_ptr<TwoTowersEmbedding>        model;
-        std::shared_ptr<DocEmbeddings>             embeddings;
+        std::shared_ptr<Encoder>                   encoder;
+        std::shared_ptr<SolutionEmbeddings>        embeddings;
 
         static std::string Type()
         {
-            return "TwoTowersEmbedding";
+            return "EmbeddingSimilarity";
         }
         virtual std::string type() const override
         {
@@ -67,23 +67,16 @@ namespace TensileLite
         }
         virtual std::string description() const override
         {
-            if(model == nullptr)
-                return concatenate(type(), ", TwoTowersEmbedding: nullptr");
+            if(encoder == nullptr)
+                return concatenate(type(), ", EmbeddingSimilarity: nullptr");
             else
-                return concatenate(type(), ": ", model->description());
+                return concatenate(type(), ": ", encoder->description());
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            const bool experimental = Debug::Instance().useExperimentalSelection();
-            if(!experimental)
-            {
-                // If the experimental library mode is not on treat it like it asserted out
-                return nullptr;
-            }
-
             auto indexMatch = solutionmap.find(index);
             if(indexMatch != solutionmap.end())
                 return indexMatch->second;
@@ -106,14 +99,6 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            const bool experimental = Debug::Instance().useExperimentalSelection();
-            if(!experimental)
-            {
-                // Skip the search for solutions if the environment variable
-                // that enables the experimental method is not set
-                SolutionSet<MySolution> rv;
-                return rv;
-            }
             SolutionSet<MySolution> rv;
             for(auto const& row : solutionmap)
                 rv.insert(row.second);
@@ -125,45 +110,45 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            std::vector<float> queryEmb = computeQueryEmbs(problem);
+            std::vector<float> gemm_embedding = computeGEMMEmbeddings(problem);
 
-            std::vector<int> cent_indexes(embeddings->centroids.size());
-            std::iota(cent_indexes.begin(), cent_indexes.end(), 0);
-            std::vector<float> cent_similarities(embeddings->centroids.size());
+            std::vector<int> centroid_indexes(embeddings->centroids.size()); 
+            std::iota(centroid_indexes.begin(), centroid_indexes.end(), 0); 
+            std::vector<float> centroid_similarities(embeddings->centroids.size()); 
 
             int max_sim_idx
                 = (embeddings->centroids.size()) > 1
-                      ? inner_product(embeddings->centroids, queryEmb, cent_similarities)
+                      ? inner_product(embeddings->centroids, gemm_embedding, centroid_similarities) 
                       : 0;
 
             std::vector<std::pair<float, std::shared_ptr<MySolution>>> rankedSolutions;
             rankedSolutions.reserve(numSolutions);
 
             int remSolutions = checkCluster(numSolutions,
-                                            queryEmb,
+                                            gemm_embedding,
                                             embeddings->embeddings[max_sim_idx],
-                                            embeddings->cluster_sols[max_sim_idx],
+                                            embeddings->cluster_indices[max_sim_idx],
                                             problem,
                                             hardware,
                                             rankedSolutions);
             if(remSolutions > 0)
             {
-                auto cent_begin = cent_indexes.begin(), cent_end = cent_indexes.end();
+                auto cent_begin = centroid_indexes.begin(), cent_end = centroid_indexes.end(); 
 
                 size_t currentIndex = 1;
-                while(remSolutions > 0 && currentIndex < cent_indexes.size())
+                while(remSolutions > 0 && currentIndex < centroid_indexes.size())
                 {
                     std::partial_sort(cent_begin + currentIndex - 1,
                                       cent_begin + currentIndex + 1,
                                       cent_end,
-                                      [&cent_similarities](int i0, int i1) {
-                                          return cent_similarities[i0] > cent_similarities[i1];
+                                      [&centroid_similarities](int i0, int i1) {
+                                          return centroid_similarities[i0] > centroid_similarities[i1]; 
                                       });
-                    auto cidx    = cent_indexes[currentIndex];
+                    auto cidx    = centroid_indexes[currentIndex];
                     remSolutions = checkCluster(remSolutions,
-                                                queryEmb,
+                                                gemm_embedding,
                                                 embeddings->embeddings[cidx],
-                                                embeddings->cluster_sols[cidx],
+                                                embeddings->cluster_indices[cidx], 
                                                 problem,
                                                 hardware,
                                                 rankedSolutions);
@@ -200,15 +185,6 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            const bool experimental = Debug::Instance().useExperimentalSelection();
-            if(!experimental)
-            {
-                // Skip the search for solutions if the environment variable
-                // that enables the experimental method is not set
-                SolutionSet<MySolution> rv;
-                return rv;
-            }
-
             SolutionSet<MySolution> rv;
             for(auto const& row : solutionmap)
                 rv.insert(row.second);
@@ -217,8 +193,8 @@ namespace TensileLite
         }
 
     protected:
-        /* Helper function to compute query embeddings. */
-        std::vector<float> computeQueryEmbs(const MyProblem& problem) const
+        /* Helper function to compute GEMM embeddings. */
+        std::vector<float> computeGEMMEmbeddings(const MyProblem& problem) const
         {
             float m = problem.freeSizeA(0);
             float n = problem.freeSizeB(0);
@@ -243,30 +219,30 @@ namespace TensileLite
             std::vector<float> features
                 = {m, n, k, lda, stride_a, ldb, stride_b, ldc, stride_c, ldd, stride_d, flops};
 
-            return model->forward(features);
+            return encoder->forward(features);
         }
 
         int checkCluster(
             int                                                         remSolutions,
-            const std::vector<float>&                                   query_embedding,
-            const std::vector<std::vector<float>>&                      kernel_embeddings,
-            const std::vector<int>&                                     cluster_solutions,
+            const std::vector<float>&                                   gemm_embedding,
+            const std::vector<std::vector<float>>&                      solution_embeddings,
+            const std::vector<int>&                                     cluster_indices, 
             const MyProblem&                                            problem,
             const Hardware&                                             hardware,
             std::vector<std::pair<float, std::shared_ptr<MySolution>>>& rankedSolutions) const
         {
-            std::vector<float> kernel_similarities(kernel_embeddings.size());
+            std::vector<float> solution_similarities(solution_embeddings.size());
 
             int max_sim_idx
-                = inner_product(kernel_embeddings, query_embedding, kernel_similarities);
+                = inner_product(solution_embeddings, gemm_embedding, solution_similarities);
 
-            auto sol = solutions[cluster_solutions[max_sim_idx]];
+            auto sol = solutions[cluster_indices[max_sim_idx]]; 
             if((*(sol->problemPredicate))(problem))
             {
                 Task task(hardware, problem, *(sol));
                 if((*sol->taskPredicate)(task))
                 {
-                    rankedSolutions.emplace_back(kernel_similarities[max_sim_idx], sol);
+                    rankedSolutions.emplace_back(solution_similarities[max_sim_idx], sol);
                     if(remSolutions == 1)
                     {
                         return 0;
@@ -274,28 +250,28 @@ namespace TensileLite
                 }
             }
 
-            std::vector<int> kernel_indices(kernel_embeddings.size());
-            std::iota(kernel_indices.begin(), kernel_indices.end(), 0);
+            std::vector<int> solution_indices(solution_embeddings.size());
+            std::iota(solution_indices.begin(), solution_indices.end(), 0);
 
             size_t currentIndex = 1;
-            while(remSolutions > 0 && currentIndex < kernel_indices.size())
+            while(remSolutions > 0 && currentIndex < solution_indices.size())
             {
-                std::partial_sort(kernel_indices.begin() + currentIndex - 1,
-                                  kernel_indices.begin() + currentIndex + 1,
-                                  kernel_indices.end(),
-                                  [&kernel_similarities](int i0, int i1) {
-                                      return kernel_similarities[i0] > kernel_similarities[i1];
+                std::partial_sort(solution_indices.begin() + currentIndex - 1,
+                                  solution_indices.begin() + currentIndex + 1,
+                                  solution_indices.end(),
+                                  [&solution_similarities](int i0, int i1) {
+                                      return solution_similarities[i0] > solution_similarities[i1];
                                   });
 
-                auto kidx = kernel_indices[currentIndex];
-                auto sol  = solutions[cluster_solutions[kidx]];
+                auto kidx = solution_indices[currentIndex];
+                auto sol  = solutions[cluster_indices[kidx]];
 
                 if((*(sol->problemPredicate))(problem))
                 {
                     Task task(hardware, problem, *(sol));
                     if((*sol->taskPredicate)(task))
-                    { // (*sol->hardwarePredicate)(hardware)
-                        rankedSolutions.emplace_back(kernel_similarities[kidx], sol);
+                    { 
+                        rankedSolutions.emplace_back(solution_similarities[kidx], sol);
                         remSolutions--;
                     }
                 }
@@ -304,27 +280,27 @@ namespace TensileLite
             return remSolutions;
         }
 
-        int inner_product(const std::vector<std::vector<float>>& doc_embeddings,
-                          const std::vector<float>&              query_embedding,
+        int inner_product(const std::vector<std::vector<float>>& solution_embeddings,
+                          const std::vector<float>&              gemm_embedding,
                           std::vector<float>&                    scores) const
         {
             short amax = 0;
             float vmax = 0;
-            for(int i = 0; i < doc_embeddings.size(); i++)
+            for(int i = 0; i < solution_embeddings.size(); i++)
             {
-                auto& doc_embedding = doc_embeddings[i];
+                auto& solution_embedding = solution_embeddings[i];
 #ifdef __AVX2__
                 scores[i]
-                    = avx_dot(query_embedding.size(), doc_embedding.data(), query_embedding.data());
+                    = avx_dot(gemm_embedding.size(), solution_embedding.data(), gemm_embedding.data());
 #else
                 scores[i] = 0.0f;
-                for(int j = 0; j < query_embedding.size(); j += 4)
+                for(int j = 0; j < gemm_embedding.size(); j += 4)
                 {
-                    float a = doc_embedding[j] * query_embedding[j];
-                    float b = doc_embedding[j + 1] * query_embedding[j + 1];
-                    float c = doc_embedding[j + 2] * query_embedding[j + 2];
-                    float d = doc_embedding[j + 3] * query_embedding[j + 3];
-                    scores[i] += a + b + c + d;
+                    float out0 = solution_embedding[j] * gemm_embedding[j];
+                    float out1 = solution_embedding[j + 1] * gemm_embedding[j + 1];
+                    float out2 = solution_embedding[j + 2] * gemm_embedding[j + 2];
+                    float out3 = solution_embedding[j + 3] * gemm_embedding[j + 3];
+                    scores[i] += out0 + out1 + out2 + out3;
                 }
 #endif
                 if(scores[i] > vmax)

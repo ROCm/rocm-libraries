@@ -31,7 +31,7 @@
 #include <numeric>
 #include <stdexcept>
 
-#include <Tensile/TwoTowersEmbedding.hpp>
+#include <Tensile/EmbeddingSimilarity.hpp>
 
 #ifdef __AVX2__
 #include <immintrin.h> // For AVX intrinsics
@@ -68,7 +68,7 @@ float avx_dot(int N, const float* A, const float* B)
 
 namespace TensileLite
 {
-    namespace TwoTowersEmbedding
+    namespace EmbeddingSimilarity
     {
         void StandardScaler::operator()(std::vector<dtype>& F) const
         {
@@ -119,31 +119,30 @@ namespace TensileLite
 #ifdef __AVX2__
                 output[j] += avx_dot(input_dim, input.data(), weights.data() + j * input_dim);
 #else
-                int k      = 0;
+                int k = 0;
                 int offset = j * input_dim;
-                for(; k < input_dim - input_dim % 8; k += 8)
+                for(; k < input_dim - input_dim % 8; k += 8, offset += 8)
                 {
-                    int   widx = k + offset;
-                    float a    = input[k] * weights[widx];
-                    float b    = input[k + 1] * weights[widx + 1];
-                    float c    = input[k + 2] * weights[widx + 2];
-                    float d    = input[k + 3] * weights[widx + 3];
-                    float e    = input[k + 4] * weights[widx + 4];
-                    float f    = input[k + 5] * weights[widx + 5];
-                    float g    = input[k + 6] * weights[widx + 6];
-                    float h    = input[k + 7] * weights[widx + 7];
-                    output[j] += a + b + c + d + e + f + g + h;
+                    float out0 = input[k] * weights[offset];
+                    float out1 = input[k + 1] * weights[offset + 1];
+                    float out2 = input[k + 2] * weights[offset + 2];
+                    float out3 = input[k + 3] * weights[offset + 3];
+                    float out4 = input[k + 4] * weights[offset + 4];
+                    float out5 = input[k + 5] * weights[offset + 5];
+                    float out6 = input[k + 6] * weights[offset + 6];
+                    float out7 = input[k + 7] * weights[widx + 7];
+                    output[j] += out0 + out1 + out2 + out3 + out4 + out5 + out6 + out7;
                 }
-                for(; k < input_dim; k++)
+                for(; k < input_dim; k++, offset++)
                 {
-                    output[j] += input[k] * weights[k + offset];
+                    output[j] += input[k] * weights[offset];
                 }
 #endif
             }
             return output;
         }
 
-        std::vector<dtype> QueryEncoder::operator()(const std::vector<dtype>& F) const
+        std::vector<dtype> Network::operator()(const std::vector<dtype>& F) const
         {
             std::vector<dtype> output = F;
             for(int i = 0; i < weights.size(); i++)
@@ -154,7 +153,7 @@ namespace TensileLite
             return dense_forward(output, proj_weights, proj_bias);
         }
 
-        bool QueryEncoder::valid(bool verbose) const
+        bool Network::valid(bool verbose) const
         {
             // Check dense layers
             for(size_t i = 0; i < weights.size(); ++i)
@@ -202,36 +201,36 @@ namespace TensileLite
             return true;
         }
 
-        std::vector<dtype> TwoTowersEmbedding::forward(std::vector<float>& query_features) const
+        std::vector<dtype> Encoder::forward(std::vector<float>& gemm_features) const
 
         {
             if(apply_log)
             {
-                for(auto& feature : query_features)
+                for(auto& feature : gemm_features)
                 {
                     feature = std::log(feature + 1e-6);
                 }
             }
 
-            scaler(query_features);
+            scaler(gemm_features);
 
-            std::vector<dtype> encoded_query = query_encoder(query_features);
+            std::vector<dtype> encoded_gemm= network(gemm_features);
 
-            return encoded_query;
+            return encoded_gemm;
         }
 
-        bool TwoTowersEmbedding::valid(bool verbose) const
+        bool Encoder::valid(bool verbose) const
         {
-            bool is_valid = scaler.valid(verbose) && query_encoder.valid(verbose);
+            bool is_valid = scaler.valid(verbose) && network.valid(verbose);
 
             size_t input_size = 0;
-            if(query_encoder.weights.empty())
+            if(network.weights.empty())
             {
-                input_size = query_encoder.proj_weights.size() / query_encoder.proj_bias.size();
+                input_size = network.proj_weights.size() / network.proj_bias.size();
             }
             else
             {
-                input_size = query_encoder.weights[0].size() / query_encoder.bias[0].size();
+                input_size = network.weights[0].size() / network.bias[0].size();
             }
 
             if(scaler.mean.size() != input_size)
@@ -239,7 +238,7 @@ namespace TensileLite
                 if(verbose)
                 {
                     std::cerr << "StandardScaler size (" << scaler.mean.size()
-                              << ") does not match TwoTowersEmbedding network input size ("
+                              << ") does not match EmbeddingSimilarity network input size ("
                               << input_size << ")." << std::endl;
                 }
                 is_valid = false;

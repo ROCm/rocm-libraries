@@ -261,9 +261,9 @@ class MLPClassificationLibrary:
         self.problemFeatures = problem_features
 
 
-class TwoTowersEmbeddingLibrary:
-    Tag = "TwoTowersEmbedding"
-    StateKeys = [("type", "tag"), "table", "query_tower", "sol_embeddings"]
+class EmbeddingSimilarityLibrary:
+    Tag = "EmbeddingSimilarity"
+    StateKeys = [("type", "tag"), "table", "encoder", "solution_embeddings"]
 
     @classmethod
     def FromOriginalState(cls, d, solutions):
@@ -279,10 +279,10 @@ class TwoTowersEmbeddingLibrary:
         except KeyError:
             pass
         
-        query_tower = d["query_tower"]
-        sol_embeddings = d["sol_embeddings"]
+        encoder = d["encoder"]
+        solution_embeddings = d["solution_embeddings"]
         
-        return cls(table, query_tower, sol_embeddings)
+        return cls(table, encoder, solution_embeddings)
 
     @property
     def tag(self):
@@ -290,16 +290,16 @@ class TwoTowersEmbeddingLibrary:
 
     def merge(self, other):
         raise RuntimeError(
-            "TwoTowersEmbeddingLibrary does not support merging yet."
+            "EmbeddingSimilarity does not support merging yet."
         )
 
     def remapSolutionIndices(self, indexMap):
         pass
 
-    def __init__(self, table, query_tower, sol_embeddings):
+    def __init__(self, table, encoder, solution_embeddings):
         self.table = table
-        self.query_tower = query_tower
-        self.sol_embeddings = sol_embeddings
+        self.encoder = encoder
+        self.solution_embeddings = solution_embeddings
 
 
 class ProblemMapLibrary:
@@ -483,10 +483,10 @@ class MasterSolutionLibrary:
                 regressionLib = MLPClassificationLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": regressionLib})
-            elif d["LibraryType"] == "TwoTowersEmbedding":
-                predicate = Properties.Predicate(tag="TruePred")
+            elif d["LibraryType"] == "EmbeddingSimilarity":
+                predicate = Properties.Predicate(tag="Embedding")
 
-                regressionLib = TwoTowersEmbeddingLibrary.FromOriginalState(d["Library"], solutions)
+                regressionLib = EmbeddingSimilarityLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": regressionLib})
                 

@@ -31,6 +31,8 @@
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/FreeSizeLibrary.hpp>
 #include <Tensile/PredictionLibrary.hpp>
+#include <Tensile/EmbeddingSimilarityLibrary.hpp>
+
 #include <Tensile/GranularitySelectionLibrary.hpp>
 #include <Tensile/MapLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
@@ -51,6 +53,8 @@ namespace TensileLite
         = ProblemSelectionLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemFreeSizeLibrary
         = ProblemFreeSizeLibrary<ContractionProblemGemm, ContractionSolution>;
+    using ContractionProblemEmbeddingSimilarityLibrary
+        = EmbeddingSimilarityLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemPredictionLibrary
         = ProblemPredictionLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemMatchingLibrary

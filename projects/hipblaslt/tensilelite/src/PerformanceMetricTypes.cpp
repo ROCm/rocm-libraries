@@ -43,8 +43,6 @@ namespace TensileLite
             return "DeviceEfficiency";
         case PerformanceMetric::ExperimentalMLP:
             return "ExperimentalMLP";
-        case PerformanceMetric::ExperimentalTwoTowers:
-            return "ExperimentalTwoTowers";
         case PerformanceMetric::ExperimentalStreamK:
             return "ExperimentalStreamK";
 
@@ -66,8 +64,6 @@ namespace TensileLite
             return "DvEff";
         case PerformanceMetric::ExperimentalMLP:
             return "MLP";
-        case PerformanceMetric::ExperimentalTwoTowers:
-            return "TwoTowers";
         case PerformanceMetric::ExperimentalStreamK:
             return "StreamK";
 
@@ -109,7 +105,6 @@ namespace TensileLite
         registerTypeInfo<PerformanceMetric::CUEfficiency>();
         registerTypeInfo<PerformanceMetric::DeviceEfficiency>();
         registerTypeInfo<PerformanceMetric::ExperimentalMLP>();
-        registerTypeInfo<PerformanceMetric::ExperimentalTwoTowers>();
         registerTypeInfo<PerformanceMetric::ExperimentalStreamK>();
     }
 
