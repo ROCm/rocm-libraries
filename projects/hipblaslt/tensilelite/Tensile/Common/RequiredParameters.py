@@ -71,6 +71,7 @@ def getRequiredParametersMin() -> set:
         'LocalWritePerMfma',
         'MIArchVgpr',
         'MaxOccupancy',
+        'Multicast',
         'NonTemporal',
         'NonTemporalA',
         'NonTemporalB',

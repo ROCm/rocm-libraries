@@ -2348,6 +2348,54 @@ class KernelWriterAssembly(KernelWriter):
                              comment="WorkGroup2 = (cluster_z(0) * nwg_z(1)) + wg_z"))
           moduleRegInit.add(label_calculate_workgroup_done)
 
+          if kernel["Multicast"]:
+            moduleRegInit.addComment0("Calculate multicast mask")
+            sgprWgX = sTmp+1
+            sgprWgY = sTmp+2
+            sgprNWgX = sTmp+3
+
+            maskA = 1
+            for idx in range(kernel["ClusterDim"][1]):
+              maskA |= (1 << (idx * kernel["ClusterDim"][0]))
+
+            maskB = (1 << kernel["ClusterDim"][0]) - 1
+
+            tdmA: bool = kernel["enableTDMA"]
+            tdmB: bool = kernel["enableTDMB"]
+
+            if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+              setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
+              setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
+              setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
+
+              with self.allocTmpSgpr(1) as tmpSgprRes:
+                wavelen: int = kernel["WavefrontSize"]
+                waveIdSgprIdx: int = tmpSgprRes.idx
+                moduleRegInit.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
+                moduleRegInit.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
+                moduleRegInit.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
+                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+
+              moduleRegInit.add(setMulticastMaskLblEven)
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                               comment="Setting maskA for even wave"))
+              moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
+              moduleRegInit.add(setMulticastMaskLblOdd)
+              moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                        comment="Shift factor: wg_y * nwg_x"))
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                               comment="Setting maskB for odd wave"))
+              moduleRegInit.add(setMulticastMaskLblEnd)
+
+            else:
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                               comment="Setting maskA"))
+
+              moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                        comment="Shift factor: wg_y * nwg_x"))
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
+                                               comment="Setting maskB"))
+
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
           comment="LDS clamp at %u bytes"%(kernel["LdsNumBytes"])))
@@ -17225,6 +17273,13 @@ class KernelWriterAssembly(KernelWriter):
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
 
+    def maskSgprName(tc: str) -> str:
+      if tc.startswith("MXS"):
+        string = tc.removeprefix("MXS")
+      else:
+        string = tc
+      return f"MulticastMask{string}"
+
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
@@ -17248,6 +17303,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), isMetadata))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+    if kernel["Multicast"]:
+      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
@@ -17342,6 +17399,9 @@ class KernelWriterAssembly(KernelWriter):
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
 
+    def maskSgprName(tc: str) -> str:
+      return f"MulticastMask"
+
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
@@ -17370,6 +17430,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+    if kernel["Multicast"]:
+      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx

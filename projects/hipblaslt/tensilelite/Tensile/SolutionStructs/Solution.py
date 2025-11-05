@@ -765,6 +765,9 @@ class Solution(collections.abc.Mapping):
       state["EnableCluster"] = False
       state["ClusterDim"] = [1, 1]
 
+    if state["Multicast"] == True and state["EnableCluster"] == False:
+      reject(state, printRejectionReason, f"Multicast should set clusterDim.")
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
