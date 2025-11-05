@@ -30,9 +30,9 @@ from typing import List
 from rrperf.problems import (
     CodeGenRun,
     GEMMRun,
+    MKNLTuple,
     TensileRun,
     TypeParameters,
-    MKNLTuple,
 )
 from rrperf.utils import rocm_gfx
 
