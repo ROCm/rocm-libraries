@@ -288,8 +288,9 @@ def writeSolutionsAndKernels(
     )
 
     def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        p, isa, wavefrontsize, _ = ret
+        # removeTemporaries=False to preserve existing behavior for tensilelite tuning workflows
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")), removeTemporaries=False)
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
