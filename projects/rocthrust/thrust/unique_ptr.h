@@ -264,11 +264,22 @@ template <class T, class D = default_delete<T>>
 class __attribute__((trivial_abi)) unique_ptr
 {
 public:
+  /*! \typedef pointer
+   *  \brief The type of the stored pointer (defaults to `thrust::device_ptr<T>`).
+   */
   using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
+  
+  /*! \typedef element_type
+   *  \brief The type of the managed object (`T`).
+   */
   using element_type = T;
+  
+  /*! \typedef deleter_type
+   *  \brief The type of the deleter (`D`).
+   */
   using deleter_type = D;
 
-  // TODO: When a standard “trivially relocatable” facility lands, add an
+  // TODO: When a standard "trivially relocatable" facility lands, add an
   // annotation/macro here to advertise that unique_ptr can be bitwise relocated
 
 private:
@@ -582,43 +593,23 @@ public:
   }
 };
 
-/*! \brief Array specialization of \p unique_ptr for managing dynamically-allocated arrays.
- *
- *  This specialization manages arrays allocated in device memory. The array form
- *  provides `operator[]` for element access.
- *
- *  \par Array Destruction Behavior
- *  The array form has different constructor requirements and performance characteristics
- *  based on the element type's destructibility:
- *
- *  **Trivially-destructible types** (e.g., `int`, `float`, POD types):
- *  - Constructors do NOT require array size parameter
- *  - Deleter is zero-size (no memory overhead)
- *  - Destruction only deallocates memory (no destructors to call)
- *  - Example: `unique_ptr<int[]> ptr(device_malloc<int>(100));`
- *
- *  **Non-trivially-destructible types** (e.g., types with custom destructors):
- *  - Constructors REQUIRE array size parameter
- *  - Deleter stores the size (small memory overhead: one `size_t`)
- *  - Destruction calls destructor for each element on device before deallocation
- *  - Example: `unique_ptr<MyClass[]> ptr(device_new<MyClass>(100), 100);`
- *
- *  This design ensures zero overhead for simple types while properly handling
- *  complex types that require cleanup.
- *
- *  \tparam T The array element type.
- *  \tparam D The type of the deleter.
- *
- *  \see thrust::default_delete
- *  \see thrust::make_unique
- *  \see https://en.cppreference.com/w/cpp/memory/unique_ptr
- */
 template <class T, class D>
 class __attribute__((trivial_abi)) unique_ptr<T[], D>
 {
 public:
+  /*! \typedef pointer
+   *  \brief The type of the stored pointer (defaults to `thrust::device_ptr<T>`).
+   */
   using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
+  
+  /*! \typedef element_type
+   *  \brief The type of the array elements (`T`).
+   */
   using element_type = T;
+  
+  /*! \typedef deleter_type
+   *  \brief The type of the deleter (`D`).
+   */
   using deleter_type = D;
 
 private:
