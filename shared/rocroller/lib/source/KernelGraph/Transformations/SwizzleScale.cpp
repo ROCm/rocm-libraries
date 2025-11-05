@@ -31,6 +31,8 @@
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 
+// TODO: Extract most of this to a detail header file and add tests
+
 namespace rocRoller
 {
     namespace KernelGraph

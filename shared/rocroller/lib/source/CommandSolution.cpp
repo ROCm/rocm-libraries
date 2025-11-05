@@ -408,9 +408,9 @@ namespace rocRoller
         if(m_commandParameters->fuseLoops)
         {
             transforms.push_back(std::make_shared<KernelGraph::FuseLoops>());
-            transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(

@@ -134,7 +134,7 @@ namespace rocRoller
             }
 
             /**
-             * Populates the parentLoops set for each loop in the provided loopInfo map.
+             * @brief Populates the parentLoops set for each loop in the provided loopInfo map.
              *
              * Iterates through each loop and its associated LoopBodyInfo, then for each child loop,
              * inserts the current loop as a parent into the child loop's parentLoops set.
