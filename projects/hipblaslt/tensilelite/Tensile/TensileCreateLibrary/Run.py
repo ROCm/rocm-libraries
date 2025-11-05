@@ -227,10 +227,10 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    disableAsmComments=False,
-    errorTolerant=False,
-    generateSourcesAndExit=False,
-    compress=True,
+    disableAsmComments: bool=False,
+    errorTolerant: bool=False,
+    generateSourcesAndExit: bool=False,
+    compress: bool=True,
 ):
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
@@ -344,8 +344,9 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    disableAsmComments=False,
-    compress=True,
+    disableAsmComments: bool=False,
+    compress: bool=True,
+    removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
     destLibPath = ensurePath(
@@ -377,7 +378,7 @@ def writeSolutionsAndKernelsTCL(
 
     def assemble(ret):
         p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")), removeTemporaries)
         return result
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
@@ -412,6 +413,7 @@ def writeSolutionsAndKernelsTCL(
         destLibPath,
         assemblyTmpPath,
         compress,
+        removeTemporaries,
     )
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -742,6 +744,7 @@ def run():
         archs,
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
+        removeTemporaries=not arguments["KeepBuildTmp"],
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")

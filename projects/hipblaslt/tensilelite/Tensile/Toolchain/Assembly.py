@@ -56,6 +56,7 @@ def buildAssemblyCodeObjectFiles(
       destDir: Union[Path, str],
       asmDir: Union[Path, str],
       compress: bool=True,
+      removeTemporaries: bool=True,
     ):
     """Builds code object files from assembly files
 
@@ -66,6 +67,7 @@ def buildAssemblyCodeObjectFiles(
         destDir: The destination directory for the code object files.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
+        removeTemporaries: Whether to remove the temporary object files after linking.
     """
 
     extObj = ".o"
@@ -93,10 +95,10 @@ def buildAssemblyCodeObjectFiles(
           coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
       for coFileRaw, objFiles in coFileMap.items():
-        linker(objFiles, str(coFileRaw))
+        linker(objFiles, str(coFileRaw), removeTemporaries)
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), gfx)
+          bundler.compress(str(coFileRaw), str(coFile), gfx, removeTemporaries)
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

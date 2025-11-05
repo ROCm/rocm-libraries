@@ -30,7 +30,7 @@ from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
-from Tensile.Common import SemanticVersion, print2
+from Tensile.Common import SemanticVersion, print2, print1
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -159,7 +159,7 @@ class Assembler(Component):
             "-c",
         ]
 
-    def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
+    def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str, removeTemporaries: bool):
         """Assemble an assembly source file into an object file.
         Args:
             targetGfx: The target GPU gfx architecture.
@@ -167,6 +167,7 @@ class Assembler(Component):
             debug: add debug flags if True.
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
+            removeTemporaries: Whether to remove the temporary object file after assembling.
         """
         args = self._default_args
         args = [
@@ -177,7 +178,11 @@ class Assembler(Component):
             "-o",
             destPath
         ]
-        return _invoke(args, "Assembling assembly source code into object file (.s -> .o)")
+        output = _invoke(args, "Assembling assembly source code into object file (.s -> .o)")
+        if removeTemporaries:
+            print1(f"Removing temporary asm file: {srcPath}")
+            Path(srcPath).unlink()
+        return output
 
     @property
     def code_object_version(self):
@@ -275,7 +280,7 @@ class Bundler(Component):
         args = [self._component_path, "--type=o", f"--input={objFile}", "-list"]
         return _invoke(args, f"Listing target triples in object file").decode().split("\n")
 
-    def compress(self, srcPath: str, destPath: str, target: str):
+    def compress(self, srcPath: str, destPath: str, target: str, removeTemporaries: bool):
         """Compresses a code object file using the provided bundler.
 
         Args:
@@ -298,7 +303,11 @@ class Bundler(Component):
             f"--output={destPath}",
         ]
 
-        return _invoke(args, "Bundling/compressing code object file (.co -> .co)")
+        output = _invoke(args, "Bundling/compressing code object file (.co -> .co)")
+        if removeTemporaries:
+            print1(f"Removing temporary code object file: {srcPath}")
+            Path(srcPath).unlink()
+        return output
 
     def __call__(self, target: str, srcPath: str, destPath: str):
         """Unbundles source code object files using the Clang Offload Bundler.
@@ -372,20 +381,26 @@ class Linker(Component):
         line_length = sum(len(arg) for arg in args) + len(args) - 1
         return line_length >= sysconf("SC_ARG_MAX")
 
-    def __call__(self, srcPaths: List[str], destPath: str):
+    def __call__(self, srcPaths: List[str], destPath: str, removeTemporaries: bool):
         """
         Links object files into a code object file.
 
         Args:
             srcPaths: A list of paths to object files.
             destPath: A destination path for the generated code object file.
+            removeTemporaries: Whether to remove the temporary object files after linking.
         Raises:
             RuntimeError: If linker invocation fails.
         """
         args = [*(self.default_args), *srcPaths, "-o", destPath]
         if self._use_response_file(args):
             args = self._response_file_args(srcPaths, destPath)
-        return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
+        output = _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
+        if removeTemporaries:
+            for srcPath in srcPaths:
+                print1(f"Removing temporary object file: {srcPath}")
+                Path(srcPath).unlink()
+        return output
 
 
 # class DeviceEnumerator(Component):
