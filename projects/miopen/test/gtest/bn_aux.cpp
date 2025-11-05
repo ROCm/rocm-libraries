@@ -59,7 +59,7 @@ TEST_F(DeriveSpatialTensorTest, TestDerive)
 
     miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, miopenBNSpatial);
     miopenGetTensorDescriptor(derivedTensor, &dt, lens.data(), nullptr);
-    
+
     EXPECT_EQ(dt, miopenFloat);
     EXPECT_EQ(lens.size(), 4);
     EXPECT_EQ(lens[0], 1);
@@ -95,7 +95,7 @@ TEST_F(DerivePerActTensorTest, TestDerive)
 
     miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, miopenBNPerActivation);
     miopenGetTensorDescriptor(derivedTensor, &dt, lens.data(), nullptr);
-    
+
     EXPECT_EQ(dt, miopenFloat);
     EXPECT_EQ(lens.size(), 4);
     EXPECT_EQ(lens[0], 1);
