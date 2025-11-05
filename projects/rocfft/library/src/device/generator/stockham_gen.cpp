@@ -449,17 +449,6 @@ void stockham_variants(const std::string&            kernel_name,
     output_json(launchers, kernel_name, output);
 }
 
-static size_t max_bytes_per_element(const unsigned int& precision)
-{
-    // generate for the maximum element size in the available
-    // precisions
-    size_t element_size = 0;
-    element_size
-        = std::max(element_size, complex_type_size(static_cast<rocfft_precision>(precision)));
-
-    return element_size;
-}
-
 // =========================================================
 // Partial pass parameters row-major ordering helpers.
 // Kernel configuration parameters for CS_3D_PP in
@@ -633,6 +622,7 @@ int main()
     std::string  scheme;
     bool         half_lds;
     unsigned int lds_size_bytes;
+    unsigned int bytes_per_element;
 
     const char* DELIM = "";
     std::cout << "{";
@@ -653,6 +643,9 @@ int main()
         auto arg = tokens.rbegin();
 
         lds_size_bytes = std::stoul(*arg);
+        ++arg;
+
+        bytes_per_element = std::stoul(*arg);
         ++arg;
 
         std::string kernel_name = *arg;
@@ -767,7 +760,7 @@ int main()
             specs.half_lds           = half_lds;
             specs.direct_to_from_reg = direct_to_from_reg[0];
 
-            specs.bytes_per_element = max_bytes_per_element(precision);
+            specs.bytes_per_element = bytes_per_element;
 
             specs.threads_per_transform = threads_per_transform.front();
 

@@ -85,6 +85,18 @@ def cjoin(xs):
 #
 # Helpers
 #
+def get_kernel_key(kernel):
+    """Return a key tuple for a kernel based on (length, scheme, lds_size_bytes)."""
+    if isinstance(kernel.length, list):
+        length_key = tuple(kernel.length)
+    else:
+        length_key = kernel.length
+
+    key = (length_key, kernel.scheme, kernel.lds_size_bytes)
+
+    return key
+
+
 def merge_kernel_list(kernels, all_precisions):
     """Merge precision list with kernel list. Check for duplicated kernel and invalid precision entries."""
     r, s = list(), set()
@@ -103,13 +115,7 @@ def merge_kernel_list(kernels, all_precisions):
             kernel_cpy = copy.copy(kernel)
             kernel_cpy.precision = p
 
-            if isinstance(kernel_cpy.length, list):
-                length_key = tuple(kernel_cpy.length)
-            else:
-                length_key = kernel_cpy.length
-
-            key = (length_key, kernel_cpy.scheme, kernel_cpy.precision,
-                   kernel_cpy.lds_size_bytes)
+            key = (get_kernel_key(kernel_cpy), kernel_cpy.precision)
 
             if key not in s:
                 s.add(key)
@@ -119,6 +125,34 @@ def merge_kernel_list(kernels, all_precisions):
                       str(kernel))
                 sys.exit(1)
     return r
+
+
+def set_bytes_per_element(kernels):
+    """Default behavior for bytes_per_element calculation is to use the highest precision
+    for a given kernel key (length, scheme, lds_size_bytes). bytes_per_element is used to
+    calculate transforms_per_block and workgroup_size later on. This behavior for tpb and 
+    wgs calculation can be overridden by using wgs_is_derived = true in kernel config.
+    NOTE: Once all kernels are tuned by precision, this function can most likely go away.
+    """
+    d = dict()
+    # add precision entries for a given (length, scheme, lds_size_bytes) key
+    for kernel in kernels:
+        key = get_kernel_key(kernel)
+        if key not in d:
+            d[key] = list()
+        d[key].append(kernel.precision)
+
+    for kernel in kernels:
+        key = get_kernel_key(kernel)
+        precisions = d[key]
+        if 'dp' in precisions:
+            kernel.bytes_per_element = 16
+        elif 'sp' in precisions:
+            kernel.bytes_per_element = 8
+        elif 'hp' in precisions:
+            kernel.bytes_per_element = 4
+
+    return kernels
 
 
 def is_aot_rtc(meta):
@@ -613,6 +647,7 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
 
             proc.stdin.write(f' {k.scheme}')
             proc.stdin.write(f' {kernel_name(k)}')
+            proc.stdin.write(f' {k.bytes_per_element}')
             proc.stdin.write(f' {k.lds_size_bytes}')
             proc.stdin.write('\n')
 
@@ -691,9 +726,13 @@ def cli():
     kernels = merge_kernel_list(kernels, list(precisions_dict))
 
     #
+    # set bytes_per_element based on highest precision for a given kernel key
+    #
+    kernels = set_bytes_per_element(kernels)
+
+    #
     # set runtime compile
     #
-
     kernels = default_runtime_compile(kernels,
                                       args.runtime_compile_default == 'ON')
 
