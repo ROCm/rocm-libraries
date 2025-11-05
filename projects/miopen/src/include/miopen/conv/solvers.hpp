@@ -4490,7 +4490,8 @@ struct ConvHipImplicitGemmGroupFwd
 
     const std::string& SolverDbId() const override
     {
-        return this->template GetSolverDbId<ConvHipImplicitGemmGroupFwd<BackendType>>();
+        throw std::runtime_error("SolverDbId() not implemented for "
+                                 "ConvHipImplicitGemmGroupFwd<BackendType> base template.");
     }
 
     MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<BackendType>
@@ -4532,11 +4533,21 @@ extern template struct ConvHipImplicitGemmGroupFwd<WmmaBackend>;
 struct ConvHipImplicitGemmGroupFwdXdlops final : ConvHipImplicitGemmGroupFwd<XdlopsBackend>
 {
     using ConvHipImplicitGemmGroupFwd::ConvHipImplicitGemmGroupFwd;
+
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipImplicitGemmGroupFwdXdlops>();
+    }
 };
 
 struct ConvHipImplicitGemmGroupFwdWmma final : ConvHipImplicitGemmGroupFwd<WmmaBackend>
 {
     using ConvHipImplicitGemmGroupFwd::ConvHipImplicitGemmGroupFwd;
+
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipImplicitGemmGroupFwdWmma>();
+    }
 };
 
 struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
