@@ -31,8 +31,7 @@
 using rocprim::detail::target_arch;
 
 __global__
-void write_target_arch([[maybe_unused]] target_arch host_arch,
-                       int* __restrict__ result)
+void write_target_arch([[maybe_unused]] target_arch host_arch, int* __restrict__ result)
 {
 #if !defined(ROCPRIM_TARGET_SPIRV)
     static constexpr auto arch = rocprim::detail::device_target_arch();
@@ -83,7 +82,7 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
     {
         target_arch host_arch;
         HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
-        
+
         int* result_ptr = nullptr;
         HIP_CHECK(common::hipMallocHelper(&result_ptr, sizeof(result_ptr)));
 
