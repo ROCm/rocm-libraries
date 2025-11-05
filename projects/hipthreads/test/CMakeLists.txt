@@ -25,6 +25,9 @@ endfunction(add_compile_test)
 
 set(testPrefix "")
 
+# TEMP: until libhipcxx resolves this
+add_compile_definitions(_LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE)
+
 file(GLOB TEST_SOURCES "*.cxx")
 foreach(testFileName ${TEST_SOURCES})
     add_compile_test(${testFileName})
