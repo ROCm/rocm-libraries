@@ -188,20 +188,20 @@ public:
 };
 
 template <typename T>
-class TestReluPointwiseOperationsCpuGraphExecutor : public ::testing::Test
+class ReluPointwiseOperationsCpuGraphExecutor : public ::testing::Test
 {
 protected:
     using DataTypeT = T;
 };
 
 using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
-TYPED_TEST_SUITE(TestReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
+TYPED_TEST_SUITE(ReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 // =============================================================================
 // ReLU Forward Tests
 // =============================================================================
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardNegativeInput)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardNegativeInput)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -213,7 +213,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardNegat
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardPositiveInput)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardPositiveInput)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -225,7 +225,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardPosit
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedBelowLowerBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedBelowLowerBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -239,7 +239,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedBelowL
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedAboveUpperBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedAboveUpperBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -253,7 +253,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedAboveU
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedWithinBounds)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedWithinBounds)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -267,7 +267,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedWithin
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyNegativeInput)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyNegativeInput)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -280,7 +280,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyNegative
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyPositiveInput)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyPositiveInput)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -293,7 +293,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyPositive
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyBelowBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyBelowBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -306,7 +306,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnl
     PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyAboveBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyAboveBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
@@ -322,7 +322,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnl
 // =============================================================================
 // ReLU Backward Tests
 // =============================================================================
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNegativeX)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNegativeX)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -335,7 +335,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNega
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPositiveX)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPositiveX)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -348,7 +348,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPosi
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelowBounds)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelowBounds)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -363,7 +363,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelow
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAboveBounds)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAboveBounds)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -378,7 +378,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAbove
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithinBounds)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithinBounds)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -393,7 +393,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithi
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativeX)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativeX)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -407,7 +407,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativ
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiveX)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiveX)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -421,7 +421,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiv
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyBelowBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyBelowBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
@@ -435,7 +435,7 @@ TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOn
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
 }
 
-TYPED_TEST(TestReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAboveBound)
+TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAboveBound)
 {
     ReluPointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
