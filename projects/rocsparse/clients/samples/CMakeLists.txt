@@ -77,6 +77,7 @@ add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
 add_rocsparse_example(example_sptrsv.cpp)
+add_rocsparse_example(example_sptrsv_strided_batched.cpp)
 
 set_source_files_properties(
   example_spmv_coo.cpp

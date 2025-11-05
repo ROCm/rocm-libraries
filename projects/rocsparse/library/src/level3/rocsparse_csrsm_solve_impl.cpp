@@ -21,6 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
@@ -32,8 +33,8 @@
 
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_hash.hpp"
 #include "csrsm_device.h"
-
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename I, typename J, typename T>
@@ -161,7 +162,7 @@ namespace rocsparse
             ldimB = nrhs;
 
             RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::dense_transpose_template(handle, m, nrhs, (T)1, B, ldb, Bt, ldimB));
+                rocsparse::dense_transpose(handle, m, nrhs, (T)1, B, ldb, Bt, ldimB));
         }
 
         // Pointers to differentiate between transpose mode
@@ -546,7 +547,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                               + ((sizeof(T) * m - 1) / 256 + 1) * 256);
         const int64_t b_inc
             = (trans_B == rocsparse_operation_none && order_B == rocsparse_order_column) ? 1 : ldb;
-
+        double e;
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve_template<I, J, T>(handle,
                                                                             trans_A,
                                                                             m,
@@ -579,7 +580,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                handle->stream,
                                                m,
                                                B,
-                                               ldb,
+                                               b_inc,
                                                y);
         }
 

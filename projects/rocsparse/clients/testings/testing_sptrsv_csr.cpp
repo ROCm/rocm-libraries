@@ -24,6 +24,71 @@
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_sptrsv.hpp"
 
+#if 0
+template <typename T, typename I, typename J>
+struct sparse_matrix_t
+{
+protected:
+  host_csr_matrix<T, I, J>*  m_h;
+  device_csr_matrix<T, I, J> m_d;
+  rocsparse_local_spmat      m_spmat;
+
+    public:
+        operator rocsparse_spmat_descr&()
+        {
+            return this->m_spmat;
+        }
+        operator const rocsparse_spmat_descr&() const
+        {
+            return this->m_spmat;
+        }
+
+        static host_csr_matrix<T, I, J>* init(const Arguments& arg)
+        {
+            const int64_t nnz = (size > 2) ? ((size - 2) * 3 + 4) : 4;
+            auto that = new host_csr_matrix<T, I, J>(size, size, nnz, rocsparse_index_base_zero);
+
+            that->ptr[0] = 0;
+            that->ptr[1] = 2;
+            for(int64_t i = 2; i < size; ++i)
+            {
+                that->ptr[i] = that->ptr[i - 1] + 3;
+            }
+            that->ptr[size] = that->ptr[size - 1] + 2;
+
+            that->val[0] = 2;
+            that->val[1] = -1;
+            for(int64_t i = 2; i < size; ++i)
+            {
+                that->val[2 + 3 * (i - 2) + 0] = -1;
+                that->val[2 + 3 * (i - 2) + 1] = 2;
+                that->val[2 + 3 * (i - 2) + 2] = -1;
+            }
+            that->val[nnz - 2] = -1;
+            that->val[nnz - 1] = 2;
+
+            that->ind[0] = 0;
+            that->ind[1] = 1;
+            for(int64_t i = 2; i < size; ++i)
+            {
+                that->ind[2 + 3 * (i - 2) + 0] = i - 1;
+                that->ind[2 + 3 * (i - 2) + 1] = i;
+                that->ind[2 + 3 * (i - 2) + 2] = i + 1;
+            }
+            that->ind[nnz - 2] = size - 2;
+            that->ind[nnz - 1] = size - 1;
+            return that;
+        }
+
+        csr_tridiag_matrix_t(int64_t size)
+            : m_h(init(size))
+            , m_d(m_h[0])
+            , m_spmat(m_d)
+        {
+        }
+    };
+#endif
+
 struct rocsparse_local_sptrsv
 {
     struct config_t
@@ -611,13 +676,15 @@ void testing_sptrsv_csr(const Arguments& arg)
     // check consistency.
     if((analysis_pivot_status == rocsparse_status_zero_pivot) && (analysis_zero_pivot == -1))
     {
-        std::cout << "inconsistent zero pivot detected during analysis " << std::endl;
+        std::cout << "inconsistent1 zero pivot detected during analysis status "
+                  << analysis_pivot_status << " value " << analysis_zero_pivot << std::endl;
         CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
     if((analysis_pivot_status != rocsparse_status_zero_pivot) && (analysis_zero_pivot != -1))
     {
-        std::cout << "inconsistent zero pivot detected during analysis " << std::endl;
+        std::cout << "inconsistent2 zero pivot detected during analysis status "
+                  << analysis_pivot_status << " value " << analysis_zero_pivot << std::endl;
         CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
@@ -783,4 +850,169 @@ INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-void testing_sptrsv_csr_extra(const Arguments& arg) {}
+
+#if 0
+void sptrsv(rocsparse_handle handle,
+	    rocsparse_local_sptrsv_descr op,
+	    rocsparse_const_dnvec_descr alpha,
+	    rocsparse_const_spmat_descr A,
+	    rocsparse_const_dnvec_descr x,
+	    rocsparse_dnvec_descr y)
+{
+  //
+  // Analysis.
+  //
+  {
+    size_t buffer_size_in_bytes;
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+						       op,
+						       A,
+						       x,
+						       y,
+						       rocsparse_sptrsv_stage_analysis,
+						       &buffer_size_in_bytes,
+						       p_error));
+
+    device_dense_vector<char> buffer(buffer_size_in_bytes);
+    CHECK_HIP_ERROR(hipMemsetAsync(buffer, 255 - 1, buffer_size_in_bytes, stream));
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+					   op,
+					   A,
+					   x,
+					   y,
+					   rocsparse_sptrsv_stage_analysis,
+					   buffer_size_in_bytes,
+					   buffer,
+					   p_error));
+  }
+
+  {
+    size_t buffer_size_in_bytes;
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+						       op,
+						       A,
+						       x,
+						       y,
+						       rocsparse_sptrsv_stage_compute,
+						       &buffer_size_in_bytes,
+						       p_error));
+    device_dense_vector<char> buffer(buffer_size_in_bytes);
+    CHECK_HIP_ERROR(hipMemsetAsync(buffer, 255 - 1, buffer_size_in_bytes, stream));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle,
+						     rocsparse_pointer_mode_device));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+						     sptrsv_descr,
+						     rocsparse_sptrsv_input_scalar_alpha,
+						     dalpha,
+						     sizeof(dalpha.data()),
+						     p_error));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+					   sptrsv_descr,
+					   A,
+					   x,
+					   y,
+					   rocsparse_sptrsv_stage_compute,
+					   buffer_size_in_bytes,
+					   buffer,
+					   p_error));
+  }
+
+}
+
+#endif
+void testing_sptrsv_csr_extra(const Arguments& arg)
+{
+    using T_A = double;
+    using I   = int32_t;
+    using J   = int32_t;
+    rocsparse_local_handle                 handle;
+    rocsparse_clients::dense_vector_t<T_A> x(4);
+    rocsparse_clients::dense_vector_t<T_A> y(4);
+
+    //
+    // Configure matrix.
+    //
+    rocsparse_clients::csr_tridiag_matrix_t<T_A, I, J> A(4);
+    rocsparse_fill_mode                                uplo        = rocsparse_fill_mode_lower;
+    rocsparse_diag_type                                diag        = rocsparse_diag_type_unit;
+    auto                                               matrix_type = rocsparse_matrix_type_general;
+    hipStream_t                                        stream;
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+        A, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)));
+
+    rocsparse_error p_error[1] = {nullptr};
+
+    rocsparse_datatype alpha_datatype = rocsparse_datatype_f64_r;
+    host_scalar<T_A>   halpha(1);
+    device_scalar<T_A> dalpha(halpha);
+
+    auto                   analysis_policy = rocsparse_analysis_policy_reuse;
+    rocsparse_local_sptrsv sptrsv_descr(
+        handle, arg.transA, arg.sptrsv_alg, alpha_datatype, get_datatype<T_A>(), analysis_policy);
+
+    {
+        size_t buffer_size_in_bytes;
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+                                                           sptrsv_descr,
+                                                           A,
+                                                           x,
+                                                           y,
+                                                           rocsparse_sptrsv_stage_analysis,
+                                                           &buffer_size_in_bytes,
+                                                           p_error));
+
+        device_dense_vector<char> buffer(buffer_size_in_bytes);
+        CHECK_HIP_ERROR(hipMemsetAsync(buffer, 255 - 1, buffer_size_in_bytes, stream));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                               sptrsv_descr,
+                                               A,
+                                               x,
+                                               y,
+                                               rocsparse_sptrsv_stage_analysis,
+                                               buffer_size_in_bytes,
+                                               buffer,
+                                               p_error));
+    }
+
+    {
+        size_t buffer_size_in_bytes;
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+                                                           sptrsv_descr,
+                                                           A,
+                                                           x,
+                                                           y,
+                                                           rocsparse_sptrsv_stage_compute,
+                                                           &buffer_size_in_bytes,
+                                                           p_error));
+        device_dense_vector<char> buffer(buffer_size_in_bytes);
+        CHECK_HIP_ERROR(hipMemsetAsync(buffer, 255 - 1, buffer_size_in_bytes, stream));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_scalar_alpha,
+                                                         halpha,
+                                                         sizeof(halpha.data()),
+                                                         p_error));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                               sptrsv_descr,
+                                               A,
+                                               x,
+                                               y,
+                                               rocsparse_sptrsv_stage_compute,
+                                               buffer_size_in_bytes,
+                                               buffer,
+                                               p_error));
+    }
+}
