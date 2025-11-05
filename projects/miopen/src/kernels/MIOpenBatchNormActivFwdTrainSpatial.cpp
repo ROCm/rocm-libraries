@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "miopen_math.hpp"
 #include "batchnorm_functions.hpp"
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
@@ -144,7 +145,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
         }
 
         variance           = fma(-mean, mean, variance);
-        invVariance        = rsqrt(variance + cast<FpPrecType>(epsilon));
+        invVariance        = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
         FpPrecType pvscale = lcl_scale;
         FpPrecType pvbias  = lcl_bias;
 
@@ -339,7 +340,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
 
         // REDUCTION COMPLETE ---------------------------
         variance    = fma(-mean, mean, variance);
-        invVariance = rsqrt(variance + cast<FpPrecType>(epsilon));
+        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
 
         FpPrecType pvscale = lcl_scale;
         FpPrecType pvbias  = lcl_bias;
@@ -520,7 +521,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         variance    = fma(-mean, mean, variance);
-        invVariance = rsqrt(variance + FpPrecType(epsilon));
+        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
 
         if(lid < mio_bn_config::hw)
         {
@@ -610,16 +611,16 @@ extern "C" __global__ void __launch_bounds__(
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
-        StashUpdater updater(miopen::batchnorm::cast<fp_accum_c_type>(mean),
-                             miopen::batchnorm::cast<fp_accum_c_type>(variance),
-                             miopen::batchnorm::cast<fp_accum_c_type>(expAvgFactor));
+        using StashUpdater = miopen::batchnorm::StashUpdater<fp_prec_c_type>;
+        StashUpdater updater(miopen::batchnorm::cast<fp_prec_c_type>(mean),
+                             miopen::batchnorm::cast<fp_prec_c_type>(variance),
+                             miopen::batchnorm::cast<fp_prec_c_type>(expAvgFactor));
 
-        miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
+        miopen::batchnorm::running_stash<fp_prec_c_type, fp_prec_c_type, StashUpdater>(
             runningMean, runningVariance, updater, grpid);
 #endif
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
-        miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
+        miopen::batchnorm::saved_stash<fp_prec_c_type, fp_prec_c_type>(
             savedMean, savedInvVariance, mean, invVariance, grpid);
 #endif
     }
