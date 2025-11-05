@@ -30,9 +30,8 @@ public:
                                       const TensorBase<ScaleBiasDataType>& scale,
                                       const TensorBase<ScaleBiasDataType>& bias,
                                       const TensorBase<MeanVarianceDataType>& estimatedMean,
-                                      const TensorBase<MeanVarianceDataType>& estimatedVariance,
-                                      TensorBase<InputDataType>& output,
-                                      double epsilon)
+                                      const TensorBase<MeanVarianceDataType>& invariance,
+                                      TensorBase<InputDataType>& output)
     {
         if(input.dims().size() < 2)
         {
@@ -43,13 +42,9 @@ public:
         auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[1];
             auto mean = staticCast<ComputeDataType>(estimatedMean.getHostValue(0, cidx));
-            auto variance = staticCast<ComputeDataType>(estimatedVariance.getHostValue(0, cidx));
+            auto invVariance = staticCast<ComputeDataType>(invariance.getHostValue(0, cidx));
 
             //There is some extra casting in here to deal with double -> float implicit casts.
-            ComputeDataType invVariance
-                = staticCast<ComputeDataType>(1.0f)
-                  / sqrtInternal(variance + staticCast<ComputeDataType>(epsilon));
-
             auto inVal = staticCast<ComputeDataType>(input.getHostValue(indices));
             ComputeDataType elemStd = inVal - mean;
             ComputeDataType inhat = elemStd * invVariance;
