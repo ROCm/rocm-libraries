@@ -215,7 +215,7 @@ namespace rocRollerTest
             };
             void setProblem(GEMMProblem const& problem);
 
-            int getFlattenWorkgroupSize() const;
+            int getFlattenedWorkgroupSize() const;
 
             CommandParametersPtr getCommandParameters() const;
 

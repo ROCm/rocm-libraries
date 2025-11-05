@@ -50,7 +50,7 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     example.setUseLDS(false, false, false);
     example.setPrefetch(false, 0, 0, false);
 
-    auto numWGs     = example.getFlattenWorkgroupSize();
+    auto numWGs     = example.getFlattenedWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
 
     // Verify the control graph matches the pseudocode

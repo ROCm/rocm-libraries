@@ -359,7 +359,7 @@ namespace rocRollerTest::Graphs
         m_problem = problem;
     }
 
-    int GEMM::getFlattenWorkgroupSize() const
+    int GEMM::getFlattenedWorkgroupSize() const
     {
         return m_problem.workgroupSizeX * m_problem.workgroupSizeY;
     }
