@@ -1893,7 +1893,7 @@ class Solution(collections.abc.Mapping):
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
     # if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (not state["1LDSBuffer"] and state["ExpandPointerSwap"]):
-    if (state["enableLDSTrA"] or state["enableLDSTrB"]) and not state["1LDSBuffer"]:
+    if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (not state["1LDSBuffer"] and state["ExpandPointerSwap"]):
       reject(state, printRejectionReason, "Current LDSTrInst implementation does not support 1LDSBuffer=0")
       return
 
@@ -3308,9 +3308,13 @@ class Solution(collections.abc.Mapping):
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
       roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
-      state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
-        (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
-        (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
+      if not isaInfoMap[isa].asmCaps["HasWMMA"]:
+        state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
+          (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
+          (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
+      else:
+        state["StoreSwapAddr"] = (state["1LDSBuffer"] != 1) and \
+          (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
 
       if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
@@ -3358,7 +3362,6 @@ class Solution(collections.abc.Mapping):
       state["LocalSplitUReuseLDS"] = math.ceil(ldsNumBytesReduction / state["MaxLDS"])
       # reserve all the LDS to LSU.
       ldsNumBytesReduction = state["MaxLDS"]
-      state["ldsAlignPow2"] = False
 
     # lds max occupancy
     ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
@@ -3392,7 +3395,7 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetB"] = ldsNumBytesAlignedA
       state["LdsOffsetMetadata"] = state["LdsOffsetB"] + ldsNumBytesAlignedB
       ldsNumBytesAB = ldsNumBytesAlignedA + ldsNumBytesAlignedB + ldsNumBytesMetadata
-      state["LdsAlignPow2"] = False
+      state["StoreSwapAddr"] = False
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)

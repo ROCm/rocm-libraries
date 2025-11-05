@@ -5113,13 +5113,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if self.states.archCaps["DeviceLDS"] > maxLDSConstOffset:
       hasMultipleBuffer = kernel["ExpandPointerSwap"] and not kernel["1LDSBuffer"] and not kernel["StoreSwapAddr"]
-
-      numVgprMultiplier = 1 if not hasMultipleBuffer else (kernel["LdsOffsetA_Blk"] // maxLDSConstOffset + 1)
-
-      numVgprMultiplierA = max(numVgprMultiplier, kernel["LdsNumElementsAlignedA"] // maxLDSConstOffset + 1)
-      numVgprMultiplierB = max(numVgprMultiplier, kernel["LdsNumElementsAlignedB"] // maxLDSConstOffset + 1)
-      numVgprMultiplierMetadata = max(numVgprMultiplier, kernel["LdsNumElementsAlignedMetadata"] // maxLDSConstOffset + 1)
-
+      maxOffsetA = kernel["LdsNumElementsAlignedA"]
+      maxOffsetB = kernel["LdsNumElementsAlignedB"]
+      maxOffsetMetadata = kernel["LdsNumElementsAlignedMetadata"]
+      if hasMultipleBuffer:
+        maxOffsetA += kernel["LdsOffsetA_Blk"]
+        maxOffsetB += kernel["LdsOffsetA_Blk"]
+        maxOffsetMetadata += kernel["LdsOffsetA_Blk"]
+        
+      numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
+      numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+      numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
 
     self.states.a.numVgprLocalReadAddr *= numVgprMultiplierA
     self.states.a.numVgprLocalWriteAddr *= numVgprMultiplierA

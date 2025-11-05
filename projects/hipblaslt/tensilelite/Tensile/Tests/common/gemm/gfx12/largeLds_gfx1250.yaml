@@ -4,7 +4,11 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   Architecture: gfx1250
-  DeviceLDS: 327680
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+  CpuThreads: 1
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
 
 BenchmarkProblems:
   #######################################
@@ -14,9 +18,9 @@ BenchmarkProblems:
     - # ProblemType
       OperationType: GEMM
       DataType: b
-      DestDataType: s
+      DestDataType: b
       ComputeDataType: s
-      HighPrecisionAccumulate:  True
+      HighPrecisionAccumulate: True
       TransposeA: True
       TransposeB: False
       UseBeta: True
@@ -31,37 +35,33 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  2, 2,  2, 2 ] #64x64x256
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2 ] #128x128
         - DepthU: [256]
-        - MaxLDS: [327680]
-        - TransposeLDS: [1]
+        - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsBlockSizePerPadA: [512]
         - LdsBlockSizePerPadB: [512]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
-        - PrefetchLocalRead: [0]
-        - PrefetchGlobalRead: [1]
-        - ExpandPointerSwap: [0,1]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1,2]
+        - ExpandPointerSwap: [1]
+        - 1LDSBuffer: [0,1]
         - ClusterLocalRead: [0]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - WavefrontSize: [32]
-        - AssertFree0ElementMultiple: [ 16 ]
-        - AssertFree1ElementMultiple: [ 16 ]
-        - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [64, 64, 1, 2048]
+          - Exact: [128, 128, 1, 1080]
