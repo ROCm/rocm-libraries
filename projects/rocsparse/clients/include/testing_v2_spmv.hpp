@@ -699,4 +699,355 @@ public:
             CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
         }
     }
+
+    static void testing_v2_spmv_multiple_extra(const Arguments& arg)
+    {
+        J                      M           = arg.M;
+        J                      N           = arg.N;
+        rocsparse_operation    trans       = arg.transA;
+        rocsparse_index_base   base        = arg.baseA;
+        rocsparse_spmv_alg     alg         = arg.spmv_alg;
+        rocsparse_matrix_type  matrix_type = arg.matrix_type;
+        rocsparse_fill_mode    uplo        = arg.uplo;
+        rocsparse_storage_mode storage     = arg.storage;
+        rocsparse_datatype     ttype       = get_datatype<T>();
+
+        // Create rocsparse handle
+        rocsparse_local_handle handle(arg);
+
+        // Number of extra vectors to test
+        static constexpr int64_t num_extra = 3;
+        T gamma_vals[num_extra] = {static_cast<T>(0.5), static_cast<T>(0.3), static_cast<T>(0.7)};
+
+        host_scalar<T> h_alpha(arg.get_alpha<T>());
+        host_scalar<T> h_beta(arg.get_beta<T>());
+        host_scalar<T> h_gamma[num_extra] = {host_scalar<T>(gamma_vals[0]),
+                                             host_scalar<T>(gamma_vals[1]),
+                                             host_scalar<T>(gamma_vals[2])};
+
+        device_scalar<T> d_alpha(h_alpha);
+        device_scalar<T> d_beta(h_beta);
+        device_scalar<T> d_gamma[num_extra] = {device_scalar<T>(h_gamma[0]),
+                                               device_scalar<T>(h_gamma[1]),
+                                               device_scalar<T>(h_gamma[2])};
+
+        //
+        // INITIALIZATE THE SPARSE MATRIX
+        //
+        host_sparse_matrix<A> hA;
+        {
+            int dev;
+            CHECK_HIP_ERROR(hipGetDevice(&dev));
+
+            hipDeviceProp_t prop;
+            CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
+            const bool has_datafile = rocsparse_arguments_has_datafile(arg);
+            bool       to_int       = false;
+            to_int |= (prop.warpSize == 32);
+            to_int |= (alg != rocsparse_spmv_alg_csr_rowsplit);
+            to_int |= (trans != rocsparse_operation_none && has_datafile);
+            to_int |= (matrix_type == rocsparse_matrix_type_symmetric && has_datafile);
+            static constexpr bool             full_rank = false;
+            rocsparse_matrix_factory<A, I, J> matrix_factory(
+                arg, arg.unit_check ? to_int : false, full_rank);
+            traits::sparse_initialization(matrix_factory, hA, M, N, base);
+        }
+
+        if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
+           || (matrix_type == rocsparse_matrix_type_triangular && M != N))
+        {
+            return;
+        }
+
+        if(M == 0 || N == 0)
+        {
+            return;
+        }
+
+        device_sparse_matrix<A> dA(hA);
+
+        host_dense_matrix<X> hx((trans == rocsparse_operation_none) ? N : M, 1);
+        rocsparse_matrix_utils::init_exact(hx);
+        device_dense_matrix<X> dx(hx);
+
+        host_dense_matrix<Y> hy((trans == rocsparse_operation_none) ? M : N, 1);
+        rocsparse_matrix_utils::init_exact(hy);
+        device_dense_matrix<Y> dy(hy);
+
+        // Create multiple extra vectors
+        host_dense_matrix<X> h_extra[num_extra] = {host_dense_matrix<X>(hy.m, 1),
+                                                   host_dense_matrix<X>(hy.m, 1),
+                                                   host_dense_matrix<X>(hy.m, 1)};
+        for(int64_t i = 0; i < num_extra; ++i)
+        {
+            rocsparse_matrix_utils::init_exact(h_extra[i]);
+        }
+
+        device_dense_matrix<X> d_extra[num_extra] = {device_dense_matrix<X>(h_extra[0]),
+                                                     device_dense_matrix<X>(h_extra[1]),
+                                                     device_dense_matrix<X>(h_extra[2])};
+
+        // Create the dnvec descriptors directly without assignment to avoid destructor issues
+        rocsparse_local_dnvec extra0(d_extra[0]);
+        rocsparse_local_dnvec extra1(d_extra[1]);
+        rocsparse_local_dnvec extra2(d_extra[2]);
+
+        rocsparse_local_spmat matA(dA);
+        rocsparse_local_dnvec x(dx);
+        rocsparse_local_dnvec y(dy);
+
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spmat_set_attribute(
+                matA, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)),
+            rocsparse_status_success);
+
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spmat_set_attribute(matA, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)),
+            rocsparse_status_success);
+
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_set_attribute(
+                                    matA, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
+                                rocsparse_status_success);
+
+        // Test both pointer modes for alpha/beta/gamma
+        for(int pointer_mode = 0; pointer_mode < 1; ++pointer_mode)
+        {
+            if(pointer_mode == 0)
+            {
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            }
+            else
+            {
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+            }
+
+            // Run buffer size
+            rocsparse_spmv_descr spmv_descr;
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_spmv_descr(&spmv_descr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(
+                handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_operation,
+                                                           &trans,
+                                                           sizeof(trans),
+                                                           nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_compute_datatype,
+                                                           &ttype,
+                                                           sizeof(ttype),
+                                                           nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_scalar_datatype,
+                                                           &ttype,
+                                                           sizeof(ttype),
+                                                           nullptr));
+
+            // Create gamma dnvec with multiple gamma values
+            rocsparse_dnvec_descr gamma_vec;
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_create_dnvec_descr(&gamma_vec, num_extra, gamma_vals, ttype));
+
+            rocsparse_const_dnvec_descr z_vecs[num_extra];
+            // Get the descriptor directly from each rocsparse_local_dnvec
+            rocsparse_local_dnvec* extra_ptrs[num_extra] = {&extra0, &extra1, &extra2};
+            for(int64_t i = 0; i < num_extra; ++i)
+            {
+                rocsparse_dnvec_descr& desc_ref = *extra_ptrs[i];
+                z_vecs[i]
+                    = desc_ref; // Implicit conversion from rocsparse_dnvec_descr to rocsparse_const_dnvec_descr
+            }
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_extra(
+                handle, spmv_descr, num_extra, gamma_vec, z_vecs, nullptr));
+
+            size_t buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                                spmv_descr,
+                                                                matA,
+                                                                x,
+                                                                y,
+                                                                rocsparse_v2_spmv_stage_analysis,
+                                                                &buffer_size,
+                                                                nullptr));
+
+            void* dbuffer = nullptr;
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+            // Run analysis
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                    spmv_descr,
+                                                    pointer_mode == 0 ? h_alpha : d_alpha,
+                                                    matA,
+                                                    x,
+                                                    pointer_mode == 0 ? h_beta : d_beta,
+                                                    y,
+                                                    rocsparse_v2_spmv_stage_analysis,
+                                                    buffer_size,
+                                                    dbuffer,
+                                                    nullptr));
+
+            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+            dbuffer = nullptr;
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                                spmv_descr,
+                                                                matA,
+                                                                x,
+                                                                y,
+                                                                rocsparse_v2_spmv_stage_compute,
+                                                                &buffer_size,
+                                                                nullptr));
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+            if(arg.unit_check)
+            {
+                // Run solve
+                CHECK_ROCSPARSE_ERROR(
+                    testing::rocsparse_v2_spmv(handle,
+                                               spmv_descr,
+                                               pointer_mode == 0 ? h_alpha : d_alpha,
+                                               matA,
+                                               x,
+                                               pointer_mode == 0 ? h_beta : d_beta,
+                                               y,
+                                               rocsparse_v2_spmv_stage_compute,
+                                               buffer_size,
+                                               dbuffer,
+                                               nullptr));
+
+                host_dense_matrix<Y> hy_copy(hy);
+                traits::host_calculation(trans,
+                                         pointer_mode == 0 ? h_alpha : d_alpha,
+                                         hA,
+                                         hx,
+                                         pointer_mode == 0 ? h_beta : d_beta,
+                                         hy,
+                                         alg,
+                                         matrix_type);
+
+                const size_t hy_size = (trans == rocsparse_operation_none) ? M : N;
+
+                // Add contribution from all extra vectors: y += gamma[i] * z[i]
+                for(int64_t i = 0; i < num_extra; ++i)
+                {
+                    for(size_t j = 0; j < hy_size; ++j)
+                    {
+                        hy[j] += gamma_vals[i] * h_extra[i][j];
+                    }
+                }
+
+                hy.near_check(dy);
+
+                if(ROCSPARSE_REPRODUCIBILITY)
+                {
+                    rocsparse_reproducibility::save(pointer_mode == 0
+                                                        ? "Y_pointer_mode_host_multiple_extra"
+                                                        : "Y_pointer_mode_device_multiple_extra",
+                                                    dy);
+                }
+
+                dy.transfer_from(hy_copy);
+            }
+
+            // Clear extra vectors after computation
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
+
+            if(arg.timing)
+            {
+                const double gpu_time_used
+                    = rocsparse_clients::run_benchmark(arg,
+                                                       rocsparse_v2_spmv,
+                                                       handle,
+                                                       spmv_descr,
+                                                       pointer_mode == 0 ? h_alpha : d_alpha,
+                                                       matA,
+                                                       x,
+                                                       pointer_mode == 0 ? h_beta : d_beta,
+                                                       y,
+                                                       rocsparse_v2_spmv_stage_compute,
+                                                       buffer_size,
+                                                       dbuffer,
+                                                       nullptr);
+
+                const double gflop_count = traits::gflop_count(hA, *h_beta != static_cast<T>(0));
+                const double gbyte_count = traits::byte_count(hA, *h_beta != static_cast<T>(0));
+
+                const double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
+                const double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
+
+                if(arg.sparsity_pattern_statistics)
+                {
+                    int64_t min_nnz_row;
+                    int64_t median_nnz_row;
+                    int64_t max_nnz_row;
+                    rocsparse_matrix_statistics::get_nnz_per_row(
+                        dA, min_nnz_row, median_nnz_row, max_nnz_row);
+
+                    int64_t min_nnz_col;
+                    int64_t median_nnz_col;
+                    int64_t max_nnz_col;
+                    rocsparse_matrix_statistics::get_nnz_per_column(
+                        dA, min_nnz_col, median_nnz_col, max_nnz_col);
+                    traits::display_info(arg,
+                                         display_key_t::trans_A,
+                                         rocsparse_operation2string(trans),
+                                         dA,
+                                         display_key_t::min_nnz_per_row,
+                                         min_nnz_row,
+                                         display_key_t::max_nnz_per_row,
+                                         max_nnz_row,
+                                         display_key_t::median_nnz_per_row,
+                                         median_nnz_row,
+                                         display_key_t::min_nnz_per_col,
+                                         min_nnz_col,
+                                         display_key_t::max_nnz_per_col,
+                                         max_nnz_col,
+                                         display_key_t::median_nnz_per_col,
+                                         median_nnz_col,
+                                         display_key_t::alpha,
+                                         *h_alpha,
+                                         display_key_t::beta,
+                                         *h_beta,
+                                         display_key_t::algorithm,
+                                         rocsparse_spmvalg2string(alg),
+                                         display_key_t::gflops,
+                                         gpu_gflops,
+                                         display_key_t::bandwidth,
+                                         gpu_gbyte,
+                                         display_key_t::time_ms,
+                                         get_gpu_time_msec(gpu_time_used));
+                }
+                else
+                {
+                    traits::display_info(arg,
+                                         display_key_t::trans_A,
+                                         rocsparse_operation2string(trans),
+                                         dA,
+                                         display_key_t::alpha,
+                                         *h_alpha,
+                                         display_key_t::beta,
+                                         *h_beta,
+                                         display_key_t::algorithm,
+                                         rocsparse_spmvalg2string(alg),
+                                         display_key_t::gflops,
+                                         gpu_gflops,
+                                         display_key_t::bandwidth,
+                                         gpu_gbyte,
+                                         display_key_t::time_ms,
+                                         get_gpu_time_msec(gpu_time_used));
+                }
+            }
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
+            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+        }
+    }
 };

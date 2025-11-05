@@ -893,3 +893,15 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+
+- name: v2_spmv_csr_res_multiple
+  category: quick
+  function: v2_spmv_csr_res_multiple
+  precision: *single_double_precisions
+  M: [50, 100]
+  N: [50, 100]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
