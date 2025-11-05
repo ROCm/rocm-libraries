@@ -313,9 +313,6 @@ namespace rocRoller
             auto forLoopCoord    = kgraph.mapper.get<CT::ForLoop>(forLoopOp);
             AssertFatal(
                 forLoopIterator != -1, "No iterator connected to ForLoopOp", ShowValue(forLoopOp));
-            AssertFatal(forLoopCoord != -1,
-                        "No ForLoop coordinate connected to ForLoopOp",
-                        ShowValue(forLoopOp));
             return {forLoopCoord, forLoopIterator};
         }
 
