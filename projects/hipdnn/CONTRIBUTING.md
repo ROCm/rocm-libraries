@@ -83,9 +83,9 @@ When contributing to hipDNN, please keep these architectural principles in mind:
 
 ```bash
 # Fork the repository on GitHub, then:
-git clone https://github.com/YOUR_USERNAME/hipDNN.git
-cd hipDNN
-git remote add upstream https://github.com/ROCm/hipDNN.git
+git clone https://github.com/YOUR_USERNAME/rocm-libraries.git
+cd rocm-libraries
+git remote add upstream https://github.com/ROCm/rocm-libraries.git
 ```
 
 ### 2. Create a Feature Branch
