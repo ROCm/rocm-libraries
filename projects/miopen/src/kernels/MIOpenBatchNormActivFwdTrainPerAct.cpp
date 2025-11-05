@@ -35,31 +35,32 @@ using mio_bn_config = miopen::batchnorm::config;
 } // namespace
 
 //==================== PER ACTIVATION =======================
-extern "C" __global__ void MIOpenBatchNormActivFwdTrainPerActivation(
-    const mio_bn_config::fp_type alpha,
-    const mio_bn_config::fp_type beta,
-    const mio_bn_config::fp_type gamma,
-    double epsilon, /* input fuzz param > 0 */
+extern "C" __global__ void __launch_bounds__(mio_bn_config::launch_dim.grp0)
+    MIOpenBatchNormActivFwdTrainPerActivation(
+        const mio_bn_config::fp_type alpha,
+        const mio_bn_config::fp_type beta,
+        const mio_bn_config::fp_type gamma,
+        double epsilon, /* input fuzz param > 0 */
 #if(MIO_RUNNING_RESULT == 1)
-    double expAvgFactor,
+        double expAvgFactor,
 #endif
-    const typename mio_bn_config::fp_type* __restrict in,        /* x input */
-    typename mio_bn_config::fp_type* __restrict out,             /* y output */
-    const typename mio_bn_config::fp_prec_type* __restrict bias, /* beta 1xCxHxW */
-    const typename mio_bn_config::fp_prec_type* __restrict scale /* gamma 1xCxHxW */
+        const typename mio_bn_config::fp_type* __restrict in,        /* x input */
+        typename mio_bn_config::fp_type* __restrict out,             /* y output */
+        const typename mio_bn_config::fp_prec_type* __restrict bias, /* beta 1xCxHxW */
+        const typename mio_bn_config::fp_prec_type* __restrict scale /* gamma 1xCxHxW */
 #if(MIO_RUNNING_RESULT == 1)
-    ,
-    typename mio_bn_config::fp_prec_type* __restrict runningMean,    /*input and output, same
-                                                                        descriptor as bias*/
-    typename mio_bn_config::fp_prec_type* __restrict runningVariance /*input and output*/
+        ,
+        typename mio_bn_config::fp_prec_type* __restrict runningMean,    /*input and output, same
+                                                                            descriptor as bias*/
+        typename mio_bn_config::fp_prec_type* __restrict runningVariance /*input and output*/
 #endif
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
-    ,
-    typename mio_bn_config::fp_prec_type* __restrict savedInvVariance, /*output only*/
-    typename mio_bn_config::fp_prec_type* __restrict savedMean         /*output only*/
+        ,
+        typename mio_bn_config::fp_prec_type* __restrict savedInvVariance, /*output only*/
+        typename mio_bn_config::fp_prec_type* __restrict savedMean         /*output only*/
 
 #endif
-)
+    )
 {
     using fp_type        = typename mio_bn_config::fp_type;
     using fp_prec_type   = typename mio_bn_config::fp_prec_type;
