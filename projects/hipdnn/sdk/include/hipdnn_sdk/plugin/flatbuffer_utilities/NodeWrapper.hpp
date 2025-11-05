@@ -104,7 +104,7 @@ public:
         const auto& n = node();
         return n.name() != nullptr ? n.name()->str() : "";
     }
-    
+
     hipdnn_sdk::data_objects::DataType computeDataType() const override
     {
         return _shallowNode->compute_data_type();

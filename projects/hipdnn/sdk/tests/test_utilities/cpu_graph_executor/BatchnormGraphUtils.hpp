@@ -50,9 +50,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::fromSdkType(meanVarianceDataType))
+        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_dim({1})
-        .set_stride({1});
+        .set_stride({1})
+        .set_value(BATCHNORM_DEFAULT_EPSILON);
 
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
@@ -67,13 +68,14 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     if(useOptionalTensors)
     {
-        auto momentumAttr = hipdnn_frontend::graph::makeTensorAttributes(
-            "momentum",
-            hipdnn_frontend::fromSdkType(meanVarianceDataType),
-            tensorBundle.momentumTensor.value());
-        momentumAttr.set_uid(uid++);
-        momentumTensorAttr
-            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(momentumAttr));
+        auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        momentumTensor->set_uid(uid++)
+            .set_name("MomentumTensor")
+            .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+            .set_dim({1})
+            .set_stride({1})
+            .set_value(0.1);
+        momentumTensorAttr = momentumTensor;
 
         auto prevRunningMeanAttr = hipdnn_frontend::graph::makeTensorAttributes(
             "prev_running_mean",
