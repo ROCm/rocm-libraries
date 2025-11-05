@@ -21,5 +21,6 @@ add_hipdnn_sample(bn_inference_activation_bwd batchnorm/BnInferenceActivationBwd
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 
-add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
+add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
+add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)

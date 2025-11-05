@@ -22,20 +22,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
-    std::cout << "Running convolution backward data graph " << inputType << " [" << layout << "]"
+    std::cout << "Running convolution backward weights graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     constexpr int64_t n = 16; // Batch size
 
-    // Input (dx dimensions)
-    constexpr int64_t c = 16; // Number of dx channels
+    // Input (x dimensions)
+    constexpr int64_t c = 16; // Number of input channels
     constexpr int64_t h = 16; // Height
     constexpr int64_t w = 16; // Width
 
-    // Filter
-    constexpr int64_t k = 16; // Number of dy channels
-    constexpr int64_t r = 3; // Height
-    constexpr int64_t s = 3; // Width
+    // Filter (dw dimensions)
+    constexpr int64_t k = 16; // Number of output channels
+    constexpr int64_t r = 3; // Filter height
+    constexpr int64_t s = 3; // Filter width
     constexpr int64_t u = 1; // Height stride
     constexpr int64_t v = 1; // Width stride
     constexpr int64_t padH = 1; // Height padding
@@ -43,7 +43,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilH = 1; // Height dilation
     constexpr int64_t dilW = 1; // Width dilation
 
-    // Output (dy dimensions) - computed based on input and conv parameters
+    // Output gradient (dy dimensions) - computed based on input and conv parameters
     const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
     const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
 
@@ -51,17 +51,17 @@ void SampleRunner::operator()(const TensorLayout& layout)
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dyAttr = createTensor({n, k, outH, outW}, inputType, layout);
-    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
+    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
 
-    graph::ConvDgradAttributes convAttributes;
-    convAttributes.set_name("conv_backward_data_node");
+    graph::ConvWgradAttributes convAttributes;
+    convAttributes.set_name("conv_backward_weights_node");
     convAttributes.set_pre_padding({padH, padW});
     convAttributes.set_post_padding({padH, padW});
     convAttributes.set_stride({u, v});
     convAttributes.set_dilation({dilH, dilW});
 
-    auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
-    dxAttr->set_output(true);
+    auto dwAttr = graph->conv_wgrad(dyAttr, xAttr, convAttributes);
+    dwAttr->set_output(true);
 
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
@@ -79,17 +79,17 @@ void SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Plans build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
-    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    utilities::Tensor<InputType> dxTensor(dxAttr->get_dim(), layout);
+    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
+    utilities::Tensor<InputType> dwTensor(dwAttr->get_dim(), layout);
 
     dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    dxTensor.fillWithValue(static_cast<InputType>(0.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    dwTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[dyAttr->get_uid()] = dyTensor.memory().deviceData();
-    variantPack[wAttr->get_uid()] = wTensor.memory().deviceData();
-    variantPack[dxAttr->get_uid()] = dxTensor.memory().deviceData();
+    variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
+    variantPack[dwAttr->get_uid()] = dwTensor.memory().deviceData();
 
     int64_t workspaceSize;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
@@ -97,14 +97,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
-    dxTensor.memory().markDeviceModified();
+    dwTensor.memory().markDeviceModified();
 
-    auto dxHostPtr = dxTensor.memory().hostData();
+    auto dwHostPtr = dwTensor.memory().hostData();
 
-    std::cout << "First 10 dx values: ";
+    std::cout << "First 10 dw values: ";
     for(int i = 0; i < 10; ++i)
     {
-        std::cout << static_cast<float>(dxHostPtr[i]) << " ";
+        std::cout << static_cast<float>(dwHostPtr[i]) << " ";
     }
     std::cout << '\n';
 
@@ -112,23 +112,24 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        utilities::Tensor<InputType> dxRefTensor(dxAttr->get_dim(), layout);
+        utilities::Tensor<InputType> dwRefTensor(dwAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdData(
-            dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
+        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdWeight(
+            xTensor, dwRefTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto tolerance = test_utilities::conv::getToleranceBwd<InputType>();
+        auto tolerance = test_utilities::conv::getToleranceWrw<InputType>();
 
-        auto dxValidator
+        auto dwValidator
             = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
+        bool dwValid = dwValidator.allClose(dwRefTensor, dwTensor);
 
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
+        std::cout << "  dw: " << (dwValid ? "successful" : "failed") << "\n";
     }
 
-    std::cout << "Convolution backward data graph execution complete for " << inputType << ".\n\n";
+    std::cout << "Convolution backward weights graph execution complete for " << inputType
+              << ".\n\n";
 }
 
 int main(int argc, char* argv[])
@@ -143,6 +144,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All convolution backward data runs completed.\n";
+    std::cout << "All convolution backward weights runs completed.\n";
     return 0;
 }
