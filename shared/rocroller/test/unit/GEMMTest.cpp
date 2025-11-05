@@ -961,7 +961,7 @@ namespace GEMMDriverTest
         : public BaseGEMMContextFixture<std::tuple<StreamKMode,
                                                    SolutionParams::LoadPath, /* loadPathA */
                                                    SolutionParams::LoadPath, /* loadPathB */
-                                                   bool /* ldsD */>>
+                                                   bool /* storeLDSD */>>
     {
     };
 
@@ -1118,7 +1118,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
+            basicGEMM<float>(gemm, false, false, 1, true);
         }
     }
 
@@ -4186,13 +4186,13 @@ namespace GEMMDriverTest
         GEMMTestStreamKGPU,
         ::testing::Combine(
             currentGPUISA(),
-            ::testing::Combine(::testing::Values(StreamKMode::Standard,
-                                                 StreamKMode::TwoTile,
-                                                 StreamKMode::TwoTileDPFirst),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::BufferToVGPR), /* ldsA */
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::BufferToVGPR), /* ldsB */
-                               ::testing::Values(true, false) /* ldsD */
-                               )));
+            ::testing::Combine(
+                ::testing::Values(
+                    StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathA */
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathB */
+                ::testing::Values(true, false) /* storeLDSD */
+                )));
 }

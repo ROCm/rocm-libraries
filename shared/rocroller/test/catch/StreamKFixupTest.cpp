@@ -50,7 +50,7 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
     example.setUseLDS(false, false, false);
     example.setPrefetch(false, 0, 0, false);
 
-    auto numWGs     = example.getTotalWorkgroupSize();
+    auto numWGs     = example.getFlattenWorkgroupSize();
     auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
 
     // Verify the control graph matches the pseudocode
@@ -70,7 +70,7 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
         auto receiveTileLoopTag = -1;
 
         // verify there is only 1 fixup for-loop
-        for(const auto& tag : forLoopTags)
+        for(const auto tag : forLoopTags)
         {
             auto forLoopOp = kgraph.control.get<ForLoopOp>(tag);
             if(forLoopOp->loopName == rocRoller::RECEIVE)
@@ -143,13 +143,14 @@ TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
         CHECK(assignAccTileDestTag == resultTileTag);
         CHECK(assignAddDest == resultTileTag);
 
-        CHECK((partialResultTileTag == assignAddLHSTag)
-              | (partialResultTileTag == assignAddRHSTag));
-        if(partialResultTileTag == assignAddLHSTag)
+        auto isLHS = partialResultTileTag == assignAddLHSTag;
+        auto isRHS = partialResultTileTag == assignAddRHSTag;
+        CHECK((isLHS || isRHS));
+        if(isLHS)
         {
             CHECK(assignAddRHSTag == resultTileTag);
         }
-        if(partialResultTileTag == assignAddRHSTag)
+        if(isRHS)
         {
             CHECK(assignAddLHSTag == resultTileTag);
         }

@@ -1133,9 +1133,9 @@ namespace rocRoller
                                                             context);
 
                 // Add send
-                sendInfo = sendTile(graph,
-                                    // Send tile if WG does not work on the first AccumTile
-                                    accumTileIdxStart > zero,
+                auto hasFirstAccumTile = accumTileIdxStart == zero;
+                sendInfo               = sendTile(graph,
+                                    logicalNot(hasFirstAccumTile),
                                     storeConnections,
                                     flagsScratchTag,
                                     accumInfo.accumulatorVarType.dataType,
@@ -1144,23 +1144,22 @@ namespace rocRoller
                                     context);
 
                 // Add receive
-                receiveInfo = receiveTile(
-                    graph,
-                    // Receive tile if WG does not work on the last AccumTile and work on the first AccumTile
-                    accumTileIdxEnd < (numAccumTiles - one) && accumTileIdxStart == zero,
-                    numRemainPartialResults,
-                    scratchTileInfo.load,
-                    loadConnections,
-                    flagsScratchTag,
-                    accumInfo.accumulatorTile,
-                    accumInfo.usesAccumulatorTile,
-                    accumInfo.accumulatorVarType.dataType,
-                    loopInfo,
-                    argInfo,
-                    forReceiveTileLoopOp,
-                    forReceiveTileLoopCoord,
-                    params,
-                    context);
+                auto hasLastAccumTile = accumTileIdxEnd < (numAccumTiles - one);
+                receiveInfo           = receiveTile(graph,
+                                          hasLastAccumTile && hasFirstAccumTile,
+                                          numRemainPartialResults,
+                                          scratchTileInfo.load,
+                                          loadConnections,
+                                          flagsScratchTag,
+                                          accumInfo.accumulatorTile,
+                                          accumInfo.usesAccumulatorTile,
+                                          accumInfo.accumulatorVarType.dataType,
+                                          loopInfo,
+                                          argInfo,
+                                          forReceiveTileLoopOp,
+                                          forReceiveTileLoopCoord,
+                                          params,
+                                          context);
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
