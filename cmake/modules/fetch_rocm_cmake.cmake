@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 find_package(ROCmCMakeBuildTools QUIET CONFIG)
 
 if(NOT ROCmCMakeBuildTools_FOUND)

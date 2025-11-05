@@ -42,7 +42,7 @@ Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0
 
 .. note::
 
-   Stream-K supports a different range of data types on different AMD accelerators. For example, the MI300A APU supports
+   Stream-K supports a different range of data types on different AMD GPUs. For example, the MI300A APU supports
    a wider variety of data types, including ``FP32``, ``FP16``, ``BF16``, ``FP8``, and ``BF8``.
    ``TENSILE_SOLUTION_SELECTION_METHOD=2`` is used to enable Stream-K on all MI300 platforms.
 

@@ -63,20 +63,28 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 2);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(int64_t)
+    CREATE_BENCHMARK(int)
+    CREATE_BENCHMARK(short)
     CREATE_BENCHMARK(int8_t)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
     CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(int32_t)
     CREATE_BENCHMARK(float)
-    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(double)
-    CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
+    // Not tuned custom types
     using custom_int2            = common::custom_type<int, int>;
     using custom_longlong_double = common::custom_type<long long, double>;
 
     CREATE_BENCHMARK(custom_int2)
     CREATE_BENCHMARK(custom_longlong_double)
+    #endif
 #endif
 
     executor.run();

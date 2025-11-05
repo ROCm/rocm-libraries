@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -45,6 +48,130 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 {
 };
 
+// Forward declarations
+class ITensor;
+
+template <bool IsConst = false>
+class ITensorIterator
+{
+public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::conditional_t<IsConst, const void*, void*>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = std::conditional_t<IsConst, const void*, void*>;
+    using reference = std::conditional_t<IsConst, const void*, void*>;
+
+    using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+
+    ITensorIterator() = default;
+
+    template <bool C = IsConst, std::enable_if_t<!C, int> = 0>
+    ITensorIterator(ITensor& tensor, bool isEnd = false)
+        : _tensor(tensor)
+        , _indices(_tensor.dims().size(), 0)
+    {
+        if(isEnd && !_tensor.dims().empty())
+        {
+            _indices[0] = _tensor.dims()[0];
+        }
+    }
+
+    template <bool C = IsConst, std::enable_if_t<C, int> = 0>
+    ITensorIterator(const ITensor& tensor, bool isEnd = false)
+        : _tensor(tensor)
+        , _indices(_tensor.dims().size(), 0)
+    {
+        if(isEnd && !_tensor.dims().empty())
+        {
+            _indices[0] = _tensor.dims()[0];
+        }
+    }
+
+    ITensorIterator(const ITensorIterator& other)
+        : _tensor(other._tensor)
+        , _indices(other._indices)
+    {
+    }
+
+    ITensorIterator(ITensorIterator&&) = default;
+
+    ITensorIterator& operator=(const ITensorIterator& other)
+    {
+        if(this != &other)
+        {
+            _tensor = other._tensor;
+            _indices = other._indices;
+        }
+        return *this;
+    }
+
+    ITensorIterator& operator=(ITensorIterator&&) = default;
+
+    value_type operator*()
+    {
+        throwIfOutOfBounds("Cannot dereference end iterator");
+
+        return _tensor.hostDataOffsetFromIndex(_tensor.getIndex(_indices));
+    }
+
+    ITensorIterator& operator++()
+    {
+        throwIfOutOfBounds("Iterator cannot be incremented past the end");
+
+        const auto& dims = _tensor.dims();
+        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+        {
+            auto dimIdx = static_cast<size_t>(dim);
+            _indices[dimIdx]++;
+            if(_indices[dimIdx] < dims[dimIdx])
+            {
+                return *this;
+            }
+            _indices[dimIdx] = 0;
+        }
+
+        //set 1 past end.
+        _indices[0] = dims[0];
+
+        return *this;
+    }
+
+    ITensorIterator operator++(int)
+    {
+        ITensorIterator temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    bool operator==(const ITensorIterator& other) const
+    {
+        return (&_tensor == &other._tensor) && (_indices == other._indices);
+    }
+
+    bool operator!=(const ITensorIterator& other) const
+    {
+        return !(*this == other);
+    }
+
+    std::vector<int64_t> indices() const
+    {
+        return _indices;
+    }
+
+private:
+    void throwIfOutOfBounds(const std::string& reason) const
+    {
+        const auto& dims = _tensor.dims();
+        if(dims.empty() || _indices[0] == dims[0])
+        {
+            throw std::out_of_range(reason);
+        }
+    }
+
+    TensorType _tensor;
+    std::vector<int64_t> _indices;
+};
+
 class ITensor
 {
 public:
@@ -54,15 +181,19 @@ public:
     virtual const std::vector<int64_t>& strides() const = 0;
 
     virtual void* rawHostData() = 0;
+    virtual void* rawDeviceData() = 0;
 
     virtual size_t elementCount() const = 0;
     virtual size_t elementSpace() const = 0;
+    virtual size_t elementSize() const = 0;
+    virtual void* hostDataOffsetFromIndex(int64_t index) = 0;
     virtual const void* hostDataOffsetFromIndex(int64_t index) const = 0;
 
     virtual void fillTensorWithValue(float value) = 0;
     virtual void
         fillTensorWithRandomValues(float min, float max, unsigned int seed = std::random_device{}())
         = 0;
+    virtual size_t fillWithData(const void* data, size_t bytesCopied) = 0;
 
     template <typename... Args>
     int64_t getIndex(Args... indices) const
@@ -91,7 +222,15 @@ public:
             std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
+    virtual ITensorIterator<false> begin() = 0;
+    virtual ITensorIterator<false> end() = 0;
+    virtual ITensorIterator<true> cbegin() const = 0;
+    virtual ITensorIterator<true> cend() const = 0;
+
     virtual bool isPacked() const = 0;
+
+    virtual void markHostModified() = 0;
+    virtual void markDeviceModified() = 0;
 
 protected:
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -118,6 +257,16 @@ public:
         return memory().hostData();
     }
 
+    void* rawDeviceData() override
+    {
+        return memory().deviceData();
+    }
+
+    void* hostDataOffsetFromIndex(int64_t index) override
+    {
+        return memory().hostData() + index;
+    }
+
     const void* hostDataOffsetFromIndex(int64_t index) const override
     {
         return memory().hostData() + index;
@@ -135,8 +284,8 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
-    virtual IMigratableMemory<T>& memory() = 0;
-    virtual const IMigratableMemory<T>& memory() const = 0;
+    virtual MigratableMemoryBase<T>& memory() = 0;
+    virtual const MigratableMemoryBase<T>& memory() const = 0;
 
     template <typename... Args>
     T getHostValue(Args... indices) const
@@ -172,6 +321,41 @@ public:
 
     virtual void fillWithValue(T value) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+    ITensorIterator<false> begin() override
+    {
+        return ITensorIterator<false>(*this, false);
+    }
+
+    ITensorIterator<false> end() override
+    {
+        return ITensorIterator<false>(*this, true);
+    }
+
+    ITensorIterator<true> cbegin() const override
+    {
+        return ITensorIterator<true>(*this, false);
+    }
+
+    ITensorIterator<true> cend() const override
+    {
+        return ITensorIterator<true>(*this, true);
+    }
+
+    void markHostModified() override
+    {
+        memory().markHostModified();
+    }
+
+    void markDeviceModified() override
+    {
+        memory().markDeviceModified();
+    }
+
+    size_t elementSize() const override
+    {
+        return sizeof(T);
+    }
 
 protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,
@@ -262,18 +446,27 @@ public:
         return _memory.count();
     }
 
-    const IMigratableMemory<T>& memory() const override
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
+    }
+
+    size_t fillWithData(const void* data, size_t maxBytesCopied) override
+    {
+        size_t bytesCopied = std::min(maxBytesCopied, _memory.count() * sizeof(T));
+        _memory.markHostModified();
+        std::memcpy(_memory.hostData(), data, bytesCopied);
+        return bytesCopied;
     }
 
     void fillWithValue(T value) override
     {
+        _memory.markHostModified();
         iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
             this->setHostValue(value, indices);
         });
@@ -281,10 +474,12 @@ public:
 
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
+
         std::mt19937 generator(seed);
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
 
+        _memory.markHostModified();
         iterateAlongDimensions(_dims, [&](const std::vector<int64_t>& indices) {
             this->setHostValue(static_cast<T>(distribution(generator)), indices);
         });
@@ -329,6 +524,30 @@ private:
 
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
+
+inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+    createTensor(hipdnn_sdk::data_objects::DataType dataType,
+                 const std::vector<int64_t>& dims,
+                 const std::vector<int64_t>& strides)
+{
+    switch(dataType)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<Tensor<float>>(dims, strides);
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return std::make_unique<Tensor<half>>(dims, strides);
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<Tensor<hip_bfloat16>>(dims, strides);
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<Tensor<double>>(dims, strides);
+    case hipdnn_sdk::data_objects::DataType::UINT8:
+        return std::make_unique<Tensor<uint8_t>>(dims, strides);
+    case hipdnn_sdk::data_objects::DataType::INT32:
+        return std::make_unique<Tensor<int32_t>>(dims, strides);
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
 
 } // namespace utilities
 } // namespace hipdnn_sdk

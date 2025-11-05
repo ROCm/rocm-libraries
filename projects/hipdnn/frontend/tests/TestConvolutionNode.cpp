@@ -720,7 +720,7 @@ TEST(TestConvolutionNode, PackNode)
     EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionNode, GatherHipdnnTensorIds)
+TEST(TestConvolutionNode, GatherHipdnnTensor)
 {
     ConvFpropAttributes convAttributes;
     auto xTensor = std::make_shared<TensorAttributes>();
@@ -743,91 +743,14 @@ TEST(TestConvolutionNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-    EXPECT_TRUE(duplicateIds.empty());
-}
+    node.gather_hipdnn_tensors(allTensors);
 
-TEST(TestConvolutionNode, GatherHipdnnTensorsCollectsDuplicates)
-{
-    ConvFpropAttributes convAttributes;
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1).set_name("XTensor");
-    convAttributes.set_x(xTensor);
-
-    auto wTensor = std::make_shared<TensorAttributes>();
-    wTensor->set_uid(2).set_name("WTensor");
-    convAttributes.set_w(wTensor);
-
-    auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_uid(1).set_name("YTensor"); // Duplicate ID
-    convAttributes.set_y(yTensor);
-
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-
-    GraphAttributes graphAttributes;
-    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
-
-    std::unordered_set<int64_t> usedIds;
-    std::unordered_set<int64_t> duplicateIds;
-    node.gather_hipdnn_tensor_ids(usedIds, duplicateIds);
-
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(duplicateIds.find(1) != duplicateIds.end());
-    EXPECT_EQ(duplicateIds.size(), 1);
-}
-
-TEST(TestConvolutionNode, PopulateHipdnnTensorIds)
-{
-    ConvFpropAttributes convAttributes;
-    convAttributes.set_x(std::make_shared<TensorAttributes>());
-    convAttributes.set_w(std::make_shared<TensorAttributes>());
-    convAttributes.set_y(std::make_shared<TensorAttributes>());
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-
-    GraphAttributes graphAttributes;
-    ConvolutionFpropNode node(std::move(convAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
-    ;
-
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size());
-
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3);
 }
 
 TEST(TestConvolutionNode, StrideInferenceWithLargeKernel5x5)

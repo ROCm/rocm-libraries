@@ -31,17 +31,6 @@ public:
         auto dy = attributes.get_dy();
         auto dw = attributes.get_dw();
 
-        auto& xDims = x->get_dim();
-        auto& dyDims = dy->get_dim();
-        auto& dwDims = dw->get_dim();
-        auto& dwStrides = dw->get_stride();
-
-        auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
-        auto& prePadding = attributes.get_pre_padding();
-        auto& postPadding = attributes.get_post_padding();
-        auto& stride = attributes.get_stride();
-        auto& dilation = attributes.get_dilation();
-
         HIPDNN_RETURN_IF_FALSE(x,
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ConvolutionWgradNode missing x (input) for pre-validation");
@@ -55,6 +44,17 @@ public:
             dw,
             ErrorCode::ATTRIBUTE_NOT_SET,
             "ConvolutionWgradNode missing dw (gradient of weights) for pre-validation");
+
+        auto& xDims = x->get_dim();
+        auto& dyDims = dy->get_dim();
+        auto& dwDims = dw->get_dim();
+        auto& dwStrides = dw->get_stride();
+
+        auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
+        auto& prePadding = attributes.get_pre_padding();
+        auto& postPadding = attributes.get_post_padding();
+        auto& stride = attributes.get_stride();
+        auto& dilation = attributes.get_dilation();
 
         HIPDNN_RETURN_IF_TRUE(attributes.get_pre_padding().empty(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
@@ -362,6 +362,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
             attributes.pack_attributes(builder).Union());
     }

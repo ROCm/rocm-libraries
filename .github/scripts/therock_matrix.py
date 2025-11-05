@@ -6,10 +6,14 @@ subtree_to_project_map = {
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
     "projects/hipcub": "prim",
+    "projects/hipdnn": "hipdnn",
+    "projects/hipfft": "fft",
     "projects/hiprand": "rand",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
+    "projects/miopen": "miopen",
     "projects/rocblas": "blas",
+    "project/rocfft": "fft",
     "projects/rocprim": "prim",
     "projects/rocrand": "rand",
     "projects/rocsolver": "solver",
@@ -33,6 +37,18 @@ project_map = {
     "blas": {
         "cmake_options": "-DTHEROCK_ENABLE_BLAS=ON",
         "project_to_test": "hipblaslt, rocblas, hipblas",
+    },
+    "miopen": {
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+        "project_to_test": "miopen",
+    },
+    "fft": {
+        "cmake_options": "-DTHEROCK_ENABLE_FFT=ON",
+        "project_to_test": "hipfft, rocfft",
+    },
+    "hipdnn": {
+        "cmake_options": "-DTHEROCK_ENABLE_HIPDNN=ON",
+        "project_to_test": "hipdnn",
     }
 }
 
