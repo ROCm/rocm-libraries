@@ -819,7 +819,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, descr);
     ROCSPARSE_CHECKARG_ENUM(2, prop);
     ROCSPARSE_CHECKARG_POINTER(3, p_value);
-
+#if 0
     switch(prop)
     {
     case rocsparse_spmat_prop_format:
@@ -889,6 +889,7 @@ try
         return rocsparse_status_success;
     }
     }
+#endif
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_START
 }

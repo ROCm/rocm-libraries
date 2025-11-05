@@ -44,24 +44,26 @@ protected:
 
 public:
     ~_rocsparse_spattern_descr();
-    void                        set_own_data(bool value);
-    int64_t                     get_rows() const;
-    int64_t                     get_cols() const;
-    int64_t                     get_nnz() const;
-    void                        set_nnz(int64_t value);
-    int64_t*                    get_pnnz();
-    int64_t                     get_ell_width() const;
-    void                        set_ell_width(int64_t value);
-    int64_t                     get_ell_cols() const;
-    rocsparse_format            get_format() const;
-    rocsparse_idvec_descr       get_row_data();
-    rocsparse_idvec_descr       get_col_data();
-    rocsparse_const_idvec_descr get_row_data() const;
-    rocsparse_const_idvec_descr get_col_data() const;
-    rocsparse_mat_descr         get_mat_descr();
-    const _rocsparse_mat_descr* get_mat_descr() const;
-    int64_t                     get_batch_count() const;
-
+    void                              set_own_data(bool value);
+    int64_t                           get_rows() const;
+    int64_t                           get_cols() const;
+    int64_t                           get_nnz() const;
+    void                              set_nnz(int64_t value);
+    int64_t*                          get_pnnz();
+    int64_t                           get_ell_width() const;
+    void                              set_ell_width(int64_t value);
+    int64_t                           get_ell_cols() const;
+    void                              set_ell_cols(int64_t value);
+    rocsparse_format                  get_format() const;
+    rocsparse_idvec_descr             get_row_data();
+    rocsparse_idvec_descr             get_col_data();
+    rocsparse_const_idvec_descr       get_row_data() const;
+    rocsparse_const_idvec_descr       get_col_data() const;
+    rocsparse_mat_descr               get_mat_descr();
+    const _rocsparse_mat_descr*       get_mat_descr() const;
+    int64_t                           get_batch_count() const;
+    void                              set_row_data(rocsparse_idvec_descr data);
+    void                              set_col_data(rocsparse_idvec_descr data);
     static _rocsparse_spattern_descr* create_csr(int64_t               rows,
                                                  int64_t               cols,
                                                  int64_t               nnz,

@@ -29,6 +29,36 @@
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_logging.hpp"
 
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spattern_prop value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spattern_prop_format:
+    case rocsparse_spattern_prop_rows:
+    case rocsparse_spattern_prop_cols:
+    case rocsparse_spattern_prop_ell_width:
+    case rocsparse_spattern_prop_bell_width:
+    case rocsparse_spattern_prop_nnz:
+    case rocsparse_spattern_prop_batchtype:
+    case rocsparse_spattern_prop_batch_count:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+void _rocsparse_spattern_descr::set_row_data(rocsparse_idvec_descr data)
+{
+    this->row_data = data;
+}
+
+void _rocsparse_spattern_descr::set_col_data(rocsparse_idvec_descr data)
+{
+    this->row_data = data;
+}
+
 int64_t _rocsparse_spattern_descr::get_batch_count() const
 {
     const int64_t row_batch_count
@@ -83,6 +113,12 @@ void _rocsparse_spattern_descr::set_ell_width(int64_t value)
 {
     this->ell_width = value;
 }
+
+void _rocsparse_spattern_descr::set_ell_cols(int64_t value)
+{
+    this->ell_cols = value;
+}
+
 void _rocsparse_spattern_descr::set_nnz(int64_t value)
 {
     this->nnz = value;
@@ -259,6 +295,7 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
                                                         size_t           value_size_in_bytes,
                                                         rocsparse_error* p_error)
 {
+
     try
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -278,6 +315,11 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
             *reinterpret_cast<rocsparse_format*>(p_value) = descr->get_format();
             return rocsparse_status_success;
         }
+        case rocsparse_spattern_prop_batchtype:
+        {
+            return rocsparse_status_success;
+        }
+
         case rocsparse_spattern_prop_batch_count:
         {
             ROCSPARSE_CHECKARG(4,
@@ -288,6 +330,29 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
             *reinterpret_cast<int64_t*>(p_value) = descr->get_batch_count();
             return rocsparse_status_success;
         }
+
+        case rocsparse_spattern_prop_ell_width:
+        {
+            ROCSPARSE_CHECKARG(4,
+                               value_size_in_bytes,
+                               (sizeof(int64_t) != value_size_in_bytes),
+                               rocsparse_status_invalid_value);
+
+            *reinterpret_cast<int64_t*>(p_value) = descr->get_ell_width();
+            return rocsparse_status_success;
+        }
+
+        case rocsparse_spattern_prop_bell_width:
+        {
+            ROCSPARSE_CHECKARG(4,
+                               value_size_in_bytes,
+                               (sizeof(int64_t) != value_size_in_bytes),
+                               rocsparse_status_invalid_value);
+
+            *reinterpret_cast<int64_t*>(p_value) = descr->get_ell_cols();
+            return rocsparse_status_success;
+        }
+
         case rocsparse_spattern_prop_rows:
         {
             ROCSPARSE_CHECKARG(4,
@@ -331,7 +396,7 @@ extern "C" rocsparse_status rocsparse_spattern_get_prop(rocsparse_handle        
 extern "C" rocsparse_status rocsparse_spattern_set_prop(rocsparse_handle         handle,
                                                         rocsparse_spattern_descr descr,
                                                         rocsparse_spattern_prop  prop,
-                                                        const void*              value,
+                                                        const void*              p_value,
                                                         size_t           value_size_in_bytes,
                                                         rocsparse_error* p_error)
 try
@@ -341,10 +406,10 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, descr);
     ROCSPARSE_CHECKARG_ENUM(2, prop);
     ROCSPARSE_CHECKARG_POINTER(3, p_value);
-
+#if 0
     switch(prop)
     {
-    case rocsparse_spmat_prop_format:
+    case rocsparse_spattern_prop_format:
     {
         ROCSPARSE_CHECKARG(4,
                            value_size_in_bytes,
@@ -353,7 +418,7 @@ try
         descr->set_format(*reinterpret_cast<const rocsparse_format*>(p_value));
         return rocsparse_status_success;
     }
-    case rocsparse_spmat_prop_batch_count:
+    case rocsparse_spattern_prop_batch_count:
     {
         ROCSPARSE_CHECKARG(4,
                            value_size_in_bytes,
@@ -363,7 +428,7 @@ try
         descr->set_batch_count(*reinterpret_cast<const int64_t*>(p_value));
         return rocsparse_status_success;
     }
-    case rocsparse_spmat_prop_rows:
+    case rocsparse_spattern_prop_rows:
     {
         ROCSPARSE_CHECKARG(4,
                            value_size_in_bytes,
@@ -373,7 +438,7 @@ try
         descr->set_rows(*reinterpret_cast<const int64_t*>(p_value));
         return rocsparse_status_success;
     }
-    case rocsparse_spmat_prop_cols:
+    case rocsparse_spattern_prop_cols:
     {
         ROCSPARSE_CHECKARG(4,
                            value_size_in_bytes,
@@ -383,7 +448,7 @@ try
         descr->set_cols(*reinterpret_cast<const int64_t*>(p_value));
         return rocsparse_status_success;
     }
-    case rocsparse_spmat_prop_nnz:
+    case rocsparse_spattern_prop_nnz:
     {
         ROCSPARSE_CHECKARG(4,
                            value_size_in_bytes,
@@ -393,6 +458,7 @@ try
         return rocsparse_status_success;
     }
     }
+#endif
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_START
 }
@@ -412,7 +478,7 @@ try
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, descr);
     ROCSPARSE_CHECKARG_POINTER(2, p_data);
-    p_data[0] = descr->get_row_data();
+    p_data[0] = (rocsparse_idvec_descr)descr->get_row_data();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -432,7 +498,7 @@ try
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, descr);
     ROCSPARSE_CHECKARG_POINTER(2, p_data);
-    p_data[0] = descr->get_col_data();
+    p_data[0] = (rocsparse_idvec_descr)descr->get_col_data();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -640,9 +706,9 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, p_descr);
     ROCSPARSE_CHECKARG_SIZE(2, rows);
     ROCSPARSE_CHECKARG_SIZE(3, cols);
-    ROCSPARSE_CHECKARG_SIZE(4, nnz);
+    ROCSPARSE_CHECKARG_SIZE(4, width);
     ROCSPARSE_CHECKARG_POINTER(5, col_data);
-    p_descr[0] = _rocsparse_spattern_descr::create_ell(rows, cols, width, nullptr, col_data);
+    p_descr[0] = _rocsparse_spattern_descr::create_ell(rows, cols, width, col_data);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -669,7 +735,7 @@ try
     ROCSPARSE_CHECKARG_SIZE(3, colsb);
     ROCSPARSE_CHECKARG_SIZE(4, width);
     ROCSPARSE_CHECKARG_POINTER(5, col_data);
-    p_descr[0] = _rocsparse_spattern_descr::create_bell(rowsb, colsb, width, nullptr, col_data);
+    p_descr[0] = _rocsparse_spattern_descr::create_bell(rowsb, colsb, width, col_data);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
