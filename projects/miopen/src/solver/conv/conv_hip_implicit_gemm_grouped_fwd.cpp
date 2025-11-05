@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,8 +38,12 @@
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
+
+// list all relevant environment variables
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_WMMA)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_WMMA_AI_HEUR)
 
 namespace miopen {
 namespace solver {
@@ -48,25 +52,6 @@ namespace conv {
 using ProblemDescription = miopen::conv::ProblemDescription;
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-template <typename DataType>
-using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
-    2,
-    ck::tensor_layout::convolution::NHWGC,
-    ck::tensor_layout::convolution::GKYXC,
-    ck::Tuple<>,
-    ck::tensor_layout::convolution::NHWGK,
-    DataType,
-    DataType,
-    ck::Tuple<>,
-    DataType,
-    ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
-
-template <typename DataType>
-using DeviceOpGFwdPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGFwd<DataType>>;
-
 namespace {
 struct CKArgs
 {
@@ -180,25 +165,30 @@ struct CKArgs
 
 } // namespace
 
+template <typename BackendType>
 template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
+void PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::Init(
     const ProblemDescription& problem) // should be parameterized with execution context
 {
     if(valid_kernels.empty())
+    {
         valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
+    }
     index     = 0;
     kernel_id = valid_kernels[index];
 }
 
+template <typename BackendType>
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::CheckIsSupportCKArgs(
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
     return IsCKArgsSupported<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem, kernel_id);
 }
 
+template <typename BackendType>
 template <typename DataType>
-bool ConvHipImplicitGemmGroupFwdXdlops::CheckCKApplicability(
+bool ConvHipImplicitGemmGroupFwd<BackendType>::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
     return IsCKApplicable<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
@@ -220,47 +210,57 @@ static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
     return tokens;
 }
 
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDs(const std::string& type)
+template <typename BackendType>
+void PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::InitHeuristicKernelIDs(
+    const std::string& type)
 {
-    for(int i = 0; i < valid_kernels.size(); i++)
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
     {
-        if(valid_kernels[i].find(type) != std::string::npos)
+        for(int i = 0; i < valid_kernels.size(); i++)
         {
-            heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            if(valid_kernels[i].find(type) != std::string::npos)
+            {
+                heuristic_indexes.push_back(i);
+                heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            }
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::ModelApplyToken(int idx,
-                                                                     std::string value,
-                                                                     const std::string& arch)
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::ModelApplyToken(int idx,
+                                                                            std::string value,
+                                                                            const std::string& arch)
 {
-    if(arch == "gfx90a")
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
     {
-        if(idx >= 5)
+        if(arch == "gfx90a")
         {
-            idx += 2; // skip MPerXDL and NPerXDL as they are constant
+            if(idx >= 5)
+            {
+                idx += 2; // skip MPerXDL and NPerXDL as they are constant
+            }
         }
-    }
-    if(idx == 0 && arch == "gfx942")
-    {
-        InitHeuristicKernelIDs(value);
-        if(!heuristic_indexes.empty())
-            return true;
-        return false;
-    }
-    if(idx >= 1 && arch == "gfx942")
-        idx--;
-    auto eraseBegin = std::remove_if(
-        heuristic_indexes.begin(), heuristic_indexes.end(), [&](int heuristic_index) {
-            return heuristic_kernels[heuristic_index][idx] != value;
-        });
+        if(idx == 0 && arch == "gfx942")
+        {
+            InitHeuristicKernelIDs(value);
+            if(!heuristic_indexes.empty())
+                return true;
+            return false;
+        }
+        if(idx >= 1 && arch == "gfx942")
+            idx--;
+        auto eraseBegin = std::remove_if(
+            heuristic_indexes.begin(), heuristic_indexes.end(), [&](int heuristic_index) {
+                return heuristic_kernels[heuristic_index][idx] != value;
+            });
 
-    if(eraseBegin != heuristic_indexes.begin())
-    {
-        heuristic_indexes.erase(eraseBegin, heuristic_indexes.end());
-        return true;
+        if(eraseBegin != heuristic_indexes.begin())
+        {
+            heuristic_indexes.erase(eraseBegin, heuristic_indexes.end());
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -322,51 +322,64 @@ GetFeatures(const ProblemDescription& problem, std::size_t num_cu, const std::st
     return features;
 }
 
+template <typename BackendType>
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel(
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
-    static const std::string& arch = ctx.GetStream().GetDeviceName();
-    if(arch == "gfx90a")
-        InitHeuristicKernelIDs("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
-    static const std::string solver = "ConvHipIgemmGroupFwdXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    bool transform              = (arch == "gfx90a") ? false : true;
-    if(ai::tuning::ModelSetParams(arch,
-                                  solver,
-                                  problem.GetDirection(),
-                                  features,
-                                  transform,
-                                  [&](int idx, const std::string& value) {
-                                      return this->ModelApplyToken(idx, value, arch);
-                                  }))
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
     {
-        index     = heuristic_indexes[0];
-        kernel_id = valid_kernels[index];
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
-        return true;
+        valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(
+            problem); // filter valid_kernel ID's
+        static const std::string& arch = ctx.GetStream().GetDeviceName();
+        if(arch == "gfx90a")
+            InitHeuristicKernelIDs("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
+        static const std::string solver = "ConvHipIgemmGroupFwdXdlops";
+        std::vector<float> features =
+            GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+        bool transform = (arch == "gfx90a") ? false : true;
+        if(ai::tuning::ModelSetParams(arch,
+                                      solver,
+                                      problem.GetDirection(),
+                                      features,
+                                      transform,
+                                      [&](int idx, const std::string& value) {
+                                          return this->ModelApplyToken(idx, value, arch);
+                                      }))
+        {
+            index     = heuristic_indexes[0];
+            kernel_id = valid_kernels[index];
+            MIOPEN_LOG_I("Params set by AI: " << ToString());
+            return true;
+        }
+        return false;
     }
     return false;
 }
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsModelApplicable(
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942")
-        return false;
-    if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
-       problem.GetInDataType() != miopenBFloat16)
-        return false;
-    if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
-        return false;
-    return true;
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+    {
+        if(ctx.GetStream().GetDeviceName() != "gfx90a" &&
+           ctx.GetStream().GetDeviceName() != "gfx942")
+            return false;
+        if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
+           problem.GetInDataType() != miopenBFloat16)
+            return false;
+        if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+            return false;
+        return true;
+    }
+    return false;
 }
 
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
+template <typename BackendType>
+void PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
@@ -375,22 +388,25 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
     {
-        if(problem.GetInDataType() == miopenFloat)
+        if(IsModelApplicable(ctx, problem))
         {
-            if(RunParameterPredictionModel<float>(ctx, problem))
-                return;
-        }
-        else if(problem.GetInDataType() == miopenBFloat16)
-        {
-            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
-                return;
-        }
-        else
-        {
-            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
-                return;
+            if(problem.GetInDataType() == miopenFloat)
+            {
+                if(RunParameterPredictionModel<float>(ctx, problem))
+                    return;
+            }
+            else if(problem.GetInDataType() == miopenBFloat16)
+            {
+                if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
+                    return;
+            }
+            else
+            {
+                if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
+                    return;
+            }
         }
     }
 #endif
@@ -398,7 +414,12 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
     case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenInt8:
+        if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+            Init<int8_t>(problem);
+        else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+            ; // no Int8 support for WmmaBackend
+        break;
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     case miopenInt64:
     case miopenInt32:
@@ -409,7 +430,9 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 #endif
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemDescription& problem)
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::SetNextValue(
+    const ProblemDescription& problem)
 {
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
@@ -418,7 +441,12 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
         {
         case miopenHalf: Init<ck::half_t>(problem); break;
         case miopenFloat: Init<float>(problem); break;
-        case miopenInt8: Init<int8_t>(problem); break;
+        case miopenInt8:
+            if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+                Init<int8_t>(problem);
+            else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+                ; // no Int8 support for WmmaBackend
+            break;
         case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
         case miopenInt64:
         case miopenInt32:
@@ -440,21 +468,28 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
         return false;
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValidValue() const
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::IsValidValue() const
 {
     return index < valid_kernels.size();
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
-    case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
-    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
-    case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
-    case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat: Init<float>(problem); break;
+    case miopenInt8:
+        if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+            Init<int8_t>(problem);
+        else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+            ; // no Int8 support for WmmaBackend
+        break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
@@ -465,50 +500,65 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
     return false;
 }
 
-bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::operator==(
-    const PerformanceConfigHipImplicitGemmGroupFwdXdlops& other) const
+template <typename BackendType>
+bool PerformanceConfigHipImplicitGemmGroupFwd<BackendType>::operator==(
+    const PerformanceConfigHipImplicitGemmGroupFwd<BackendType>& other) const
 {
     return this->kernel_id == other.kernel_id;
 }
 
-PerformanceConfigHipImplicitGemmGroupFwdXdlops
-ConvHipImplicitGemmGroupFwdXdlops::GetDefaultPerformanceConfig(
+template <typename BackendType>
+PerformanceConfigHipImplicitGemmGroupFwd<BackendType>
+ConvHipImplicitGemmGroupFwd<BackendType>::GetDefaultPerformanceConfig(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    PerformanceConfigHipImplicitGemmGroupFwdXdlops pp;
+    PerformanceConfigHipImplicitGemmGroupFwd<BackendType> pp;
     pp.HeuristicInit(ctx, problem);
     return pp;
 }
 
-bool ConvHipImplicitGemmGroupFwdXdlops::IsValidPerformanceConfig(
+template <typename BackendType>
+bool ConvHipImplicitGemmGroupFwd<BackendType>::IsValidPerformanceConfig(
     const ExecutionContext&,
     const ProblemDescription& problem,
-    const PerformanceConfigHipImplicitGemmGroupFwdXdlops& config) const
+    const PerformanceConfigHipImplicitGemmGroupFwd<BackendType>& config) const
 {
     return config.IsValid(problem);
 }
 
-size_t ConvHipImplicitGemmGroupFwdXdlops::GetWorkspaceSize(const ExecutionContext&,
+template <typename BackendType>
+size_t
+ConvHipImplicitGemmGroupFwd<BackendType>::GetWorkspaceSize(const ExecutionContext&,
                                                            const ProblemDescription& problem) const
 {
     return GetWorkspaceSizeLayoutTransformConv(problem);
 }
 
-PerformanceConfigHipImplicitGemmGroupFwdXdlops
-ConvHipImplicitGemmGroupFwdXdlops::Search(const ExecutionContext& ctx,
-                                          const ProblemDescription& problem,
-                                          const AnyInvokeParams& invoke_ctx) const
+template <typename BackendType>
+PerformanceConfigHipImplicitGemmGroupFwd<BackendType>
+ConvHipImplicitGemmGroupFwd<BackendType>::Search(const ExecutionContext& ctx,
+                                                 const ProblemDescription& problem,
+                                                 const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
+template <typename BackendType>
+bool ConvHipImplicitGemmGroupFwd<BackendType>::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
-        return false;
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+    {
+        if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
+            return false;
+    }
+    else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+    {
+        if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_WMMA))
+            return false;
+    }
     if(problem.GetConv().attribute.deterministic)
         return false;
     if(problem.HasNonPackedTensors())
@@ -528,14 +578,27 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
     // needed because layout transpose kernel does not support non-packed tensors
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
-    if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
-        return false;
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+    {
+        if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
+            return false;
+    }
+    else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+    {
+        if(!ck_utility::is_wmma_capable(ctx.GetStream().GetDeviceName()))
+            return false;
+    }
     switch(problem.GetInDataType())
     {
-    case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat: return CheckCKApplicability<float>(problem);
-    case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat: Init<float>(problem); break;
+    case miopenInt8:
+        if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+            Init<int8_t>(problem);
+        else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+            ; // no Int8 support for WmmaBackend
+        break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
@@ -546,35 +609,67 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
     return false;
 }
 
-ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
+template <typename BackendType>
+ConvSolution ConvHipImplicitGemmGroupFwd<BackendType>::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupFwdXdlops& config) const
+    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupFwd<BackendType>& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    return MakeSolutionGroupConvImplicitGemmXdlops(
-        problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryFwdNCHW<2,
-                                             false,
-                                             DeviceOpGFwdPtrs<T>,
-                                             CKArgs,
-                                             miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGFwdPtrs<T>,
-                                          CKArgs,
-                                          miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        });
+    if constexpr(std::is_same_v<BackendType, XdlopsBackend>)
+    {
+        return MakeSolutionGroupConvImplicitGemmXdlops(
+            problem,
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryFwdNCHW<2,
+                                                 false,
+                                                 DeviceOpGFwdPtrs<T>,
+                                                 CKArgs,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            },
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGFwdPtrs<T>,
+                                              CKArgs,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            });
+    }
+    else if constexpr(std::is_same_v<BackendType, WmmaBackend>)
+    {
+        return MakeSolutionGroupConvImplicitGemmWmma(
+            problem,
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryFwdNCHW<2,
+                                                 false,
+                                                 DeviceOpGFwdPtrs<T>,
+                                                 CKArgs,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            },
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGFwdPtrs<T>,
+                                              CKArgs,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            });
+    }
 #else
     return {};
 #endif
 }
+
+// explicit template instantiations
+template struct PerformanceConfigHipImplicitGemmGroupFwd<XdlopsBackend>;
+template struct PerformanceConfigHipImplicitGemmGroupFwd<WmmaBackend>;
+template struct ConvHipImplicitGemmGroupFwd<XdlopsBackend>;
+template struct ConvHipImplicitGemmGroupFwd<WmmaBackend>;
 
 } // namespace conv
 } // namespace solver

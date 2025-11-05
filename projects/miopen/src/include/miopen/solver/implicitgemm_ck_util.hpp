@@ -93,6 +93,25 @@ using DeviceOpGWrwPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGWrw<DataType>>;
 
 template <typename DataType>
+using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
+    2,
+    ck::tensor_layout::convolution::NHWGC,
+    1 ck::tensor_layout::convolution::GKYXC,
+    ck::Tuple<>,
+    ck::tensor_layout::convolution::NHWGK,
+    DataType,
+    DataType,
+    ck::Tuple<>,
+    DataType,
+    ck::tensor_operation::element_wise::PassThrough,
+    ck::tensor_operation::element_wise::PassThrough,
+    ck::tensor_operation::element_wise::PassThrough>;
+
+template <typename DataType>
+using DeviceOpGFwdPtrs =
+    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGFwd<DataType>>;
+
+template <typename DataType>
 using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<
     2,
     ck::tensor_layout::convolution::NHWGK,

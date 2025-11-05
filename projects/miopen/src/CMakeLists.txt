@@ -249,7 +249,7 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r5_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_grouped_fwd_xdlops.cpp
+    solver/conv/conv_hip_implicit_gemm_grouped_fwd.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_wmma.cpp
