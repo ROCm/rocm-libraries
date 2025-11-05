@@ -464,9 +464,17 @@ std::vector<T>
     common::uniform_int_distribution<size_t> segment_length_distribution(
         std::numeric_limits<size_t>::min(),
         max_segment_length);
-    // std::uniform_real_distribution cannot handle rocprim::half, use float instead
+    // std::uniform_real_distribution cannot handle:
+    //   - rocprim::half, use float instead.
+    //   - single byte integer-based types (char, unsigned char, int8_t, uint8_t), use int instead
     using dis_type =
-        typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
+        typename std::conditional<std::is_same<rocprim::half, T>::value,
+                                  float,
+                                  typename std::conditional<rocprim::is_integral<T>::value
+                                                   && !common::is_valid_for_int_distribution<T>::value,
+                                                   typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type,
+                                                   T>::type>::type;
+
     using key_distribution_type = std::conditional_t<rocprim::is_integral<T>::value,
                                                      common::uniform_int_distribution<dis_type>,
                                                      std::uniform_real_distribution<dis_type>>;
