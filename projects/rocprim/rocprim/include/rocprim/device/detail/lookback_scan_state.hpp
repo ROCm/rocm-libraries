@@ -1052,7 +1052,7 @@ template<typename LookbackScanState>
 constexpr bool is_lookback_kernel_runnable()
 {
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    if(device_target_arch() == target_arch::gfx908)
+    if constexpr(__builtin_amdgcn_processor_is("gfx908"))
     {
         // For gfx908 kernels with both version of lookback_scan_state can run: with and without
         // sleep
