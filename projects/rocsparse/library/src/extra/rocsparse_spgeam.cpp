@@ -291,7 +291,7 @@ namespace rocsparse
                                                size_t*                     buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format_A = mat_A->format;
+        const rocsparse_format format_A = mat_A->get_format();
         switch(stage)
         {
         case rocsparse_spgeam_stage_numeric_analysis:
@@ -309,17 +309,17 @@ namespace rocsparse
                     handle,
                     descr->get_operation_A(),
                     descr->get_operation_B(),
-                    mat_A->rows,
-                    mat_B->cols,
-                    mat_A->descr,
-                    mat_A->nnz,
-                    mat_A->const_row_data,
-                    mat_A->const_col_data,
-                    mat_B->descr,
-                    mat_B->nnz,
-                    mat_B->const_row_data,
-                    mat_B->const_col_data,
-                    mat_C != nullptr ? mat_C->const_row_data : nullptr,
+                    mat_A->get_rows(),
+                    mat_B->get_cols(),
+                    mat_A->get_descr(),
+                    mat_A->get_nnz(),
+                    mat_A->get_const_row_data(),
+                    mat_A->get_const_col_data(),
+                    mat_B->get_descr(),
+                    mat_B->get_nnz(),
+                    mat_B->get_const_row_data(),
+                    mat_B->get_const_col_data(),
+                    mat_C != nullptr ? mat_C->get_const_row_data() : nullptr,
                     buffer_size));
                 return rocsparse_status_success;
             }
@@ -365,42 +365,57 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG_ENUM(5, stage);
 
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
-
         ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
+            2, mat_A, (mat_A->get_init() == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(
+            3, mat_B, (mat_B->get_init() == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_format() != mat_A->get_format()),
+                           rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(2,
                            mat_A,
-                           (mat_A->data_type != descr->get_compute_datatype()),
+                           (mat_A->get_data_type() != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(3,
                            mat_B,
-                           (mat_B->data_type != descr->get_compute_datatype()),
+                           (mat_B->get_data_type() != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_row_type() != mat_A->get_row_type()),
+                           rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_col_type() != mat_A->get_col_type()),
+                           rocsparse_status_type_mismatch);
 
         if(stage == rocsparse_spgeam_stage_compute || mat_C != nullptr)
         {
-            ROCSPARSE_CHECKARG(4, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
-
             ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
+                4, mat_C, (mat_C->get_init() == false), rocsparse_status_not_initialized);
 
             ROCSPARSE_CHECKARG(4,
                                mat_C,
-                               (mat_C->data_type != descr->get_compute_datatype()),
+                               (mat_C->get_format() != mat_A->get_format()),
                                rocsparse_status_not_implemented);
 
-            ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
-            ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_data_type() != descr->get_compute_datatype()),
+                               rocsparse_status_not_implemented);
+
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_row_type() != mat_A->get_row_type()),
+                               rocsparse_status_type_mismatch);
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_col_type() != mat_A->get_col_type()),
+                               rocsparse_status_type_mismatch);
         }
 
         return rocsparse_status_continue;
@@ -434,42 +449,57 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG_ENUM(5, stage);
 
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
-
         ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
+            2, mat_A, (mat_A->get_init() == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(
+            3, mat_B, (mat_B->get_init() == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_format() != mat_A->get_format()),
+                           rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(2,
                            mat_A,
-                           (mat_A->data_type != descr->get_compute_datatype()),
+                           (mat_A->get_data_type() != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(3,
                            mat_B,
-                           (mat_B->data_type != descr->get_compute_datatype()),
+                           (mat_B->get_data_type() != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_row_type() != mat_A->get_row_type()),
+                           rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->get_col_type() != mat_A->get_col_type()),
+                           rocsparse_status_type_mismatch);
 
         if(stage == rocsparse_spgeam_stage_compute
            || stage == rocsparse_spgeam_stage_symbolic_compute
            || stage == rocsparse_spgeam_stage_numeric_compute || mat_C != nullptr)
         {
-            ROCSPARSE_CHECKARG(4, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
-
             ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
+                4, mat_C, (mat_C->get_init() == false), rocsparse_status_not_initialized);
+
             ROCSPARSE_CHECKARG(4,
                                mat_C,
-                               (mat_C->data_type != descr->get_compute_datatype()),
+                               (mat_C->get_format() != mat_A->get_format()),
+                               rocsparse_status_not_implemented);
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_data_type() != descr->get_compute_datatype()),
                                rocsparse_status_not_implemented);
 
-            ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
-            ROCSPARSE_CHECKARG(
-                4, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_row_type() != mat_A->get_row_type()),
+                               rocsparse_status_type_mismatch);
+            ROCSPARSE_CHECKARG(4,
+                               mat_C,
+                               (mat_C->get_col_type() != mat_A->get_col_type()),
+                               rocsparse_status_type_mismatch);
         }
 
         // Validate spgeam descriptor inputs.
@@ -866,7 +896,7 @@ namespace rocsparse
                                    void*                        temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format_A = mat_A->format;
+        const rocsparse_format format_A = mat_A->get_format();
         switch(stage)
         {
         case rocsparse_spgeam_stage_numeric_analysis:
@@ -886,8 +916,12 @@ namespace rocsparse
             {
                 if(mat_C == nullptr)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_allocate_descr_memory(
-                        handle, mat_A->rows, mat_B->cols, mat_A->nnz, mat_B->nnz));
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        descr->csrgeam_allocate_descr_memory(handle,
+                                                             mat_A->get_rows(),
+                                                             mat_B->get_cols(),
+                                                             mat_A->get_nnz(),
+                                                             mat_B->get_nnz()));
                 }
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_nnz(
@@ -895,32 +929,33 @@ namespace rocsparse
                     descr,
                     descr->get_operation_A(),
                     descr->get_operation_B(),
-                    mat_A->rows,
-                    mat_B->cols,
-                    mat_A->descr,
-                    mat_A->nnz,
-                    mat_A->row_type,
-                    mat_A->const_row_data,
-                    mat_A->col_type,
-                    mat_A->const_col_data,
-                    mat_B->descr,
-                    mat_B->nnz,
-                    mat_B->row_type,
-                    mat_B->const_row_data,
-                    mat_B->col_type,
-                    mat_B->const_col_data,
-                    mat_C != nullptr ? mat_C->descr : nullptr,
-                    mat_C != nullptr ? mat_C->row_type : ((rocsparse_indextype)-1),
-                    mat_C != nullptr ? mat_C->row_data : nullptr,
-                    mat_C != nullptr ? &mat_C->nnz : nullptr,
+                    mat_A->get_rows(),
+                    mat_B->get_cols(),
+                    mat_A->get_descr(),
+                    mat_A->get_nnz(),
+                    mat_A->get_row_type(),
+                    mat_A->get_const_row_data(),
+                    mat_A->get_col_type(),
+                    mat_A->get_const_col_data(),
+                    mat_B->get_descr(),
+                    mat_B->get_nnz(),
+                    mat_B->get_row_type(),
+                    mat_B->get_const_row_data(),
+                    mat_B->get_col_type(),
+                    mat_B->get_const_col_data(),
+                    mat_C != nullptr ? mat_C->get_descr() : nullptr,
+                    mat_C != nullptr ? mat_C->get_row_type() : ((rocsparse_indextype)-1),
+                    mat_C != nullptr ? mat_C->get_row_data() : nullptr,
+                    mat_C != nullptr ? mat_C->get_pnnz() : nullptr,
                     temp_buffer,
                     true));
 
-                if(mat_C != nullptr && mat_C->row_type == rocsparse_indextype_i32)
+                if(mat_C != nullptr && mat_C->get_row_type() == rocsparse_indextype_i32)
                 {
-                    // Temporary hack to handle the fact that we pass mat_C->nnz as an int64_t* but internally in order to match
+                    // Temporary hack to handle the fact that we pass mat_C->get_nnz() as an int64_t* but internally in order to match
                     // the legacy API we handle nnz_C using int32_t* when csr_row_ptr_C is int32_t*
-                    mat_C->nnz = *reinterpret_cast<const int32_t*>(&mat_C->nnz);
+                    int64_t nnz = mat_C->get_nnz();
+                    mat_C->set_nnz(*reinterpret_cast<const int32_t*>(&nnz));
                 }
 
                 return rocsparse_status_success;
@@ -964,45 +999,45 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_copy_row_pointer(handle,
-                                                                          mat_A->rows,
-                                                                          mat_B->cols,
-                                                                          mat_C->descr,
-                                                                          mat_C->row_type,
-                                                                          mat_C->row_data,
-                                                                          &mat_C->nnz));
+                                                                          mat_A->get_rows(),
+                                                                          mat_B->get_cols(),
+                                                                          mat_C->get_descr(),
+                                                                          mat_C->get_row_type(),
+                                                                          mat_C->get_row_data(),
+                                                                          mat_C->get_pnnz()));
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam(handle,
                                                              descr->get_operation_A(),
                                                              descr->get_operation_B(),
-                                                             mat_A->rows,
-                                                             mat_B->cols,
+                                                             mat_A->get_rows(),
+                                                             mat_B->get_cols(),
                                                              descr->get_scalar_datatype(),
                                                              local_alpha,
-                                                             mat_A->descr,
-                                                             mat_A->nnz,
-                                                             mat_A->data_type,
-                                                             mat_A->const_val_data,
-                                                             mat_A->row_type,
-                                                             mat_A->const_row_data,
-                                                             mat_A->col_type,
-                                                             mat_A->const_col_data,
+                                                             mat_A->get_descr(),
+                                                             mat_A->get_nnz(),
+                                                             mat_A->get_data_type(),
+                                                             mat_A->get_const_val_data(),
+                                                             mat_A->get_row_type(),
+                                                             mat_A->get_const_row_data(),
+                                                             mat_A->get_col_type(),
+                                                             mat_A->get_const_col_data(),
                                                              descr->get_scalar_datatype(),
                                                              local_beta,
-                                                             mat_B->descr,
-                                                             mat_B->nnz,
-                                                             mat_B->data_type,
-                                                             mat_B->const_val_data,
-                                                             mat_B->row_type,
-                                                             mat_B->const_row_data,
-                                                             mat_B->col_type,
-                                                             mat_B->const_col_data,
-                                                             mat_C->descr,
-                                                             mat_C->data_type,
-                                                             mat_C->val_data,
-                                                             mat_C->row_type,
-                                                             mat_C->const_row_data,
-                                                             mat_C->col_type,
-                                                             mat_C->col_data,
+                                                             mat_B->get_descr(),
+                                                             mat_B->get_nnz(),
+                                                             mat_B->get_data_type(),
+                                                             mat_B->get_const_val_data(),
+                                                             mat_B->get_row_type(),
+                                                             mat_B->get_const_row_data(),
+                                                             mat_B->get_col_type(),
+                                                             mat_B->get_const_col_data(),
+                                                             mat_C->get_descr(),
+                                                             mat_C->get_data_type(),
+                                                             mat_C->get_val_data(),
+                                                             mat_C->get_row_type(),
+                                                             mat_C->get_const_row_data(),
+                                                             mat_C->get_col_type(),
+                                                             mat_C->get_col_data(),
                                                              temp_buffer));
 
                 return rocsparse_status_success;
@@ -1026,35 +1061,35 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_copy_row_pointer(handle,
-                                                                          mat_A->rows,
-                                                                          mat_B->cols,
-                                                                          mat_C->descr,
-                                                                          mat_C->row_type,
-                                                                          mat_C->row_data,
-                                                                          &mat_C->nnz));
+                                                                          mat_A->get_rows(),
+                                                                          mat_B->get_cols(),
+                                                                          mat_C->get_descr(),
+                                                                          mat_C->get_row_type(),
+                                                                          mat_C->get_row_data(),
+                                                                          mat_C->get_pnnz()));
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_symbolic(handle,
                                                                       descr->get_operation_A(),
                                                                       descr->get_operation_B(),
-                                                                      mat_A->rows,
-                                                                      mat_B->cols,
-                                                                      mat_A->descr,
-                                                                      mat_A->nnz,
-                                                                      mat_A->row_type,
-                                                                      mat_A->const_row_data,
-                                                                      mat_A->col_type,
-                                                                      mat_A->const_col_data,
-                                                                      mat_B->descr,
-                                                                      mat_B->nnz,
-                                                                      mat_B->row_type,
-                                                                      mat_B->const_row_data,
-                                                                      mat_B->col_type,
-                                                                      mat_B->const_col_data,
-                                                                      mat_C->descr,
-                                                                      mat_C->row_type,
-                                                                      mat_C->const_row_data,
-                                                                      mat_C->col_type,
-                                                                      mat_C->col_data,
+                                                                      mat_A->get_rows(),
+                                                                      mat_B->get_cols(),
+                                                                      mat_A->get_descr(),
+                                                                      mat_A->get_nnz(),
+                                                                      mat_A->get_row_type(),
+                                                                      mat_A->get_const_row_data(),
+                                                                      mat_A->get_col_type(),
+                                                                      mat_A->get_const_col_data(),
+                                                                      mat_B->get_descr(),
+                                                                      mat_B->get_nnz(),
+                                                                      mat_B->get_row_type(),
+                                                                      mat_B->get_const_row_data(),
+                                                                      mat_B->get_col_type(),
+                                                                      mat_B->get_const_col_data(),
+                                                                      mat_C->get_descr(),
+                                                                      mat_C->get_row_type(),
+                                                                      mat_C->get_const_row_data(),
+                                                                      mat_C->get_col_type(),
+                                                                      mat_C->get_col_data(),
                                                                       temp_buffer));
 
                 return rocsparse_status_success;
@@ -1101,35 +1136,35 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_numeric(handle,
                                                                      descr->get_operation_A(),
                                                                      descr->get_operation_B(),
-                                                                     mat_A->rows,
-                                                                     mat_B->cols,
+                                                                     mat_A->get_rows(),
+                                                                     mat_B->get_cols(),
                                                                      descr->get_scalar_datatype(),
                                                                      local_alpha,
-                                                                     mat_A->descr,
-                                                                     mat_A->nnz,
-                                                                     mat_A->data_type,
-                                                                     mat_A->const_val_data,
-                                                                     mat_A->row_type,
-                                                                     mat_A->const_row_data,
-                                                                     mat_A->col_type,
-                                                                     mat_A->const_col_data,
+                                                                     mat_A->get_descr(),
+                                                                     mat_A->get_nnz(),
+                                                                     mat_A->get_data_type(),
+                                                                     mat_A->get_const_val_data(),
+                                                                     mat_A->get_row_type(),
+                                                                     mat_A->get_const_row_data(),
+                                                                     mat_A->get_col_type(),
+                                                                     mat_A->get_const_col_data(),
                                                                      descr->get_scalar_datatype(),
                                                                      local_beta,
-                                                                     mat_B->descr,
-                                                                     mat_B->nnz,
-                                                                     mat_B->data_type,
-                                                                     mat_B->const_val_data,
-                                                                     mat_B->row_type,
-                                                                     mat_B->const_row_data,
-                                                                     mat_B->col_type,
-                                                                     mat_B->const_col_data,
-                                                                     mat_C->descr,
-                                                                     mat_C->data_type,
-                                                                     mat_C->val_data,
-                                                                     mat_C->row_type,
-                                                                     mat_C->const_row_data,
-                                                                     mat_C->col_type,
-                                                                     mat_C->col_data,
+                                                                     mat_B->get_descr(),
+                                                                     mat_B->get_nnz(),
+                                                                     mat_B->get_data_type(),
+                                                                     mat_B->get_const_val_data(),
+                                                                     mat_B->get_row_type(),
+                                                                     mat_B->get_const_row_data(),
+                                                                     mat_B->get_col_type(),
+                                                                     mat_B->get_const_col_data(),
+                                                                     mat_C->get_descr(),
+                                                                     mat_C->get_data_type(),
+                                                                     mat_C->get_val_data(),
+                                                                     mat_C->get_row_type(),
+                                                                     mat_C->get_const_row_data(),
+                                                                     mat_C->get_col_type(),
+                                                                     mat_C->get_col_data(),
                                                                      temp_buffer));
 
                 return rocsparse_status_success;

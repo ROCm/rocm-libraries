@@ -269,7 +269,7 @@ namespace rocsparse
                                                size_t*                     buffer_size_in_bytes)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format    format    = A->format;
+        const rocsparse_format    format    = A->get_format();
         const rocsparse_operation operation = sptrsv_descr->get_operation();
         switch(format)
         {
@@ -277,16 +277,16 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size(handle,
                                                                    operation,
-                                                                   A->rows,
-                                                                   A->nnz,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
-                                                                   A->info,
+                                                                   A->get_rows(),
+                                                                   A->get_nnz(),
+                                                                   A->get_descr(),
+                                                                   A->get_data_type(),
+                                                                   A->get_const_val_data(),
+                                                                   A->get_row_type(),
+                                                                   A->get_const_row_data(),
+                                                                   A->get_col_type(),
+                                                                   A->get_const_col_data(),
+                                                                   A->get_info(),
                                                                    buffer_size_in_bytes));
 
             return rocsparse_status_success;
@@ -296,16 +296,16 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_buffer_size(handle,
                                                                    operation,
-                                                                   A->rows,
-                                                                   A->nnz,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
-                                                                   A->info,
+                                                                   A->get_rows(),
+                                                                   A->get_nnz(),
+                                                                   A->get_descr(),
+                                                                   A->get_data_type(),
+                                                                   A->get_const_val_data(),
+                                                                   A->get_row_type(),
+                                                                   A->get_const_row_data(),
+                                                                   A->get_col_type(),
+                                                                   A->get_const_col_data(),
+                                                                   A->get_info(),
                                                                    buffer_size_in_bytes));
             return rocsparse_status_success;
         }
@@ -381,7 +381,7 @@ namespace rocsparse
                                    void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format       format         = A->format;
+        const rocsparse_format       format         = A->get_format();
         const rocsparse_operation    operation      = sptrsv_descr->get_operation();
         const rocsparse_sptrsv_stage previous_stage = sptrsv_descr->get_stage();
         const rocsparse_sptrsv_alg   alg            = sptrsv_descr->get_alg();
@@ -437,7 +437,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    sptrsv_descr->set_shared_csrsv_info(A->info->get_shared_csrsv_info());
+                    sptrsv_descr->set_shared_csrsv_info(A->get_info()->get_shared_csrsv_info());
                     csrsv_info = sptrsv_descr->get_csrsv_info();
                     break;
                 }
@@ -450,16 +450,16 @@ namespace rocsparse
 
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_analysis(handle,
                                                                      operation,
-                                                                     A->rows,
-                                                                     A->nnz,
-                                                                     A->descr,
-                                                                     A->data_type,
-                                                                     A->const_val_data,
-                                                                     A->row_type,
-                                                                     A->const_row_data,
-                                                                     A->col_type,
-                                                                     A->const_col_data,
-                                                                     A->info,
+                                                                     A->get_rows(),
+                                                                     A->get_nnz(),
+                                                                     A->get_descr(),
+                                                                     A->get_data_type(),
+                                                                     A->get_const_val_data(),
+                                                                     A->get_row_type(),
+                                                                     A->get_const_row_data(),
+                                                                     A->get_col_type(),
+                                                                     A->get_const_col_data(),
+                                                                     A->get_info(),
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
@@ -488,7 +488,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    sptrsv_descr->set_shared_csrsv_info(A->info->get_shared_csrsv_info());
+                    sptrsv_descr->set_shared_csrsv_info(A->get_info()->get_shared_csrsv_info());
                     csrsv_info = sptrsv_descr->get_csrsv_info();
                     break;
                 }
@@ -501,16 +501,16 @@ namespace rocsparse
 
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coosv_analysis(handle,
                                                                      operation,
-                                                                     A->rows,
-                                                                     A->nnz,
-                                                                     A->descr,
-                                                                     A->data_type,
-                                                                     A->const_val_data,
-                                                                     A->row_type,
-                                                                     A->const_row_data,
-                                                                     A->col_type,
-                                                                     A->const_col_data,
-                                                                     A->info,
+                                                                     A->get_rows(),
+                                                                     A->get_nnz(),
+                                                                     A->get_descr(),
+                                                                     A->get_data_type(),
+                                                                     A->get_const_val_data(),
+                                                                     A->get_row_type(),
+                                                                     A->get_const_row_data(),
+                                                                     A->get_col_type(),
+                                                                     A->get_const_col_data(),
+                                                                     A->get_info(),
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
@@ -572,18 +572,18 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  operation,
-                                                                 A->rows,
-                                                                 A->nnz,
+                                                                 A->get_rows(),
+                                                                 A->get_nnz(),
                                                                  alpha_datatype,
                                                                  alpha,
-                                                                 A->descr,
-                                                                 A->data_type,
-                                                                 A->const_val_data,
-                                                                 A->row_type,
-                                                                 A->const_row_data,
-                                                                 A->col_type,
-                                                                 A->const_col_data,
-                                                                 A->info,
+                                                                 A->get_descr(),
+                                                                 A->get_data_type(),
+                                                                 A->get_const_val_data(),
+                                                                 A->get_row_type(),
+                                                                 A->get_const_row_data(),
+                                                                 A->get_col_type(),
+                                                                 A->get_const_col_data(),
+                                                                 A->get_info(),
                                                                  dnvec_descr_x->data_type,
                                                                  dnvec_descr_x->const_values,
                                                                  static_cast<int64_t>(1),
@@ -599,18 +599,18 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve(handle,
                                                                  operation,
-                                                                 A->rows,
-                                                                 A->nnz,
+                                                                 A->get_rows(),
+                                                                 A->get_nnz(),
                                                                  alpha_datatype,
                                                                  alpha,
-                                                                 A->descr,
-                                                                 A->data_type,
-                                                                 A->const_val_data,
-                                                                 A->row_type,
-                                                                 A->const_row_data,
-                                                                 A->col_type,
-                                                                 A->const_col_data,
-                                                                 A->info,
+                                                                 A->get_descr(),
+                                                                 A->get_data_type(),
+                                                                 A->get_const_val_data(),
+                                                                 A->get_row_type(),
+                                                                 A->get_const_row_data(),
+                                                                 A->get_col_type(),
+                                                                 A->get_const_col_data(),
+                                                                 A->get_info(),
                                                                  dnvec_descr_x->data_type,
                                                                  dnvec_descr_x->const_values,
                                                                  dnvec_descr_y->data_type,
@@ -707,7 +707,7 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(2, A, (A->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, A, (A->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(3, x, (x->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, y, (y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
@@ -715,7 +715,7 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2,
                        A,
-                       (A->data_type != sptrsv_descr->get_compute_datatype()),
+                       (A->get_data_type() != sptrsv_descr->get_compute_datatype()),
                        rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(3,
                        x,

@@ -86,20 +86,20 @@ rocsparse_status rocsparse::spmat_coo_aos2coo(rocsparse_handle            handle
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo_aos2coo(handle,
-                                                      source_->rows,
-                                                      source_->nnz,
-                                                      source_->row_type,
-                                                      source_->const_ind_data,
-                                                      source_->data_type,
-                                                      source_->const_val_data,
-                                                      source_->idx_base,
-                                                      target_->row_type,
-                                                      target_->row_data,
-                                                      target_->col_type,
-                                                      target_->col_data,
-                                                      target_->data_type,
-                                                      target_->val_data,
-                                                      target_->idx_base));
+                                                      source_->get_rows(),
+                                                      source_->get_nnz(),
+                                                      source_->get_row_type(),
+                                                      source_->get_const_ind_data(),
+                                                      source_->get_data_type(),
+                                                      source_->get_const_val_data(),
+                                                      source_->get_idx_base(),
+                                                      target_->get_row_type(),
+                                                      target_->get_row_data(),
+                                                      target_->get_col_type(),
+                                                      target_->get_col_data(),
+                                                      target_->get_data_type(),
+                                                      target_->get_val_data(),
+                                                      target_->get_idx_base()));
 
     return rocsparse_status_success;
 }

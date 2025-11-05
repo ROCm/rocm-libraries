@@ -114,6 +114,36 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_fill_mode& p)
 }
 
 template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_batchtype& p)
+{
+    p = (rocsparse_batchtype)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_batchstorage& p)
+{
+    p = (rocsparse_batchstorage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_dnvec_prop& p)
+{
+    p = (rocsparse_dnvec_prop)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_idvec_prop& p)
+{
+    p = (rocsparse_idvec_prop)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_dnmat_prop& p)
+{
+    p = (rocsparse_dnmat_prop)-1;
+}
+
+template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_storage_mode& p)
 {
     p = (rocsparse_storage_mode)-1;

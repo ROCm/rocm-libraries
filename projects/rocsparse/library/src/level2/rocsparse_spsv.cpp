@@ -109,7 +109,7 @@ namespace rocsparse
                                  void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format = mat->format;
+        const rocsparse_format format = mat->get_format();
         switch(format)
         {
         case rocsparse_format_csr:
@@ -120,16 +120,16 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size(handle,
                                                                        trans,
-                                                                       mat->rows,
-                                                                       mat->nnz,
-                                                                       mat->descr,
-                                                                       mat->data_type,
-                                                                       mat->const_val_data,
-                                                                       mat->row_type,
-                                                                       mat->const_row_data,
-                                                                       mat->col_type,
-                                                                       mat->const_col_data,
-                                                                       mat->info,
+                                                                       mat->get_rows(),
+                                                                       mat->get_nnz(),
+                                                                       mat->get_descr(),
+                                                                       mat->get_data_type(),
+                                                                       mat->get_const_val_data(),
+                                                                       mat->get_row_type(),
+                                                                       mat->get_const_row_data(),
+                                                                       mat->get_col_type(),
+                                                                       mat->get_const_col_data(),
+                                                                       mat->get_info(),
                                                                        buffer_size));
 
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
@@ -137,55 +137,55 @@ namespace rocsparse
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                    rocsparse_csrsv_info csrsv_info = mat->get_info()->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
-                                                   mat->rows,
-                                                   mat->nnz,
-                                                   mat->descr,
-                                                   mat->data_type,
-                                                   mat->const_val_data,
-                                                   mat->row_type,
-                                                   mat->const_row_data,
-                                                   mat->col_type,
-                                                   mat->const_col_data,
-                                                   mat->info,
+                                                   mat->get_rows(),
+                                                   mat->get_nnz(),
+                                                   mat->get_descr(),
+                                                   mat->get_data_type(),
+                                                   mat->get_const_val_data(),
+                                                   mat->get_row_type(),
+                                                   mat->get_const_row_data(),
+                                                   mat->get_col_type(),
+                                                   mat->get_const_col_data(),
+                                                   mat->get_info(),
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
+                    mat->set_analysed(true);
                 }
 
                 return rocsparse_status_success;
             }
             case rocsparse_spsv_stage_compute:
             {
-                const rocsparse_datatype datatype = mat->data_type;
+                const rocsparse_datatype datatype = mat->get_data_type();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  trans,
-                                                                 mat->rows,
-                                                                 mat->nnz,
+                                                                 mat->get_rows(),
+                                                                 mat->get_nnz(),
                                                                  datatype,
                                                                  alpha,
-                                                                 mat->descr,
+                                                                 mat->get_descr(),
                                                                  datatype,
-                                                                 mat->const_val_data,
-                                                                 mat->row_type,
-                                                                 mat->const_row_data,
-                                                                 mat->col_type,
-                                                                 mat->const_col_data,
-                                                                 mat->info,
+                                                                 mat->get_const_val_data(),
+                                                                 mat->get_row_type(),
+                                                                 mat->get_const_row_data(),
+                                                                 mat->get_col_type(),
+                                                                 mat->get_const_col_data(),
+                                                                 mat->get_info(),
                                                                  datatype,
                                                                  x->const_values,
                                                                  (int64_t)1,
                                                                  datatype,
                                                                  y->values,
                                                                  rocsparse_solve_policy_auto,
-                                                                 mat->info->get_csrsv_info(),
+                                                                 mat->get_info()->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
@@ -205,70 +205,70 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_buffer_size(handle,
                                                                        trans,
-                                                                       mat->rows,
-                                                                       mat->nnz,
-                                                                       mat->descr,
-                                                                       mat->data_type,
-                                                                       mat->const_val_data,
-                                                                       mat->row_type,
-                                                                       mat->const_row_data,
-                                                                       mat->col_type,
-                                                                       mat->const_col_data,
-                                                                       mat->info,
+                                                                       mat->get_rows(),
+                                                                       mat->get_nnz(),
+                                                                       mat->get_descr(),
+                                                                       mat->get_data_type(),
+                                                                       mat->get_const_val_data(),
+                                                                       mat->get_row_type(),
+                                                                       mat->get_const_row_data(),
+                                                                       mat->get_col_type(),
+                                                                       mat->get_const_col_data(),
+                                                                       mat->get_info(),
                                                                        buffer_size));
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                if(mat->get_analysed() == false)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                    rocsparse_csrsv_info csrsv_info = mat->get_info()->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
-                                                   mat->rows,
-                                                   mat->nnz,
-                                                   mat->descr,
-                                                   mat->data_type,
-                                                   mat->const_val_data,
-                                                   mat->row_type,
-                                                   mat->const_row_data,
-                                                   mat->col_type,
-                                                   mat->const_col_data,
-                                                   mat->info,
+                                                   mat->get_rows(),
+                                                   mat->get_nnz(),
+                                                   mat->get_descr(),
+                                                   mat->get_data_type(),
+                                                   mat->get_const_val_data(),
+                                                   mat->get_row_type(),
+                                                   mat->get_const_row_data(),
+                                                   mat->get_col_type(),
+                                                   mat->get_const_col_data(),
+                                                   mat->get_info(),
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
+                    mat->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
 
             case rocsparse_spsv_stage_compute:
             {
-                const rocsparse_datatype datatype = mat->data_type;
+                const rocsparse_datatype datatype = mat->get_data_type();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve(handle,
                                                                  trans,
-                                                                 mat->rows,
-                                                                 mat->nnz,
+                                                                 mat->get_rows(),
+                                                                 mat->get_nnz(),
                                                                  datatype,
                                                                  alpha,
-                                                                 mat->descr,
+                                                                 mat->get_descr(),
                                                                  datatype,
-                                                                 mat->const_val_data,
-                                                                 mat->row_type,
-                                                                 mat->const_row_data,
-                                                                 mat->col_type,
-                                                                 mat->const_col_data,
-                                                                 mat->info,
+                                                                 mat->get_const_val_data(),
+                                                                 mat->get_row_type(),
+                                                                 mat->get_const_row_data(),
+                                                                 mat->get_col_type(),
+                                                                 mat->get_const_col_data(),
+                                                                 mat->get_info(),
                                                                  datatype,
                                                                  x->const_values,
                                                                  datatype,
                                                                  y->values,
                                                                  rocsparse_solve_policy_auto,
-                                                                 mat->info->get_csrsv_info(),
+                                                                 mat->get_info()->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
@@ -337,13 +337,14 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(3, mat, (mat->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(3, mat, (mat->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, x, (x->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(5, y, (y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(3, mat, (mat->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(
+        3, mat, (mat->get_data_type() != compute_type), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(4, x, (x->data_type != compute_type), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(5, y, (y->data_type != compute_type), rocsparse_status_not_implemented);
 

@@ -122,6 +122,236 @@ struct rocsparse_operation_t
     // clang-format on
 };
 
+struct rocsparse_dnvec_prop_t
+{
+    using value_t                     = rocsparse_dnvec_prop;
+    static constexpr uint32_t nvalues = 8;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = { rocsparse_dnvec_prop_datatype,
+    rocsparse_dnvec_prop_size,
+    rocsparse_dnvec_prop_size_in_bytes,
+    rocsparse_dnvec_prop_inc,
+    rocsparse_dnvec_prop_batchtype,
+    rocsparse_dnvec_prop_batchstorage,
+    rocsparse_dnvec_prop_batch_count,
+    rocsparse_dnvec_prop_batch_dist
+  };
+    // clang-format on
+    static const char* to_string(rocsparse_dnvec_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_dnvec_prop_datatype:
+        {
+            return "rocsparse_dnvec_prop_datatype";
+        }
+        case rocsparse_dnvec_prop_size:
+        {
+            return "rocsparse_dnvec_prop_size";
+        }
+        case rocsparse_dnvec_prop_size_in_bytes:
+        {
+            return "rocsparse_dnvec_prop_size_in_bytes";
+        }
+        case rocsparse_dnvec_prop_inc:
+        {
+            return "rocsparse_dnvec_prop_size_inc";
+        }
+        case rocsparse_dnvec_prop_batchtype:
+        {
+            return "rocsparse_dnvec_prop_batchtype";
+        }
+        case rocsparse_dnvec_prop_batchstorage:
+        {
+            return "rocsparse_dnvec_prop_batchstorage";
+        }
+        case rocsparse_dnvec_prop_batch_count:
+        {
+            return "rocsparse_dnvec_prop_batch_count";
+        }
+        case rocsparse_dnvec_prop_batch_dist:
+        {
+            return "rocsparse_dnvec_prop_batch_dist";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_dnmat_prop_t
+{
+    using value_t                     = rocsparse_dnmat_prop;
+    static constexpr uint32_t nvalues = 9;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = { rocsparse_dnmat_prop_datatype,
+    rocsparse_dnmat_prop_order,
+    rocsparse_dnmat_prop_rows,
+    rocsparse_dnmat_prop_cols,
+    rocsparse_dnmat_prop_ld,
+    rocsparse_dnmat_prop_batchtype,
+    rocsparse_dnmat_prop_batchstorage,
+    rocsparse_dnmat_prop_batch_count,
+    rocsparse_dnmat_prop_batch_dist
+  };
+static const char * to_string(rocsparse_dnmat_prop prop)
+  {
+    switch(prop)
+      {
+      case     rocsparse_dnmat_prop_datatype:
+	{
+	  return "rocsparse_dnmat_prop_datatype";
+	}
+      case     rocsparse_dnmat_prop_rows:
+	{
+	  return "rocsparse_dnmat_prop_rows";
+	}
+      case     rocsparse_dnmat_prop_cols:
+	{
+	  return "rocsparse_dnmat_prop_cols";
+	}
+case     rocsparse_dnmat_prop_ld:
+	{
+	  return "rocsparse_dnmat_prop_size_ld";
+	}
+      case     rocsparse_dnmat_prop_order:
+	{
+	  return "rocsparse_dnmat_prop_order";
+	}
+case     rocsparse_dnmat_prop_batchtype:
+	{
+	  return "rocsparse_dnmat_prop_batchtype";
+	}
+case     rocsparse_dnmat_prop_batchstorage:
+	{
+	  return "rocsparse_dnmat_prop_batchstorage";
+	}
+case     rocsparse_dnmat_prop_batch_count:
+	{
+	  return "rocsparse_dnmat_prop_batch_count";
+	}
+      case     rocsparse_dnmat_prop_batch_dist:
+	{
+	  return "rocsparse_dnmat_prop_batch_dist";
+	}
+
+      }
+    return "unknown";
+  } // clang-format on
+};
+
+struct rocsparse_idvec_prop_t
+{
+    using value_t                     = rocsparse_idvec_prop;
+    static constexpr uint32_t nvalues = 9;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = { rocsparse_idvec_prop_indextype,
+    rocsparse_idvec_prop_size,
+    rocsparse_idvec_prop_size_in_bytes,
+    rocsparse_idvec_prop_inc,
+    rocsparse_idvec_prop_batchtype,
+    rocsparse_idvec_prop_batchstorage,
+    rocsparse_idvec_prop_batch_count,
+    rocsparse_idvec_prop_batch_dist,
+    rocsparse_idvec_prop_base
+  };
+    // clang-format on
+
+    static const char* to_string(rocsparse_idvec_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_idvec_prop_indextype:
+        {
+            return "rocsparse_idvec_prop_indextype";
+        }
+        case rocsparse_idvec_prop_base:
+        {
+            return "rocsparse_idvec_prop_base";
+        }
+        case rocsparse_idvec_prop_size:
+        {
+            return "rocsparse_idvec_prop_size";
+        }
+        case rocsparse_idvec_prop_size_in_bytes:
+        {
+            return "rocsparse_idvec_prop_size_in_bytes";
+        }
+        case rocsparse_idvec_prop_inc:
+        {
+            return "rocsparse_idvec_prop_size_inc";
+        }
+        case rocsparse_idvec_prop_batchtype:
+        {
+            return "rocsparse_idvec_prop_batchtype";
+        }
+        case rocsparse_idvec_prop_batchstorage:
+        {
+            return "rocsparse_idvec_prop_batchstorage";
+        }
+        case rocsparse_idvec_prop_batch_count:
+        {
+            return "rocsparse_idvec_prop_batch_count";
+        }
+        case rocsparse_idvec_prop_batch_dist:
+        {
+            return "rocsparse_idvec_prop_batch_dist";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_batchtype_t
+{
+    using value_t                     = rocsparse_batchtype;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {rocsparse_batchtype_pointerarray,
+    rocsparse_batchtype_strided};
+    // clang-format on
+
+    static const char* to_string(rocsparse_batchtype value)
+    {
+        switch(value)
+        {
+        case rocsparse_batchtype_pointerarray:
+        {
+            return "rocsparse_batchtype_pointerarray";
+        }
+        case rocsparse_batchtype_strided:
+        {
+            return "rocsparse_batchtype_strided";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_batchstorage_t
+{
+    using value_t                     = rocsparse_batchstorage;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {rocsparse_batchstorage_soa,
+    rocsparse_batchstorage_aos};
+    // clang-format on
+    static const char* to_string(rocsparse_batchstorage value)
+    {
+        switch(value)
+        {
+        case rocsparse_batchstorage_soa:
+        {
+            return "rocsparse_batchstorage_soa";
+        }
+        case rocsparse_batchstorage_aos:
+        {
+            return "rocsparse_batchstorage_aos";
+        }
+        }
+        return "unknown";
+    }
+};
+
 struct rocsparse_order_t
 {
     using value_t                     = rocsparse_order;

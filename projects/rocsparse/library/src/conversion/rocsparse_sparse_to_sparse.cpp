@@ -108,16 +108,19 @@ extern "C" rocsparse_status
         descr[0]->m_target_format = target_format;
         descr[0]->m_source_format = source_format;
 
-        const int64_t batch_count = source->batch_count;
+        const int64_t batch_count = source->get_batch_count();
         if(batch_count > 1)
         {
             descr[0]->batched = true;
 
             RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                                      source->offsets_batch_stride > 0);
+                                      source->get_row_batch_dist() > 0);
 
             RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                                      source->columns_values_batch_stride > 0);
+                                      source->get_col_batch_dist() > 0);
+
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      source->get_val_batch_dist() > 0);
         }
     }
     catch(const rocsparse_status& status)

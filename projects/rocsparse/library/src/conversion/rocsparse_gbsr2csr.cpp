@@ -247,34 +247,34 @@ rocsparse_status rocsparse::spmat_bsr2csr(rocsparse_handle            handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                              source->row_type != target->row_type);
+                              source->get_row_type() != target->get_row_type());
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                              source->col_type != target->col_type);
-    if(target->val_data != nullptr && source->const_val_data != nullptr)
+                              source->get_col_type() != target->get_col_type());
+    if(target->get_val_data() != nullptr && source->get_const_val_data() != nullptr)
     {
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
-                                  source->data_type != target->data_type);
+                                  source->get_data_type() != target->get_data_type());
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gbsr2csr(handle,
-                                                  source->block_dir,
-                                                  source->rows,
-                                                  source->cols,
-                                                  source->descr,
-                                                  source->data_type,
-                                                  source->const_val_data,
-                                                  source->row_type,
-                                                  source->const_row_data,
-                                                  source->col_type,
-                                                  source->col_data,
-                                                  source->block_dim,
-                                                  target->descr,
-                                                  target->data_type,
-                                                  target->val_data,
-                                                  target->row_type,
-                                                  target->row_data,
-                                                  target->col_type,
-                                                  target->col_data));
+                                                  source->get_block_dir(),
+                                                  source->get_rows(),
+                                                  source->get_cols(),
+                                                  source->get_descr(),
+                                                  source->get_data_type(),
+                                                  source->get_const_val_data(),
+                                                  source->get_row_type(),
+                                                  source->get_const_row_data(),
+                                                  source->get_col_type(),
+                                                  source->get_col_data(),
+                                                  source->get_block_dim(),
+                                                  target->get_descr(),
+                                                  target->get_data_type(),
+                                                  target->get_val_data(),
+                                                  target->get_row_type(),
+                                                  target->get_row_data(),
+                                                  target->get_col_type(),
+                                                  target->get_col_data()));
 
     return rocsparse_status_success;
 }

@@ -38,7 +38,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
     if(descr_->m_permissive == false)
     {
         std::stringstream message;
-        message << "The conversion from " << source_->format << " to " << target_->format
+        message << "The conversion from " << source_->get_format() << " to "
+                << target_->get_format()
                 << " requires the calculation of an intermediate matrix with the CSR format, call "
                    "the routine rocsparse_sparse_to_sparse_permissive to allow such calculation.";
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented,
@@ -71,12 +72,12 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         int64_t             csr_m{};
         int64_t             csr_n{};
         int64_t             csr_nnz{};
-        rocsparse_indextype row_type = source_->row_type;
-        rocsparse_indextype col_type = source_->col_type;
+        rocsparse_indextype row_type = source_->get_row_type();
+        rocsparse_indextype col_type = source_->get_col_type();
         //
         // Get csr csr dimensions.
         //
-        switch(source_->format)
+        switch(source_->get_format())
         {
         case rocsparse_format_bell:
         {
@@ -84,30 +85,30 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         }
         case rocsparse_format_bsr:
         {
-            row_type = source_->row_type;
-            col_type = source_->col_type;
-            csr_m    = source_->rows * source_->block_dim;
-            csr_n    = source_->cols * source_->block_dim;
-            csr_nnz  = source_->nnz * source_->block_dim * source_->block_dim;
+            row_type = source_->get_row_type();
+            col_type = source_->get_col_type();
+            csr_m    = source_->get_rows() * source_->get_block_dim();
+            csr_n    = source_->get_cols() * source_->get_block_dim();
+            csr_nnz  = source_->get_nnz() * source_->get_block_dim() * source_->get_block_dim();
             break;
         }
         case rocsparse_format_ell:
         {
-            row_type = source_->row_type;
-            col_type = source_->col_type;
-            csr_m    = source_->rows;
-            csr_n    = source_->cols;
+            row_type = source_->get_row_type();
+            col_type = source_->get_col_type();
+            csr_m    = source_->get_rows();
+            csr_n    = source_->get_cols();
             csr_nnz  = 0; // cannot know.
 
-            if(target_->format == rocsparse_format_csc)
+            if(target_->get_format() == rocsparse_format_csc)
             {
-                row_type = target_->col_type;
-                col_type = target_->row_type;
+                row_type = target_->get_col_type();
+                col_type = target_->get_row_type();
             }
-            if(target_->format == rocsparse_format_bsr)
+            if(target_->get_format() == rocsparse_format_bsr)
             {
-                row_type = target_->row_type;
-                col_type = target_->col_type;
+                row_type = target_->get_row_type();
+                col_type = target_->get_col_type();
             }
 
             break;
@@ -115,32 +116,32 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         case rocsparse_format_coo:
         case rocsparse_format_coo_aos:
         {
-            row_type = source_->row_type;
-            col_type = source_->col_type;
-            csr_m    = source_->rows;
-            csr_n    = source_->cols;
-            csr_nnz  = source_->nnz;
+            row_type = source_->get_row_type();
+            col_type = source_->get_col_type();
+            csr_m    = source_->get_rows();
+            csr_n    = source_->get_cols();
+            csr_nnz  = source_->get_nnz();
 
-            if(target_->format == rocsparse_format_csc)
+            if(target_->get_format() == rocsparse_format_csc)
             {
-                row_type = target_->col_type;
-                col_type = target_->row_type;
+                row_type = target_->get_col_type();
+                col_type = target_->get_row_type();
             }
-            if(target_->format == rocsparse_format_bsr)
+            if(target_->get_format() == rocsparse_format_bsr)
             {
-                row_type = target_->row_type;
-                col_type = target_->col_type;
+                row_type = target_->get_row_type();
+                col_type = target_->get_col_type();
             }
 
             break;
         }
         case rocsparse_format_csc:
         {
-            row_type = source_->col_type;
-            col_type = source_->row_type;
-            csr_m    = source_->rows;
-            csr_n    = source_->cols;
-            csr_nnz  = source_->nnz;
+            row_type = source_->get_col_type();
+            col_type = source_->get_row_type();
+            csr_m    = source_->get_rows();
+            csr_n    = source_->get_cols();
+            csr_nnz  = source_->get_nnz();
             break;
         }
         case rocsparse_format_csr:
@@ -166,9 +167,9 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         if(csr_nnz > 0)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_col__, rocsparse::indextype_sizeof(source_->col_type) * csr_nnz));
+                &TEMP_col__, rocsparse::indextype_sizeof(source_->get_col_type()) * csr_nnz));
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_val__, rocsparse::datatype_sizeof(source_->data_type) * csr_nnz));
+                &TEMP_val__, rocsparse::datatype_sizeof(source_->get_data_type()) * csr_nnz));
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_csr_descr(&intermediate,
                                                              csr_m,
@@ -179,8 +180,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
                                                              TEMP_val__,
                                                              row_type,
                                                              col_type,
-                                                             source_->idx_base,
-                                                             source_->data_type));
+                                                             source_->get_idx_base(),
+                                                             source_->get_data_type()));
 
         //
         // Attach the intermediate.
@@ -230,19 +231,21 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         //
         // Here we know unknown size of intermediate if any.
         //
-        switch(source_->format)
+        switch(source_->get_format())
         {
         case rocsparse_format_ell:
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_col__,
-                rocsparse::indextype_sizeof(intermediate->col_type) * intermediate->nnz));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMalloc(&TEMP_col__,
+                                    rocsparse::indextype_sizeof(intermediate->get_col_type())
+                                        * intermediate->get_nnz()));
             //
             // MUST BE CONDITIONAL
             //
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_val__,
-                rocsparse::datatype_sizeof(intermediate->data_type) * intermediate->nnz));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMalloc(&TEMP_val__,
+                                    rocsparse::datatype_sizeof(intermediate->get_data_type())
+                                        * intermediate->get_nnz()));
             rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
             break;
         }

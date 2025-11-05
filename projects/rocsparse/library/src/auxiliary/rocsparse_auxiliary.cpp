@@ -1867,37 +1867,18 @@ try
     ROCSPARSE_CHECKARG_ENUM(8, idx_base);
     ROCSPARSE_CHECKARG_ENUM(9, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-    (*descr)->nnz  = nnz;
-
-    (*descr)->row_data = coo_row_ind;
-    (*descr)->col_data = coo_col_ind;
-    (*descr)->val_data = coo_val;
-
-    (*descr)->const_row_data = coo_row_ind;
-    (*descr)->const_col_data = coo_col_ind;
-    (*descr)->const_val_data = coo_val;
-
-    (*descr)->row_type  = idx_type;
-    (*descr)->col_type  = idx_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_coo;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
+    *descr = _rocsparse_spmat_descr::create_coo(rows,
+                                                cols,
+                                                nnz,
+                                                coo_row_ind,
+                                                coo_row_ind,
+                                                coo_col_ind,
+                                                coo_col_ind,
+                                                coo_val,
+                                                coo_val,
+                                                idx_type,
+                                                idx_base,
+                                                data_type);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1934,41 +1915,18 @@ try
     ROCSPARSE_CHECKARG_ENUM(8, idx_base);
     ROCSPARSE_CHECKARG_ENUM(9, data_type);
 
-    rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
-
-    new_descr->init = true;
-
-    new_descr->rows = rows;
-    new_descr->cols = cols;
-    new_descr->nnz  = nnz;
-
-    new_descr->row_data = nullptr;
-    new_descr->col_data = nullptr;
-    new_descr->val_data = nullptr;
-
-    new_descr->const_row_data = coo_row_ind;
-    new_descr->const_col_data = coo_col_ind;
-    new_descr->const_val_data = coo_val;
-
-    new_descr->row_type  = idx_type;
-    new_descr->col_type  = idx_type;
-    new_descr->data_type = data_type;
-
-    new_descr->idx_base = idx_base;
-    new_descr->format   = rocsparse_format_coo;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&new_descr->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&new_descr->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(new_descr->descr, idx_base));
-
-    new_descr->batch_count                 = 1;
-    new_descr->batch_stride                = 0;
-    new_descr->offsets_batch_stride        = 0;
-    new_descr->columns_values_batch_stride = 0;
-
-    *descr = new_descr;
+    *descr = _rocsparse_spmat_descr::create_coo(rows,
+                                                cols,
+                                                nnz,
+                                                coo_row_ind,
+                                                nullptr,
+                                                coo_col_ind,
+                                                nullptr,
+                                                coo_val,
+                                                nullptr,
+                                                idx_type,
+                                                idx_base,
+                                                data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2009,37 +1967,8 @@ try
     ROCSPARSE_CHECKARG_ENUM(7, idx_base);
     ROCSPARSE_CHECKARG_ENUM(8, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-    (*descr)->nnz  = nnz;
-
-    (*descr)->ind_data = coo_ind;
-    (*descr)->val_data = coo_val;
-
-    (*descr)->const_ind_data = coo_ind;
-    (*descr)->const_val_data = coo_val;
-
-    (*descr)->row_type  = idx_type;
-    (*descr)->col_type  = idx_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_coo_aos;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
+    *descr = _rocsparse_spmat_descr::create_coo_aos(
+        rows, cols, nnz, coo_ind, coo_ind, coo_val, coo_val, idx_type, idx_base, data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2089,39 +2018,19 @@ try
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-    (*descr)->nnz  = nnz;
-
-    (*descr)->row_data = csr_row_ptr;
-    (*descr)->col_data = csr_col_ind;
-    (*descr)->val_data = csr_val;
-
-    (*descr)->const_row_data = csr_row_ptr;
-    (*descr)->const_col_data = csr_col_ind;
-    (*descr)->const_val_data = csr_val;
-
-    (*descr)->row_type  = row_ptr_type;
-    (*descr)->col_type  = col_ind_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_csr;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
+    *descr = _rocsparse_spmat_descr::create_csr(rows,
+                                                cols,
+                                                nnz,
+                                                csr_row_ptr,
+                                                csr_row_ptr,
+                                                csr_col_ind,
+                                                csr_col_ind,
+                                                csr_val,
+                                                csr_val,
+                                                row_ptr_type,
+                                                col_ind_type,
+                                                idx_base,
+                                                data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2166,41 +2075,19 @@ try
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
 
-    rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
-
-    new_descr->init = true;
-
-    new_descr->rows = rows;
-    new_descr->cols = cols;
-    new_descr->nnz  = nnz;
-
-    new_descr->row_data = nullptr;
-    new_descr->col_data = nullptr;
-    new_descr->val_data = nullptr;
-
-    new_descr->const_row_data = csr_row_ptr;
-    new_descr->const_col_data = csr_col_ind;
-    new_descr->const_val_data = csr_val;
-
-    new_descr->row_type  = row_ptr_type;
-    new_descr->col_type  = col_ind_type;
-    new_descr->data_type = data_type;
-
-    new_descr->idx_base = idx_base;
-    new_descr->format   = rocsparse_format_csr;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&new_descr->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&new_descr->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(new_descr->descr, idx_base));
-
-    new_descr->batch_count                 = 1;
-    new_descr->batch_stride                = 0;
-    new_descr->offsets_batch_stride        = 0;
-    new_descr->columns_values_batch_stride = 0;
-
-    *descr = new_descr;
+    *descr = _rocsparse_spmat_descr::create_csr(rows,
+                                                cols,
+                                                nnz,
+                                                csr_row_ptr,
+                                                nullptr,
+                                                csr_col_ind,
+                                                nullptr,
+                                                csr_val,
+                                                nullptr,
+                                                row_ptr_type,
+                                                col_ind_type,
+                                                idx_base,
+                                                data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2243,39 +2130,19 @@ try
     ROCSPARSE_CHECKARG_ENUM(8, row_ind_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-    (*descr)->nnz  = nnz;
-
-    (*descr)->row_data = csc_row_ind;
-    (*descr)->col_data = csc_col_ptr;
-    (*descr)->val_data = csc_val;
-
-    (*descr)->const_row_data = csc_row_ind;
-    (*descr)->const_col_data = csc_col_ptr;
-    (*descr)->const_val_data = csc_val;
-
-    (*descr)->row_type  = row_ind_type;
-    (*descr)->col_type  = col_ptr_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_csc;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
+    *descr = _rocsparse_spmat_descr::create_csc(rows,
+                                                cols,
+                                                nnz,
+                                                csc_col_ptr,
+                                                csc_col_ptr,
+                                                csc_row_ind,
+                                                csc_row_ind,
+                                                csc_val,
+                                                csc_val,
+                                                col_ptr_type,
+                                                row_ind_type,
+                                                idx_base,
+                                                data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2313,41 +2180,20 @@ try
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
 
-    rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
+    *descr = _rocsparse_spmat_descr::create_csc(rows,
+                                                cols,
+                                                nnz,
+                                                csc_col_ptr,
+                                                nullptr,
+                                                csc_row_ind,
+                                                nullptr,
+                                                csc_val,
+                                                nullptr,
+                                                col_ptr_type,
+                                                row_ind_type,
+                                                idx_base,
+                                                data_type);
 
-    new_descr->init = true;
-
-    new_descr->rows = rows;
-    new_descr->cols = cols;
-    new_descr->nnz  = nnz;
-
-    new_descr->row_data = nullptr;
-    new_descr->col_data = nullptr;
-    new_descr->val_data = nullptr;
-
-    new_descr->const_row_data = csc_row_ind;
-    new_descr->const_col_data = csc_col_ptr;
-    new_descr->const_val_data = csc_val;
-
-    new_descr->row_type  = row_ind_type;
-    new_descr->col_type  = col_ptr_type;
-    new_descr->data_type = data_type;
-
-    new_descr->idx_base = idx_base;
-    new_descr->format   = rocsparse_format_csc;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&new_descr->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&new_descr->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(new_descr->descr, idx_base));
-
-    new_descr->batch_count                 = 1;
-    new_descr->batch_stride                = 0;
-    new_descr->offsets_batch_stride        = 0;
-    new_descr->columns_values_batch_stride = 0;
-
-    *descr = new_descr;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2387,44 +2233,16 @@ try
     ROCSPARSE_CHECKARG_ENUM(7, idx_base);
     ROCSPARSE_CHECKARG_ENUM(8, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows      = rows;
-    (*descr)->cols      = cols;
-    (*descr)->ell_width = ell_width;
-
-    (*descr)->col_data = ell_col_ind;
-    (*descr)->val_data = ell_val;
-
-    (*descr)->const_col_data = ell_col_ind;
-    (*descr)->const_val_data = ell_val;
-
-    (*descr)->row_type  = idx_type;
-    (*descr)->col_type  = idx_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_ell;
-
-    //
-    // This is not really the number of non-zeros.
-    // TODO: refactor the descriptors and having a proper design (get_nnz and different implementation for different format).
-    // ell_width = nnz / rows.
-    //
-    (*descr)->nnz = ell_width * rows;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
-
+    *descr = _rocsparse_spmat_descr::create_ell(rows,
+                                                cols,
+                                                ell_col_ind,
+                                                ell_col_ind,
+                                                ell_val,
+                                                ell_val,
+                                                ell_width,
+                                                idx_type,
+                                                idx_base,
+                                                data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2472,39 +2290,18 @@ try
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-
-    (*descr)->ell_cols  = ell_cols;
-    (*descr)->block_dir = ell_block_dir;
-    (*descr)->block_dim = ell_block_dim;
-
-    (*descr)->col_data = ell_col_ind;
-    (*descr)->val_data = ell_val;
-
-    (*descr)->const_col_data = ell_col_ind;
-    (*descr)->const_val_data = ell_val;
-
-    (*descr)->row_type  = idx_type;
-    (*descr)->col_type  = idx_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_bell;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
+    *descr = _rocsparse_spmat_descr::create_bell(rows,
+                                                 cols,
+                                                 ell_block_dir,
+                                                 ell_block_dim,
+                                                 ell_col_ind,
+                                                 ell_col_ind,
+                                                 ell_val,
+                                                 ell_val,
+                                                 ell_cols,
+                                                 idx_type,
+                                                 idx_base,
+                                                 data_type);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2545,42 +2342,19 @@ try
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
 
-    rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
+    *descr = _rocsparse_spmat_descr::create_bell(rows,
+                                                 cols,
+                                                 ell_block_dir,
+                                                 ell_block_dim,
+                                                 ell_col_ind,
+                                                 nullptr,
+                                                 ell_val,
+                                                 nullptr,
+                                                 ell_cols,
+                                                 idx_type,
+                                                 idx_base,
+                                                 data_type);
 
-    new_descr->init = true;
-
-    new_descr->rows = rows;
-    new_descr->cols = cols;
-
-    new_descr->ell_cols  = ell_cols;
-    new_descr->block_dir = ell_block_dir;
-    new_descr->block_dim = ell_block_dim;
-
-    new_descr->col_data = nullptr;
-    new_descr->val_data = nullptr;
-
-    new_descr->const_col_data = ell_col_ind;
-    new_descr->const_val_data = ell_val;
-
-    new_descr->row_type  = idx_type;
-    new_descr->col_type  = idx_type;
-    new_descr->data_type = data_type;
-
-    new_descr->idx_base = idx_base;
-    new_descr->format   = rocsparse_format_bell;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&new_descr->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&new_descr->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(new_descr->descr, idx_base));
-
-    new_descr->batch_count                 = 1;
-    new_descr->batch_stride                = 0;
-    new_descr->offsets_batch_stride        = 0;
-    new_descr->columns_values_batch_stride = 0;
-
-    *descr = new_descr;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2629,42 +2403,22 @@ try
     ROCSPARSE_CHECKARG_ENUM(11, idx_base);
     ROCSPARSE_CHECKARG_ENUM(12, data_type);
 
-    *descr = new _rocsparse_spmat_descr;
+    *descr = _rocsparse_spmat_descr::create_bsr(mb,
+                                                nb,
+                                                nnzb,
+                                                block_dir,
+                                                block_dim,
+                                                bsr_row_ptr,
+                                                bsr_row_ptr,
+                                                bsr_col_ind,
+                                                bsr_col_ind,
+                                                bsr_val,
+                                                bsr_val,
+                                                row_ptr_type,
+                                                col_ind_type,
+                                                idx_base,
+                                                data_type);
 
-    (*descr)->init = true;
-
-    (*descr)->rows = mb;
-    (*descr)->cols = nb;
-    (*descr)->nnz  = nnzb;
-
-    (*descr)->row_data = bsr_row_ptr;
-    (*descr)->col_data = bsr_col_ind;
-    (*descr)->val_data = bsr_val;
-
-    (*descr)->const_row_data = bsr_row_ptr;
-    (*descr)->const_col_data = bsr_col_ind;
-    (*descr)->const_val_data = bsr_val;
-
-    (*descr)->row_type  = row_ptr_type;
-    (*descr)->col_type  = col_ind_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_bsr;
-
-    (*descr)->block_dim = block_dim;
-    (*descr)->block_dir = block_dir;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -2685,14 +2439,11 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
 
     // Check if descriptor has been initialized
-    if(descr->init == false)
+    if(descr->get_init() == false)
     {
         // Do nothing
         return rocsparse_status_success;
     }
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_mat_descr(descr->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_destroy_mat_info(descr->info));
 
     delete descr;
     return rocsparse_status_success;
@@ -2723,7 +2474,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2734,17 +2485,17 @@ try
     ROCSPARSE_CHECKARG_POINTER(8, idx_base);
     ROCSPARSE_CHECKARG_POINTER(9, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *coo_row_ind = descr->row_data;
-    *coo_col_ind = descr->col_data;
-    *coo_val     = descr->val_data;
+    *coo_row_ind = descr->get_row_data();
+    *coo_col_ind = descr->get_col_data();
+    *coo_val     = descr->get_val_data();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -2770,7 +2521,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2781,17 +2532,17 @@ try
     ROCSPARSE_CHECKARG_POINTER(8, idx_base);
     ROCSPARSE_CHECKARG_POINTER(9, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *coo_row_ind = descr->const_row_data;
-    *coo_col_ind = descr->const_col_data;
-    *coo_val     = descr->const_val_data;
+    *coo_row_ind = descr->get_const_row_data();
+    *coo_col_ind = descr->get_const_col_data();
+    *coo_val     = descr->get_const_val_data();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -2820,7 +2571,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2830,16 +2581,16 @@ try
     ROCSPARSE_CHECKARG_POINTER(7, idx_base);
     ROCSPARSE_CHECKARG_POINTER(8, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *coo_ind = descr->ind_data;
-    *coo_val = descr->val_data;
+    *coo_ind = descr->get_ind_data();
+    *coo_val = descr->get_val_data();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -2864,7 +2615,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2874,16 +2625,16 @@ try
     ROCSPARSE_CHECKARG_POINTER(7, idx_base);
     ROCSPARSE_CHECKARG_POINTER(8, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *coo_ind = descr->const_ind_data;
-    *coo_val = descr->const_val_data;
+    *coo_ind = descr->get_const_ind_data();
+    *coo_val = descr->get_const_val_data();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -2914,7 +2665,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2926,18 +2677,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *csr_row_ptr = descr->row_data;
-    *csr_col_ind = descr->col_data;
-    *csr_val     = descr->val_data;
+    *csr_row_ptr = descr->get_row_data();
+    *csr_col_ind = descr->get_col_data();
+    *csr_val     = descr->get_val_data();
 
-    *row_ptr_type = descr->row_type;
-    *col_ind_type = descr->col_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
+    *row_ptr_type = descr->get_row_type();
+    *col_ind_type = descr->get_col_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -2964,7 +2715,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -2976,18 +2727,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *csr_row_ptr = descr->const_row_data;
-    *csr_col_ind = descr->const_col_data;
-    *csr_val     = descr->const_val_data;
+    *csr_row_ptr = descr->get_const_row_data();
+    *csr_col_ind = descr->get_const_col_data();
+    *csr_val     = descr->get_const_val_data();
 
-    *row_ptr_type = descr->row_type;
-    *col_ind_type = descr->col_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
+    *row_ptr_type = descr->get_row_type();
+    *col_ind_type = descr->get_col_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3045,25 +2796,25 @@ try
     }
 
     // Check if descriptor has been initialized
-    if(descr->init == false)
+    if(descr->get_init() == false)
     {
         return rocsparse_status_not_initialized;
     }
 
-    *brows = descr->rows;
-    *bcols = descr->cols;
-    *bnnz  = descr->nnz;
+    *brows = descr->get_rows();
+    *bcols = descr->get_cols();
+    *bnnz  = descr->get_nnz();
 
-    *bsr_row_ptr = descr->const_row_data;
-    *bsr_col_ind = descr->const_col_data;
-    *bsr_val     = descr->const_val_data;
+    *bsr_row_ptr = descr->get_const_row_data();
+    *bsr_col_ind = descr->get_const_col_data();
+    *bsr_val     = descr->get_const_val_data();
 
-    *row_ptr_type = descr->row_type;
-    *col_ind_type = descr->col_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
-    *bdim         = descr->block_dim;
-    *bdir         = descr->block_dir;
+    *row_ptr_type = descr->get_row_type();
+    *col_ind_type = descr->get_col_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
+    *bdim         = descr->get_block_dim();
+    *bdir         = descr->get_block_dir();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -3116,25 +2867,25 @@ try
     }
 
     // Check if descriptor has been initialized
-    if(descr->init == false)
+    if(descr->get_init() == false)
     {
         return rocsparse_status_not_initialized;
     }
 
-    *brows = descr->rows;
-    *bcols = descr->cols;
-    *bnnz  = descr->nnz;
+    *brows = descr->get_rows();
+    *bcols = descr->get_cols();
+    *bnnz  = descr->get_nnz();
 
-    *bsr_row_ptr = descr->row_data;
-    *bsr_col_ind = descr->col_data;
-    *bsr_val     = descr->val_data;
+    *bsr_row_ptr = descr->get_row_data();
+    *bsr_col_ind = descr->get_col_data();
+    *bsr_val     = descr->get_val_data();
 
-    *row_ptr_type = descr->row_type;
-    *col_ind_type = descr->col_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
-    *bdim         = descr->block_dim;
-    *bdir         = descr->block_dir;
+    *row_ptr_type = descr->get_row_type();
+    *col_ind_type = descr->get_col_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
+    *bdim         = descr->get_block_dim();
+    *bdir         = descr->get_block_dir();
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -3164,7 +2915,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -3176,18 +2927,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *csc_col_ptr = descr->col_data;
-    *csc_row_ind = descr->row_data;
-    *csc_val     = descr->val_data;
+    *csc_col_ptr = descr->get_col_data();
+    *csc_row_ind = descr->get_row_data();
+    *csc_val     = descr->get_val_data();
 
-    *col_ptr_type = descr->col_type;
-    *row_ind_type = descr->row_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
+    *col_ptr_type = descr->get_col_type();
+    *row_ind_type = descr->get_row_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3214,7 +2965,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
@@ -3226,18 +2977,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
-    *csc_col_ptr = descr->const_col_data;
-    *csc_row_ind = descr->const_row_data;
-    *csc_val     = descr->const_val_data;
+    *csc_col_ptr = descr->get_const_col_data();
+    *csc_row_ind = descr->get_const_row_data();
+    *csc_val     = descr->get_const_val_data();
 
-    *row_ind_type = descr->row_type;
-    *col_ptr_type = descr->col_type;
-    *idx_base     = descr->idx_base;
-    *data_type    = descr->data_type;
+    *row_ind_type = descr->get_row_type();
+    *col_ptr_type = descr->get_col_type();
+    *idx_base     = descr->get_idx_base();
+    *data_type    = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3266,7 +3017,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, ell_col_ind);
@@ -3276,16 +3027,16 @@ try
     ROCSPARSE_CHECKARG_POINTER(7, idx_base);
     ROCSPARSE_CHECKARG_POINTER(8, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
 
-    *ell_col_ind = descr->col_data;
-    *ell_val     = descr->val_data;
-    *ell_width   = descr->ell_width;
+    *ell_col_ind = descr->get_col_data();
+    *ell_val     = descr->get_val_data();
+    *ell_width   = descr->get_ell_width();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3310,7 +3061,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, ell_col_ind);
@@ -3320,16 +3071,16 @@ try
     ROCSPARSE_CHECKARG_POINTER(7, idx_base);
     ROCSPARSE_CHECKARG_POINTER(8, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
 
-    *ell_col_ind = descr->const_col_data;
-    *ell_val     = descr->const_val_data;
-    *ell_width   = descr->ell_width;
+    *ell_col_ind = descr->get_const_col_data();
+    *ell_val     = descr->get_const_val_data();
+    *ell_width   = descr->get_ell_width();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3360,7 +3111,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, ell_block_dir);
@@ -3372,18 +3123,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
 
-    *ell_col_ind   = descr->col_data;
-    *ell_val       = descr->val_data;
-    *ell_cols      = descr->ell_cols;
-    *ell_block_dir = descr->block_dir;
-    *ell_block_dim = descr->block_dim;
+    *ell_col_ind   = descr->get_col_data();
+    *ell_val       = descr->get_val_data();
+    *ell_cols      = descr->get_ell_cols();
+    *ell_block_dir = descr->get_block_dir();
+    *ell_block_dim = descr->get_block_dim();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3410,7 +3161,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, ell_block_dir);
@@ -3422,18 +3173,18 @@ try
     ROCSPARSE_CHECKARG_POINTER(9, idx_base);
     ROCSPARSE_CHECKARG_POINTER(10, data_type);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
 
-    *ell_col_ind   = descr->const_col_data;
-    *ell_val       = descr->const_val_data;
-    *ell_cols      = descr->ell_cols;
-    *ell_block_dir = descr->block_dir;
-    *ell_block_dim = descr->block_dim;
+    *ell_col_ind   = descr->get_const_col_data();
+    *ell_val       = descr->get_const_val_data();
+    *ell_cols      = descr->get_ell_cols();
+    *ell_block_dir = descr->get_block_dir();
+    *ell_block_dim = descr->get_block_dim();
 
-    *idx_type  = descr->row_type;
-    *idx_base  = descr->idx_base;
-    *data_type = descr->data_type;
+    *idx_type  = descr->get_row_type();
+    *idx_base  = descr->get_idx_base();
+    *data_type = descr->get_data_type();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3456,18 +3207,18 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, coo_row_ind);
     ROCSPARSE_CHECKARG_POINTER(2, coo_col_ind);
     ROCSPARSE_CHECKARG_POINTER(3, coo_val);
 
-    descr->row_data = coo_row_ind;
-    descr->col_data = coo_col_ind;
-    descr->val_data = coo_val;
+    descr->set_row_data(coo_row_ind);
+    descr->set_col_data(coo_col_ind);
+    descr->set_val_data(coo_val);
 
-    descr->const_row_data = coo_row_ind;
-    descr->const_col_data = coo_col_ind;
-    descr->const_val_data = coo_val;
+    descr->set_const_row_data(coo_row_ind);
+    descr->set_const_col_data(coo_col_ind);
+    descr->set_const_val_data(coo_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3488,15 +3239,15 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, coo_ind);
     ROCSPARSE_CHECKARG_POINTER(2, coo_val);
 
-    descr->ind_data = coo_ind;
-    descr->val_data = coo_val;
+    descr->set_ind_data(coo_ind);
+    descr->set_val_data(coo_val);
 
-    descr->const_ind_data = coo_ind;
-    descr->const_val_data = coo_val;
+    descr->set_const_ind_data(coo_ind);
+    descr->set_const_val_data(coo_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3519,24 +3270,26 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(1, csr_row_ptr);
+    ROCSPARSE_CHECKARG(2,
+                       csr_col_ind,
+                       descr->get_nnz() > 0 && csr_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
-        2, csr_col_ind, descr->nnz > 0 && csr_col_ind == nullptr, rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
+        3, csr_val, descr->get_nnz() > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
     // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    descr->set_analysed(false);
 
-    descr->row_data = csr_row_ptr;
-    descr->col_data = csr_col_ind;
-    descr->val_data = csr_val;
+    descr->set_row_data(csr_row_ptr);
+    descr->set_col_data(csr_col_ind);
+    descr->set_val_data(csr_val);
 
-    descr->const_row_data = csr_row_ptr;
-    descr->const_col_data = csr_col_ind;
-    descr->const_val_data = csr_val;
+    descr->set_const_row_data(csr_row_ptr);
+    descr->set_const_col_data(csr_col_ind);
+    descr->set_const_val_data(csr_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3559,24 +3312,26 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(1, csc_col_ptr);
+    ROCSPARSE_CHECKARG(2,
+                       csc_row_ind,
+                       descr->get_nnz() > 0 && csc_row_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
-        2, csc_row_ind, descr->nnz > 0 && csc_row_ind == nullptr, rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
+        3, csc_val, descr->get_nnz() > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
 
     // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    descr->set_analysed(false);
 
-    descr->row_data = csc_row_ind;
-    descr->col_data = csc_col_ptr;
-    descr->val_data = csc_val;
+    descr->set_row_data(csc_row_ind);
+    descr->set_col_data(csc_col_ptr);
+    descr->set_val_data(csc_val);
 
-    descr->const_row_data = csc_row_ind;
-    descr->const_col_data = csc_col_ptr;
-    descr->const_val_data = csc_val;
+    descr->set_const_row_data(csc_row_ind);
+    descr->set_const_col_data(csc_col_ptr);
+    descr->set_const_val_data(csc_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3597,15 +3352,15 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, ell_col_ind);
     ROCSPARSE_CHECKARG_POINTER(2, ell_val);
 
-    descr->col_data = ell_col_ind;
-    descr->val_data = ell_val;
+    descr->set_col_data(ell_col_ind);
+    descr->set_val_data(ell_val);
 
-    descr->const_col_data = ell_col_ind;
-    descr->const_val_data = ell_val;
+    descr->set_const_col_data(ell_col_ind);
+    descr->set_const_val_data(ell_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3628,24 +3383,26 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
 
     ROCSPARSE_CHECKARG_POINTER(1, bsr_row_ptr);
+    ROCSPARSE_CHECKARG(2,
+                       bsr_col_ind,
+                       descr->get_nnz() > 0 && bsr_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
-        2, bsr_col_ind, descr->nnz > 0 && bsr_col_ind == nullptr, rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(
-        3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
+        3, bsr_val, descr->get_nnz() > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
 
     // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    descr->set_analysed(false);
 
-    descr->row_data = bsr_row_ptr;
-    descr->col_data = bsr_col_ind;
-    descr->val_data = bsr_val;
+    descr->set_row_data(bsr_row_ptr);
+    descr->set_col_data(bsr_col_ind);
+    descr->set_val_data(bsr_val);
 
-    descr->const_row_data = bsr_row_ptr;
-    descr->const_col_data = bsr_col_ind;
-    descr->const_val_data = bsr_val;
+    descr->set_const_row_data(bsr_row_ptr);
+    descr->set_const_col_data(bsr_col_ind);
+    descr->set_const_val_data(bsr_val);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3668,14 +3425,14 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
 
-    *rows = descr->rows;
-    *cols = descr->cols;
-    *nnz  = descr->nnz;
+    *rows = descr->get_rows();
+    *cols = descr->get_cols();
+    *nnz  = descr->get_nnz();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3696,10 +3453,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, format);
 
-    *format = descr->format;
+    *format = descr->get_format();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3720,10 +3477,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, idx_base);
 
-    *idx_base = descr->idx_base;
+    *idx_base = descr->get_idx_base();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3743,9 +3500,9 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
-    *values = descr->val_data;
+    *values = descr->get_val_data();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3763,10 +3520,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
 
-    *values = descr->const_val_data;
+    *values = descr->get_const_val_data();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3786,11 +3543,11 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
 
-    descr->val_data       = values;
-    descr->const_val_data = values;
+    descr->set_val_data(values);
+    descr->set_const_val_data(values);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3811,10 +3568,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, batch_count);
 
-    *batch_count = descr->batch_count;
+    *batch_count = descr->get_batch_count();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3834,26 +3591,27 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, nnz);
 
-    switch(descr->format)
+    switch(descr->get_format())
     {
     case rocsparse_format_bell:
     {
-        nnz[0] = descr->ell_cols * descr->rows * descr->block_dim * descr->block_dim;
+        nnz[0] = descr->get_ell_cols() * descr->get_rows() * descr->get_block_dim()
+                 * descr->get_block_dim();
         break;
     }
 
     case rocsparse_format_ell:
     {
-        nnz[0] = descr->ell_width * descr->rows;
+        nnz[0] = descr->get_ell_width() * descr->get_rows();
         break;
     }
 
     case rocsparse_format_bsr:
     {
-        nnz[0] = descr->nnz * descr->block_dim * descr->block_dim;
+        nnz[0] = descr->get_nnz() * descr->get_block_dim() * descr->get_block_dim();
         break;
     }
 
@@ -3862,7 +3620,7 @@ try
     case rocsparse_format_coo:
     case rocsparse_format_coo_aos:
     {
-        nnz[0] = descr->nnz;
+        nnz[0] = descr->get_nnz();
         break;
     }
     }
@@ -3885,10 +3643,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_SIZE(1, nnz);
 
-    switch(descr->format)
+    switch(descr->get_format())
     {
     case rocsparse_format_bell:
     {
@@ -3912,27 +3670,27 @@ try
 
     case rocsparse_format_bsr:
     {
-        descr->nnz = nnz;
+        descr->set_nnz(nnz);
         break;
     }
     case rocsparse_format_csc:
     {
-        descr->nnz = nnz;
+        descr->set_nnz(nnz);
         break;
     }
     case rocsparse_format_csr:
     {
-        descr->nnz = nnz;
+        descr->set_nnz(nnz);
         break;
     }
     case rocsparse_format_coo:
     {
-        descr->nnz = nnz;
+        descr->set_nnz(nnz);
         break;
     }
     case rocsparse_format_coo_aos:
     {
-        descr->nnz = nnz;
+        descr->set_nnz(nnz);
         break;
     }
     }
@@ -3956,10 +3714,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
 
-    descr->batch_count = batch_count;
+    descr->set_batch_count(batch_count);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3982,13 +3740,14 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
 
-    descr->batch_count  = batch_count;
-    descr->batch_stride = batch_stride;
-
+    descr->set_batch_count(batch_count);
+    descr->set_row_batch_dist(batch_stride);
+    descr->set_col_batch_dist(batch_stride);
+    descr->set_val_batch_dist(batch_stride);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4011,7 +3770,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(
         2, offsets_batch_stride, (offsets_batch_stride < 0), rocsparse_status_invalid_value);
@@ -4020,10 +3779,10 @@ try
                        (columns_values_batch_stride < 0),
                        rocsparse_status_invalid_value);
 
-    descr->batch_count                 = batch_count;
-    descr->offsets_batch_stride        = offsets_batch_stride;
-    descr->columns_values_batch_stride = columns_values_batch_stride;
-
+    descr->set_batch_count(batch_count);
+    descr->set_row_batch_dist(offsets_batch_stride);
+    descr->set_col_batch_dist(columns_values_batch_stride);
+    descr->set_val_batch_dist(columns_values_batch_stride);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4044,9 +3803,8 @@ rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(0, descr, (descr->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(
         2, offsets_batch_stride, (offsets_batch_stride < 0), rocsparse_status_invalid_value);
@@ -4055,9 +3813,9 @@ try
                        (rows_values_batch_stride < 0),
                        rocsparse_status_invalid_value);
 
-    descr->batch_count                 = batch_count;
-    descr->offsets_batch_stride        = offsets_batch_stride;
-    descr->columns_values_batch_stride = rows_values_batch_stride;
+    descr->set_row_batch_dist(rows_values_batch_stride);
+    descr->set_col_batch_dist(offsets_batch_stride);
+    descr->set_val_batch_dist(rows_values_batch_stride);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4090,7 +3848,7 @@ try
                            data_size != sizeof(rocsparse_spmat_fill_mode),
                            rocsparse_status_invalid_size);
         rocsparse_fill_mode* uplo = reinterpret_cast<rocsparse_fill_mode*>(data);
-        *uplo                     = rocsparse_get_mat_fill_mode(descr->descr);
+        *uplo                     = rocsparse_get_mat_fill_mode(descr->get_descr());
         return rocsparse_status_success;
     }
     case rocsparse_spmat_diag_type:
@@ -4100,7 +3858,7 @@ try
                            data_size != sizeof(rocsparse_spmat_diag_type),
                            rocsparse_status_invalid_size);
         rocsparse_diag_type* uplo = reinterpret_cast<rocsparse_diag_type*>(data);
-        *uplo                     = rocsparse_get_mat_diag_type(descr->descr);
+        *uplo                     = rocsparse_get_mat_diag_type(descr->get_descr());
         return rocsparse_status_success;
     }
     case rocsparse_spmat_matrix_type:
@@ -4110,7 +3868,7 @@ try
                            data_size != sizeof(rocsparse_spmat_matrix_type),
                            rocsparse_status_invalid_size);
         rocsparse_matrix_type* matrix = reinterpret_cast<rocsparse_matrix_type*>(data);
-        *matrix                       = rocsparse_get_mat_type(descr->descr);
+        *matrix                       = rocsparse_get_mat_type(descr->get_descr());
         return rocsparse_status_success;
     }
     case rocsparse_spmat_storage_mode:
@@ -4120,7 +3878,7 @@ try
                            data_size != sizeof(rocsparse_spmat_storage_mode),
                            rocsparse_status_invalid_size);
         rocsparse_storage_mode* storage = reinterpret_cast<rocsparse_storage_mode*>(data);
-        *storage                        = rocsparse_get_mat_storage_mode(descr->descr);
+        *storage                        = rocsparse_get_mat_storage_mode(descr->get_descr());
         return rocsparse_status_success;
     }
     }
@@ -4158,7 +3916,7 @@ try
                            data_size != sizeof(rocsparse_spmat_fill_mode),
                            rocsparse_status_invalid_size);
         rocsparse_fill_mode uplo = *reinterpret_cast<const rocsparse_fill_mode*>(data);
-        return rocsparse_set_mat_fill_mode(descr->descr, uplo);
+        return rocsparse_set_mat_fill_mode(descr->get_descr(), uplo);
     }
     case rocsparse_spmat_diag_type:
     {
@@ -4167,7 +3925,7 @@ try
                            data_size != sizeof(rocsparse_spmat_diag_type),
                            rocsparse_status_invalid_size);
         rocsparse_diag_type diag = *reinterpret_cast<const rocsparse_diag_type*>(data);
-        return rocsparse_set_mat_diag_type(descr->descr, diag);
+        return rocsparse_set_mat_diag_type(descr->get_descr(), diag);
     }
 
     case rocsparse_spmat_matrix_type:
@@ -4177,7 +3935,7 @@ try
                            data_size != sizeof(rocsparse_spmat_matrix_type),
                            rocsparse_status_invalid_size);
         rocsparse_matrix_type matrix = *reinterpret_cast<const rocsparse_matrix_type*>(data);
-        return rocsparse_set_mat_type(descr->descr, matrix);
+        return rocsparse_set_mat_type(descr->get_descr(), matrix);
     }
     case rocsparse_spmat_storage_mode:
     {
@@ -4186,7 +3944,7 @@ try
                            data_size != sizeof(rocsparse_spmat_storage_mode),
                            rocsparse_status_invalid_size);
         rocsparse_storage_mode storage = *reinterpret_cast<const rocsparse_storage_mode*>(data);
-        return rocsparse_set_mat_storage_mode(descr->descr, storage);
+        return rocsparse_set_mat_storage_mode(descr->get_descr(), storage);
     }
     }
     // LCOV_EXCL_START
@@ -4218,14 +3976,9 @@ try
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
 
-    *descr = new _rocsparse_dnvec_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->size         = size;
-    (*descr)->values       = values;
-    (*descr)->const_values = values;
-    (*descr)->data_type    = data_type;
+    static constexpr int64_t inc          = 1;
+    const void*              const_values = values;
+    descr[0] = new _rocsparse_dnvec_descr(data_type, size, inc, const_values, values);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4237,7 +3990,7 @@ catch(...)
 
 rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr* descr,
                                                     int64_t                      size,
-                                                    const void*                  values,
+                                                    const void*                  const_values,
                                                     rocsparse_datatype           data_type)
 try
 {
@@ -4245,19 +3998,13 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, size);
-    ROCSPARSE_CHECKARG_ARRAY(2, size, values);
+    ROCSPARSE_CHECKARG_ARRAY(2, size, const_values);
     ROCSPARSE_CHECKARG_ENUM(3, data_type);
 
-    rocsparse_dnvec_descr new_descr = new _rocsparse_dnvec_descr;
+    static constexpr int64_t inc    = 1;
+    static constexpr void*   values = nullptr;
 
-    new_descr->init = true;
-
-    new_descr->size         = size;
-    new_descr->values       = nullptr;
-    new_descr->const_values = values;
-    new_descr->data_type    = data_type;
-
-    *descr = new_descr;
+    descr[0] = new _rocsparse_dnvec_descr(data_type, size, inc, const_values, values);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4453,20 +4200,7 @@ try
 
     ROCSPARSE_CHECKARG_ARRAY(4, int64_t(rows) * cols, values);
 
-    *descr = new _rocsparse_dnmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows         = rows;
-    (*descr)->cols         = cols;
-    (*descr)->ld           = ld;
-    (*descr)->values       = values;
-    (*descr)->const_values = values;
-    (*descr)->data_type    = data_type;
-    (*descr)->order        = order;
-
-    (*descr)->batch_count  = 1;
-    (*descr)->batch_stride = 0;
+    *descr = new _rocsparse_dnmat_descr(data_type, order, rows, cols, ld, values, values);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -4512,21 +4246,8 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, data_type);
     ROCSPARSE_CHECKARG_ENUM(6, order);
 
-    rocsparse_dnmat_descr new_descr = new _rocsparse_dnmat_descr;
-    new_descr->init                 = true;
+    *descr = new _rocsparse_dnmat_descr(data_type, order, rows, cols, ld, values, nullptr);
 
-    new_descr->rows         = rows;
-    new_descr->cols         = cols;
-    new_descr->ld           = ld;
-    new_descr->values       = nullptr;
-    new_descr->const_values = values;
-    new_descr->data_type    = data_type;
-    new_descr->order        = order;
-
-    new_descr->batch_count  = 1;
-    new_descr->batch_stride = 0;
-
-    *descr = new_descr;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4800,40 +4521,20 @@ try
     ROCSPARSE_CHECKARG_ENUM(8, col_ind_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
     ROCSPARSE_CHECKARG_ENUM(10, data_type);
+    *descr = _rocsparse_spmat_descr::create_csr(rows,
+                                                cols,
+                                                nnz,
+                                                csr_row_ptr,
+                                                csr_row_ptr,
+                                                csr_col_ind,
+                                                csr_col_ind,
+                                                csr_val,
+                                                csr_val,
+                                                row_ptr_type,
+                                                col_ind_type,
+                                                idx_base,
+                                                data_type);
 
-    *descr = new _rocsparse_spmat_descr;
-
-    (*descr)->init = true;
-
-    (*descr)->rows = rows;
-    (*descr)->cols = cols;
-    (*descr)->nnz  = nnz;
-
-    (*descr)->row_data = csr_row_ptr;
-    (*descr)->col_data = csr_col_ind;
-    (*descr)->val_data = csr_val;
-
-    (*descr)->const_row_data = csr_row_ptr;
-    (*descr)->const_col_data = csr_col_ind;
-    (*descr)->const_val_data = csr_val;
-
-    (*descr)->row_type  = row_ptr_type;
-    (*descr)->col_type  = col_ind_type;
-    (*descr)->data_type = data_type;
-
-    (*descr)->idx_base = idx_base;
-    (*descr)->format   = rocsparse_format_csr;
-
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
-
-    // Initialize descriptor
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base((*descr)->descr, idx_base));
-
-    (*descr)->batch_count                 = 1;
-    (*descr)->batch_stride                = 0;
-    (*descr)->offsets_batch_stride        = 0;
-    (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

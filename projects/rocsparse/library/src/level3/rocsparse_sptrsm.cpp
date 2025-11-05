@@ -366,30 +366,30 @@ namespace rocsparse
             }
         }
 
-        switch(A->format)
+        switch(A->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              Y->values,
                                                              Y->ld,
                                                              Y->order,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -401,23 +401,23 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              Y->values,
                                                              Y->ld,
                                                              Y->order,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -486,30 +486,30 @@ namespace rocsparse
             }
         }
 
-        switch(A->format)
+        switch(A->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              sptrsm_buffer,
                                                              Y->cols,
                                                              rocsparse_order_row,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -521,23 +521,23 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              sptrsm_buffer,
                                                              Y->cols,
                                                              rocsparse_order_row,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -630,30 +630,30 @@ namespace rocsparse
             }
         }
 
-        switch(A->format)
+        switch(A->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              Y->values,
                                                              Y->ld,
                                                              Y->order,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -665,23 +665,23 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              Y->values,
                                                              Y->ld,
                                                              Y->order,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -751,30 +751,30 @@ namespace rocsparse
             }
         }
 
-        switch(A->format)
+        switch(A->get_format())
         {
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              sptrsm_buffer,
                                                              Y->cols,
                                                              rocsparse_order_row,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -786,23 +786,23 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve(handle,
                                                              operation,
                                                              X_operation,
-                                                             A->rows,
+                                                             A->get_rows(),
                                                              Y->cols,
-                                                             A->nnz,
+                                                             A->get_nnz(),
                                                              alpha_datatype,
                                                              alpha,
-                                                             A->descr,
-                                                             A->data_type,
-                                                             A->const_val_data,
-                                                             A->row_type,
-                                                             A->const_row_data,
-                                                             A->col_type,
-                                                             A->const_col_data,
+                                                             A->get_descr(),
+                                                             A->get_data_type(),
+                                                             A->get_const_val_data(),
+                                                             A->get_row_type(),
+                                                             A->get_const_row_data(),
+                                                             A->get_col_type(),
+                                                             A->get_const_col_data(),
                                                              Y->data_type,
                                                              sptrsm_buffer,
                                                              Y->cols,
                                                              rocsparse_order_row,
-                                                             A->info,
+                                                             A->get_info(),
                                                              rocsparse_solve_policy_auto,
                                                              csrsm_info,
                                                              csrsm_buffer));
@@ -866,9 +866,9 @@ namespace rocsparse
 
         const rocsparse_operation operation      = sptrsm_descr->get_operation_A();
         const rocsparse_datatype  alpha_datatype = sptrsm_descr->get_compute_datatype();
-        const rocsparse_format    format         = A->format;
+        const rocsparse_format    format         = A->get_format();
         const int64_t             nrhs           = sptrsm_descr->get_nrhs();
-        const int64_t             n              = A->rows;
+        const int64_t             n              = A->get_rows();
 
         switch(format)
         {
@@ -877,20 +877,20 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_buffer_size(handle,
                                                                    operation,
                                                                    operation_X,
-                                                                   A->rows,
+                                                                   A->get_rows(),
                                                                    nrhs,
-                                                                   A->nnz,
+                                                                   A->get_nnz(),
                                                                    alpha_datatype,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
+                                                                   A->get_descr(),
+                                                                   A->get_data_type(),
+                                                                   A->get_const_val_data(),
+                                                                   A->get_row_type(),
+                                                                   A->get_const_row_data(),
+                                                                   A->get_col_type(),
+                                                                   A->get_const_col_data(),
                                                                    sptrsm_descr->get_Y_datatype(),
                                                                    sptrsm_descr->get_Y_order(),
-                                                                   A->info,
+                                                                   A->get_info(),
                                                                    rocsparse_solve_policy_auto,
                                                                    buffer_size_in_bytes));
 
@@ -922,20 +922,20 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_buffer_size(handle,
                                                                    operation,
                                                                    operation_X,
-                                                                   A->rows,
+                                                                   A->get_rows(),
                                                                    nrhs,
-                                                                   A->nnz,
+                                                                   A->get_nnz(),
                                                                    alpha_datatype,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
+                                                                   A->get_descr(),
+                                                                   A->get_data_type(),
+                                                                   A->get_const_val_data(),
+                                                                   A->get_row_type(),
+                                                                   A->get_const_row_data(),
+                                                                   A->get_col_type(),
+                                                                   A->get_const_col_data(),
                                                                    sptrsm_descr->get_Y_datatype(),
                                                                    sptrsm_descr->get_Y_order(),
-                                                                   A->info,
+                                                                   A->get_info(),
                                                                    rocsparse_solve_policy_auto,
                                                                    buffer_size_in_bytes));
 
@@ -1087,7 +1087,7 @@ namespace rocsparse
                                                        "invalid analysis_policy");
             }
 
-            switch(A->format)
+            switch(A->get_format())
             {
             case rocsparse_format_csr:
             {
@@ -1096,7 +1096,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    sptrsm_descr->set_shared_csrsm_info(A->info->get_shared_csrsm_info());
+                    sptrsm_descr->set_shared_csrsm_info(A->get_info()->get_shared_csrsm_info());
                     csrsm_info = sptrsm_descr->get_csrsm_info();
                     break;
                 }
@@ -1110,22 +1110,22 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
                                                                     operation,
                                                                     X_operation,
-                                                                    A->rows,
+                                                                    A->get_rows(),
                                                                     Y->cols,
-                                                                    A->nnz,
+                                                                    A->get_nnz(),
                                                                     alpha_datatype,
                                                                     alpha,
-                                                                    A->descr,
-                                                                    A->data_type,
-                                                                    A->const_val_data,
-                                                                    A->row_type,
-                                                                    A->const_row_data,
-                                                                    A->col_type,
-                                                                    A->const_col_data,
+                                                                    A->get_descr(),
+                                                                    A->get_data_type(),
+                                                                    A->get_const_val_data(),
+                                                                    A->get_row_type(),
+                                                                    A->get_const_row_data(),
+                                                                    A->get_col_type(),
+                                                                    A->get_const_col_data(),
                                                                     Y->data_type,
                                                                     Y->values,
                                                                     Y->ld,
-                                                                    A->info,
+                                                                    A->get_info(),
                                                                     analysis_policy,
                                                                     rocsparse_solve_policy_auto,
                                                                     &csrsm_info,
@@ -1153,7 +1153,7 @@ namespace rocsparse
                 {
                 case rocsparse_analysis_policy_reuse:
                 {
-                    sptrsm_descr->set_shared_csrsm_info(A->info->get_shared_csrsm_info());
+                    sptrsm_descr->set_shared_csrsm_info(A->get_info()->get_shared_csrsm_info());
                     csrsm_info = sptrsm_descr->get_csrsm_info();
                     break;
                 }
@@ -1167,22 +1167,22 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_analysis(handle,
                                                                     operation,
                                                                     X_operation,
-                                                                    A->rows,
+                                                                    A->get_rows(),
                                                                     Y->cols,
-                                                                    A->nnz,
+                                                                    A->get_nnz(),
                                                                     alpha_datatype,
                                                                     alpha,
-                                                                    A->descr,
-                                                                    A->data_type,
-                                                                    A->const_val_data,
-                                                                    A->row_type,
-                                                                    A->const_row_data,
-                                                                    A->col_type,
-                                                                    A->const_col_data,
+                                                                    A->get_descr(),
+                                                                    A->get_data_type(),
+                                                                    A->get_const_val_data(),
+                                                                    A->get_row_type(),
+                                                                    A->get_const_row_data(),
+                                                                    A->get_col_type(),
+                                                                    A->get_const_col_data(),
                                                                     Y->data_type,
                                                                     Y->values,
                                                                     Y->ld,
-                                                                    A->info,
+                                                                    A->get_info(),
                                                                     analysis_policy,
                                                                     rocsparse_solve_policy_auto,
                                                                     &csrsm_info,
@@ -1400,7 +1400,7 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(2, A, (A->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, A, (A->get_init() == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(3, X, (X->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, Y, (Y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
@@ -1408,7 +1408,8 @@ try
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(2, A, (A->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(
+        2, A, (A->get_data_type() != compute_type), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(3, X, (X->data_type != compute_type), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(4, Y, (Y->data_type != compute_type), rocsparse_status_not_implemented);
 

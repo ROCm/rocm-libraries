@@ -108,7 +108,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        if(mat->format != rocsparse_format_csr)
+        if(mat->get_format() != rocsparse_format_csr)
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -122,13 +122,13 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::csritsv_buffer_size_template(handle,
                                                         trans,
-                                                        (J)mat->rows,
-                                                        (I)mat->nnz,
-                                                        mat->descr,
-                                                        (const T*)mat->val_data,
-                                                        (const I*)mat->row_data,
-                                                        (const J*)mat->col_data,
-                                                        mat->info,
+                                                        (J)mat->get_rows(),
+                                                        (I)mat->get_nnz(),
+                                                        mat->get_descr(),
+                                                        (const T*)mat->get_val_data(),
+                                                        (const I*)mat->get_row_data(),
+                                                        (const J*)mat->get_col_data(),
+                                                        mat->get_info(),
                                                         buffer_size));
             return rocsparse_status_success;
         }
@@ -138,13 +138,13 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::csritsv_analysis_template(handle,
                                                      trans,
-                                                     (J)mat->rows,
-                                                     (I)mat->nnz,
-                                                     mat->descr,
-                                                     (const T*)mat->val_data,
-                                                     (const I*)mat->row_data,
-                                                     (const J*)mat->col_data,
-                                                     mat->info,
+                                                     (J)mat->get_rows(),
+                                                     (I)mat->get_nnz(),
+                                                     mat->get_descr(),
+                                                     (const T*)mat->get_val_data(),
+                                                     (const I*)mat->get_row_data(),
+                                                     (const J*)mat->get_col_data(),
+                                                     mat->get_info(),
                                                      rocsparse_analysis_policy_force,
                                                      rocsparse_solve_policy_auto,
                                                      temp_buffer));
@@ -161,14 +161,14 @@ namespace rocsparse
                                                                 (const floating_data_t<T>*)host_tol,
                                                                 (floating_data_t<T>*)host_history,
                                                                 trans,
-                                                                (J)mat->rows,
-                                                                (I)mat->nnz,
+                                                                (J)mat->get_rows(),
+                                                                (I)mat->get_nnz(),
                                                                 (const T*)alpha,
-                                                                mat->descr,
-                                                                (const T*)mat->val_data,
-                                                                (const I*)mat->row_data,
-                                                                (const J*)mat->col_data,
-                                                                mat->info,
+                                                                mat->get_descr(),
+                                                                (const T*)mat->get_val_data(),
+                                                                (const I*)mat->get_row_data(),
+                                                                (const J*)mat->get_col_data(),
+                                                                mat->get_info(),
                                                                 (const T*)x->values,
                                                                 (T*)y->values,
                                                                 rocsparse_solve_policy_auto,
@@ -335,14 +335,14 @@ try
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    if(mat->init == false || x->init == false || y->init == false)
+    if(mat->get_init() == false || x->init == false || y->init == false)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_initialized);
     }
     // LCOV_EXCL_STOP
 
     // Check for matching types while we do not support mixed precision computation
-    if(compute_type != mat->data_type || //
+    if(compute_type != mat->get_data_type() || //
        compute_type != x->data_type || //
        compute_type != y->data_type)
     {
@@ -350,8 +350,8 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
     }
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spitsv_dynamic_dispatch(mat->row_type,
-                                                                 mat->col_type,
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spitsv_dynamic_dispatch(mat->get_row_type(),
+                                                                 mat->get_col_type(),
                                                                  compute_type,
                                                                  handle,
                                                                  host_nmaxiter,

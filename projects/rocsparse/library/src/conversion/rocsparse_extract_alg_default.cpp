@@ -686,14 +686,14 @@ rocsparse_extract_descr_default_t::rocsparse_extract_descr_default_t(
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(source->format != target->format)
+    if(source->get_format() != target->get_format())
     {
         THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
             rocsparse_status_internal_error,
             "source and target matrices must have the same matrix format");
     }
 
-    switch(source->format)
+    switch(source->get_format())
     {
     case rocsparse_format_csr:
     {
@@ -717,7 +717,7 @@ rocsparse_extract_descr_default_t::rocsparse_extract_descr_default_t(
     }
     }
 
-    if(source->descr->storage_mode != target->descr->storage_mode)
+    if(source->get_descr()->storage_mode != target->get_descr()->storage_mode)
     {
         THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
             rocsparse_status_internal_error,
@@ -740,11 +740,12 @@ rocsparse_status
     {
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::internal_extract_buffer_size_dispatch(
-            (this->m_direction == rocsparse_direction_row) ? target->row_type : target->col_type,
+            (this->m_direction == rocsparse_direction_row) ? target->get_row_type()
+                                                           : target->get_col_type(),
             handle,
             this->m_direction,
-            source->rows,
-            source->cols,
+            source->get_rows(),
+            source->get_cols(),
             buffer_size_in_bytes)));
 
         this->m_stage_analysis_buffer_size = buffer_size_in_bytes[0];
@@ -771,30 +772,30 @@ rocsparse_status rocsparse_extract_descr_default_t::run(rocsparse_handle        
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    const rocsparse_fill_mode target_fill_mode = target->descr->fill_mode;
-    const rocsparse_diag_type target_diag_type = target->descr->diag_type;
+    const rocsparse_fill_mode target_fill_mode = target->get_descr()->fill_mode;
+    const rocsparse_diag_type target_diag_type = target->get_descr()->diag_type;
 
     const void* __restrict__ const_source_ptr_data = nullptr;
     const void* __restrict__ const_source_ind_data = nullptr;
     void* __restrict__ target_ptr_data             = nullptr;
     void* __restrict__ target_ind_data             = nullptr;
 
-    switch(source->format)
+    switch(source->get_format())
     {
     case rocsparse_format_csr:
     {
-        const_source_ptr_data = source->row_data;
-        const_source_ind_data = source->col_data;
-        target_ptr_data       = target->row_data;
-        target_ind_data       = target->col_data;
+        const_source_ptr_data = source->get_row_data();
+        const_source_ind_data = source->get_col_data();
+        target_ptr_data       = target->get_row_data();
+        target_ind_data       = target->get_col_data();
         break;
     }
     case rocsparse_format_csc:
     {
-        const_source_ptr_data = source->col_data;
-        const_source_ind_data = source->row_data;
-        target_ptr_data       = target->col_data;
-        target_ind_data       = target->row_data;
+        const_source_ptr_data = source->get_col_data();
+        const_source_ind_data = source->get_row_data();
+        target_ptr_data       = target->get_col_data();
+        target_ind_data       = target->get_row_data();
         break;
     }
     case rocsparse_format_ell:
@@ -814,23 +815,25 @@ rocsparse_status rocsparse_extract_descr_default_t::run(rocsparse_handle        
     case rocsparse_extract_stage_analysis:
     {
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::internal_extract_analysis_dispatch(
-            source->data_type,
-            (this->m_direction == rocsparse_direction_row) ? target->row_type : target->col_type,
-            (this->m_direction == rocsparse_direction_row) ? target->col_type : target->row_type,
+            source->get_data_type(),
+            (this->m_direction == rocsparse_direction_row) ? target->get_row_type()
+                                                           : target->get_col_type(),
+            (this->m_direction == rocsparse_direction_row) ? target->get_col_type()
+                                                           : target->get_row_type(),
             handle,
             this->m_direction,
-            source->rows,
-            source->cols,
-            source->nnz,
+            source->get_rows(),
+            source->get_cols(),
+            source->get_nnz(),
             const_source_ptr_data,
             const_source_ind_data,
-            source->const_val_data,
-            source->idx_base,
+            source->get_const_val_data(),
+            source->get_idx_base(),
             target_fill_mode,
             target_diag_type,
             this->m_device_nnz,
             target_ptr_data,
-            target->idx_base,
+            target->get_idx_base(),
             buffer_size,
             buffer)));
 
@@ -840,25 +843,27 @@ rocsparse_status rocsparse_extract_descr_default_t::run(rocsparse_handle        
     case rocsparse_extract_stage_compute:
     {
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::internal_extract_compute_dispatch(
-            source->data_type,
-            (this->m_direction == rocsparse_direction_row) ? target->row_type : target->col_type,
-            (this->m_direction == rocsparse_direction_row) ? target->col_type : target->row_type,
+            source->get_data_type(),
+            (this->m_direction == rocsparse_direction_row) ? target->get_row_type()
+                                                           : target->get_col_type(),
+            (this->m_direction == rocsparse_direction_row) ? target->get_col_type()
+                                                           : target->get_row_type(),
             handle,
             this->m_direction,
-            source->rows,
-            source->cols,
-            source->nnz,
+            source->get_rows(),
+            source->get_cols(),
+            source->get_nnz(),
             const_source_ptr_data,
             const_source_ind_data,
-            source->const_val_data,
-            source->idx_base,
+            source->get_const_val_data(),
+            source->get_idx_base(),
             //
             target_fill_mode,
             target_diag_type,
             target_ptr_data,
             target_ind_data,
-            target->val_data,
-            target->idx_base,
+            target->get_val_data(),
+            target->get_idx_base(),
             //
             buffer)));
         break;

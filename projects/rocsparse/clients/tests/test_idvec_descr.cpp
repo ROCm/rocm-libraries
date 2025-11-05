@@ -20,45 +20,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "rocsparse_determine_indextype.hpp"
-#include "rocsparse_handle.hpp"
 
-rocsparse_indextype rocsparse::determine_I_indextype(rocsparse_const_spmat_descr mat)
-{
-    switch(mat->get_format())
-    {
-    case rocsparse_format_coo:
-    case rocsparse_format_coo_aos:
-    case rocsparse_format_csr:
-    case rocsparse_format_ell:
-    case rocsparse_format_bell:
-    case rocsparse_format_bsr:
-    {
-        return mat->get_row_type();
-    }
-    case rocsparse_format_csc:
-    {
-        return mat->get_col_type();
-    }
-    }
-}
+#include "test.hpp"
 
-rocsparse_indextype rocsparse::determine_J_indextype(rocsparse_const_spmat_descr mat)
-{
-    switch(mat->get_format())
-    {
-    case rocsparse_format_coo:
-    case rocsparse_format_coo_aos:
-    case rocsparse_format_csr:
-    case rocsparse_format_ell:
-    case rocsparse_format_bell:
-    case rocsparse_format_bsr:
-    {
-        return mat->get_col_type();
-    }
-    case rocsparse_format_csc:
-    {
-        return mat->get_row_type();
-    }
-    }
-}
+#include "testing_idvec_descr.hpp"
+
+TEST_ROUTINE(idvec_descr, auxiliary, "");

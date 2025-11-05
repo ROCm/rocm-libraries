@@ -26,6 +26,11 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/rocsparse_dnvec_descr.cpp
+  src/auxiliary/rocsparse_dnmat_descr.cpp
+  src/auxiliary/rocsparse_idvec_descr.cpp
+  src/auxiliary/rocsparse_spattern_descr.cpp
+  src/auxiliary/rocsparse_spmat_descr.cpp
   src/auxiliary/rocsparse_error.cpp
 
 # Common

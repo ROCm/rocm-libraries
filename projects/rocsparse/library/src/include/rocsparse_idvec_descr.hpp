@@ -26,78 +26,46 @@
 
 #include "rocsparse-types.h"
 
-struct _rocsparse_dnvec_descr
+struct _rocsparse_idvec_descr
 {
-public:
-    const void*            const_values{};
-    void*                  values{};
-    int64_t                size{};
-    int64_t                inc{};
+protected:
+    rocsparse_indextype  indextype{};
+    rocsparse_index_base base{};
+    int64_t              size{};
+    int64_t              inc{};
+
     rocsparse_batchtype    batch_type{};
     rocsparse_batchstorage batch_storage{};
-    int64_t                batch_count;
-    int64_t                batch_dist;
-    rocsparse_datatype     data_type{};
+    int64_t                batch_count{};
+    int64_t                batch_dist{};
+
+    const void*            const_values{};
+    void*                  values{};
     rocsparse_pointer_mode pointer_mode{};
-    bool                   init;
-
-    template <typename T>
-    inline operator T*()
-    {
-        return reinterpret_cast<T*>(this->values);
-    }
-
-    template <typename T>
-    inline operator T**()
-    {
-        return reinterpret_cast<T**>(this->values);
-    }
-
-    template <typename T>
-    inline operator const T*() const
-    {
-        return reinterpret_cast<const T*>(this->const_values);
-    }
-
-    template <typename T>
-    inline operator const T* const *() const
-    {
-        return reinterpret_cast<const T* const*>(this->const_values);
-    }
-
-    _rocsparse_dnvec_descr() = delete;
-
-    _rocsparse_dnvec_descr(rocsparse_datatype datatype,
-                           int64_t            size,
-                           int64_t            inc,
-                           const void*        const_values,
-                           void*              values);
-
-    _rocsparse_dnvec_descr(rocsparse_datatype     datatype,
-                           int64_t                size,
-                           int64_t                inc,
-                           rocsparse_batchtype    batchtype,
-                           rocsparse_batchstorage batchstorage,
-                           int64_t                batch_count,
-                           int64_t                batch_dist,
-                           const void*            const_values,
-                           void*                  values);
-
-    ~_rocsparse_dnvec_descr() = default;
-
-    rocsparse_status destroy(rocsparse_handle handle);
 
 public:
     //
     //
     //
-    rocsparse_datatype get_datatype() const
+    rocsparse_indextype get_indextype() const
     {
-        return this->data_type;
+        return this->indextype;
     };
-    void set_datatype(rocsparse_datatype value)
+    void set_indextype(rocsparse_indextype value)
     {
-        this->data_type = value;
+        this->indextype = value;
+    };
+
+    //
+    //
+    //
+    rocsparse_index_base get_base() const
+    {
+        return this->base;
+    };
+    void set_base(rocsparse_index_base value)
+    {
+        this->base = value;
     };
 
     //
@@ -214,5 +182,71 @@ public:
     void set_data(void* value)
     {
         this->values = value;
+    }
+
+    //
+    //
+    //
+    _rocsparse_idvec_descr() = delete;
+
+    //
+    //
+    //
+    _rocsparse_idvec_descr(rocsparse_indextype  indextype,
+                           rocsparse_index_base base,
+                           int64_t              size,
+                           int64_t              inc,
+                           const void*          const_values,
+                           void*                values);
+
+    //
+    //
+    //
+    _rocsparse_idvec_descr(rocsparse_indextype    indextype,
+                           rocsparse_index_base   base,
+                           int64_t                size,
+                           int64_t                inc,
+                           rocsparse_batchtype    batch_type,
+                           rocsparse_batchstorage batch_storage,
+                           int64_t                batch_count,
+                           int64_t                batch_dist,
+                           const void*            const_values,
+                           void*                  values);
+
+    //
+    //
+    //
+    ~_rocsparse_idvec_descr() = default;
+
+    //
+    //
+    //
+    rocsparse_status destroy(rocsparse_handle handle);
+
+    //
+    // Implicit casts.
+    //
+    template <typename T>
+    inline operator T*()
+    {
+        return reinterpret_cast<T*>(this->values);
+    }
+
+    template <typename T>
+    inline operator T**()
+    {
+        return reinterpret_cast<T**>(this->values);
+    }
+
+    template <typename T>
+    inline operator const T*() const
+    {
+        return reinterpret_cast<const T*>(this->const_values);
+    }
+
+    template <typename T>
+    inline operator const T* const *() const
+    {
+        return reinterpret_cast<const T* const*>(this->const_values);
     }
 };

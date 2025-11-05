@@ -377,26 +377,26 @@ namespace rocsparse
         //
         //
         //
-        const rocsparse_format    format         = mat->format;
-        const int64_t             rows           = mat->rows;
-        const int64_t             cols           = mat->cols;
-        const int64_t             nnz            = mat->nnz;
-        rocsparse_mat_descr       mat_descr      = mat->descr;
-        const rocsparse_datatype  data_type      = mat->data_type;
-        const rocsparse_indextype row_type       = mat->row_type;
-        const rocsparse_indextype col_type       = mat->col_type;
-        const void*               const_val_data = mat->const_val_data;
-        const void*               const_row_data = mat->const_row_data;
-        const void*               const_ind_data = mat->const_ind_data;
-        const void*               const_col_data = mat->const_col_data;
+        const rocsparse_format    format         = mat->get_format();
+        const int64_t             rows           = mat->get_rows();
+        const int64_t             cols           = mat->get_cols();
+        const int64_t             nnz            = mat->get_nnz();
+        rocsparse_mat_descr       mat_descr      = mat->get_descr();
+        const rocsparse_datatype  data_type      = mat->get_data_type();
+        const rocsparse_indextype row_type       = mat->get_row_type();
+        const rocsparse_indextype col_type       = mat->get_col_type();
+        const void*               const_val_data = mat->get_const_val_data();
+        const void*               const_row_data = mat->get_const_row_data();
+        const void*               const_ind_data = mat->get_const_ind_data();
+        const void*               const_col_data = mat->get_const_col_data();
         const rocsparse_datatype  x_data_type    = x->data_type;
         const rocsparse_datatype  y_data_type    = y->data_type;
         const void*               x_const_values = x->const_values;
         void*                     y_values       = y->values;
-        const bool                analysed       = mat->analysed;
-        const int64_t             block_dim      = mat->block_dim;
-        const int64_t             ell_width      = mat->ell_width;
-        const rocsparse_direction block_dir      = mat->block_dir;
+        const bool                analysed       = mat->get_analysed();
+        const int64_t             block_dim      = mat->get_block_dim();
+        const int64_t             ell_width      = mat->get_ell_width();
+        const rocsparse_direction block_dir      = mat->get_block_dir();
 
         //
         //
@@ -439,7 +439,7 @@ namespace rocsparse
                                                                          const_row_data,
                                                                          col_type,
                                                                          const_col_data)));
-                    mat->analysed = true;
+                    mat->set_analysed(true);
                 }
                 return rocsparse_status_success;
             }
@@ -829,7 +829,7 @@ try
                        rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
                        rocsparse_status_invalid_value);
 
-    switch(mat->format)
+    switch(mat->get_format())
     {
     case rocsparse_format_coo:
     case rocsparse_format_coo_aos:

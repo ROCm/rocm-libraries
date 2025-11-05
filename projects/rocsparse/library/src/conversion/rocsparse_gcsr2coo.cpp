@@ -116,29 +116,29 @@ rocsparse_status rocsparse::spmat_csr2coo(rocsparse_handle            handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2coo(handle,
-                                                  source_->row_type,
-                                                  source_->const_row_data,
-                                                  source_->nnz,
-                                                  source_->rows,
-                                                  target_->row_type,
-                                                  target_->row_data,
-                                                  source_->idx_base));
+                                                  source_->get_row_type(),
+                                                  source_->get_const_row_data(),
+                                                  source_->get_nnz(),
+                                                  source_->get_rows(),
+                                                  target_->get_row_type(),
+                                                  target_->get_row_data(),
+                                                  source_->get_idx_base()));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                       source_->nnz,
-                                                       target_->col_type,
-                                                       target_->col_data,
-                                                       source_->col_type,
-                                                       source_->const_col_data));
+                                                       source_->get_nnz(),
+                                                       target_->get_col_type(),
+                                                       target_->get_col_data(),
+                                                       source_->get_col_type(),
+                                                       source_->get_const_col_data()));
 
-    if(source_->const_val_data != nullptr && target_->val_data != nullptr)
+    if(source_->get_const_val_data() != nullptr && target_->get_val_data() != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                           source_->nnz,
-                                                           target_->data_type,
-                                                           target_->val_data,
-                                                           source_->data_type,
-                                                           source_->const_val_data));
+                                                           source_->get_nnz(),
+                                                           target_->get_data_type(),
+                                                           target_->get_val_data(),
+                                                           source_->get_data_type(),
+                                                           source_->get_const_val_data()));
     }
     return rocsparse_status_success;
 }

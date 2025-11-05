@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,12 +90,187 @@ void testing_dnmat_descr_bad_arg(const Arguments& arg)
 
         rocsparse_int* batch_count  = &local_batch_count;
         int64_t*       batch_stride = &local_batch_stride;
-
 #define PARAMS_GET descr, batch_count, batch_stride
         bad_arg_analysis(rocsparse_dnmat_get_strided_batch, PARAMS_GET);
 #undef PARAMS_GET
-
         EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
+    }
+
+    rocsparse_local_handle local_handle;
+    rocsparse_handle       handle = local_handle;
+    rocsparse_error        p_error[1];
+    //
+    // rocsparse_dnmat_create
+    //
+    {
+        rocsparse_dnmat_descr* p_descr    = (rocsparse_dnmat_descr*)0x4;
+        int64_t                rows       = 4;
+        int64_t                cols       = 7;
+        int64_t                ld         = std::max(rows, cols);
+        rocsparse_order        order      = rocsparse_order_column;
+        const void*            const_data = (const void*)0x4;
+        void*                  data       = (void*)0x4;
+        rocsparse_datatype     data_type  = rocsparse_datatype_f32_r;
+
+#define PARAMS_CREATE handle, p_descr, data_type, order, rows, cols, ld, const_data, data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 3;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {6, 8, 9};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_create, nargs_to_exclude, args_to_exclude, PARAMS_CREATE);
+        }
+#undef PARAMS_CREATE
+    }
+
+    //
+    // rocsparse_dnmat_create_batched
+    //
+    {
+        rocsparse_dnmat_descr* p_descr       = (rocsparse_dnmat_descr*)0x4;
+        int64_t                rows          = 4;
+        int64_t                cols          = 7;
+        int64_t                ld            = std::max(rows, cols);
+        const void*            const_data    = (const void*)0x4;
+        void*                  data          = (void*)0x4;
+        rocsparse_datatype     data_type     = local_data_type;
+        rocsparse_batchtype    batch_type    = rocsparse_batchtype_pointerarray;
+        rocsparse_batchstorage batch_storage = rocsparse_batchstorage_soa;
+        int64_t                batch_count   = 1;
+        int64_t                batch_dist    = 1;
+        rocsparse_order        order         = rocsparse_order_row;
+#define PARAMS_CREATE_BATCHED                                                                  \
+    handle, p_descr, data_type, order, rows, cols, ld, batch_type, batch_storage, batch_count, \
+        batch_dist, const_data, data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 4;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {6, 10, 12, 13};
+            select_bad_arg_analysis(rocsparse_dnmat_create_batched,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_CREATE_BATCHED);
+        }
+#undef PARAMS_CREATE_BATCHED
+    }
+
+    //
+    // rocsparse_dnmat_get_data
+    //
+    {
+        rocsparse_dnmat_descr descr  = (rocsparse_dnmat_descr)0x4;
+        void**                p_data = (void**)0x4;
+
+#define PARAMS_GET_DATA handle, descr, p_data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 1;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {3};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_get_data, nargs_to_exclude, args_to_exclude, PARAMS_GET_DATA);
+        }
+#undef PARAMS_GET_DATA
+    }
+
+    //
+    // rocsparse_dnmat_get_const_data
+    //
+    {
+        rocsparse_dnmat_descr descr        = (rocsparse_dnmat_descr)0x4;
+        const void**          p_const_data = (const void**)0x4;
+
+#define PARAMS_GET_CONST_DATA handle, descr, p_const_data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 1;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {3};
+            select_bad_arg_analysis(rocsparse_dnmat_get_const_data,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_GET_CONST_DATA);
+        }
+#undef PARAMS_GET_CONST_DATA
+    }
+
+    //
+    // rocsparse_dnmat_set_data
+    //
+    {
+        rocsparse_dnmat_descr descr = (rocsparse_dnmat_descr)0x4;
+        void*                 data  = (void*)0x4;
+
+#define PARAMS_SET_DATA handle, descr, data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 2;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {2, 3};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_set_data, nargs_to_exclude, args_to_exclude, PARAMS_SET_DATA);
+        }
+#undef PARAMS_SET_DATA
+    }
+
+    //
+    // rocsparse_dnmat_set_const_data
+    //
+    {
+        rocsparse_dnmat_descr descr      = (rocsparse_dnmat_descr)0x4;
+        const void*           const_data = (const void*)0x4;
+
+#define PARAMS_SET_CONST_DATA handle, descr, const_data, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 2;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {2, 3};
+            select_bad_arg_analysis(rocsparse_dnmat_set_const_data,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_SET_CONST_DATA);
+        }
+#undef PARAMS_SET_CONST_DATA
+    }
+
+    //
+    // rocsparse_dnmat_get_prop
+    //
+    {
+        rocsparse_dnmat_descr descr               = (rocsparse_dnmat_descr)0x4;
+        rocsparse_dnmat_prop  prop                = rocsparse_dnmat_prop_rows;
+        void*                 p_value             = (void*)0x4;
+        size_t                value_size_in_bytes = sizeof(int64_t);
+
+#define PARAMS_GET_PROP handle, descr, prop, p_value, value_size_in_bytes, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 2;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {4, 5};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_get_prop, nargs_to_exclude, args_to_exclude, PARAMS_GET_PROP);
+        }
+#undef PARAMS_GET_PROP
+    }
+    {
+        rocsparse_dnmat_descr descr               = (rocsparse_dnmat_descr)0x4;
+        rocsparse_dnmat_prop  prop                = rocsparse_dnmat_prop_rows;
+        void*                 p_const_value       = (void*)0x4;
+        size_t                value_size_in_bytes = sizeof(int64_t);
+
+#define PARAMS_SET_PROP handle, descr, prop, p_const_value, value_size_in_bytes, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 2;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {4, 5};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_set_prop, nargs_to_exclude, args_to_exclude, PARAMS_SET_PROP);
+        }
+#undef PARAMS_SET_PROP
+    }
+
+    //
+    // rocsparse_dnmat_destroy
+    //
+    {
+        rocsparse_dnmat_descr descr = (rocsparse_dnmat_descr)0x4;
+#define PARAMS_DESTROY handle, descr, p_error
+        {
+            static constexpr int32_t nargs_to_exclude                  = 2;
+            const int32_t            args_to_exclude[nargs_to_exclude] = {1, 2};
+            select_bad_arg_analysis(
+                rocsparse_dnmat_destroy, nargs_to_exclude, args_to_exclude, PARAMS_DESTROY);
+        }
+#undef PARAMS_DESTROY
     }
 }
 
