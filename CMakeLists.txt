@@ -70,3 +70,6 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/GpuLibConfig.cmake"
     DESTINATION ${CMAKECONFIG_INSTALL_DIR}
 )
+
+# TEMP: until libhipcxx resolves this
+target_compile_definitions(GpuThreads PUBLIC _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE)
