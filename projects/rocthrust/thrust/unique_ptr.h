@@ -865,8 +865,8 @@ public:
     return *this;
   }
 
-  /*! \brief Converting assignment operator. Replaces the managed object with the one from \p u.
-   *  \param u The \p unique_ptr to move from.
+  /*! \brief Converting assignment operator. Replaces the managed object with the one from \p p.
+   *  \param p The \p unique_ptr to move from.
    *  \return `*this`
    */
   template <class Up,
@@ -1011,6 +1011,13 @@ public:
   }
 };
 
+/*! \brief Swaps two \p unique_ptr objects.
+ *
+ *  Exchanges the contents of \p x and \p y by calling `x.swap(y)`.
+ *
+ *  \param x The first \p unique_ptr.
+ *  \param y The second \p unique_ptr.
+ */
 template <class T, class D, std::enable_if_t<std::is_swappable_v<D>, void>>
 inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
 {
@@ -1066,18 +1073,36 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<
   return std::less<CTP>()(thrust::raw_pointer_cast(x.get()), thrust::raw_pointer_cast(y.get()));
 }
 
+/*! \brief Compares two \p unique_ptr objects using greater-than ordering.
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if \p x is greater than \p y, `false` otherwise.
+ */
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return y < x;
 }
 
+/*! \brief Compares two \p unique_ptr objects using less-than-or-equal ordering.
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if \p x is less than or equal to \p y, `false` otherwise.
+ */
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(y < x);
 }
 
+/*! \brief Compares two \p unique_ptr objects using greater-than-or-equal ordering.
+ *
+ *  \param x The first \p unique_ptr to compare.
+ *  \param y The second \p unique_ptr to compare.
+ *  \return `true` if \p x is greater than or equal to \p y, `false` otherwise.
+ */
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
@@ -1093,6 +1118,11 @@ template <class T1, class D1, class T2, class D2>
 }
 #endif
 
+/*! \brief Compares a \p unique_ptr with nullptr for equality.
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if \p x is empty, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
@@ -1100,18 +1130,33 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr
 }
 
 #if THRUST_STD_VER <= 17
+/*! \brief Compares nullptr with a \p unique_ptr for equality (C++17 and earlier).
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if \p y is empty, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
   return !y;
 }
 
+/*! \brief Compares a \p unique_ptr with nullptr for inequality (C++17 and earlier).
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if \p x is not empty, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
   return static_cast<bool>(x);
 }
 
+/*! \brief Compares nullptr with a \p unique_ptr for inequality (C++17 and earlier).
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if \p y is not empty, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
@@ -1119,48 +1164,88 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(std::nullptr_t, 
 }
 #endif
 
+/*! \brief Compares a \p unique_ptr with nullptr using less-than ordering.
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if the pointer in \p x is less than nullptr, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return std::less<typename unique_ptr<T, D>::pointer>()(x.get(), nullptr); // x.get() < nullptr;
 }
 
+/*! \brief Compares nullptr with a \p unique_ptr using less-than ordering.
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if nullptr is less than the pointer in \p y, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return std::less<typename unique_ptr<T, D>::pointer>()(nullptr, y.get()); // nullptr < y.get();
 }
 
+/*! \brief Compares a \p unique_ptr with nullptr using greater-than ordering.
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if the pointer in \p x is greater than nullptr, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return nullptr < x;
 }
 
+/*! \brief Compares nullptr with a \p unique_ptr using greater-than ordering.
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if nullptr is greater than the pointer in \p y, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return y < nullptr;
 }
 
+/*! \brief Compares a \p unique_ptr with nullptr using less-than-or-equal ordering.
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if the pointer in \p x is less than or equal to nullptr, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return !(nullptr < x);
 }
 
+/*! \brief Compares nullptr with a \p unique_ptr using less-than-or-equal ordering.
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if nullptr is less than or equal to the pointer in \p y, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
   return !(y < nullptr);
 }
 
+/*! \brief Compares a \p unique_ptr with nullptr using greater-than-or-equal ordering.
+ *
+ *  \param x The \p unique_ptr to compare.
+ *  \return `true` if the pointer in \p x is greater than or equal to nullptr, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
   return !(x < nullptr);
 }
 
+/*! \brief Compares nullptr with a \p unique_ptr using greater-than-or-equal ordering.
+ *
+ *  \param y The \p unique_ptr to compare.
+ *  \return `true` if nullptr is greater than or equal to the pointer in \p y, `false` otherwise.
+ */
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
