@@ -353,16 +353,18 @@ struct scan_by_key_config_tag
 {};
 
 template<class Value>
-struct default_scan_config_base
+constexpr scan_config_params scan_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = scan_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                             ::rocprim::max(1u, 16u / item_scale),
-                             ::rocprim::block_load_method::block_load_transpose,
-                             ::rocprim::block_store_method::block_store_transpose,
-                             ::rocprim::block_scan_algorithm::using_warp_scan>;
+    return scan_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_store_method::block_store_transpose,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    };
 };
 
 /// \brief Provides the kernel parameters for exclusive_scan_by_key and inclusive_scan_by_key based
@@ -427,17 +429,19 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_scan_by_key_config_base
+constexpr scan_by_key_config_params scan_by_key_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        sizeof(Key) + sizeof(Value), 2 * sizeof(int));
+    constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key) + sizeof(Value),
+                                                       2 * sizeof(int));
 
-    using type = scan_by_key_config<
-        limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-        ::rocprim::max(1u, 16u / item_scale),
+    return scan_by_key_config_params{
+        {limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,
-        ::rocprim::block_scan_algorithm::using_warp_scan>;
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    };
 };
 
 struct transform_config_tag
@@ -479,14 +483,14 @@ struct warp_sort_config_params
 
 struct segmented_radix_sort_config_params
 {
-    /// \brief Kernel start parameters.
-    kernel_config_params kernel_config{};
     /// \brief Number of bits in iterations.
     unsigned int radix_bits = 0;
-    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
-    bool enable_unpartitioned_warp_sort = true;
+    /// \brief Kernel start parameters.
+    kernel_config_params kernel_config{};
     /// \brief Warp sort config params
     warp_sort_config_params warp_sort_config{};
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
+    bool enable_unpartitioned_warp_sort = true;
 };
 
 } // namespace detail
@@ -609,17 +613,17 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
 
     constexpr segmented_radix_sort_config()
         : detail::segmented_radix_sort_config_params{
-            SortConfig(),
             RadixBits,
-            EnableUnpartitionedWarpSort,
+            SortConfig(),
             {warp_sort_config::partitioning_allowed,
-              warp_sort_config::logical_warp_size_small,
-              warp_sort_config::items_per_thread_small,
-              warp_sort_config::block_size_small,
-              warp_sort_config::partitioning_threshold,
-              warp_sort_config::logical_warp_size_medium,
-              warp_sort_config::items_per_thread_medium,
-              warp_sort_config::block_size_medium}
+                warp_sort_config::logical_warp_size_small,
+                warp_sort_config::items_per_thread_small,
+                warp_sort_config::block_size_small,
+                warp_sort_config::partitioning_threshold,
+                warp_sort_config::logical_warp_size_medium,
+                warp_sort_config::items_per_thread_medium,
+                warp_sort_config::block_size_medium},
+            EnableUnpartitionedWarpSort
     }
     {}
 #endif
@@ -628,18 +632,17 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
 namespace detail
 {
 /// \brief Default segmented_radix_sort kernel configurations, such that the maximum shared memory is not exceeded.
-///
-/// \tparam RadixBits Bits used during the sorting.
-/// \tparam ItemsPerThread Items per thread when type Key has size 1.
-template<unsigned int RadixBits>
-struct default_segmented_radix_sort_config_base
+template<class Key, class Value>
+constexpr segmented_radix_sort_config_params segmented_radix_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
-    using type = segmented_radix_sort_config<RadixBits,
-                                             kernel_config<128, 17u>,
-                                             WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
-                                             true>;
+    constexpr unsigned int radix_bits = 6;
+
+    return segmented_radix_sort_config_params{
+        radix_bits,
+        kernel_config_params{128, 17u},
+        warp_sort_config_params{true, 32, 4, 256, 3000, 32, 4, 256},
+        true
+    };
 };
 
 } // namespace detail
@@ -1474,15 +1477,16 @@ struct search_n_config : public detail::search_n_config_params
 namespace detail
 {
 template<class InputType>
-struct default_search_n_config_base
+constexpr search_n_config_params search_n_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputType), sizeof(int));
 
-    using type
-        = search_n_config<limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
-                          ::rocprim::max(1u, 10u / item_scale),
-                          8>;
+    return search_n_config_params{
+        {limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 10u / item_scale)},
+        8
+    };
 };
 
 } // namespace detail

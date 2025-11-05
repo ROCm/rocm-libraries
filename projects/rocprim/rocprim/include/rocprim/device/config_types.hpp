@@ -209,6 +209,7 @@ enum class gpu
     v620,
     rx6900,
     rx7900,
+    rx9060,
     rx9070,
     mi50,
     mi100,
@@ -248,6 +249,7 @@ constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
     std::make_tuple<std::string_view, gpu>("MI300X", gpu::mi300x),
     std::make_tuple<std::string_view, gpu>("MI210", gpu::mi210),
     std::make_tuple<std::string_view, gpu>("MI100", gpu::mi100),
+    std::make_tuple<std::string_view, gpu>("RX 9060", gpu::rx9060),
     std::make_tuple<std::string_view, gpu>("RX 9070", gpu::rx9070),
     std::make_tuple<std::string_view, gpu>("V620", gpu::v620),
     std::make_tuple<std::string_view, gpu>("RX 7900", gpu::rx7900),
@@ -482,20 +484,6 @@ struct radix_sort_config_selector
         = Config::template architecture_config<Arch>::params.block_size;
 };
 
-template<typename Config, target_arch Arch>
-struct segmented_radix_sort_warp_sort_small_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_small;
-};
-
-template<typename Config, target_arch Arch>
-struct segmented_radix_sort_warp_sort_meduim_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_medium;
-};
-
 template<class Config, target_arch Arch>
 struct target_config
 {
@@ -624,7 +612,7 @@ constexpr typename Selector::param_type default_select_config(target t)
 }
 
 template<class Selector, class Config>
-constexpr auto get_config(Config config, target t)
+constexpr typename Selector::param_type get_config(Config config, target t)
 {
     if constexpr(std::is_same_v<Config, default_config>)
     {
