@@ -17,23 +17,40 @@ template <typename Tuple>
 class TestCkTileGroupedGemmQuant : public ::testing::Test
 {
     protected:
-    using ALayout                    = std::tuple_element_t<0, Tuple>;
-    using BLayout                    = std::tuple_element_t<1, Tuple>;
-    using CLayout                    = std::tuple_element_t<2, Tuple>;
-    using ADataType                  = std::tuple_element_t<3, Tuple>;
-    using AQDataType                 = std::tuple_element_t<4, Tuple>;
-    using BDataType                  = std::tuple_element_t<5, Tuple>;
-    using BQDataType                 = std::tuple_element_t<6, Tuple>;
-    using AccDataType                = std::tuple_element_t<7, Tuple>;
-    using CDataType                  = std::tuple_element_t<8, Tuple>;
-    static constexpr auto QuantType  = std::tuple_element_t<9, Tuple>::value;
-    using DsLayout                   = ck_tile::tuple<>;
-    using DsDataType                 = ck_tile::tuple<>;
-    using Row                        = ck_tile::tensor_layout::gemm::RowMajor;
-    using Col                        = ck_tile::tensor_layout::gemm::ColumnMajor;
-    using AQLayout                   = Row;
-    using BQLayout                   = Col;
-    static constexpr bool Persistent = true;
+    using ALayout                     = std::tuple_element_t<0, Tuple>;
+    using BLayout                     = std::tuple_element_t<1, Tuple>;
+    using CLayout                     = std::tuple_element_t<2, Tuple>;
+    using ADataType                   = std::tuple_element_t<3, Tuple>;
+    using AQDataType                  = std::tuple_element_t<4, Tuple>;
+    using BDataType                   = std::tuple_element_t<5, Tuple>;
+    using BQDataType                  = std::tuple_element_t<6, Tuple>;
+    using AccDataType                 = std::tuple_element_t<7, Tuple>;
+    using CDataType                   = std::tuple_element_t<8, Tuple>;
+    static constexpr auto QuantType   = std::tuple_element_t<9, Tuple>::value;
+    using DsLayout                    = ck_tile::tuple<>;
+    using DsDataType                  = ck_tile::tuple<>;
+    using Row                         = ck_tile::tensor_layout::gemm::RowMajor;
+    using Col                         = ck_tile::tensor_layout::gemm::ColumnMajor;
+    using AQLayout                    = Row;
+    using BQLayout                    = Col;
+    static constexpr bool Persistent  = true;
+    static constexpr bool PreshuffleB = std::tuple_element_t<10, Tuple>::value;
+
+    template <typename PrecType, ck_tile::index_t M_Warp_Tile>
+    static constexpr ck_tile::index_t get_k_from_preshuffled_warp_tile()
+    {
+#if defined(CK_GFX950_SUPPORT)
+        if constexpr(M_Warp_Tile == 32)
+            return sizeof(PrecType) == 2 ? 16 : 64;
+        else
+            return sizeof(PrecType) == 2 ? 32 : 128;
+#else
+        if constexpr(M_Warp_Tile == 32)
+            return sizeof(PrecType) == 2 ? 16 : 32;
+        else
+            return sizeof(PrecType) == 2 ? 32 : 64;
+#endif
+    }
 
     struct GroupedGemKernelParam_Mfma
     {
@@ -52,7 +69,9 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
 
         static const ck_tile::index_t M_Warp_Tile = 32;
         static const ck_tile::index_t N_Warp_Tile = 32;
-        static const ck_tile::index_t K_Warp_Tile = 16;
+        static const ck_tile::index_t K_Warp_Tile =
+            TestCkTileGroupedGemmQuant::template get_k_from_preshuffled_warp_tile<BDataType,
+                                                                                  M_Warp_Tile>();
     };
 
     using grouped_gemm_kargs = ck_tile::QuantGroupedGemmHostArgs;
@@ -66,12 +85,15 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                                         const ck_tile::index_t num_groups,
                                         void* kargs_ptr)
     {
-        constexpr bool TransposeC       = false;
-        constexpr bool DoubleSmemBuffer = false;
+        constexpr bool TransposeC = false;
+        constexpr bool DoubleSmemBuffer =
+            PreshuffleB; // currently DoubleSmemBuffer is only supported for preshuffled B
 
         constexpr int kBlockPerCu                         = 1;
         constexpr ck_tile::index_t TileParitionerGroupNum = 8;
         constexpr ck_tile::index_t TileParitionerM01      = 4;
+
+        using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, 128>>;
 
         using GemmShape =
             ck_tile::TileGemmShape<ck_tile::sequence<GroupedGemKernelParam::M_Tile,
@@ -90,7 +112,7 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                                                                  GroupedGemKernelParam::kPadN,
                                                                  GroupedGemKernelParam::kPadK,
                                                                  false,
-                                                                 false,
+                                                                 PreshuffleB,
                                                                  ALayout,
                                                                  BLayout,
                                                                  CLayout,
@@ -107,7 +129,15 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
             constexpr bool transpose_c      = false;
             // We create the GEMM pipeline without specifying hotloop or tailnumber.
             // These are automatically run inside the kernel based on the given input data.
-            using QuantGemmProblem =
+            using QuantGemmProblem = typename std::conditional<
+                QuantType == ck_tile::QuantType::BQuantGrouped,
+                ck_tile::GemmBQuantPipelineProblem<ADataType,
+                                                   BDataType,
+                                                   BQDataType,
+                                                   AccDataType,
+                                                   GemmShape,
+                                                   GemmUniversalTraits,
+                                                   QuantGroupSize>,
                 ck_tile::GemmRowColTensorQuantPipelineProblem<ADataType,
                                                               BDataType,
                                                               AccDataType,
@@ -116,9 +146,15 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                                                               GemmUniversalTraits,
                                                               transpose_c,
                                                               BDataType,
-                                                              scheduler>;
+                                                              scheduler>>::type;
 
-            using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<QuantGemmProblem>;
+            using GemmPipeline = std::conditional_t<
+                QuantType == ck_tile::QuantType::RowColQuant ||
+                    QuantType == ck_tile::QuantType::TensorQuant,
+                ck_tile::GemmPipelineAgBgCrCompV3<QuantGemmProblem>,
+                std::conditional_t<PreshuffleB == true,
+                                   ck_tile::WPQuantBPipelineAgBgCrV2<QuantGemmProblem>,
+                                   ck_tile::BQuantGemmPipelineAgBgCrCompV3<QuantGemmProblem>>>;
             using GemmEpilogue = ck_tile::CShuffleEpilogue<
                 ck_tile::CShuffleEpilogueProblem<ADataType,
                                                  BDataType,
@@ -224,6 +260,8 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
         std::vector<std::unique_ptr<ck_tile::DeviceMem>> aq_dev_buf;
         std::vector<std::unique_ptr<ck_tile::DeviceMem>> bq_dev_buf;
 
+        using QuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, 128>>;
+
         a_m_k_dev_buf.reserve(group_count);
         b_k_n_dev_buf.reserve(group_count);
         c_m_n_dev_buf.reserve(group_count);
@@ -244,6 +282,15 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                 AQK = 1; // Row quantization: tensor shape [M, 1] or [1]
                 BQK = 1; // Column quantization: tensor shape [1, N] or [1]
             }
+            else if constexpr(QuantType == ck_tile::QuantType::BQuantGrouped)
+            {
+                AQK = 0;       // No A quantization
+                BQK = K / 128; // Group quantization: BQK = K / GroupSize
+                if(K % 128 != 0)
+                {
+                    throw std::runtime_error("K must be divisible by 128 for BQuantGrouped mode");
+                }
+            }
 
             stride_As[i] = ck_tile::get_default_stride(M, K, stride_As[i], is_row_major(ALayout{}));
             stride_Bs[i] = ck_tile::get_default_stride(K, N, stride_Bs[i], is_row_major(BLayout{}));
@@ -258,7 +305,13 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
             else if constexpr(QuantType == ck_tile::QuantType::TensorQuant)
             {
                 stride_AQs[i] = 1; // Tensor quantization: tensor shape [1]
-                stride_AQs[i] = 1; // Tensor quantization: tensor shape [1]
+                stride_BQs[i] = 1; // Tensor quantization: tensor shape [1]
+            }
+            else if constexpr(QuantType == ck_tile::QuantType::BQuantGrouped)
+            {
+                stride_AQs[i] = 0; // No A quantization
+                stride_BQs[i] =
+                    ck_tile::get_default_stride(BQK, N, stride_BQs[i], is_row_major(BQLayout()));
             }
 
             a_m_k_tensors.push_back(ck_tile::HostTensor<ADataType>(
@@ -285,6 +338,15 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                     ck_tile::HostTensor<BQDataType>(ck_tile::host_tensor_descriptor(
                         1, 1, stride_BQs[i], is_row_major(BQLayout()))));
             }
+            else if constexpr(QuantType == ck_tile::QuantType::BQuantGrouped)
+            {
+                aq_tensors.push_back(
+                    ck_tile::HostTensor<AQDataType>(ck_tile::host_tensor_descriptor(
+                        0, AQK, stride_AQs[i], is_row_major(AQLayout{}))));
+                bq_tensors.push_back(
+                    ck_tile::HostTensor<BQDataType>(ck_tile::host_tensor_descriptor(
+                        BQK, N, stride_BQs[i], is_row_major(BQLayout()))));
+            }
 
             std::cout << "gemm[" << i << "]" << " a_m_k: " << a_m_k_tensors[i].mDesc
                       << " b_k_n: " << b_k_n_tensors[i].mDesc
@@ -308,7 +370,18 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                 bq_tensors[i].get_element_space_size_in_bytes()));
 
             a_m_k_dev_buf[i]->ToDevice(a_m_k_tensors[i].data());
-            b_k_n_dev_buf[i]->ToDevice(b_k_n_tensors[i].data());
+
+            if constexpr(PreshuffleB && QuantType == ck_tile::QuantType::BQuantGrouped)
+            {
+                auto b_shuffle_host =
+                    ck_tile::shuffle_b<GroupedGemKernelParam_Mfma>(b_k_n_tensors[i]);
+                b_k_n_dev_buf[i]->ToDevice(b_shuffle_host.data());
+            }
+            else
+            {
+                b_k_n_dev_buf[i]->ToDevice(b_k_n_tensors[i].data());
+            }
+
             aq_dev_buf[i]->ToDevice(aq_tensors[i].data());
             bq_dev_buf[i]->ToDevice(bq_tensors[i].data());
             c_m_n_dev_buf[i]->SetZero();
@@ -373,7 +446,6 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                                     kargs.size() * sizeof(ck_tile::QuantGemmTransKernelArg),
                                     hipMemcpyHostToDevice,
                                     stream.stream_id_));
-
             invoke_grouped_gemm_persistent<GroupedGemKernelParam_Mfma, ALayout, BLayout, CLayout>(
                 stream, group_count, kargs_ptr);
         }
@@ -420,6 +492,17 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
                                                                 bq_tensors[i],
                                                                 c_m_n_host_ref);
             }
+            else if constexpr(QuantType == ck_tile::QuantType::BQuantGrouped)
+            {
+                ck_tile::reference_gemm_quant<ADataType,
+                                              AQDataType,
+                                              BDataType,
+                                              AccDataType,
+                                              CDataType,
+                                              QuantGroupSize,
+                                              false>(
+                    a_m_k_tensors[i], bq_tensors[i], b_k_n_tensors[i], c_m_n_host_ref);
+            }
 
             const float max_accumulated_value =
                 *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
@@ -439,3 +522,13 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
         EXPECT_TRUE(pass);
     }
 };
+
+// Aliases for split test files
+template <typename Tuple>
+using TestCkTileGroupedGemmQuant_RowCol = TestCkTileGroupedGemmQuant<Tuple>;
+
+template <typename Tuple>
+using TestCkTileGroupedGemmQuant_Tensor = TestCkTileGroupedGemmQuant<Tuple>;
+
+template <typename Tuple>
+using TestCkTileGroupedGemmQuant_BQuant = TestCkTileGroupedGemmQuant<Tuple>;

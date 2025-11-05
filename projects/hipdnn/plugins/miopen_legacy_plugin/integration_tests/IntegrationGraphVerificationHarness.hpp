@@ -1,12 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
@@ -109,6 +112,15 @@ protected:
                                         createAllCloseValidator(toSdkType(attr->get_data_type()),
                                                                 absoluteTolerance,
                                                                 relativeTolerance)});
+        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+    }
+
+    void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                              float rmsThreshold)
+    {
+        _tensorIdToValidatorMap.insert(
+            {attr->get_uid(), createRmsValidator(toSdkType(attr->get_data_type()), rmsThreshold)});
+        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
@@ -191,7 +203,9 @@ private:
 
         if(tensorAttr->get_is_virtual()
            || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+        {
             return false;
+        }
 
         cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
         gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
@@ -208,6 +222,6 @@ private:
         _tensorIdToValidatorMap;
 };
 
-// NOLINTEND (portability-template-virtual-member-function
+// NOLINTEND (portability-template-virtual-member-function)
 
 } // namespace hipdnn_sdk::test_utilities
