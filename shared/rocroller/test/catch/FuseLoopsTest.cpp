@@ -79,8 +79,7 @@ namespace FuseLoopsTest
         graph = transform<Simplify>(graph);
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(
-            graph, context.get(), params->workgroupMappingDim, params->workgroupRemapXCC);
+        graph = transform<ConnectWorkgroups>(graph, context.get());
         graph = transform<UnrollLoops>(graph, params, context.get());
 
         SECTION("Call IdentifyFusibleLoops directly.")
