@@ -30,7 +30,7 @@ from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
-from Tensile.Common import SemanticVersion, print2, print1
+from Tensile.Common import SemanticVersion, print2
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -167,7 +167,7 @@ class Assembler(Component):
             debug: add debug flags if True.
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
-            removeTemporaries: Whether to remove the temporary object file after assembling.
+            removeTemporaries: Whether to remove the temporary assembly file.
         """
         args = self._default_args
         args = [
@@ -180,7 +180,6 @@ class Assembler(Component):
         ]
         output = _invoke(args, "Assembling assembly source code into object file (.s -> .o)")
         if removeTemporaries:
-            print1(f"Removing temporary asm file: {srcPath}")
             Path(srcPath).unlink()
         return output
 
@@ -287,6 +286,7 @@ class Bundler(Component):
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
             gfx: The target GPU architecture.
+            removeTemporaries: Whether to remove the temporary code object file.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
@@ -305,7 +305,6 @@ class Bundler(Component):
 
         output = _invoke(args, "Bundling/compressing code object file (.co -> .co)")
         if removeTemporaries:
-            print1(f"Removing temporary code object file: {srcPath}")
             Path(srcPath).unlink()
         return output
 
@@ -388,7 +387,7 @@ class Linker(Component):
         Args:
             srcPaths: A list of paths to object files.
             destPath: A destination path for the generated code object file.
-            removeTemporaries: Whether to remove the temporary object files after linking.
+            removeTemporaries: Whether to remove the temporary object files.
         Raises:
             RuntimeError: If linker invocation fails.
         """
@@ -398,7 +397,6 @@ class Linker(Component):
         output = _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
         if removeTemporaries:
             for srcPath in srcPaths:
-                print1(f"Removing temporary object file: {srcPath}")
                 Path(srcPath).unlink()
         return output
 

@@ -67,7 +67,7 @@ def buildAssemblyCodeObjectFiles(
         destDir: The destination directory for the code object files.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
-        removeTemporaries: Whether to remove the temporary object files after linking.
+        removeTemporaries: Whether to remove the temporary files after linking or compressing.
     """
 
     extObj = ".o"
