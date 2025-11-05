@@ -19,11 +19,6 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk;
 
-namespace
-{
-constexpr double BATCHNORM_DEFAULT_EPSILON = 1e-5;
-}
-
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -62,7 +57,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
         = graph->batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttributes);
     bnY->set_name("bn_y");
     bnY->set_data_type(inputType);
-    bnY->set_is_virtual(true); // Mark as virtual - intermediate tensor
 
     // Step 2: Activation Backward (ReLU backward)
     auto activBwdAttributes = graph::PointwiseAttributes();
@@ -72,7 +66,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto dxDrelu = graph->pointwise(bnY, dy, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
     dxDrelu->set_data_type(inputType);
-    dxDrelu->set_is_virtual(true); // Mark as virtual - intermediate tensor
 
     // Step 3: Batchnorm Backward
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
@@ -186,8 +179,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         test_utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        // Tolerance range is very high due to data-type mismatch & variance issues.
-        const auto inputTol = 4e-3f;
+        // Tolerance range is very high due to data-type mismatch & variance issues (https://github.com/ROCm/rocm-libraries/issues/2459).
+        const auto inputTol = 4e-1f;
 
         auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));

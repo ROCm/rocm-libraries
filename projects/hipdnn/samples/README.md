@@ -69,9 +69,9 @@ Executes the backward pass of a batch normalization graph to compute gradients o
     ```
     where `nhw = N * H * W` is the number of elements averaged per channel.
 
-### [**`BnInferenceActivationBwd`**](./batchnorm/BnInferenceActivationBwd.cpp)
+### [**`FusedBnInfDReluBnBwd`**](./batchnorm/FusedBnInfDReluBnBwd.cpp)
 
-Executes a fused 3-operation graph demonstrating batchnorm inference followed by activation backward and batchnorm backward passes. This pattern is common in training neural networks where an activation function is applied after batch normalization in the forward pass, and during backpropagation, gradients flow backward through both operations.
+Executes a fused 3-operation graph demonstrating batchnorm inference followed by activation backward and batchnorm backward passes.
 
 The fused graph consists of three operations:
 
@@ -98,7 +98,6 @@ The fused graph consists of three operations:
 - Demonstrates multi-operation graph fusion with virtual intermediate tensors
 - The intermediate outputs (`bn_y` and `dx_drelu`) are marked as virtual, allowing the backend to optimize memory usage
 - Uses `CpuReferenceGraphExecutor` for validation, which executes the entire fused graph on CPU
-- Common use case: Training networks with BatchNorm → Activation layers
 
 **Graph Flow:**
 ```
