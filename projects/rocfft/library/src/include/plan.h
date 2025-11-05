@@ -388,6 +388,8 @@ private:
                   const std::vector<size_t>& fftDims,
                   std::vector<BufferPtr>&    input,
                   std::vector<BufferPtr>&    output,
+                  const LoadOps*             loadOps,
+                  const StoreOps*            storeOps,
                   const std::vector<size_t>& inputAntecedents,
                   std::vector<size_t>&       outputItems);
 };

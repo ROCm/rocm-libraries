@@ -206,6 +206,15 @@
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
       "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocwmma",
+      "url": "ROCm/rocWMMA",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     }
   ]
 }

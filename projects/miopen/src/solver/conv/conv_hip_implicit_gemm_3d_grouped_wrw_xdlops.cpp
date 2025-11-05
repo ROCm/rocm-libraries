@@ -387,7 +387,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
-    const miopen::ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
+    [[maybe_unused]] const miopen::ExecutionContext& ctx,
+    const ::miopen::conv::ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "None";
@@ -413,6 +414,34 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                 [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
                 return FillValidKernelsByAlphaBeta<T>(problem);
             };
+
+            // Validation lambda for AI-predicted kernel + split_k combinations
+            auto is_kernel_split_k_valid = [&](int kernel_index, int split_k_value) -> bool {
+                if(kernel_index < 0 || kernel_index >= static_cast<int>(valid_kernels.size()))
+                    return false;
+
+                std::string test_kernel_id =
+                    valid_kernels[kernel_index] + "+" + std::to_string(split_k_value);
+
+                switch(problem.GetAlphaBetaCase())
+                {
+                case BILINEAR:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightBilinearPtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                case SCALE:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightScalePtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                default:
+                    return IsCKArgsSupported<DeviceOpGBwdWeightDefaultPtrs<T>,
+                                             CKArgs<T>,
+                                             miopen::conv::ProblemDescription,
+                                             true>(problem, test_kernel_id);
+                }
+            };
             return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
                                                                         problem,
                                                                         valid_kernels,
@@ -420,7 +449,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                                                                         split_k,
                                                                         kernel_id,
                                                                         fill_valid_kernels,
-                                                                        solver_name);
+                                                                        solver_name,
+                                                                        is_kernel_split_k_valid);
         };
         switch(problem.GetInDataType())
         {

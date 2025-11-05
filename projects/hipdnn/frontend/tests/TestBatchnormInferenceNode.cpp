@@ -213,3 +213,47 @@ TEST(TestBatchnormInferenceNode, PackNode)
     EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
     EXPECT_EQ(packedAttributes->bias_tensor_uid(), biasTensor->get_uid());
 }
+
+TEST(TestBatchnormInferenceNode, GatherHipdnnTensors)
+{
+    BatchnormInferenceAttributes bnAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1).set_name("X");
+    bnAttributes.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(2).set_name("Scale");
+    bnAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_uid(3).set_name("Bias");
+    bnAttributes.set_bias(biasTensor);
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_uid(4).set_name("Mean");
+    bnAttributes.set_mean(meanTensor);
+
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_uid(5).set_name("InvVariance");
+    bnAttributes.set_inv_variance(invVarianceTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(7).set_name("Y");
+    bnAttributes.set_y(yTensor);
+
+    GraphAttributes graphAttributes;
+    BatchnormInferenceNode node(std::move(bnAttributes), graphAttributes);
+
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    node.gather_hipdnn_tensors(allTensors);
+
+    EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(biasTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(meanTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(invVarianceTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(yTensor) != allTensors.end());
+
+    EXPECT_EQ(allTensors.size(), 6);
+}

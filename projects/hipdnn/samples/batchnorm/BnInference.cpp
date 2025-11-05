@@ -34,7 +34,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
-        .set_compute_data_type(intermediateType);
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -120,7 +120,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = validator.allClose(yRefTensor.memory(), yTensor.memory());
+        bool yValid = validator.allClose(yRefTensor, yTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";

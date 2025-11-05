@@ -270,6 +270,6 @@ namespace rocisa
 
     std::string isaToGfx(const nb::tuple& arch);
     std::string isaToGfx(const IsaVersion& arch);
-    std::string getGlcBitName(bool hasGLCModifier);
-    std::string getSlcBitName(bool hasGLCModifier);
+    std::string getGlcBitName();
+    std::string getSlcBitName();
 } // namespace rocisa
