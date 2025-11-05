@@ -65,7 +65,6 @@ jobs:
         fi
     - name: Generate a token
       id: generate-token
-      if: steps.branch-check.outputs.should-run == 'true'
       uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
       with:
         app-id: ${{ secrets.APP_ID }}
