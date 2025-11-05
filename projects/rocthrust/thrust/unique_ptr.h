@@ -51,16 +51,32 @@ struct default_delete;
 template <class T>
 struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
 {
+  /*! \typedef pointer
+   *  \brief The pointer type (`thrust::device_ptr<T>`).
+   */
   using pointer = thrust::device_ptr<T>;
 
   THRUST_HOST constexpr default_delete() noexcept = default;
 
+  /*! \brief Converting constructor from compatible deleter.
+   *
+   *  Allows construction from a deleter for a convertible type.
+   *
+   *  \tparam U A type convertible to \p T.
+   */
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
     std::enable_if_t<std::is_convertible_v<thrust::device_ptr<U>, pointer>>* = nullptr) noexcept
   {}
 
+  /*! \brief Deletes the object pointed to by \p ptr.
+   *
+   *  For non-trivially destructible types, invokes the destructor on the device
+   *  before deallocating memory.
+   *
+   *  \param ptr Pointer to the object to delete.
+   */
   THRUST_HOST void operator()(pointer ptr) const noexcept
   {
     if (ptr.get() == nullptr)
@@ -99,11 +115,25 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
 template <class T>
 struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>>>
 {
+  /*! \typedef pointer
+   *  \brief The pointer type (`thrust::device_ptr<T>`).
+   */
   using pointer = thrust::device_ptr<T>;
 
+  /*! \brief Constructs a deleter with the specified array size.
+   *
+   *  \param n The number of elements in the array (default: 0).
+   */
   THRUST_HOST constexpr default_delete(size_t n = 0) noexcept
       : m_size(n){};
 
+  /*! \brief Converting constructor from compatible array deleter.
+   *
+   *  Copies the size from another deleter for a convertible array type.
+   *
+   *  \tparam U An array element type convertible to \p T.
+   *  \param other The deleter to copy from.
+   */
   template <class U>
   THRUST_HOST
   default_delete(const default_delete<U[]>& other,
@@ -111,6 +141,12 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
       : m_size(other.size())
   {}
 
+  /*! \brief Deletes the array pointed to by \p ptr.
+   *
+   *  Invokes the destructor for each element on the device before deallocating memory.
+   *
+   *  \param ptr Pointer to the array to delete.
+   */
   THRUST_HOST void operator()(pointer ptr) const noexcept
   {
     if (ptr.get() == nullptr)
@@ -139,6 +175,10 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
     thrust::device_free(ptr);
   }
 
+  /*! \brief Returns the number of elements in the array.
+   *
+   *  \return The array size.
+   */
   THRUST_HOST size_t size() const
   {
     return m_size;
@@ -161,16 +201,36 @@ private:
 template <class T>
 struct default_delete<T[], std::enable_if_t<std::is_trivially_destructible_v<T>>>
 {
+  /*! \typedef pointer
+   *  \brief The pointer type (`thrust::device_ptr<T>`).
+   */
   using pointer = thrust::device_ptr<T>;
 
+  /*! \brief Constructs a deleter (size parameter ignored for trivially destructible types).
+   *
+   *  The size parameter is accepted but ignored since trivially destructible types
+   *  don't require element-wise destruction.
+   */
   THRUST_HOST constexpr default_delete(size_t = 0) noexcept {};
 
+  /*! \brief Converting constructor from compatible deleter.
+   *
+   *  Allows construction from a deleter for a convertible type.
+   *
+   *  \tparam U A type convertible to \p T.
+   */
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
     std::enable_if_t<std::is_convertible_v<thrust::device_ptr<U>, pointer>>* = nullptr) noexcept
   {}
 
+  /*! \brief Deletes the array pointed to by \p ptr.
+   *
+   *  Only deallocates memory (no destructors called for trivially destructible types).
+   *
+   *  \param ptr Pointer to the array to delete.
+   */
   THRUST_HOST void operator()(pointer ptr) const noexcept
   {
     thrust::device_free(ptr);
