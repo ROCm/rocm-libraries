@@ -80,7 +80,6 @@ class BatchnormInference:
             inputs.scale.to_gpu()
             inputs.bias.to_gpu()
 
-
         saved_exception = None
         
         try:
