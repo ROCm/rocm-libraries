@@ -322,11 +322,19 @@ TEST(TestTensorAttributes, ValidateDimsSetAndPositive5DValidCase)
     EXPECT_TRUE(tensor.validate_dims_set_and_positive());
 }
 
+TEST(TestTensorAttributes, ValidateDimsSetAndPositiveWithStridesIgnored)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 5, 6});
+    tensor.set_stride({0, -1, 2}); // Invalid strides should be ignored
+    EXPECT_TRUE(tensor.validate_dims_set_and_positive());
+}
+
 TEST(TestTensorAttributes, ValidateDataType)
 {
     TensorAttributes tensor;
     tensor.set_dim({4, 5, 6});
-    tensor.set_stride({0, 1, 2}); // Invalid strides should be ignored
+    tensor.set_stride({0, 1, 2});
 
     std::vector<std::pair<DataType, ErrorCode>> expectedResults
         = {{DataType::NOT_SET, ErrorCode::ATTRIBUTE_NOT_SET},

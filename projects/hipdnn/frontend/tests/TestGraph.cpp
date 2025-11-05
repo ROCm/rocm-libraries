@@ -120,6 +120,29 @@ TEST_F(TestGraph, ValidateFailsOnUnsetNodeComputeDataType)
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, ValidateSucceedsOnUnsetNodeComputeDataTypeWithSetGraph)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
 TEST_F(TestGraph, ValidateFailsOnUnsetTensorDataType)
 {
     Graph graph;
@@ -141,6 +164,29 @@ TEST_F(TestGraph, ValidateFailsOnUnsetTensorDataType)
     auto validationResult = graph.validate();
 
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ValidateSucceedsOnUnsetTensorDataTypeWithSetGraph)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
 TEST_F(TestGraph, SetAndGetAttributes)
