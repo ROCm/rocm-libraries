@@ -1914,10 +1914,10 @@ class GSUOn(GSU):
 
         # WS address calculation
         module.addComment("calculate the starting WG index of GSU WGs")
-        module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("NumWorkGroups1"), src1=sgpr("WorkGroup0"), comment="NumWorkGroups1*wg0"))
+        module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"), comment="NumWorkGroups0*wg1"))
         module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-        module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr("WorkGroup1"), comment="NumWorkGroups1*wg0+wg1"))
-        module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr(tmpS02), comment="(NumWorkGroups1*wg0+wg1)*GSU"))
+        module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr("WorkGroup0"), comment="NumWorkGroups0*wg1+wg0"))
+        module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr(tmpS02), comment="(NumWorkGroups0*wg1+wg0)*GSU"))
         module.add(SMulI32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="NumWgPerBatch"))
         module.add(SMulI32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("GSUStartWGIdx"), src1=sgpr("WorkGroup2"), comment="NumWgPerBatch"))
         module.add(SMulI32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("GSUStartWGIdx"), src1=sgpr(tmpS02), comment="NumWgPerBatch"))
@@ -2043,7 +2043,7 @@ class GSUOn(GSU):
                     vgprstart = vgprstart*2
                 module.add(writer.chooseGlobalRead(True, bps, vgprstart, \
                                 addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True,\
-                                comment="load GSU D 0 "+str(vgprstart)))
+                                comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                 SyncloadedData += 1
 
                 # Init GSUSync for different batch
@@ -2069,11 +2069,11 @@ class GSUOn(GSU):
                     if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
                                     addr0, addr1, soffset=0, offset=0, glc=True, slc=True, \
-                                    comment="load GSU DD %u %u %u" % (bps, gwvw, kernel["ProblemType"]["DestDataType"].numRegisters())))
+                                    comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                     else:
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*i, \
                                     addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, \
-                                    comment="load GSU DD %u %u %u" % (bps, gwvw, kernel["ProblemType"]["DestDataType"].numRegisters())))
+                                    comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                     SyncloadedData += 1
 
                 module.addComment("buffer load end")
@@ -2115,11 +2115,11 @@ class GSUOn(GSU):
                     if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
                                     vgpr(GSUMvgpr), addr1, soffset=0, offset=0, glc=True, slc=True, \
-                                    comment="load GSU DD %u" % bps))
+                                    comment="prefetch GSU WG element %d" % elementIdx))
                     else:
                         module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*i, \
                                     vgpr(GSUMvgpr), addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, \
-                                    comment="load GSU DD %u" % bps))
+                                    comment="prefetch GSU WG element %d" % elementIdx))
                     vlcnt += 1
 
                 module.addComment("buffer add end")

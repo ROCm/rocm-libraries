@@ -22,18 +22,18 @@ void SampleRunner::operator()(const TensorLayout& layout)
 {
     const auto inputType = getDataTypeEnumFromType<InputType>();
 
-    std::cout << "Running convolution forward graph " << inputType << " [" << layout << "]"
+    std::cout << "Running convolution fprop graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     constexpr int64_t n = 16; // Batch size
 
     // Input
-    constexpr int64_t c = 16; // Number of channels
+    constexpr int64_t c = 16; // Number of input (x) channels
     constexpr int64_t h = 16; // Height
     constexpr int64_t w = 16; // Width
 
     // Filter
-    constexpr int64_t k = 16; // Number of filters
+    constexpr int64_t k = 16; // Number of output (y) channels
     constexpr int64_t r = 3; // Height
     constexpr int64_t s = 3; // Width
     constexpr int64_t u = 1; // Height stride
@@ -44,13 +44,13 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilW = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(inputType);
+    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
-    convAttributes.set_name("conv_forward_node");
+    convAttributes.set_name("conv_fprop_node");
     convAttributes.set_padding({padH, padW});
     convAttributes.set_stride({u, v});
     convAttributes.set_dilation({dilH, dilW});
@@ -122,7 +122,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
     }
 
-    std::cout << "Convolution forward graph execution complete for " << inputType << ".\n\n";
+    std::cout << "Convolution fprop graph execution complete for " << inputType << ".\n\n";
 }
 
 int main(int argc, char* argv[])
@@ -137,6 +137,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All convolution forward runs completed.\n";
+    std::cout << "All convolution fprop runs completed.\n";
     return 0;
 }
