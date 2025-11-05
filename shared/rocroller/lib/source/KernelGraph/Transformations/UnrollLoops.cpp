@@ -708,15 +708,17 @@ namespace rocRoller
                 // Add SetCoordinate for the loop size for the tail loop.
                 auto setCoordK = graph.control.addElement(SetCoordinate(loopSizeRoundedDown));
                 graph.mapper.connect<ForLoop>(setCoordK, forLoopDimension);
-                // Connect it to the tail loop via a Body edge.
-                graph.control.chain<Body>(setCoordK, tailLoop);
+                // Set the value of the unroll dimension to 0 for the tail loop.
+                auto setCoord = graph.control.addElement(SetCoordinate(Expression::literal(0u)));
+                graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                // Connect them: setCoordK -> setCoord -> tailLoop
+                graph.control.chain<Body>(setCoordK, setCoord, tailLoop);
                 // Connect the parent loop's Sequence children as Sequence children of the
                 // new SetCoordinate. This ensures that the tail loop is before the
                 // original Sequence children to the parent loop.
                 for(auto node : graph.control.getOutputNodeIndices<Sequence>(loop))
-                {
-                    graph.control.chain<Sequence>(setCoordK, node);
-                }
+                    graph.control.chain<Sequence>(setCoord, node);
+
                 graph.control.chain<Sequence>(loop, setCoordK);
             }
 
