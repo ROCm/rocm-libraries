@@ -187,16 +187,16 @@ namespace rocsparse
             return;
         }
 
-        Y tmp = static_cast<Y>(0);
+        T tmp = static_cast<T>(0);
         if(beta != static_cast<T>(0))
         {
-            tmp += static_cast<Y>(beta) * y_array[gid];
+            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
         }
         if(alpha != static_cast<T>(0))
         {
-            tmp += static_cast<Y>(alpha) * static_cast<Y>(x_array[gid]);
+            tmp = fma(alpha, static_cast<T>(x_array[gid]), tmp);
         }
-        y_array[gid] = tmp;
+        y_array[gid] = static_cast<Y>(tmp);
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
@@ -214,10 +214,10 @@ namespace rocsparse
             return;
         }
 
-        Y tmp = static_cast<Y>(0);
+        T tmp = static_cast<T>(0);
         if(beta != static_cast<T>(0))
         {
-            tmp += static_cast<Y>(beta) * y_array[gid];
+            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
         }
 
         // Add contributions from all extra vectors, each with its own gamma
@@ -226,11 +226,11 @@ namespace rocsparse
             T gamma = gamma_values[i]; // gamma is a scalar value from the array
             if(gamma != static_cast<T>(0))
             {
-                tmp += static_cast<Y>(gamma) * static_cast<Y>(x_arrays[i][gid]);
+                tmp = fma(gamma, static_cast<T>(x_arrays[i][gid]), tmp);
             }
         }
 
-        y_array[gid] = tmp;
+        y_array[gid] = static_cast<Y>(tmp);
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>

@@ -221,24 +221,44 @@ public:
     }
 
     // Residual computation parameters
-    struct extra_params
+    struct extra_vectors
     {
-        rocsparse_int                count;
+    private:
+        int64_t                      count;
         rocsparse_const_dnvec_descr  gamma_vec;
         rocsparse_const_dnvec_descr* z_vecs;
-        bool                         enabled;
 
-        extra_params()
+    public:
+        extra_vectors()
             : count(0)
             , gamma_vec(nullptr)
             , z_vecs(nullptr)
-            , enabled(false)
         {
         }
 
-        ~extra_params()
+        ~extra_vectors()
         {
             clear();
+        }
+
+        // Getter methods
+        int64_t get_count() const
+        {
+            return count;
+        }
+
+        rocsparse_const_dnvec_descr get_gamma_vec() const
+        {
+            if(count == 0)
+                return nullptr;
+            return gamma_vec;
+        }
+
+        rocsparse_const_dnvec_descr* get_z_vecs() const
+        {
+            if(count == 0)
+                return nullptr;
+            return z_vecs;
         }
 
         void clear()
@@ -249,10 +269,9 @@ public:
             count     = 0;
             gamma_vec = nullptr;
             z_vecs    = nullptr;
-            enabled   = false;
         }
 
-        rocsparse_status set(rocsparse_int                num_extras,
+        rocsparse_status set(int64_t                      num_extras,
                              rocsparse_const_dnvec_descr  gamma_vec_in,
                              rocsparse_const_dnvec_descr* z_vecs_in)
         {
@@ -260,19 +279,23 @@ public:
 
             if(num_extras <= 0)
             {
-                return rocsparse_status_invalid_value;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
             }
 
             count     = num_extras;
             gamma_vec = gamma_vec_in;
             z_vecs    = new rocsparse_const_dnvec_descr[count];
 
-            for(rocsparse_int i = 0; i < count; ++i)
+            if(z_vecs == nullptr)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_memory_error);
+            }
+
+            for(int64_t i = 0; i < count; ++i)
             {
                 z_vecs[i] = z_vecs_in[i];
             }
 
-            enabled = true;
             return rocsparse_status_success;
         }
     } extras;
@@ -464,11 +487,9 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(format, alg)));
 
         // Pass gamma dnvec and dnvec descriptors for z vectors
-        const rocsparse_int num_extra = spmv_descr->extras.enabled ? spmv_descr->extras.count : 0;
-        rocsparse_const_dnvec_descr gamma_vec
-            = spmv_descr->extras.enabled ? spmv_descr->extras.gamma_vec : nullptr;
-        rocsparse_const_dnvec_descr* z_vecs
-            = spmv_descr->extras.enabled ? spmv_descr->extras.z_vecs : nullptr;
+        const int64_t                num_extra = spmv_descr->extras.get_count();
+        rocsparse_const_dnvec_descr  gamma_vec = spmv_descr->extras.get_gamma_vec();
+        rocsparse_const_dnvec_descr* z_vecs    = spmv_descr->extras.get_z_vecs();
 
         switch(stage)
         {
@@ -1036,16 +1057,19 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr         descr,
-                                                     rocsparse_int                num_extras,
+extern "C" rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
+                                                     rocsparse_spmv_descr         descr,
+                                                     int64_t                      num_extras,
                                                      rocsparse_const_dnvec_descr  gamma_vec,
-                                                     rocsparse_const_dnvec_descr* z_vecs)
+                                                     rocsparse_const_dnvec_descr* z_vecs,
+                                                     rocsparse_error*             p_error)
 try
 {
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(1, num_extras, (num_extras <= 0), rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG_POINTER(2, gamma_vec);
-    ROCSPARSE_CHECKARG_ARRAY(3, num_extras, z_vecs);
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG(2, num_extras, (num_extras <= 0), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG_POINTER(3, gamma_vec);
+    ROCSPARSE_CHECKARG_ARRAY(4, num_extras, z_vecs);
 
     return descr->extras.set(num_extras, gamma_vec, z_vecs);
     // LCOV_EXCL_START
@@ -1056,10 +1080,13 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-extern "C" rocsparse_status rocsparse_spmv_clear_extra(rocsparse_spmv_descr descr)
+extern "C" rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
+                                                       rocsparse_spmv_descr descr,
+                                                       rocsparse_error*     p_error)
 try
 {
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
 
     descr->extras.clear();
 

@@ -112,7 +112,7 @@ int main()
 
     rocsparse_const_dnvec_descr z_vecs[1] = {extra};
 
-    ROCSPARSE_CHECK(rocsparse_spmv_set_extra(spmv_descr, 1, gamma_vec, z_vecs));
+    ROCSPARSE_CHECK(rocsparse_spmv_set_extra(handle, spmv_descr, 1, gamma_vec, z_vecs, nullptr));
 
     float alpha = 1.0f, beta = 0.0f;
 
@@ -157,7 +157,7 @@ int main()
                                       nullptr));
 
     // Clear extra parameters
-    ROCSPARSE_CHECK(rocsparse_spmv_clear_extra(spmv_descr));
+    ROCSPARSE_CHECK(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
 
     // Cleanup
     HIP_CHECK(hipFree(temp_buffer));

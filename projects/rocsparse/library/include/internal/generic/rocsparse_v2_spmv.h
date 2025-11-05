@@ -246,6 +246,8 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  This feature can be used to implement residual calculations of the form
  *  $r = b - A * x$ within the SpMV call by setting $\gamma = 1$ and $z = b$.
  *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
  *  @param[inout]
  *  descr           spmv descriptor.
  *  @param[in]
@@ -254,32 +256,44 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  gamma_vec       dense vector descriptor containing gamma scalars.
  *  @param[in]
  *  z_vecs          array of dense vector descriptors for z vectors.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
  *  \retval rocsparse_status_invalid_value invalid parameters.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr         descr,
-                                          rocsparse_int                num_extras,
+rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
+                                          rocsparse_spmv_descr         descr,
+                                          int64_t                      num_extras,
                                           rocsparse_const_dnvec_descr  gamma_vec,
-                                          rocsparse_const_dnvec_descr* z_vecs);
+                                          rocsparse_const_dnvec_descr* z_vecs,
+                                          rocsparse_error*             p_error);
 
 /*! \ingroup generic_module
- *  \brief Clear extra residual parameters for spmv
+ *  \brief Clear extra parameters for spmv
  *
  *  \details
  *  \p rocsparse_spmv_clear_extra clears the extra parameters set by
  *  rocsparse_spmv_set_extra.
  *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
  *  @param[inout]
  *  descr           spmv descriptor.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spmv_clear_extra(rocsparse_spmv_descr descr);
+rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
+                                            rocsparse_spmv_descr descr,
+                                            rocsparse_error*     p_error);
 
 #ifdef __cplusplus
 }
