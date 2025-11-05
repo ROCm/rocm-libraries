@@ -36,7 +36,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto x = createTensor({n, c, h, w}, inputType);
+    auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
@@ -47,6 +47,19 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true).set_data_type(inputType);
+
+    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
+    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
+    utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
+    utilities::Tensor<IntermediateType> meanTensor(mean->get_dim());
+    utilities::Tensor<IntermediateType> invVarianceTensor(invVariance->get_dim());
+    utilities::Tensor<InputType> yTensor(y->get_dim(), layout);
+
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    scaleTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
+    biasTensor.fillWithValue(static_cast<IntermediateType>(0.0f));
+    meanTensor.fillWithValue(static_cast<IntermediateType>(0.5f));
+    invVarianceTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
 
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
@@ -63,25 +76,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
 
-    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
-    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
-    utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
-    utilities::Tensor<IntermediateType> meanTensor(mean->get_dim());
-    utilities::Tensor<IntermediateType> invVarianceTensor(invVariance->get_dim());
-    utilities::Tensor<InputType> yTensor(y->get_dim(), layout);
-
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-
-    scaleTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
-
-    biasTensor.fillWithValue(static_cast<IntermediateType>(0.0f));
-
-    meanTensor.fillWithValue(static_cast<IntermediateType>(0.5f));
-
-    invVarianceTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
-
     std::unordered_map<int64_t, void*> variantPack;
-
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
     variantPack[bias->get_uid()] = biasTensor.memory().deviceData();
@@ -142,12 +137,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All batch normalization inference runs completed.\n";
     return 0;
 }
