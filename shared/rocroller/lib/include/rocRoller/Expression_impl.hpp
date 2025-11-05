@@ -339,7 +339,7 @@ namespace rocRoller
                    || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
                    || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
                    || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
-                   || dt == DataType::Bool32 || dt == DataType::Bool64;
+                   || dt == DataType::Bool32 || dt == DataType::Bool64 || dt == DataType::Raw32;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)

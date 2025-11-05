@@ -226,6 +226,11 @@ namespace rocRoller::Expression::EvaluateDetail
             return evaluate(convert(expr.outputDataType, resultExpr));
         }
 
+        CommandArgumentValue operator()(Raw32 const& arg) const
+        {
+            return call(arg.value);
+        }
+
         template <typename ARG>
         CommandArgumentValue operator()(ARG const&) const
         {

@@ -80,6 +80,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
+                auto exprType = resultVariableType(expr);
+
                 auto lhs = expr.lhs;
                 lhs      = call(expr.lhs);
                 if(lhs)
@@ -132,6 +134,9 @@ namespace rocRoller
                     lhs = logicalShiftR(lhs, literal(expr.srcOffset - expr.dstOffset));
 
                 ExpressionPtr ret = lhs | rhs;
+                if (resultVariableType(ret) != exprType)
+                    ret = convert(exprType.dataType, ret);
+
                 setComment(ret, expr.comment);
                 return ret;
             }
