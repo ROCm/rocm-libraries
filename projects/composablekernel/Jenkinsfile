@@ -1642,14 +1642,9 @@ pipeline {
                                            ninja -j64 benchmark_gemm_preshuffle_all && \
                                            python3 ../tile_engine/ops/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" \
                                            --warmup 5 --repeat 5 --verbose --json results.json && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_rrrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_rrrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_ccrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_ccrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_crrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_crrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_rcrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_rcrr """
+                                           ninja -j64 benchmark_gemm_multi_d_all && \
+                                           python3 ../tile_engine/ops/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" \
+                                           --warmup 5 --repeat 5 --verbose --json results.json """
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, no_reboot:true, build_type: 'Release', execute_cmd: execute_args)
@@ -1682,14 +1677,9 @@ pipeline {
                                            ninja -j64 benchmark_gemm_preshuffle_all && \
                                            python3 ../tile_engine/ops/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" \
                                            --warmup 5 --repeat 5 --verbose --json results.json && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_rrrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_rrrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_ccrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_ccrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_crrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_crrr && \
-                                           ninja -j64 benchmark_gemm_multi_d_fp16_rcrr && \
-                                           ./bin/benchmark_gemm_multi_d_fp16_rcrr """
+                                           ninja -j64 benchmark_gemm_multi_d_all && \
+                                           python3 ../tile_engine/ops/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" \
+                                           --warmup 5 --repeat 5 --verbose --json results.json """
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, no_reboot:true, build_type: 'Release', execute_cmd: execute_args)
@@ -1846,10 +1836,11 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     environment{
-                        setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx90a" -DCMAKE_CXX_FLAGS=" -O3 " """
+                        setup_args = """ -DCMAKE_INSTALL_PREFIX=../install -DGPU_TARGETS="gfx90a" -DCK_CXX_STANDARD="17" -DCMAKE_CXX_FLAGS=" -O3 " """
                         execute_args = """ cd ../client_example && rm -rf build && mkdir build && cd build && \
                                            cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/install;/opt/rocm" \
                                            -DGPU_TARGETS="gfx90a" \
+                                           -DCK_CXX_STANDARD="17" \
                                            -DCMAKE_CXX_COMPILER="${build_compiler()}" \
                                            -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
                                            -DCMAKE_CXX_FLAGS=" -O3 " .. && make -j """

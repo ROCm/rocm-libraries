@@ -1,5 +1,5 @@
+// Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -128,14 +128,38 @@ enum class ElementwiseOperation
     PASS_THROUGH
 };
 
-// Enums for the current block GEMM pipeline versions.
-enum class BlockGemmPipelineVersion
+// Enums for pipeline versions & schedulers
+enum class PipelineVersion
 {
     V1,
     V2,
     V3,
     V4,
-    V5
+    V5,
+    WEIGHT_ONLY
+};
+
+// Enums for the GEMM specialization.
+enum struct GemmSpecialization
+{
+    // Gemm
+    Default,
+    MPadding,
+    NPadding,
+    KPadding,
+    MNPadding,
+    MKPadding,
+    NKPadding,
+    MNKPadding,
+    // Gemm + Gemm
+    OPadding,
+    MOPadding,
+    NOPadding,
+    KOPadding,
+    MNOPadding,
+    MKOPadding,
+    NKOPadding,
+    MNKOPadding
 };
 
 // Enums for the forward convolution specialization.
@@ -145,6 +169,50 @@ enum class ConvFwdSpecialization
     FILTER_1X1_PAD0,
     FILTER_1X1_STRIDE1_PAD0,
     FILTER_3x3
+};
+
+// Enums for the backward data convolution specialization.
+enum class ConvBwdDataSpecialization
+{
+    DEFAULT,
+    FILTER_1X1_STRIDE1_PAD0,
+};
+
+// Enums for the backward weight convolution specialization.
+enum class ConvBwdWeightSpecialization
+{
+    DEFAULT,
+    FILTER_1X1_STRIDE1_PAD0,
+    FILTER_1X1_PAD0,
+    ODD_C,
+};
+
+// Enums for the Gemm padding.
+enum class GemmPadding
+{
+    DEFAULT,
+    M_PADDING,
+    N_PADDING,
+    K_PADDING,
+    MN_PADDING,
+    MK_PADDING,
+    NK_PADDING,
+    MNK_PADDING,
+    O_PADDING,
+    MO_PADDING,
+    NO_PADDING,
+    KO_PADDING,
+    MNO_PADDING,
+    MKO_PADDING,
+    NKO_PADDING,
+    MNKO_PADDING,
+};
+
+enum class PipelineScheduler
+{
+    DEFAULT,
+    INTRAWAVE,
+    INTERWAVE
 };
 
 } // namespace ck_tile::builder
