@@ -97,7 +97,7 @@ protected:
     }
 };
 
-TEST_F(TestGraph, ValidateFailsOnUnsetNodeComputeDataType)
+TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
 {
     Graph graph;
 
@@ -120,7 +120,7 @@ TEST_F(TestGraph, ValidateFailsOnUnsetNodeComputeDataType)
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ValidateSucceedsOnUnsetNodeComputeDataTypeWithSetGraph)
+TEST_F(TestGraph, ValidateUnsetNodeComputeTypeSetGraphComputeType)
 {
     Graph graph;
 
@@ -143,7 +143,7 @@ TEST_F(TestGraph, ValidateSucceedsOnUnsetNodeComputeDataTypeWithSetGraph)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ValidateFailsOnUnsetTensorDataType)
+TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIoType)
 {
     Graph graph;
 
@@ -166,7 +166,7 @@ TEST_F(TestGraph, ValidateFailsOnUnsetTensorDataType)
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ValidateSucceedsOnUnsetTensorDataTypeWithSetGraph)
+TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataType)
 {
     Graph graph;
 
