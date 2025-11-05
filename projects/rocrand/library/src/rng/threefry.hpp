@@ -84,15 +84,19 @@ struct threefry_device_engine : public BaseType
     // m_state from base class
 };
 
-template<class Engine, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_threefry(dim3         block_idx,
-                                                           dim3         thread_idx,
-                                                           dim3         grid_dim,
-                                                           dim3         block_dim,
-                                                           Engine       engine,
-                                                           T*           data,
-                                                           const size_t n,
-                                                           Distribution distribution)
+template<class Engine,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_threefry(dim3         block_idx,
+                       dim3         thread_idx,
+                       dim3         grid_dim,
+                       dim3         block_dim,
+                       Engine       engine,
+                       T*           data,
+                       const size_t n,
+                       Distribution distribution)
 {
     using engine_scalar_type = typename Engine::scalar_type;
 
@@ -344,22 +348,34 @@ public:
                 return ROCRAND_STATUS_SUCCESS;
             }
 
-            status = dynamic_dispatch(m_order,
-                                      [&, this](auto is_dynamic)
-                                      {
-                                          return system_type::template launch<
-                                              generate_threefry<engine_type, T, Distribution>,
-                                              ConfigProvider,
-                                              T,
-                                              is_dynamic>(dim3(config.blocks),
-                                                          dim3(config.threads),
-                                                          0,
-                                                          m_stream,
-                                                          m_engine,
-                                                          data,
-                                                          data_size,
-                                                          distribution);
-                                      });
+            host::target_arch target_arch;
+            hipError_t        result = host::get_device_arch(m_stream, target_arch);
+            if(result != hipSuccess)
+            {
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
+
+            auto generate_threefry_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
+                generate_threefry<engine_type, T, Distribution, arch>(args...);
+            };
+
+            status = dynamic_dispatch(
+                m_order,
+                [&, this](auto is_dynamic)
+                {
+                    return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                        generate_threefry_kernel,
+                        target_arch,
+                        dim3(config.blocks),
+                        dim3(config.threads),
+                        0,
+                        m_stream,
+                        m_engine,
+                        data,
+                        data_size,
+                        distribution);
+                });
 
             // Check kernel status
             if(status != ROCRAND_STATUS_SUCCESS)

@@ -949,6 +949,14 @@ namespace GEMMDriverTest
     {
     };
 
+    class GEMMTestStreamKWGMGPU
+        : public BaseGEMMContextFixture<std::tuple<int, /* workgroupMapping dim */
+                                                   int, /* workgroupMapping value */
+                                                   bool, /* workgroupRemapXCC */
+                                                   StreamKMode>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -1252,6 +1260,35 @@ namespace GEMMDriverTest
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<Half>(gemm);
         }
+    }
+
+    TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+
+        gemm.k = gemm.macK * 8;
+
+        std::tie(gemm.workgroupMappingDim,
+                 gemm.workgroupMappingValue,
+                 gemm.workgroupRemapXCC,
+                 gemm.streamK)
+            = std::get<1>(GetParam());
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
@@ -4097,4 +4134,17 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamKWGM,
+        GEMMTestStreamKWGMGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(0, 1), /* workgroupMapping dim */
+                               ::testing::Values(1, 2, 6), /* workgroupMapping value */
+                               ::testing::Values(true, false), /* remapWorkgroupXCC */
+                               ::testing::Values(StreamKMode::Standard,
+                                                 StreamKMode::TwoTile,
+                                                 StreamKMode::TwoTileDPFirst))));
+
 }
