@@ -105,12 +105,14 @@ int main()
         handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
 
     // Set extra residual parameters
-    float                       gamma          = 0.5f;
-    rocsparse_datatype          gamma_types[1] = {rocsparse_datatype_f32_r};
-    const void*                 gamma_ptrs[1]  = {&gamma};
-    rocsparse_const_dnvec_descr z_vecs[1]      = {z_vec};
+    // Create gamma dnvec with host values
+    float                 gamma = 0.5f;
+    rocsparse_dnvec_descr gamma_vec;
+    ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&gamma_vec, 1, &gamma, rocsparse_datatype_f32_r));
 
-    ROCSPARSE_CHECK(rocsparse_spmv_set_extra(spmv_descr, 1, gamma_types, gamma_ptrs, z_vecs));
+    rocsparse_const_dnvec_descr z_vecs[1] = {extra};
+
+    ROCSPARSE_CHECK(rocsparse_spmv_set_extra(spmv_descr, 1, gamma_vec, z_vecs));
 
     float alpha = 1.0f, beta = 0.0f;
 
@@ -167,6 +169,7 @@ int main()
     ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x_vec));
     ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y_vec));
     ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(z_vec));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(gamma_vec));
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
 
     std::cout << "Success!\n";

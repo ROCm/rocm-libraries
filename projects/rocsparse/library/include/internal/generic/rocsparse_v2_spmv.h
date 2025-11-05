@@ -235,21 +235,23 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
                                    rocsparse_error*            error);
 
 /*! \ingroup generic_module
- *  \brief Set extra residual parameters for spmv
+ *  \brief Set extra scalar and vector parameters for spmv
  *
  *  \details
- *  \p rocsparse_spmv_set_extra sets arrays of gamma scalars and z vectors
- *  for residual computation. The computation will be:
- *  y = alpha * op(A) * x + beta * y + sum(gamma[i] * z[i])
+ *  \p rocsparse_spmv_set_extra sets a gamma dnvec vector and z vectors
+ *  appended to the spmv computation. The computation will be:
+ *  $y = alpha * op(A) * x + beta * y + \sum_{i=1}^{n} \gamma_i z_i$
+ *  where $n$ is the number of extra terms set by \p num_extras.
+ * 
+ *  This feature can be used to implement residual calculations of the form
+ *  $r = b - A * x$ within the SpMV call by setting $\gamma = 1$ and $z = b$.
  *
  *  @param[inout]
  *  descr           spmv descriptor.
  *  @param[in]
  *  num_extras      number of extra terms (gamma/z pairs).
  *  @param[in]
- *  gamma_types     array of data types for gamma scalars.
- *  @param[in]
- *  gamma_ptrs      array of pointers to gamma scalars.
+ *  gamma_vec       dense vector descriptor containing gamma scalars.
  *  @param[in]
  *  z_vecs          array of dense vector descriptors for z vectors.
  *
@@ -260,8 +262,7 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmv_set_extra(rocsparse_spmv_descr         descr,
                                           rocsparse_int                num_extras,
-                                          rocsparse_datatype*          gamma_types,
-                                          const void**                 gamma_ptrs,
+                                          rocsparse_const_dnvec_descr  gamma_vec,
                                           rocsparse_const_dnvec_descr* z_vecs);
 
 /*! \ingroup generic_module

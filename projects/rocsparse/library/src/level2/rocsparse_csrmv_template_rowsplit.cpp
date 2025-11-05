@@ -197,7 +197,6 @@ rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle   
                                                        0,
                                                        nullptr,
                                                        nullptr,
-                                                       nullptr,
                                                        force_conj);
 }
 
@@ -210,15 +209,14 @@ rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle   
                                                              const T*            alpha_device_host,
                                                              const rocsparse_mat_descr descr,
                                                              const A*                  csr_val,
-                                                             const I*            csr_row_ptr_begin,
-                                                             const I*            csr_row_ptr_end,
-                                                             const J*            csr_col_ind,
-                                                             const X*            x,
-                                                             const T*            beta_device_host,
-                                                             Y*                  y,
-                                                             rocsparse_int       num_extra,
-                                                             rocsparse_datatype* gamma_types,
-                                                             const void**        gamma_ptrs,
+                                                             const I*      csr_row_ptr_begin,
+                                                             const I*      csr_row_ptr_end,
+                                                             const J*      csr_col_ind,
+                                                             const X*      x,
+                                                             const T*      beta_device_host,
+                                                             Y*            y,
+                                                             rocsparse_int num_extra,
+                                                             rocsparse_const_dnvec_descr  gamma_vec,
                                                              rocsparse_const_dnvec_descr* z_vecs,
                                                              bool force_conj)
 {
@@ -253,7 +251,7 @@ rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle   
 
         // Fill the preallocated buffers
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
-            handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
+            handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
     }
 
     bool conj = (trans == rocsparse_operation_conjugate_transpose || force_conj);

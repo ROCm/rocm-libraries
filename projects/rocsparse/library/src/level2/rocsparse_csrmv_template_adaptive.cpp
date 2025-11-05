@@ -618,7 +618,6 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                                                        0,
                                                        nullptr,
                                                        nullptr,
-                                                       nullptr,
                                                        force_conj);
 }
 
@@ -635,11 +634,10 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                                                              const J*                  csr_col_ind,
                                                              rocsparse_csrmv_info      info,
                                                              const X*                  x,
-                                                             const T*            beta_device_host,
-                                                             Y*                  y,
-                                                             rocsparse_int       num_extra,
-                                                             rocsparse_datatype* gamma_types,
-                                                             const void**        gamma_ptrs,
+                                                             const T*      beta_device_host,
+                                                             Y*            y,
+                                                             rocsparse_int num_extra,
+                                                             rocsparse_const_dnvec_descr  gamma_vec,
                                                              rocsparse_const_dnvec_descr* z_vecs,
                                                              bool force_conj)
 {
@@ -674,7 +672,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 
         // Fill the preallocated buffers
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
-            handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
+            handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
     }
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);

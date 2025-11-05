@@ -613,7 +613,6 @@ namespace rocsparse
                                       0,
                                       nullptr,
                                       nullptr,
-                                      nullptr,
                                       fallback_algorithm)));
                 return rocsparse_status_success;
             }

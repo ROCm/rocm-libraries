@@ -452,8 +452,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                                                         const T*                  beta_device_host,
                                                         Y*                        y,
                                                         rocsparse_int             num_extra,
-                                                        rocsparse_datatype*       gamma_types,
-                                                        const void**              gamma_ptrs,
+                                                        rocsparse_const_dnvec_descr  gamma_vec,
                                                         rocsparse_const_dnvec_descr* z_vecs,
                                                         bool                         force_conj)
 {
@@ -488,7 +487,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
 
         // Fill the preallocated buffers
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
-            handle, num_extra, gamma_types, gamma_ptrs, z_vecs, gamma_device_array, z_array));
+            handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
     }
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(6, descr);
@@ -797,8 +796,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
         const TTYPE*                 beta_device_host,                \
         YTYPE*                       y,                               \
         rocsparse_int                num_extra,                       \
-        rocsparse_datatype*          gamma_types,                     \
-        const void**                 gamma_ptrs,                      \
+        rocsparse_const_dnvec_descr  gamma_vec,                       \
         rocsparse_const_dnvec_descr* z_vecs,                          \
         bool                         force_conj);
 

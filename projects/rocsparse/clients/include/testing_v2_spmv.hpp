@@ -507,13 +507,13 @@ public:
                                                            sizeof(ttype),
                                                            nullptr));
 
-            rocsparse_datatype gamma_types[1] = {ttype};
-            const void*        gamma_ptrs[1]
-                = {pointer_mode == 0 ? (const void*)(&gamma_val) : (const void*)d_gamma};
+            // Create gamma dnvec with host values
+            rocsparse_dnvec_descr gamma_vec;
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr(&gamma_vec, 1, h_gamma, ttype));
+
             rocsparse_const_dnvec_descr z_vecs[1] = {extra};
 
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spmv_set_extra(spmv_descr, 1, gamma_types, gamma_ptrs, z_vecs));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_extra(spmv_descr, 1, gamma_vec, z_vecs));
 
             size_t buffer_size = 0;
             CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
@@ -688,6 +688,7 @@ public:
                 }
             }
 
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));
             CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
             CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
         }

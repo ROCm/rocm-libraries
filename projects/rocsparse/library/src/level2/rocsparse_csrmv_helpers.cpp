@@ -30,8 +30,7 @@ namespace rocsparse
     template <typename T, typename Y>
     rocsparse_status csrmv_extract_gamma_and_z_arrays(rocsparse_handle             handle,
                                                       rocsparse_int                num_extra,
-                                                      rocsparse_datatype*          gamma_types,
-                                                      const void**                 gamma_ptrs,
+                                                      rocsparse_const_dnvec_descr  gamma_vec,
                                                       rocsparse_const_dnvec_descr* z_vecs,
                                                       T*        gamma_device_array,
                                                       const Y** z_array)
@@ -63,52 +62,25 @@ namespace rocsparse
             }
         }
 
-        // Handle gamma values based on pointer mode
-        if(handle->pointer_mode == rocsparse_pointer_mode_host)
+        // Extract gamma values from the dnvec descriptor
+        if(gamma_vec != nullptr)
         {
-            // Host mode: gamma_ptrs[i] are host pointers
-            // Copy gamma values directly to device array using hipMemcpyAsync and hipMemsetAsync
-            for(rocsparse_int i = 0; i < num_extra; ++i)
-            {
-                if(gamma_ptrs != nullptr && gamma_ptrs[i] != nullptr)
-                {
-                    // Copy the gamma value directly to device array element
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)(&gamma_device_array[i]),
-                                                       gamma_ptrs[i],
-                                                       sizeof(T),
-                                                       hipMemcpyHostToDevice,
-                                                       handle->stream));
-                }
-                else
-                {
-                    // Set gamma_device_array[i] to zero using hipMemsetAsync
-                    RETURN_IF_HIP_ERROR(hipMemsetAsync(
-                        (void*)(&gamma_device_array[i]), 0, sizeof(T), handle->stream));
-                }
-            }
+            // The gamma values are in the dnvec, copy them to the device array
+            const T* gamma_data = reinterpret_cast<const T*>(gamma_vec->const_values);
+
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)gamma_device_array,
+                                               gamma_data,
+                                               num_extra * sizeof(T),
+                                               handle->pointer_mode == rocsparse_pointer_mode_host
+                                                   ? hipMemcpyHostToDevice
+                                                   : hipMemcpyDeviceToDevice,
+                                               handle->stream));
         }
         else
         {
-            // Device mode: gamma_ptrs[i] are device pointers
-            // Copy each gamma value directly from device to device
-            for(rocsparse_int i = 0; i < num_extra; ++i)
-            {
-                if(gamma_ptrs != nullptr && gamma_ptrs[i] != nullptr)
-                {
-                    // Copy single value from device pointer to device array element
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync((void*)(&gamma_device_array[i]),
-                                                       gamma_ptrs[i],
-                                                       sizeof(T),
-                                                       hipMemcpyDeviceToDevice,
-                                                       handle->stream));
-                }
-                else
-                {
-                    // Set to zero
-                    RETURN_IF_HIP_ERROR(hipMemsetAsync(
-                        (void*)(&gamma_device_array[i]), 0, sizeof(T), handle->stream));
-                }
-            }
+            // If gamma_vec is null, set all gamma values to zero
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                (void*)gamma_device_array, 0, num_extra * sizeof(T), handle->stream));
         }
 
         return rocsparse_status_success;
@@ -119,8 +91,7 @@ namespace rocsparse
     template rocsparse_status rocsparse::csrmv_extract_gamma_and_z_arrays( \
         rocsparse_handle             handle,                               \
         rocsparse_int                num_extra,                            \
-        rocsparse_datatype*          gamma_types,                          \
-        const void**                 gamma_ptrs,                           \
+        rocsparse_const_dnvec_descr  gamma_vec,                            \
         rocsparse_const_dnvec_descr* z_vecs,                               \
         TTYPE*                       gamma_device_array,                   \
         const YTYPE**                z_array);
