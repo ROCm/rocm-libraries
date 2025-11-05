@@ -86,7 +86,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForSupportedSingleNodeGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
