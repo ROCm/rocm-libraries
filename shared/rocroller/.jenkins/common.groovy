@@ -357,6 +357,15 @@ def runPerformanceCommand (platform, project)
             def resCommentTitle = "# Resource Report for ${platform.gpu}"
             def resCommentString = "${resCommentTitle}\n\n"
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+            
+            def maxResultsLength = 60000
+            def truncatedMessage = "\n\n*[Results truncated. See full report in artifacts.]*"
+            
+            if (resResults.length() > maxResultsLength) {
+                def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
+                resResults = resResults.substring(0, truncateIndex) + truncatedMessage
+            }
+            
             resCommentString += "## Results${estimateString}\n\n"
             resCommentString += "<details open>\n\n${resResults}\n</details>\n"
             resCommentString += "<details><summary>Links</summary>\n\n"
