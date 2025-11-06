@@ -104,7 +104,6 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
 /*! \brief Default deleter specialization for arrays of non-trivially destructible types.
  *
  *  This specialization handles deletion of arrays where element destructors must be called.
- *  Stores the array size to ensure all element destructors are properly invoked on the device.
  *
  *  \tparam T The array element type (non-trivially destructible).
  */
