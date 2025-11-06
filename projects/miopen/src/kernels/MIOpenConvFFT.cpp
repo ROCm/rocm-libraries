@@ -312,7 +312,7 @@ __device__ void FwdPassIN(unsigned int me,
                           float2& R5)
 {
     unsigned int met = me % 48;
-    float* ldsf      = (float*)(bufOut + outOffset);
+    float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
 
     R0 = float2(0, 0);
     R1 = float2(0, 0);
@@ -366,7 +366,7 @@ __device__ void FwdPassWE(unsigned int batch,
                           float2& R5)
 {
     unsigned int met = me % 24;
-    float* ldsf      = (float*)(bufOut + outOffset);
+    float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
 
 #ifdef CFF_BACKWARD
     inOffset =
@@ -1232,7 +1232,7 @@ __device__ void InvPass3(unsigned int me,
 __device__ void InvPassOUT(unsigned int me,
                            unsigned int inOffset,
                            unsigned int outOffset,
-                           float2* bufIn,
+                           float2 const* bufIn,
                            float* bufOut,
                            float2& R0,
                            float2& R1,
@@ -1241,8 +1241,8 @@ __device__ void InvPassOUT(unsigned int me,
                            float2& R4)
 {
 
-    unsigned int met = me % 48;
-    float* ldsf      = (float*)(bufIn + inOffset);
+    unsigned int met  = me % 48;
+    float const* ldsf = reinterpret_cast<float const*>(bufIn + inOffset);
 
     R0.x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
                 0 * 672];
@@ -1746,7 +1746,7 @@ __device__ void FwdPassWE(unsigned int batch,
     R4 = float2(0, 0);
     R5 = float2(0, 0);
 
-    float* ldsf = (float*)(bufOut + outOffset);
+    float* ldsf = reinterpret_cast<float*>(bufOut + outOffset);
 
     ldsf[(me / 32) * 180 * 2 + met] = R0.x;
 
@@ -2673,7 +2673,7 @@ __device__ void FwdPassWE(unsigned int me,
                           float2& R7)
 {
 
-    float* ldsf = (float*)bufOut;
+    float* ldsf = reinterpret_cast<float*>(bufOut);
 
     if(me < 25)
     {
@@ -4013,8 +4013,12 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     /* other non-unrolled summation indices (all start at zero) */
 
     /* where will this thread read from global memory */
-    A += GLOBAL_A((unsigned long)aL, (unsigned long)a0I + g0I * MT_0I, (unsigned long)gK);
-    B += GLOBAL_B((unsigned long)bL, (unsigned long)b1J + g1J * MT_1J, (unsigned long)gK);
+    A += GLOBAL_A(static_cast<unsigned long>(aL),
+                  static_cast<unsigned long>(a0I) + g0I * MT_0I,
+                  static_cast<unsigned long>(gK));
+    B += GLOBAL_B(static_cast<unsigned long>(bL),
+                  static_cast<unsigned long>(b1J) + g1J * MT_1J,
+                  static_cast<unsigned long>(gK));
 
     /* where will this thread write to local memory */
     TYPE_A* lA = localA + a0I + aL * (MT_0I + PAD);
@@ -4094,8 +4098,8 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
         MICRO_TILE
         MICRO_TILE
 
-        A += (long)strideAL * UNROLL;
-        B += (long)strideBL * UNROLL;
+        A += static_cast<unsigned long>(strideAL) * UNROLL;
+        B += static_cast<unsigned long>(strideBL) * UNROLL;
     } while(--sumIterL > 0);
 
     /* which global Cij index */
@@ -4108,9 +4112,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 0 * WG_0I,
-                                      (unsigned long)globalC1J + 0 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0][0])
         }
     }
@@ -4118,9 +4122,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 0 * WG_0I,
-                                      (unsigned long)globalC1J + 1 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0][1])
         }
     }
@@ -4128,9 +4132,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 0 * WG_0I,
-                                      (unsigned long)globalC1J + 2 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0][2])
         }
     }
@@ -4138,9 +4142,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 0 * WG_0I,
-                                      (unsigned long)globalC1J + 3 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0][3])
         }
     }
@@ -4148,9 +4152,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 1 * WG_0I,
-                                      (unsigned long)globalC1J + 0 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[1][0])
         }
     }
@@ -4158,9 +4162,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 1 * WG_0I,
-                                      (unsigned long)globalC1J + 1 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[1][1])
         }
     }
@@ -4168,9 +4172,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 1 * WG_0I,
-                                      (unsigned long)globalC1J + 2 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[1][2])
         }
     }
@@ -4178,9 +4182,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 1 * WG_0I,
-                                      (unsigned long)globalC1J + 3 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[1][3])
         }
     }
@@ -4188,9 +4192,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 2 * WG_0I,
-                                      (unsigned long)globalC1J + 0 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[2][0])
         }
     }
@@ -4198,9 +4202,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 2 * WG_0I,
-                                      (unsigned long)globalC1J + 1 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[2][1])
         }
     }
@@ -4208,9 +4212,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 2 * WG_0I,
-                                      (unsigned long)globalC1J + 2 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[2][2])
         }
     }
@@ -4218,9 +4222,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 2 * WG_0I,
-                                      (unsigned long)globalC1J + 3 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[2][3])
         }
     }
@@ -4228,9 +4232,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 3 * WG_0I,
-                                      (unsigned long)globalC1J + 0 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[3][0])
         }
     }
@@ -4238,9 +4242,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 3 * WG_0I,
-                                      (unsigned long)globalC1J + 1 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[3][1])
         }
     }
@@ -4248,9 +4252,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 3 * WG_0I,
-                                      (unsigned long)globalC1J + 2 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[3][2])
         }
     }
@@ -4258,9 +4262,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C((unsigned long)globalC0I + 3 * WG_0I,
-                                      (unsigned long)globalC1J + 3 * WG_1J,
-                                      (unsigned long)globalCK)],
+            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[3][3])
         }
     }
@@ -4557,16 +4561,16 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_3, wgK);
 
     /* global read: addresses a */
-    VECTOR_TYPE const* globalReadA_0_0 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    VECTOR_TYPE const* globalReadA_0_1 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
-    VECTOR_TYPE const* globalReadA_0_2 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_2);
-    VECTOR_TYPE const* globalReadA_0_3 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_3);
+    auto globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_0);
+    auto globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_1);
+    auto globalReadA_0_2 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_2);
+    auto globalReadA_0_3 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_3);
 
     /* global read: addresses b */
-    VECTOR_TYPE const* globalReadB_0_0 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    VECTOR_TYPE const* globalReadB_0_1 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
-    VECTOR_TYPE const* globalReadB_0_2 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_2);
-    VECTOR_TYPE const* globalReadB_0_3 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_3);
+    auto globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_0);
+    auto globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_1);
+    auto globalReadB_0_2 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_2);
+    auto globalReadB_0_3 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_3);
 
     /***************************************/
     /* LDS Write Addresses                 */
@@ -4599,25 +4603,26 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         ldsWriteOffsetInitialB + (0 * LSCB) * (MT1J + PAD) + (3 * LSPB);
 
     /* lds write addresses */
-    VECTOR_TYPE* ldsWriteA_0_0 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_0);
-    VECTOR_TYPE* ldsWriteA_0_1 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_1);
-    VECTOR_TYPE* ldsWriteA_0_2 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_2);
-    VECTOR_TYPE* ldsWriteA_0_3 = (VECTOR_TYPE*)(lds + ldsWriteOffsetA_0_3);
-    VECTOR_TYPE* ldsWriteB_0_0 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_0);
-    VECTOR_TYPE* ldsWriteB_0_1 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_1);
-    VECTOR_TYPE* ldsWriteB_0_2 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_2);
-    VECTOR_TYPE* ldsWriteB_0_3 = (VECTOR_TYPE*)(lds + ldsWriteOffsetB_0_3);
+    auto ldsWriteA_0_0 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetA_0_0);
+    auto ldsWriteA_0_1 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetA_0_1);
+    auto ldsWriteA_0_2 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetA_0_2);
+    auto ldsWriteA_0_3 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetA_0_3);
+    auto ldsWriteB_0_0 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetB_0_0);
+    auto ldsWriteB_0_1 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetB_0_1);
+    auto ldsWriteB_0_2 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetB_0_2);
+    auto ldsWriteB_0_3 = reinterpret_cast<VECTOR_TYPE*>(lds + ldsWriteOffsetB_0_3);
 
     /***************************************/
     /* LDS Read Addresses                  */
     /***************************************/
-    unsigned int lr0I     = (serial % SG0I);
-    unsigned int lr1J     = (serial / SG0I) % SG1J;
-    VECTOR_TYPE* ldsReadA = (VECTOR_TYPE*)(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
-    VECTOR_TYPE* ldsReadB =
-        (VECTOR_TYPE*)(lds + lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B);
-    VECTOR_TYPE* ldsReadIterA = ldsReadA;
-    VECTOR_TYPE* ldsReadIterB = ldsReadB;
+    unsigned int lr0I = (serial % SG0I);
+    unsigned int lr1J = (serial / SG0I) % SG1J;
+    auto ldsReadA =
+        reinterpret_cast<VECTOR_TYPE const*>(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
+    auto ldsReadB     = reinterpret_cast<VECTOR_TYPE const*>(lds + lr1J * VECTOR_WIDTH +
+                                                         sgId * (MT1J + PAD) + LDS_OFFSET_B);
+    auto ldsReadIterA = ldsReadA;
+    auto ldsReadIterB = ldsReadB;
 
     /****************************************/
     /* summation loops(s)                   */
@@ -4659,22 +4664,30 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         SUMMATION_UNROLL
 
         /* increment global read addresses */
-        globalReadA_0_0 =
-            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_0) + ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_1 =
-            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_1) + ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_2 =
-            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_2) + ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_3 =
-            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_3) + ((unsigned long)strideAL) * DEPTHU);
-        globalReadB_0_0 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
-                                               ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_1 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
-                                               ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_2 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
-                                               ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_3 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
-                                               ((unsigned long)strideBL) * DEPTHU);
+        globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_2) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_3) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_2) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_3) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
     }
 
     /***************************************/
@@ -4715,29 +4728,37 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         SUMMATION_UNROLL
 
         /* increment global read addresses */
-        globalReadA_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) + ((long)strideAL) * DEPTHU);
-        globalReadA_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) + ((long)strideAL) * DEPTHU);
-        globalReadA_0_2 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_2) + ((long)strideAL) * DEPTHU);
-        globalReadA_0_3 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_3) + ((long)strideAL) * DEPTHU);
-        globalReadB_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) + ((long)strideBL) * DEPTHU);
-        globalReadB_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) + ((long)strideBL) * DEPTHU);
-        globalReadB_0_2 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) + ((long)strideBL) * DEPTHU);
-        globalReadB_0_3 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) + ((long)strideBL) * DEPTHU);
+        globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_2) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadA_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_3) +
+            static_cast<unsigned long>(strideAL) * DEPTHU);
+        globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_2 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_2) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
+        globalReadB_0_3 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_3) +
+            static_cast<unsigned long>(strideBL) * DEPTHU);
     }
 
     /***************************************/
     /* SplitU Reduction                    */
     /***************************************/
     __syncthreads();
-    VECTOR_TYPE* ldsSplitU                         = (VECTOR_TYPE*)(lds);
+    VECTOR_TYPE* ldsSplitU                         = reinterpret_cast<VECTOR_TYPE*>(lds);
     ldsSplitU[lr0I + 0 * SG0I +
               (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
               (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
@@ -4824,9 +4845,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C((unsigned long)globalC0I,
-                                      (unsigned long)globalC1J + 0 * CPS,
-                                      (unsigned long)globalCK)],
+            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                                      static_cast<unsigned long>(globalC1J) + 0 * CPS,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0])
         }
     }
@@ -4834,9 +4855,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 1 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C((unsigned long)globalC0I,
-                                      (unsigned long)globalC1J + 1 * CPS,
-                                      (unsigned long)globalCK)],
+            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                                      static_cast<unsigned long>(globalC1J) + 1 * CPS,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[1])
         }
     }
@@ -4844,9 +4865,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 2 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C((unsigned long)globalC0I,
-                                      (unsigned long)globalC1J + 2 * CPS,
-                                      (unsigned long)globalCK)],
+            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                                      static_cast<unsigned long>(globalC1J) + 2 * CPS,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[2])
         }
     }
@@ -4854,9 +4875,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 3 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C((unsigned long)globalC0I,
-                                      (unsigned long)globalC1J + 3 * CPS,
-                                      (unsigned long)globalCK)],
+            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                                      static_cast<unsigned long>(globalC1J) + 3 * CPS,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[3])
         }
     }
@@ -5102,18 +5123,18 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_1, wgK);
 
     /* global read addresses: addresses a */
-    VECTOR_TYPE const* globalReadA_0_0 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    VECTOR_TYPE const* globalReadA_0_1 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
+    auto globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_0);
+    auto globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(A + globalReadOffsetA_0_1);
 
     /* global read addresses: addresses b */
-    VECTOR_TYPE const* globalReadB_0_0 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    VECTOR_TYPE const* globalReadB_0_1 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
+    auto globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_0);
+    auto globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_1);
 
     /* global read addresses: increments a */
-    long globalReadIncAL = (long)strideAL * DEPTHU;
+    unsigned long globalReadIncAL = static_cast<unsigned long>(strideAL) * DEPTHU;
 
     /* global read addresses: increments b */
-    long globalReadIncBL = (long)strideBL * DEPTHU;
+    unsigned long globalReadIncBL = static_cast<unsigned long>(strideBL) * DEPTHU;
 
     /******************************************/
     /* Local Write Addresses                  */
@@ -5149,21 +5170,11 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     unsigned int localWriteOffsetB_0_1 =
         localWriteFirstOffsetB + (0 * LSCB) * (MT1J + PAD) + (1 * LSPB);
 
-    /* local write addresses: declare addresses a */
-    VECTOR_TYPE* localWriteA_0_0;
-    VECTOR_TYPE* localWriteA_0_1;
+    auto localWriteA_0_0 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetA_0_0);
+    auto localWriteA_0_1 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetA_0_1);
 
-    /* local write addresses: declare addresses b */
-    VECTOR_TYPE* localWriteB_0_0;
-    VECTOR_TYPE* localWriteB_0_1;
-
-    /* local write addresses: init pointers a */
-    localWriteA_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
-    localWriteA_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
-
-    /* local write addresses: init pointers b */
-    localWriteB_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
-    localWriteB_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
+    auto localWriteB_0_0 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetB_0_0);
+    auto localWriteB_0_1 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetB_0_1);
 
     /******************************************/
     /* Local Read Addresses                   */
@@ -5181,17 +5192,11 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     /* local read addresses: final offsets b */
     unsigned int localReadOffsetB = lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B;
 
-    /* local read addresses: declare addresses a */
-    VECTOR_TYPE* localReadA;
-
-    /* local read addresses: declare addresses b */
-    VECTOR_TYPE* localReadB;
-
     /* local read addresses: init pointers a */
-    localReadA = (VECTOR_TYPE*)(localMemory + localReadOffsetA);
+    auto localReadA = reinterpret_cast<VECTOR_TYPE const*>(localMemory + localReadOffsetA);
 
     /* local read addresses: init pointers b */
-    localReadB = (VECTOR_TYPE*)(localMemory + localReadOffsetB);
+    auto localReadB = reinterpret_cast<VECTOR_TYPE const*>(localMemory + localReadOffsetB);
 
     /* declare loop iterators */
     unsigned int sumIterL;
@@ -5210,16 +5215,16 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         b_0_1 = *globalReadB_0_1;
 
         /* global read inc a */
-        globalReadA_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) + globalReadIncAL);
-        globalReadA_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) + globalReadIncAL);
+        globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) + globalReadIncAL);
+        globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) + globalReadIncAL);
 
         /* global read inc b */
-        globalReadB_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) + globalReadIncBL);
-        globalReadB_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) + globalReadIncBL);
+        globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) + globalReadIncBL);
+        globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
+            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) + globalReadIncBL);
         __syncthreads();
 
         /* local write a */
@@ -5293,10 +5298,10 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         rB[1] = localReadB[1 * SG1J];
 
         /* local read init pointers a */
-        localReadA = (VECTOR_TYPE*)(localMemory + localReadOffsetA);
+        localReadA = reinterpret_cast<VECTOR_TYPE const*>(localMemory + localReadOffsetA);
 
         /* local read init pointers b */
-        localReadB = (VECTOR_TYPE*)(localMemory + localReadOffsetB);
+        localReadB = reinterpret_cast<VECTOR_TYPE const*>(localMemory + localReadOffsetB);
         MAC_2x2
     }
 
@@ -5313,12 +5318,12 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     b_0_1 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadB_0_1;
 
     /* local write init pointers a */
-    localWriteA_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_0);
-    localWriteA_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetA_0_1);
+    localWriteA_0_0 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetA_0_0);
+    localWriteA_0_1 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetA_0_1);
 
     /* local write init pointers b */
-    localWriteB_0_0 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_0);
-    localWriteB_0_1 = (VECTOR_TYPE*)(localMemory + localWriteOffsetB_0_1);
+    localWriteB_0_0 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetB_0_0);
+    localWriteB_0_1 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetB_0_1);
     __syncthreads();
 
     /* local write a */
@@ -5357,7 +5362,8 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     __syncthreads();
 
     /* SplitU: local write */
-    VECTOR_TYPE* localSplitU                         = (VECTOR_TYPE*)(localMemory);
+    VECTOR_TYPE* localSplitU = reinterpret_cast<VECTOR_TYPE*>(localMemory);
+
     localSplitU[lr0I + 0 * SG0I +
                 (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
                 (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
@@ -5394,9 +5400,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C((unsigned long)globalC0I,
-                                      (unsigned long)globalC1J + 0 * CPS,
-                                      (unsigned long)globalCK)],
+            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                                      static_cast<unsigned long>(globalC1J) + 0 * CPS,
+                                      static_cast<unsigned long>(globalCK))],
                            rC[0])
         }
     }
