@@ -29,8 +29,7 @@ THRUST_NAMESPACE_BEGIN
 /*! \brief Default deleter for \p unique_ptr.
  *
  *  The default deleter used by \p unique_ptr when no custom deleter is specified.
- *  Uses \p thrust::device_free to deallocate memory. For non-trivially destructible
- *  types, invokes destructors on the device before deallocation.
+ *  Calls the destructor (if needed) and deallocates memory using \p thrust::device_free.
  *
  *  \tparam T The type of object to delete (single object form).
  *
@@ -43,8 +42,6 @@ struct default_delete;
 /*! \brief Default deleter specialization for single objects.
  *
  *  This specialization handles deletion of single objects allocated in device memory.
- *  For non-trivially destructible types, the destructor is invoked on the device
- *  before memory deallocation.
  *
  *  \tparam T The type of object to delete.
  */
@@ -72,8 +69,7 @@ struct default_delete<T, std::enable_if_t<!std::is_array_v<T>>>
 
   /*! \brief Deletes the object pointed to by \p ptr.
    *
-   *  For non-trivially destructible types, invokes the destructor on the device
-   *  before deallocating memory.
+   *  Calls the destructor (if needed) and deallocates memory using thrust::device_free.
    *
    *  \param ptr Pointer to the object to delete.
    */
@@ -143,7 +139,7 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
 
   /*! \brief Deletes the array pointed to by \p ptr.
    *
-   *  Invokes the destructor for each element on the device before deallocating memory.
+   *  Calls destructors (if needed) and deallocates memory using thrust::device_free.
    *
    *  \param ptr Pointer to the array to delete.
    */
@@ -227,7 +223,7 @@ struct default_delete<T[], std::enable_if_t<std::is_trivially_destructible_v<T>>
 
   /*! \brief Deletes the array pointed to by \p ptr.
    *
-   *  Only deallocates memory (no destructors called for trivially destructible types).
+   *  Deallocates memory using thrust::device_free.
    *
    *  \param ptr Pointer to the array to delete.
    */
@@ -292,10 +288,9 @@ struct unique_ptr_deleter_sfinae<Deleter&>
  *  - the managing `unique_ptr` object is assigned another pointer via `operator=` or `reset()`.
  *
  *  The object is disposed of by calling `get_deleter()(get())`. The default deleter,
- *  `thrust::default_delete`, deallocates the memory using `thrust::device_free`.
- *  For non-trivially destructible types, Deleter invokes the destructor of the
- *  managed object on the device before deallocation.
- *
+ *  `thrust::default_delete`, calls the destructor (if needed) and deallocates memory
+ *  using `thrust::device_free`.
+ * 
  *  A `unique_ptr` may alternatively own no object, in which case it is described as
  *  *empty*.
  *
@@ -984,7 +979,6 @@ public:
   // Destructor
   //==========================================================================
   /*! \brief Destroys the \p unique_ptr, the managed array is destroyed via `get_deleter()(get())`. If get() == nullptr there are no effects.
-   *  For non-trivially-destructible types, this calls the destructor for each element.
    */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
   {
