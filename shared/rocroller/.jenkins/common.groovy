@@ -141,9 +141,9 @@ def runCodeCovTestCommand(platform, project)
         }
         commentString += "## Artifacts\n\n"
         commentString += "* [HTML Coverage Report and Diff](${JOB_URL}/Code_20coverage_20${platform.gpu}_20report) \n"
-        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.report/*view*/) \n"
-        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
-        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.zip) \n"
+        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.report/*view*/) \n"
+        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
+        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.zip) \n"
         commentString += "* [Python Coverage Report](${JOB_URL}/Python_20Code_20coverage_20${platform.gpu}_20report) \n"
         commentString += "\n"
         commentString += "## Commit Hashes\n\n"
@@ -469,7 +469,7 @@ def runPerformanceCommand (platform, project)
                         <ul>
                         <li><a href='${JOB_URL}/Performance_20Report_20for_20${platform.gpu}'>HTML Report</a></li>
                         <li><a href='${env.BUILD_URL}'>Job Link</a></li>
-                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
+                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
                         </ul>
                         ${email_results}""",
                 to: "dl.rocroller@amd.com"
