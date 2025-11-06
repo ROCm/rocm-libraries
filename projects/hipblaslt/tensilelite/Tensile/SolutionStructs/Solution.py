@@ -1649,7 +1649,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = 16 // state["ProblemType"]["DataType"].numBytes()
               if state["DirectToLdsA"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
-                ldsPadA = 0
+                ldsPadA = state["MatrixInstM"] if state["enableLDSTrA"] else 0
             else: # mac instruction
               if state["ProblemType"]["TLUA"]:
                 ldsPadA = 0
@@ -1672,7 +1672,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = 16 // state["ProblemType"]["DataType"].numBytes()
               if state["DirectToLdsB"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
-                ldsPadB = 0
+                ldsPadB = state["MatrixInstM"] if state["enableLDSTrB"] else 0
             else:
               if state["ProblemType"]["TLUB"]:
                 ldsPadB = 0
