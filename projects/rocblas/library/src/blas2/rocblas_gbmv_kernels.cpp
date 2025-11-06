@@ -59,25 +59,17 @@ __forceinline__ __device__ void rocblas_gbmvn_kernel_calc(rocblas_int m,
 
     if(alpha)
     {
-        int bands_minus_1 = kl + ku;
-
-        int brow = row + ku;
-        if(brow > bands_minus_1)
-            brow = bands_minus_1;
-
-        int bcol = row - kl;
-        if(bcol < 0)
-            bcol = 0;
+        int brow = min(row + ku, kl + ku);
+        int bcol = max(row - kl, 0);
 
         // witin warp x threads compute a row dot product so move to adjacent band (unbanded matrix next column)
         brow -= threadIdx.x;
         bcol += threadIdx.x;
 
         // accumulate all bands partial results
-        for(; brow >= 0; brow -= WARP, bcol += WARP)
+        for(; brow >= 0 && bcol < n; brow -= WARP, bcol += WARP)
         {
-            if(bcol < n)
-                res_A += A[brow + bcol * lda] * x[bcol * incx];
+            res_A += A[brow + bcol * lda] * x[bcol * incx];
         }
         __syncthreads();
 
@@ -135,21 +127,13 @@ __forceinline__ __device__ void rocblas_gbmvt_kernel_calc(rocblas_operation tran
         int tx = threadIdx.x;
 
         int nbands = kl + ku + 1;
-
+        int brow   = max(ku - col, 0);
         A += col * lda;
 
         // create WARP number of partial results
-        for(int row = tx; row < nbands; row += WARP)
+        for(int row = brow + tx; row < nbands && col < (m + ku - row); row += WARP)
         {
-            int ku_minus_row = ku - row;
-
-            if(col < (m + ku_minus_row))
-            {
-                if(row > ku || (row <= ku && col >= ku_minus_row))
-                {
-                    res_A += ((is_conj ? conj(A[row]) : A[row]) * x[(col - ku_minus_row) * incx]);
-                }
-            }
+            res_A += ((is_conj ? conj(A[row]) : A[row]) * x[(col - ku + row) * incx]);
         }
         __syncthreads();
 
