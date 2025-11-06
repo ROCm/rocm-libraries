@@ -22,6 +22,7 @@
 #define HIPFFTW_HELPER_H
 
 #include "../shared/array_validator.h"
+#include "../shared/data_layout.h"
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
@@ -611,50 +612,6 @@ static bool flags_are_valid_for_hipfftw(unsigned f)
     return (f & hipfftw_valid_flags_mask) == f;
 }
 
-struct io_nembed_t
-{
-    int              istride;
-    int              ostride;
-    std::vector<int> inembed;
-    std::vector<int> onembed;
-    bool             operator==(const io_nembed_t& other) const
-    {
-        return istride == other.istride && ostride == other.ostride && inembed == other.inembed
-               && onembed == other.onembed;
-    }
-    bool operator!=(const io_nembed_t& other) const
-    {
-        return !(*this == other);
-    }
-    std::vector<ptrdiff_t> as_actual_strides(fft_io                        io,
-                                             fft_transform_type            dft_kind,
-                                             fft_result_placement          placement,
-                                             const std::vector<ptrdiff_t>& lengths) const
-    {
-        const std::vector<int>& nembed = io == fft_io::fft_io_in ? inembed : onembed;
-        if(!nembed.empty() && !lengths.empty() && lengths.size() != nembed.size())
-            throw std::invalid_argument(
-                "Mismatch for nembed.size() vs lengths.size() in io_nembed_t::as_actual_strides");
-        std::vector<ptrdiff_t> ret(lengths.size());
-        if(lengths.empty())
-            return ret;
-        const auto elem_stride = io == fft_io::fft_io_in ? istride : ostride;
-        if(!nembed.empty())
-        {
-            ret.back() = elem_stride;
-            for(auto dim = ret.size() - 1; dim-- > 0;)
-                ret[dim] = ret[dim + 1] * nembed[dim + 1];
-        }
-        else
-        {
-            ret = default_strides(dft_kind, placement, io, lengths);
-            if(elem_stride != ret.back())
-                std::for_each(ret.begin(), ret.end(), [&](ptrdiff_t& s) { s *= elem_stride; });
-        }
-        return ret;
-    }
-};
-
 template <
     fft_precision prec,
     std::enable_if_t<prec == fft_precision_single || prec == fft_precision_double, bool> = true>
@@ -669,19 +626,19 @@ private:
     // or to re-create the plan at execution if needed or found necessary)
     mutable std::shared_ptr<hipfftw_plan_bundle_t<prec>> plan_bundle;
 
-    fft_transform_type         dft_kind;
-    int                        rank       = 0;
-    int                        batch_rank = 0;
-    std::vector<ptrdiff_t>     lengths;
-    std::vector<ptrdiff_t>     istrides;
-    std::vector<ptrdiff_t>     ostrides;
-    std::optional<io_nembed_t> io_nembed;
-    std::vector<ptrdiff_t>     batches;
-    std::vector<ptrdiff_t>     idist;
-    std::vector<ptrdiff_t>     odist;
-    fft_result_placement       plan_placement;
-    int                        sign  = 0;
-    unsigned                   flags = std::numeric_limits<unsigned>::max();
+    fft_transform_type                dft_kind;
+    int                               rank       = 0;
+    int                               batch_rank = 0;
+    std::vector<ptrdiff_t>            lengths;
+    std::vector<ptrdiff_t>            istrides;
+    std::vector<ptrdiff_t>            ostrides;
+    std::optional<hipfftw_ionembed_t> ionembed;
+    std::vector<ptrdiff_t>            batches;
+    std::vector<ptrdiff_t>            idist;
+    std::vector<ptrdiff_t>            odist;
+    fft_result_placement              plan_placement;
+    int                               sign  = 0;
+    unsigned                          flags = std::numeric_limits<unsigned>::max();
 
     template <typename T>
     void reset_member_value(T& member, const T& new_value)
@@ -904,13 +861,13 @@ private:
             if(!can_use_creation_options(hipfftw_plan_creation_func::PLAN_MANY))
                 throw std::runtime_error("hipfftw_helper::make_plan: "
                                          "hipfftw_plan_creation_func::PLAN_MANY cannot be used.");
-            if(!io_nembed)
+            if(!ionembed)
                 throw std::logic_error(
                     "hipfftw_helper::make_plan: hipfftw_plan_creation_func::PLAN_MANY seemingly "
                     "usable but io_nembed has no value/was not set.");
 
-            const int* inembed = io_nembed->inembed.empty() ? nullptr : io_nembed->inembed.data();
-            const int* onembed = io_nembed->onembed.empty() ? nullptr : io_nembed->onembed.data();
+            const int* inembed = ionembed->get_nembed(fft_io::fft_io_in);
+            const int* onembed = ionembed->get_nembed(fft_io::fft_io_out);
 
             if(dft_kind == fft_transform_type_real_forward)
             {
@@ -920,11 +877,11 @@ private:
                     static_cast<int>(batches[0]),
                     static_cast<hipfftw_real_t<prec>*>(in),
                     inembed,
-                    io_nembed->istride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
                     static_cast<int>(idist[0]),
                     static_cast<hipfftw_complex_t<prec>*>(out),
                     onembed,
-                    io_nembed->ostride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
                     static_cast<int>(odist[0]),
                     flags);
             }
@@ -936,11 +893,11 @@ private:
                     static_cast<int>(batches[0]),
                     static_cast<hipfftw_complex_t<prec>*>(in),
                     inembed,
-                    io_nembed->istride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
                     static_cast<int>(idist[0]),
                     static_cast<hipfftw_real_t<prec>*>(out),
                     onembed,
-                    io_nembed->ostride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
                     static_cast<int>(odist[0]),
                     flags);
             }
@@ -952,11 +909,11 @@ private:
                     static_cast<int>(batches[0]),
                     static_cast<hipfftw_complex_t<prec>*>(in),
                     inembed,
-                    io_nembed->istride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_in),
                     static_cast<int>(idist[0]),
                     static_cast<hipfftw_complex_t<prec>*>(out),
                     onembed,
-                    io_nembed->ostride,
+                    ionembed->get_elementary_stride(fft_io::fft_io_out),
                     static_cast<int>(odist[0]),
                     sign,
                     flags);
@@ -998,111 +955,35 @@ private:
 
     void reset_io_nembed_from_strides()
     {
-        struct strides_are_not_nembed_compatible : std::runtime_error
-        {
-            strides_are_not_nembed_compatible()
-                : std::runtime_error(""){};
-        };
         try
         {
-            auto can_be_int = [](ptrdiff_t val) {
-                return val >= std::numeric_limits<int>::lowest()
-                       && val <= std::numeric_limits<int>::max();
-            };
-
-            io_nembed_t tmp;
-            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
-            {
-                auto&       elem_stride = io == fft_io::fft_io_in ? tmp.istride : tmp.ostride;
-                auto&       nembed      = io == fft_io::fft_io_in ? tmp.inembed : tmp.onembed;
-                const auto& strides     = io == fft_io::fft_io_in ? istrides : ostrides;
-                const auto  def_strides = default_strides(dft_kind, plan_placement, io, lengths);
-                if(strides.empty())
-                {
-                    if(!lengths.empty())
-                        throw std::logic_error("empty strides with non-empty lengths encountered "
-                                               "by hipfftw_helper::reset_io_nembed_from_strides");
-                    // degenerate case supposedly configured so for argument validation purposes
-                    // use/set default values:
-                    elem_stride = 1;
-                    nembed.clear();
-                    continue;
-                }
-                else if(strides.size() != def_strides.size())
-                    throw std::logic_error("inconsistent strides.size() encountered by "
-                                           "hipfftw_helper::reset_io_nembed_from_strides");
-                if(strides.back() == 0)
-                    throw strides_are_not_nembed_compatible();
-
-                if(!can_be_int(strides.back()))
-                    throw strides_are_not_nembed_compatible();
-
-                elem_stride = strides.back();
 #ifdef __HIP_PLATFORM_AMD__
-                // use nullptr as nembed for default nembed ~half of the time
-                // in order to guarantee testing thereof
-                // NOTE: cuFFTW does not accept nullptr for default io_nembed
-                std::hash<std::string> hasher;
-                if(std::equal(
-                       strides.begin(),
-                       strides.end(),
-                       def_strides.begin(),
-                       [&](ptrdiff_t s, ptrdiff_t def_s) { return s == elem_stride * def_s; })
-                   && hasher(token() + (io == fft_io::fft_io_in ? "_in" : "_out")) & 1)
-                {
-                    // empty vector re-interpreted as nullptr internally
-                    nembed.clear();
-                }
-                else
+            // use nullptr as ionembed for default layouts ~half of the time in order to
+            // guarantee testing thereof
+            std::hash<std::string> hasher;
+            const bool             use_nullptr_for_default_inembed = hasher(token() + "_in") & 1;
+            const bool             use_nullptr_for_default_onembed = hasher(token() + "_out") & 1;
+#else
+            // NOTE: cuFFTW does not accept nullptr for default ionembed
+            constexpr bool use_nullptr_for_default_inembed = false;
+            constexpr bool use_nullptr_for_default_onembed = false;
 #endif
-                {
-                    nembed.resize(strides.size());
-                    for(auto nembed_dim = nembed.size(); nembed_dim-- > 0;)
-                    {
-                        ptrdiff_t nembed_val;
-                        if(nembed_dim > 0)
-                        {
-                            if(strides[nembed_dim] == 0
-                               || strides[nembed_dim - 1] % strides[nembed_dim] != 0)
-                                throw strides_are_not_nembed_compatible();
-                            nembed_val = strides[nembed_dim - 1] / strides[nembed_dim];
-                        }
-                        else
-                        {
-                            // actually irrelevant/unused value...
-                            // set it to the minimum value documented to be valid by FFTW3
-                            // to avoid triggering (reference) plan creation failures
-                            if(is_real(dft_kind) && lengths.size() == 1)
-                            {
-                                const int cmplx_stride = lengths[nembed_dim] / 2 + 1;
-                                if((io == fft_io_in) == is_bwd(dft_kind))
-                                    nembed_val = cmplx_stride;
-                                else
-                                {
-                                    if(plan_placement == fft_placement_inplace)
-                                        nembed_val = 2 * cmplx_stride;
-                                    else
-                                        nembed_val = lengths[nembed_dim];
-                                }
-                            }
-                            else
-                                nembed_val = lengths[nembed_dim];
-                        }
-
-                        if(!can_be_int(nembed_val))
-                            throw strides_are_not_nembed_compatible();
-                        nembed[nembed_dim] = nembed_val;
-                    }
-                }
-            }
-            reset_member_value(io_nembed, tmp);
+            hipfftw_ionembed_t tmp(istrides,
+                                   ostrides,
+                                   lengths,
+                                   dft_kind,
+                                   plan_placement,
+                                   use_nullptr_for_default_inembed,
+                                   use_nullptr_for_default_onembed);
+            reset_member_value(ionembed, tmp);
         }
-        catch(const strides_are_not_nembed_compatible& e)
+        catch(const ionembed_exception& e)
         {
-            if(io_nembed)
+            // couldnt' construct the hipfftw_ionembed_t object
+            if(ionembed)
                 plan_bundle.reset();
-            // cannot use io_nembed
-            io_nembed.reset();
+            // cannot use ionembed
+            ionembed.reset();
         }
     }
 
@@ -1255,18 +1136,18 @@ private:
                 break;
             case hipfftw_plan_creation_func::PLAN_MANY:
             {
-                bool valid_io_nembed = io_nembed.has_value();
+                bool valid_io_nembed = ionembed.has_value();
                 if(valid_io_nembed && !lengths.empty())
                 {
                     if(std::any_of(
                            lengths.begin(), lengths.end(), [](ptrdiff_t len) { return len != 1; })
-                       && (io_nembed->istride == 0 || io_nembed->ostride == 0))
+                       && (ionembed->get_elementary_stride(fft_io::fft_io_in) == 0
+                           || ionembed->get_elementary_stride(fft_io::fft_io_out) == 0))
                         valid_io_nembed = false;
                     for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
                     {
-                        const auto& nembed
-                            = io == fft_io::fft_io_in ? io_nembed->inembed : io_nembed->onembed;
-                        if(nembed.empty()) // <-- default, always valid
+                        const int* nembed = ionembed->get_nembed(io);
+                        if(!nembed) // <-- default, always valid
                             continue;
                         for(auto dim = lengths.size(); dim-- > 0;)
                         {
@@ -1368,7 +1249,7 @@ public:
                            fft_result_placement          placement_to_set,
                            int                           sign_to_set,
                            unsigned                      flags_to_set,
-                           const io_nembed_t&            io_nembed_to_set,
+                           const hipfftw_ionembed_t&     ionembed_to_set,
                            ptrdiff_t                     batch_to_set,
                            ptrdiff_t                     idist_to_set,
                            ptrdiff_t                     odist_to_set)
@@ -1378,9 +1259,10 @@ public:
             if(!lengths_to_set.empty() && lengths_to_set.size() != static_cast<size_t>(rank_to_set))
                 throw std::invalid_argument(
                     "Inconsistent size for non-empty lengths given to hipfftw::set_creation_args.");
-            for(const auto& vec : {io_nembed_to_set.inembed, io_nembed_to_set.onembed})
+            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
             {
-                if(!vec.empty() && vec.size() != static_cast<size_t>(rank_to_set))
+                if(ionembed_to_set.get_nembed(io)
+                   && ionembed_to_set.get_nembed_size(io) != static_cast<size_t>(rank_to_set))
                     throw std::invalid_argument("Inconsistent size for non-empty inembed or "
                                                 "onembed given to hipfftw::set_creation_args.");
             }
@@ -1394,13 +1276,13 @@ public:
         reset_member_value(flags, flags_to_set);
         reset_member_value(
             istrides,
-            io_nembed_to_set.as_actual_strides(
+            ionembed_to_set.as_generalized_strides(
                 fft_io::fft_io_in, dft_kind_to_set, placement_to_set, lengths_to_set));
         reset_member_value(
             ostrides,
-            io_nembed_to_set.as_actual_strides(
+            ionembed_to_set.as_generalized_strides(
                 fft_io::fft_io_out, dft_kind_to_set, placement_to_set, lengths_to_set));
-        reset_member_value(io_nembed, io_nembed_to_set);
+        reset_member_value(ionembed, ionembed_to_set);
         reset_member_value(batch_rank, 1 /* implicit */);
         reset_member_value(batches, std::vector<ptrdiff_t>(1, batch_to_set));
         reset_member_value(idist, std::vector<ptrdiff_t>(1, idist_to_set));
@@ -1616,7 +1498,7 @@ public:
             if(batch_rank != 1 || batches.size() != 1 || idist.size() != 1 || odist.size() != 1)
                 return false;
             // only strides that may be represented via inembed/onembed
-            if(!io_nembed)
+            if(!ionembed)
                 return false;
             // lengths, batches, and distances must be representable as int
             try

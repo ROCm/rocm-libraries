@@ -1346,20 +1346,19 @@ namespace
         return ret;
     }
 
-    std::vector<ptrdiff_t> arg_validation_dist_range_many_dft(ptrdiff_t          nbatch,
-                                                              const io_nembed_t& io_nembed,
-                                                              fft_io             io,
+    std::vector<ptrdiff_t> arg_validation_dist_range_many_dft(ptrdiff_t                 nbatch,
+                                                              const hipfftw_ionembed_t& ionembed,
+                                                              fft_io                    io,
                                                               ptrdiff_t (*random_dist_func)())
     {
-        std::vector<ptrdiff_t>  ret;
-        ptrdiff_t               to_add;
-        const std::vector<int>& nembed
-            = io == fft_io::fft_io_in ? io_nembed.inembed : io_nembed.onembed;
-        int stride = io == fft_io::fft_io_in ? io_nembed.istride : io_nembed.ostride;
-        if(!nembed.empty())
+        std::vector<ptrdiff_t> ret;
+        ptrdiff_t              to_add;
+        const int*             nembed = ionembed.get_nembed(io);
+        const int              stride = ionembed.get_elementary_stride(io);
+        if(nembed)
         {
             // add a value that will always be valid for valid nembed and stride
-            to_add = product(nembed.begin(), nembed.end()) * stride;
+            to_add = product(nembed, nembed + ionembed.get_nembed_size(io)) * stride;
         }
         else
         {
@@ -1534,34 +1533,27 @@ namespace
                                                  get_random_elementary_stride(valid_value)};
             if(is_real_ip)
                 istride_range.insert(1);
-            io_nembed_t io_nembed;
-            io_nembed.istride                 = get_random_element_in(istride_range);
+            const auto istride = get_random_element_in(istride_range);
+
             std::set<ptrdiff_t> ostride_range = {get_random_elementary_stride(!valid_value),
                                                  get_random_elementary_stride(valid_value)};
-            if(placement == fft_placement_inplace && io_nembed.istride > 0)
-                ostride_range.insert(io_nembed.istride);
-            io_nembed.ostride = get_random_element_in(ostride_range);
-            if(is_fwd(dft_kind))
-            {
-                io_nembed.inembed.assign(fwd_domain_nembed.begin(), fwd_domain_nembed.end());
-                io_nembed.onembed.assign(bwd_domain_nembed.begin(), bwd_domain_nembed.end());
-            }
-            else
-            {
-                io_nembed.inembed.assign(bwd_domain_nembed.begin(), bwd_domain_nembed.end());
-                io_nembed.onembed.assign(fwd_domain_nembed.begin(), fwd_domain_nembed.end());
-            }
-            const auto idist = get_random_element_in(arg_validation_dist_range_many_dft(
-                nbatch, io_nembed, fft_io::fft_io_in, get_random_dist));
-            const auto odist = get_random_element_in(arg_validation_dist_range_many_dft(
-                nbatch, io_nembed, fft_io::fft_io_out, get_random_dist));
+            if(placement == fft_placement_inplace && istride > 0)
+                ostride_range.insert(istride);
+            const auto  ostride     = get_random_element_in(ostride_range);
+            const auto& inembed_vec = is_fwd(dft_kind) ? fwd_domain_nembed : bwd_domain_nembed;
+            const auto& onembed_vec = is_fwd(dft_kind) ? bwd_domain_nembed : fwd_domain_nembed;
+            hipfftw_ionembed_t ionembed(istride, inembed_vec, ostride, onembed_vec);
+            const auto         idist = get_random_element_in(arg_validation_dist_range_many_dft(
+                nbatch, ionembed, fft_io::fft_io_in, get_random_dist));
+            const auto         odist = get_random_element_in(arg_validation_dist_range_many_dft(
+                nbatch, ionembed, fft_io::fft_io_out, get_random_dist));
 
             const auto sign  = get_random_element_in(arg_validation_sign_range(dft_kind));
             const auto flags = get_random_element_in(arg_validation_flags_range(dft_kind, rank));
 
             hipfftw_helper<prec> helper_to_add;
             helper_to_add.set_creation_args(
-                dft_kind, rank, lengths, placement, sign, flags, io_nembed, nbatch, idist, odist);
+                dft_kind, rank, lengths, placement, sign, flags, ionembed, nbatch, idist, odist);
             ret.emplace_back(helper_to_add);
         }
         return ret;
@@ -2841,25 +2833,17 @@ namespace
                     fwd_nembed, is_real(dft_kind) && placement == fft_placement_inplace);
                 const auto bwd_nembed = get_random_bwd_domain_nembed<valid_value>(
                     max_nembed_fwd_domain, fwd_nembed, lengths, dft_kind, placement);
-                io_nembed_t io_nembed;
-                if(is_fwd(dft_kind))
-                {
-                    io_nembed.istride = elementary_fwd_stride;
-                    io_nembed.ostride = elementary_bwd_stride;
-                    io_nembed.inembed.assign(fwd_nembed.begin(), fwd_nembed.end());
-                    io_nembed.onembed.assign(bwd_nembed.begin(), bwd_nembed.end());
-                }
-                else
-                {
-                    io_nembed.istride = elementary_bwd_stride;
-                    io_nembed.ostride = elementary_fwd_stride;
-                    io_nembed.inembed.assign(bwd_nembed.begin(), bwd_nembed.end());
-                    io_nembed.onembed.assign(fwd_nembed.begin(), fwd_nembed.end());
-                }
-                const auto idist = product(io_nembed.inembed.begin(), io_nembed.inembed.end())
-                                   * io_nembed.istride;
-                const auto odist = product(io_nembed.onembed.begin(), io_nembed.onembed.end())
-                                   * io_nembed.ostride;
+                hipfftw_ionembed_t ionembed(
+                    is_fwd(dft_kind) ? elementary_fwd_stride : elementary_bwd_stride,
+                    is_fwd(dft_kind) ? fwd_nembed : bwd_nembed,
+                    is_fwd(dft_kind) ? elementary_bwd_stride : elementary_fwd_stride,
+                    is_fwd(dft_kind) ? bwd_nembed : fwd_nembed);
+                const auto idist = product(ionembed.get_nembed(fft_io::fft_io_in),
+                                           ionembed.get_nembed(fft_io::fft_io_in) + rank)
+                                   * ionembed.get_elementary_stride(fft_io::fft_io_in);
+                const auto odist = product(ionembed.get_nembed(fft_io::fft_io_out),
+                                           ionembed.get_nembed(fft_io::fft_io_out) + rank)
+                                   * ionembed.get_elementary_stride(fft_io::fft_io_out);
 
                 helper.set_creation_args(dft_kind,
                                          rank,
@@ -2867,7 +2851,7 @@ namespace
                                          placement,
                                          is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
                                          FFTW_ESTIMATE,
-                                         io_nembed,
+                                         ionembed,
                                          batches[0],
                                          idist,
                                          odist);
@@ -2907,18 +2891,10 @@ namespace
         if(is_real(dft_kind))
             bwd_nembed.back() = bwd_nembed.back() / 2 + 1;
 
-        io_nembed_t io_nembed;
-        io_nembed.istride = io_nembed.ostride = batches[0] * dist;
-        if(is_fwd(dft_kind))
-        {
-            io_nembed.inembed.assign(fwd_nembed.begin(), fwd_nembed.end());
-            io_nembed.onembed.assign(bwd_nembed.begin(), bwd_nembed.end());
-        }
-        else
-        {
-            io_nembed.inembed.assign(bwd_nembed.begin(), bwd_nembed.end());
-            io_nembed.onembed.assign(fwd_nembed.begin(), fwd_nembed.end());
-        }
+        hipfftw_ionembed_t ionembed(batches[0] * dist,
+                                    is_fwd(dft_kind) ? fwd_nembed : bwd_nembed,
+                                    batches[0] * dist,
+                                    is_fwd(dft_kind) ? bwd_nembed : fwd_nembed);
 
         helper.set_creation_args(dft_kind,
                                  rank,
@@ -2926,7 +2902,7 @@ namespace
                                  placement,
                                  is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
                                  FFTW_ESTIMATE,
-                                 io_nembed,
+                                 ionembed,
                                  batches[0],
                                  dist,
                                  dist);
