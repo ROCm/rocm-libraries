@@ -78,7 +78,6 @@ struct verify_forward_train_bn_per_activation
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -204,11 +203,9 @@ struct verify_forward_train_bn_per_activation
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> gpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         auto&& handle = get_handle();
 
         std::size_t n_batch, channels, height, width;
@@ -340,11 +337,9 @@ struct verify_forward_infer_bn_per_activation_recalc
 
     tensor<T> cpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         double epsilon = MIO_BN_TEST_EPSILON;
 
         std::size_t n_batch, channels, height, width;
@@ -418,7 +413,6 @@ struct verify_forward_infer_bn_per_activation_recalc
 
     tensor<T> gpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -486,11 +480,9 @@ struct verify_forward_infer_bn_per_activation_use_est
 
     tensor<T> cpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         double epsilon = MIO_BN_TEST_EPSILON;
 
         std::size_t n_batch, channels, height, width;
@@ -538,7 +530,6 @@ struct verify_forward_infer_bn_per_activation_use_est
 
     tensor<T> gpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -612,7 +603,6 @@ struct verify_backward_bn_per_activation_use_saved
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -983,94 +973,10 @@ struct verify_backward_bn_per_activation_recalc
 
 //====== DRIVERS ===========================================
 
-// template <class T>
-// struct batch_norm_per_activation_driver : test_driver
-// {
-//     tensor<T> input;
-//     tensor<PREC_TYPE> scale;
-//     tensor<PREC_TYPE> shift;
-
-//     batch_norm_per_activation_driver()
-//     {
-//         this->batch_factor = 4;
-//         add(input,
-//             "input",
-//             get_bn_peract_input_tensor(
-//                 tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17}));
-//     }
-
-//     void run()
-//     {
-//         std::size_t n, c, h, w;
-//         std::tie(n, c, h, w) = miopen::tien<4>(input.desc.GetLengths());
-//         this->tolerance      = 80 * input.desc.GetElementSize();
-
-//         if(n == 1)
-//         {
-//             std::cout << "Invalid batch size for batch norm tests.\nExiting...\n" << std::endl;
-//             return;
-//         }
-
-//         std::size_t ssn, ssc, ssh, ssw;
-//         auto derivedBnDesc = miopen::TensorDescriptor{};
-//         miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, miopenBNPerActivation);
-//         std::tie(ssn, ssc, ssh, ssw) = miopen::tien<4>(derivedBnDesc.GetLengths());
-
-//         if(input.desc.GetType() == miopenFloat)
-//         {
-//             scale = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{17});
-//             shift = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw}.generate(tensor_elem_gen_integer{17});
-//         }
-//         else
-//         {
-//             scale = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
-//             shift = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
-
-//             const double Data_scale = 0.001;
-//             for(std::size_t i = 0; i < scale.desc.GetElementSize(); i++)
-//             {
-//                 scale[i] = prng::gen_descreet_uniform_sign<PREC_TYPE>(Data_scale, 100);
-//                 shift[i] = prng::gen_descreet_uniform_sign<PREC_TYPE>(Data_scale, 100);
-//             }
-//             for(std::size_t i = 0; i < input.desc.GetElementSize(); i++)
-//             {
-//                 input[i] = prng::gen_descreet_uniform_sign<T>(1e-4, 100);
-//             }
-//         }
-
-//         // train
-//         auto outpair =
-//             verify(verify_forward_train_bn_per_activation<T, PREC_TYPE>{input, scale, shift});
-//         // returns:  std::make_tuple(out,runMean,runVar,saveMean,saveInvVar);
-
-//         // inference recalc
-//         verify(verify_forward_infer_bn_per_activation_recalc<T, PREC_TYPE>{input, scale, shift});
-
-//         // inference use estimated running values
-//         auto estMean = std::get<1>(outpair.second);
-//         auto estVar  = std::get<2>(outpair.second);
-//         verify(verify_forward_infer_bn_per_activation_use_est<T, PREC_TYPE>{
-//             input, scale, shift, estMean, estVar});
-
-//         // backprop recalc
-//         uint64_t max_value = miopen_type<T>{} == miopenHalf ? 5 : 17;
-
-//         this->tolerance = 8000 * input.desc.GetElementSize();
-//         auto dy_input   = tensor<T>{n, c, h, w}.generate(
-//             tensor_elem_gen_integer{max_value}); //= std::get<0>(outpair.first);//
-//         verify(verify_backward_bn_per_activation_recalc<T, PREC_TYPE>{input, dy_input, scale});
-
-//         // backprop use saved values
-//         auto savedMean   = std::get<3>(outpair.second);
-//         auto savedInvVar = std::get<4>(outpair.second);
-//         verify(verify_backward_bn_per_activation_use_saved<T, PREC_TYPE>{
-//             input, dy_input, scale, savedMean, savedInvVar});
-//     }
-// };
-
 inline auto GenCases()
 {
-    return testing::ValuesIn(get_bn_peract_inputs(4));
+    auto&& s = get_bn_peract_inputs(4);
+    return testing::ValuesIn((s.insert({16, 32, 8, 8}), s));
 }
 
 inline auto GetCases()
@@ -1084,17 +990,20 @@ inline auto GetCases()
 template <typename T>
 struct BnPeractTest : public testing::TestWithParam<TestCase>
 {
-    const constexpr uint64_t MaxValue = miopen_type<T>{} == miopenHalf ? 5 : 17;
+    static const constexpr uint64_t MaxValue {miopen_type<T>{} == miopenHalf ? 5 : 17};
 
     void SetUp() override
     {
         prng::reset_seed();
         const auto dims = GetParam();
-        input = tensor<T>{dims}.generate(tensor_elem_gen_integer{MaxValue}));
+        input = tensor<T>{dims}.generate(tensor_elem_gen_integer{MaxValue});
     }
 
     void Run()
     {
+#if(MIO_BN_TIME_EVERYTHING == 1)
+        const auto t_start = std::chrono::high_resolution_clock::now();
+#endif
         tensor<PREC_TYPE> scale;
         tensor<PREC_TYPE> shift;
 
@@ -1162,18 +1071,62 @@ struct BnPeractTest : public testing::TestWithParam<TestCase>
         const auto savedInvVar  = std::get<4>(outpair.second);
         Verify(verify_backward_bn_per_activation_use_saved<T, PREC_TYPE>{
             input, dy_input, scale, savedMean, savedInvVar}, tolerance);
+
+#if(MIO_BN_TIME_EVERYTHING == 1)
+        const auto t_end = std::chrono::high_resolution_clock::now();
+        std::cout << "Wall clock: full PER_ACTIVATION test pass time: "
+                << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
+#endif
     }
 
     private:
         tensor<T> input;
     
     private:
-        void Verify(auto&& v, double tolerance)
+        auto Verify(auto&& v, double tolerance) -> decltype(std::make_pair(v.cpu(), v.gpu()))
         {
             const auto cpu = v.cpu();
             const auto gpu = v.gpu();
 
-            EXPECT_EQ(miopen::range_distance(cpu), miopen::range_distance(gpu));
+            Compare(v, cpu, gpu, tolerance);
+
+            return std::make_pair(cpu, gpu);
+        }
+
+        template <typename... CpuRanges, typename... GpuRanges>
+        void Compare(auto&& v, const std::tuple<CpuRanges...>& cpu, const std::tuple<GpuRanges...>& gpu, double tolerance)
+        {
+            static_assert(sizeof...(CpuRanges) == sizeof...(GpuRanges), "CPU and GPU mismatch");
+
+            miopen::sequence([&](auto... is) {
+                miopen::each_args(
+                    [&](auto i) {
+                        const auto& c = std::get<i>(cpu);
+                        const auto& g = std::get<i>(gpu);
+
+                        ASSERT_EQ(miopen::range_distance(c), miopen::range_distance(g));
+
+                        using value_type = miopen::range_value<decltype(g)>;
+
+                        const double threshold  = std::numeric_limits<value_type>::epsilon() * tolerance;
+                        const double error      = miopen::rms_range(c, g);
+
+                        EXPECT_LE(error, threshold);
+
+                        if (error > threshold)
+                        {
+                            v.fail(i);
+                        }
+                    },
+                    is...
+                );
+            })(std::integral_constant<std::size_t, sizeof...(CpuRanges)>{});
+        }
+
+        template <typename CpuRanges, typename GpuRanges>
+        void Compare(auto&& v, const CpuRanges& cpu, const GpuRanges& gpu, double tolerance)
+        {
+            ASSERT_EQ(miopen::range_distance(cpu), miopen::range_distance(gpu));
 
             using value_type = miopen::range_value<decltype(gpu)>;
             
@@ -1181,68 +1134,22 @@ struct BnPeractTest : public testing::TestWithParam<TestCase>
             const double error      = miopen::rms_range(cpu, gpu);
             
             EXPECT_LE(error, threshold);
+
+            if (error > threshold)
+            {
+                v.fail(0);
+            }
         }
-
-        
 };
-
-/*
-    template <class V, class... Ts>
-    auto verify(V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
-
-        return verify_impl(
-            [&](std::vector<double>& error, auto&& cpu, auto&& gpu) {
-                CHECK(miopen::range_distance(cpu) == miopen::range_distance(gpu));
-
-                using value_type = miopen::range_value<decltype(gpu)>;
-                double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
-                error            = {miopen::rms_range(cpu, gpu)};
-                return error.front() <= threshold;
-            },
-            v,
-            xs...);
-
-    template <class... CpuRanges, class... GpuRanges, class Compare, class Report, class Fail>
-    bool compare_and_report(const std::tuple<CpuRanges...>& out_cpu,
-                            const std::tuple<GpuRanges...>& out_gpu,
-                            Compare compare,
-                            Report report,
-                            Fail fail)
-    {
-        static_assert(sizeof...(CpuRanges) == sizeof...(GpuRanges), "Cpu and gpu mismatch");
-        return miopen::sequence([&](auto... is) {
-            bool continue_ = true;
-            miopen::each_args(
-                [&](auto i) {
-                    // cppcheck-suppress knownConditionTrueFalse
-                    if(continue_)
-                    {
-                        continue_ = this->compare_and_report(
-                            std::get<i>(out_cpu), std::get<i>(out_gpu), compare, report, [&](int) {
-                                return fail(i);
-                            });
-                    }
-                },
-                is...);
-            return continue_;
-        })(std::integral_constant<std::size_t, sizeof...(CpuRanges)>{});
-    }
-*/
 
 using GPU_BnPeract_FP16     = BnPeractTest<half_float::half>;
 using GPU_BnPeract_FP32     = BnPeractTest<float>;
-using GPU_BnPeract_FP64     = BnPeractTest<double>;
-using GPU_BnPeract_U8       = BnPeractTest<int8_t>;
 using GPU_BnPeract_BFP16    = BnPeractTest<bfloat16>;
 
-TEST_P(GPU_BnPeract_FP16, TestFloat16)  { this->Run(); }
-TEST_P(GPU_BnPeract_FP32, TestFloat32)  { this->Run(); }
-TEST_P(GPU_BnPeract_FP64, TestFloat32)  { this->Run(); }
-TEST_P(GPU_BnPeract_U8, TestFloat32)    { this->Run(); }
-TEST_P(GPU_BnPeract_BFP16, TestFloat32) { this->Run(); }
+TEST_P(GPU_BnPeract_FP16, TestFloat16)      { this->Run(); }
+TEST_P(GPU_BnPeract_FP32, TestFloat32)      { this->Run(); }
+TEST_P(GPU_BnPeract_BFP16, TestBFloat16)    { this->Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP16, GetCases());
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP32, GetCases());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP64, GetCases());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_U8, GetCases());
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_BFP16, GetCases());
