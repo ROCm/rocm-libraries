@@ -359,7 +359,7 @@ def runPerformanceCommand (platform, project)
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
             
             def maxResultsLength = 60000
-            def truncatedMessage = "\n\n*[Results truncated. See full report in artifacts.]*"
+            def truncatedMessage = "\n```\n\n*[Results truncated. See full report in artifacts.]*"
             
             if (resResults.length() > maxResultsLength) {
                 def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
