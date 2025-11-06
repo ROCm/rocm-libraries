@@ -23524,6 +23524,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     | bf16_r | f32_r  |      f32_r     |
     | f16_r  | f16_r  |      f32_r     |
     | f16_r  | f32_r  |      f32_r     |
+    | f32_r  | f32_r  |      f64_r     |
+    | f32_r  | f64_r  |      f64_r     |
     ------------------------------------
 
     @param[in]

@@ -125,6 +125,12 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  </table>
 *
 *  <table>
+*  <caption id="v2_spmv_sell_algorithms">Sliced ELL Algorithms</caption>
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Notes
+*  <tr><td>rocsparse_spmv_alg_sell</td>   <td>Yes</td>        <td></td>
+*  </table>
+*
+*  <table>
 *  <caption id="v2_spmv_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td></td>

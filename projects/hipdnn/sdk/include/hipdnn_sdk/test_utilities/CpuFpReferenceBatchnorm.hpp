@@ -30,9 +30,8 @@ public:
                                       const TensorBase<ScaleBiasDataType>& scale,
                                       const TensorBase<ScaleBiasDataType>& bias,
                                       const TensorBase<MeanVarianceDataType>& estimatedMean,
-                                      const TensorBase<MeanVarianceDataType>& estimatedVariance,
-                                      TensorBase<InputDataType>& output,
-                                      double epsilon)
+                                      const TensorBase<MeanVarianceDataType>& invVariance,
+                                      TensorBase<InputDataType>& output)
     {
         if(input.dims().size() < 2)
         {
@@ -43,16 +42,12 @@ public:
         auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
             auto cidx = indices[1];
             auto mean = staticCast<ComputeDataType>(estimatedMean.getHostValue(0, cidx));
-            auto variance = staticCast<ComputeDataType>(estimatedVariance.getHostValue(0, cidx));
+            auto invVarianceValue = staticCast<ComputeDataType>(invVariance.getHostValue(0, cidx));
 
             //There is some extra casting in here to deal with double -> float implicit casts.
-            ComputeDataType invVariance
-                = staticCast<ComputeDataType>(1.0f)
-                  / sqrtInternal(variance + staticCast<ComputeDataType>(epsilon));
-
             auto inVal = staticCast<ComputeDataType>(input.getHostValue(indices));
             ComputeDataType elemStd = inVal - mean;
-            ComputeDataType inhat = elemStd * invVariance;
+            ComputeDataType inhat = elemStd * invVarianceValue;
 
             output.setHostValue(
                 staticCast<InputDataType>(
@@ -74,8 +69,8 @@ public:
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
                              TensorBase<InputDataType>& y,
-                             MeanVarianceDataType epsilon,
-                             MeanVarianceDataType momentum,
+                             double epsilon,
+                             double momentum,
                              TensorBase<MeanVarianceDataType>* mean = nullptr,
                              TensorBase<MeanVarianceDataType>* invVariance = nullptr,
                              const TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
@@ -114,6 +109,8 @@ public:
                     varianceAccum = varianceAccum + (inVal * inVal);
                 });
 
+            // NOTE: Different operation order from MIOpen produces expected FP differences.
+            // Both implementations are correct; validated using RMS error tolerance
             ComputeDataType channelMean = meanAccum / nhw;
             ComputeDataType channelVariance = (varianceAccum / nhw) - (channelMean * channelMean);
 
