@@ -2983,7 +2983,9 @@ class KernelWriterAssembly(KernelWriter):
     parDimSize = kernel["MacroTile%s"%tc] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["DepthU"]
     numThreadsCoalesced = (parDimSize // kernel["GlobalReadVectorWidth%s"%tc])
 
-    numThreadsPerMI = (kernel["MatrixInstM"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["MatrixInstK"]) // kernel["GlobalReadVectorWidth%s"%tc]
+    numThreadsPerMI = max((kernel["MatrixInstM"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
+                           else kernel["MatrixInstK"]) // kernel["GlobalReadVectorWidth%s"%tc],\
+                          1)
     numThreadGroupsPerParDim = numThreadsCoalesced // numThreadsPerMI
 
     module.addComment0("NumThreadsCoalesced%s = %u, %u total threads, %u thread groups"%( \

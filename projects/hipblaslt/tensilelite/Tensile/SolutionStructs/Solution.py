@@ -2019,7 +2019,10 @@ class Solution(collections.abc.Mapping):
 
       disableGNLC = False # Set to true to disable GNLC if needed
       isMixedPrec = (state["ProblemType"]["DataTypeA"].numBytes() != state["ProblemType"]["DataTypeB"].numBytes())
-      if state["DirectToLds"] and state["LocalSplitU"] == 1 and not isMixedPrec and not state["ProblemType"]["Sparse"] and not disableGNLC:
+      if state["DirectToLds"] and state["LocalSplitU"] == 1 \
+         and not isMixedPrec and not state["ProblemType"]["Sparse"] \
+         and state["MatrixInstB"] == 1 \
+         and not disableGNLC:
         # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
         grwidthA = state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()
         grwidthB = state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()
