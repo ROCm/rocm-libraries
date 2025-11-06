@@ -960,9 +960,13 @@ struct test_driver
         if(this->iteration >= this->config_iter_start &&
            (this->config_iter_end < 0 || this->iteration < this->config_iter_end))
         {
-            std::cout << "Iteration: " << this->iteration << std::endl;
+            if(this->time && !this->verbose)
+            {
+                std::cout << "Iteration: " << this->iteration << std::endl;
+            }
             if(this->dry_run)
             {
+                std::cout << "Iteration: " << this->iteration << std::endl;
                 show_command();
             }
             else
