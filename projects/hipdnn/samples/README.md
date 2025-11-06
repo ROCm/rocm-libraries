@@ -37,15 +37,6 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 
 The current samples include:
 
-### [**`BnInference`**](./batchnorm/BnInference.cpp)
-
-Executes a single-node batch normalization inference graph on a 4D input tensor.
-
-- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)` to enable broadcasting over the batch (N) and spatial (H, W) dimensions. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions:
-    ```python
-    y = scale * ((x - mean) * inv_variance) + bias
-    ```
-
 ### [**`BnTraining`**](./batchnorm/BnTraining.cpp)
 
 Executes the forward pass of a batch normalization training graph on a 4D input tensor.
@@ -68,6 +59,49 @@ Executes the backward pass of a batch normalization graph to compute gradients o
     dx = (scale * inv_variance) * (dy - (dbias + x_hat * dscale) / nhw)
     ```
     where `nhw = N * H * W` is the number of elements averaged per channel.
+
+### [**`FusedBnInfDReluBnBwd`**](./batchnorm/FusedBnInfDReluBnBwd.cpp)
+
+Executes a fused 3-operation graph demonstrating batchnorm inference followed by activation backward and batchnorm backward passes.
+
+The fused graph consists of three operations:
+
+1. **Batchnorm Inference (Forward)**: Normalizes input `x` using saved statistics
+   ```python
+   bn_y = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation Backward (ReLU)**: Computes gradient through ReLU activation
+   ```python
+   # ReLU backward: gradient flows through only where forward output was positive
+   dx_drelu[i] = dy[i] if bn_y[i] > 0 else 0
+   ```
+
+3. **Batchnorm Backward**: Computes gradients with respect to inputs and parameters
+   ```python
+   dbias = sum(dx_drelu)
+   x_hat = (x - mean) * inv_variance  
+   dscale = sum(dx_drelu * x_hat)
+   dx = (scale * inv_variance) * (dx_drelu - (dbias + x_hat * dscale) / nhw)
+   ```
+
+**Key Features:**
+- Demonstrates multi-operation graph fusion with virtual intermediate tensors
+- The intermediate outputs (`bn_y` and `dx_drelu`) are marked as virtual, allowing the backend to optimize memory usage
+- Uses `CpuReferenceGraphExecutor` for validation, which executes the entire fused graph on CPU
+
+**Graph Flow:**
+```
+Inputs: x, dy, scale, bias, mean, inv_variance
+        ↓
+    bn_y = batchnorm_inference(x, mean, inv_variance, scale, bias)
+        ↓ (virtual tensor)
+    dx_drelu = activation_backward(bn_y, dy)  
+        ↓ (virtual tensor)
+    [dx, dscale, dbias] = batchnorm_backward(dx_drelu, x, scale, mean, inv_variance)
+        ↓
+Outputs: dx, dscale, dbias
+```
 
 ### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
 
@@ -123,3 +157,36 @@ Executes the backward pass (data gradient) of a 2D convolution operation to comp
     H_in = stride_h * (H_out - 1) + dilation_h * (R - 1) + 1 - 2*pad_h
     W_in = stride_w * (W_out - 1) + dilation_w * (S - 1) + 1 - 2*pad_w
     ```
+
+### [**`ConvWgrad`**](./convolution/ConvWgrad.cpp)
+
+Executes the backward pass (filter gradient) of a 2D convolution operation to compute filter gradients.
+
+- For an output gradient tensor `dy` of shape `(N, K, H_out, W_out)` and an input tensor `x` of shape `(N, C, H_in, W_in)`, the convolution backward filter operation computes the filter gradient tensor `dw` of shape `(K, C, R, S)`. At a high-level, each filter gradient element is computed by accumulating contributions from all batch samples and valid spatial positions:
+
+    ```python
+    dw[k, c, r, s] = sum(sum(sum(dy[n, k, p, q] * x[n, c, h, w]
+                                 for n in range(N))
+                             for p in range(H_out))
+                         for q in range(W_out))
+    ```
+
+    where for each output position `(p, q)` and filter position `(r, s)`, the corresponding input position `(h, w)` is computed as:
+    
+    ```python
+    h = p * stride_h - pad_h + r * dilation_h
+    w = q * stride_w - pad_w + s * dilation_w
+    ```
+    
+    For each valid output position, the input position `(h, w)` must fall within the input bounds `[0, H_in) × [0, W_in)` to contribute to the gradient. Input positions outside these bounds (from padding regions) do not contribute.
+
+    The filter gradient dimensions match the original filter tensor from the forward pass:
+    
+    ```python
+    dw.shape = w.shape = (K, C, R, S)
+    ```
+    
+    where:
+    - `K` = number of output channels (filters)
+    - `C` = number of input channels per filter
+    - `R, S` = filter spatial dimensions (height, width)
