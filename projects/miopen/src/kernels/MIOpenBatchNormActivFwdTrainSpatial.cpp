@@ -464,7 +464,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         unsigned int cidx  = grpid * mio_bn_config::hw;
 
         // Unused if (NormPerN == false)
-        FpPrecType minibatch[NormPerN ? mio_bn_config::n : 1];
+        FpPrecType minibatch[mio_bn_config::n];
 
         __shared__ FpPrecType lcl_bias;
         __shared__ FpPrecType lcl_scale;
