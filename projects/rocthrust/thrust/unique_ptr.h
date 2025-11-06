@@ -116,6 +116,10 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
    */
   using pointer = thrust::device_ptr<T>;
 
+  // Allow other instantiations to access private members for converting constructor
+  template <class U, class>
+  friend struct default_delete;
+
   /*! \brief Constructs a deleter with the specified array size.
    *
    *  \param n The number of elements in the array (default: 0).
@@ -134,7 +138,7 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
   THRUST_HOST
   default_delete(const default_delete<U[]>& other,
                  std::enable_if_t<std::is_convertible_v<U (*)[], T (*)[]>>* = nullptr) noexcept
-      : m_size(other.size())
+      : m_size(other.m_size)
   {}
 
   /*! \brief Deletes the array pointed to by \p ptr.
@@ -169,15 +173,6 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
       });
     }
     thrust::device_free(ptr);
-  }
-
-  /*! \brief Returns the number of elements in the array.
-   *
-   *  \return The array size.
-   */
-  THRUST_HOST size_t size() const
-  {
-    return m_size;
   }
 
 private:
