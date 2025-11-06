@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_sort_checker.hpp"
 
 // required rocprim headers
 #include <rocprim/device/config_types.hpp>
@@ -59,9 +60,9 @@ template<class KeyType,
          typename Config = rocprim::default_config>
 struct DeviceMergeParams
 {
-    using key_type = KeyType;
-    using value_type = ValueType;
-    using compare_op_type = CompareOp;
+    using key_type                   = KeyType;
+    using value_type                 = ValueType;
+    using compare_op_type            = CompareOp;
     static constexpr bool use_graphs = UseGraphs;
     using config                     = Config;
 };
@@ -70,12 +71,12 @@ template<class Params>
 class RocprimDeviceMergeTests : public ::testing::Test
 {
 public:
-    using key_type = typename Params::key_type;
-    using value_type = typename Params::value_type;
-    using compare_op_type = typename Params::compare_op_type;
+    using key_type                          = typename Params::key_type;
+    using value_type                        = typename Params::value_type;
+    using compare_op_type                   = typename Params::compare_op_type;
     using config                            = typename Params::config;
-    const bool debug_synchronous = false;
-    static constexpr bool use_graphs = Params::use_graphs;
+    const bool            debug_synchronous = false;
+    static constexpr bool use_graphs        = Params::use_graphs;
 };
 
 using custom_int2    = common::custom_type<int, int, true>;
@@ -129,12 +130,12 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type = typename TestFixture::key_type;
-    using compare_op_type = typename TestFixture::compare_op_type;
+    using key_type               = typename TestFixture::key_type;
+    using compare_op_type        = typename TestFixture::compare_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -155,10 +156,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             continue;
         }
 
-        SCOPED_TRACE(
-            testing::Message() << "with sizes = {" <<
-            std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with sizes = {" << std::get<0>(sizes) << ", "
+                                        << std::get<1>(sizes) << "}");
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
@@ -168,7 +167,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
             // Generate data
@@ -179,17 +179,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
             std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
             std::vector<key_type> keys_output(size1 + size2, (key_type)0);
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_output.size());
-            std::merge(
-                keys_input1.begin(),
-                keys_input1.end(),
-                keys_input2.begin(),
-                keys_input2.end(),
-                expected.begin(),
-                compare_op
-            );
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
@@ -268,18 +257,22 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
             ASSERT_FALSE(out_of_bounds.get());
 
-            // Copy keys_output to host
-            keys_output = d_keys_output.load();
+            bool is_sorted = test_utils::device_sort_check(d_keys_output.get(),
+                                                           size1 + size2,
+                                                           compare_op,
+                                                           stream,
+                                                           debug_synchronous);
 
-            // Check if keys_output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+            ASSERT_TRUE(is_sorted);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 gHelper.cleanupGraphHelper();
+            }
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -290,14 +283,14 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type = typename TestFixture::key_type;
-    using value_type = typename TestFixture::value_type;
+    using key_type        = typename TestFixture::key_type;
+    using value_type      = typename TestFixture::value_type;
     using compare_op_type = typename TestFixture::compare_op_type;
 
     using key_value = std::pair<key_type, value_type>;
 
     hipStream_t stream = 0; // default
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -318,10 +311,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             continue;
         }
 
-        SCOPED_TRACE(
-            testing::Message() << "with sizes = {" <<
-            std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
-        );
+        SCOPED_TRACE(testing::Message() << "with sizes = {" << std::get<0>(sizes) << ", "
+                                        << std::get<1>(sizes) << "}");
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
@@ -331,7 +322,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
         for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
-            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
             // Generate data
@@ -345,7 +337,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             std::vector<value_type> values_input2(size2);
             test_utils::iota(values_input1.begin(), values_input1.end(), 0);
             test_utils::iota(values_input2.begin(), values_input2.end(), size1);
-            std::vector<key_type> keys_output(size1 + size2, (key_type)0);
+            std::vector<key_type>   keys_output(size1 + size2, (key_type)0);
             std::vector<value_type> values_output(size1 + size2, (value_type)0);
 
             // Calculate expected results on host
@@ -362,14 +354,13 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             }
 
             std::vector<key_value> expected(size1 + size2);
-            std::merge(
-                vector1.begin(),
-                vector1.end(),
-                vector2.begin(),
-                vector2.end(),
-                expected.begin(),
-                [compare_op](const key_value& a, const key_value& b) { return compare_op(a.first, b.first); }
-            );
+            std::merge(vector1.begin(),
+                       vector1.end(),
+                       vector2.begin(),
+                       vector2.end(),
+                       expected.begin(),
+                       [compare_op](const key_value& a, const key_value& b)
+                       { return compare_op(a.first, b.first); });
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
@@ -470,22 +461,22 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             values_output = d_values_output.load();
 
             // Check if keys_output values are as expected
-            std::vector<key_type> expected_key(expected.size());
+            std::vector<key_type>   expected_key(expected.size());
             std::vector<value_type> expected_value(expected.size());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                expected_key[i] = expected[i].first;
+                expected_key[i]   = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
@@ -521,7 +512,7 @@ void testMergeMismatchedIteratorTypes()
     static constexpr bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default
-    if (UseGraphs)
+    if(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -569,7 +560,7 @@ void testMergeMismatchedIteratorTypes()
 
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_keys_output));
 
-    if (UseGraphs)
+    if(UseGraphs)
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));

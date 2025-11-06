@@ -152,7 +152,8 @@ TEST_P(change_type, short_to_float)
                           &callback_host, HIP_SYMBOL(load_callback_short2_dev), sizeof(void*)),
                       hipSuccess);
         }
-        ASSERT_EQ(params.set_callbacks(callback_host, nullptr, nullptr, nullptr),
+        std::vector<void*> callback_host_vec{callback_host};
+        ASSERT_EQ(params.set_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT

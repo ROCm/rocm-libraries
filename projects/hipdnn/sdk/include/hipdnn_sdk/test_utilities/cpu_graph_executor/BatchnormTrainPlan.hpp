@@ -12,6 +12,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanUtils.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <optional>
 #include <variant>
 
@@ -27,9 +28,10 @@ struct BatchnormTrainParams
         const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& biasAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& yAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& epsilonAttributes,
+        // Optional mean/variance tensors
+        const hipdnn_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
+        const hipdnn_sdk::data_objects::TensorAttributes* invVarianceAttributes = nullptr,
         // Optional running mean/variance tensors
         const hipdnn_sdk::data_objects::TensorAttributes* momentumAttributes = nullptr,
         const hipdnn_sdk::data_objects::TensorAttributes* prevRunningMeanAttributes = nullptr,
@@ -39,10 +41,14 @@ struct BatchnormTrainParams
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
-        , yTensor(unpackTensorAttributes(yAttributes))
-        , meanTensor(unpackTensorAttributes(meanAttributes))
-        , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
+        , yTensor(unpackTensorAttributes(yAttributes))
+        , meanTensor(meanAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*meanAttributes))
+                         : std::nullopt)
+        , invVarianceTensor(invVarianceAttributes != nullptr
+                                ? std::make_optional(unpackTensorAttributes(*invVarianceAttributes))
+                                : std::nullopt)
         , momentumTensor(momentumAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*momentumAttributes))
                              : std::nullopt)
@@ -68,10 +74,10 @@ struct BatchnormTrainParams
     hipdnn_sdk::data_objects::TensorAttributesT xTensor;
     hipdnn_sdk::data_objects::TensorAttributesT scaleTensor;
     hipdnn_sdk::data_objects::TensorAttributesT biasTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT yTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT meanTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT invVarianceTensor;
     hipdnn_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_sdk::data_objects::TensorAttributesT yTensor;
+    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> invVarianceTensor;
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> momentumTensor;
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> prevRunningMeanTensor;
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> prevRunningVarianceTensor;
@@ -79,7 +85,10 @@ struct BatchnormTrainParams
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> nextRunningVarianceTensor;
 };
 
-template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
+template <typename InputDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename ComputeDataType>
 class BatchnormTrainPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -98,15 +107,33 @@ public:
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
         auto shallowYTensor = createShallowTensor<InputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
-        auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
-            _params.meanTensor, variantPack.at(_params.meanTensor.uid));
-        auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
-            _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
-        auto shallowEpsilonTensor = createShallowTensor<MeanVarianceDataType>(
-            _params.epsilonTensor, variantPack.at(_params.epsilonTensor.uid));
 
-        // Optional tensors
-        std::unique_ptr<TensorBase<MeanVarianceDataType>> momentum;
+        // Extract epsilon from pass-by-value tensor (cast to double)
+        double epsilon
+            = hipdnn_sdk::utilities::extractDoubleFromTensorValue(_params.epsilonTensor, "Epsilon");
+
+        // Optional batch statistics tensors
+        std::unique_ptr<TensorBase<MeanVarianceDataType>> mean;
+        std::unique_ptr<TensorBase<MeanVarianceDataType>> invVariance;
+        TensorBase<MeanVarianceDataType>* meanPtr = nullptr;
+        TensorBase<MeanVarianceDataType>* invVariancePtr = nullptr;
+
+        if(_params.meanTensor.has_value())
+        {
+            mean = createShallowTensor<MeanVarianceDataType>(
+                _params.meanTensor.value(), variantPack.at(_params.meanTensor.value().uid));
+            meanPtr = mean.get();
+        }
+
+        if(_params.invVarianceTensor.has_value())
+        {
+            invVariance = createShallowTensor<MeanVarianceDataType>(
+                _params.invVarianceTensor.value(),
+                variantPack.at(_params.invVarianceTensor.value().uid));
+            invVariancePtr = invVariance.get();
+        }
+
+        // Optional momentum and running statistics tensors
         std::unique_ptr<TensorBase<MeanVarianceDataType>> prevRunningMean;
         std::unique_ptr<TensorBase<MeanVarianceDataType>> prevRunningVariance;
         std::unique_ptr<TensorBase<MeanVarianceDataType>> nextRunningMean;
@@ -116,10 +143,12 @@ public:
         TensorBase<MeanVarianceDataType>* nextRunningMeanPtr = nullptr;
         TensorBase<MeanVarianceDataType>* nextRunningVariancePtr = nullptr;
 
+        // Extract momentum from pass-by-value tensor if present (cast to double)
+        double momentumValue = 0.1;
         if(_params.momentumTensor.has_value())
         {
-            momentum = createShallowTensor<MeanVarianceDataType>(
-                _params.momentumTensor.value(), variantPack.at(_params.momentumTensor.value().uid));
+            momentumValue = hipdnn_sdk::utilities::extractDoubleFromTensorValue(
+                _params.momentumTensor.value(), "Momentum");
         }
 
         if(_params.prevRunningMeanTensor.has_value())
@@ -151,20 +180,21 @@ public:
             nextRunningVariancePtr = nextRunningVariance.get();
         }
 
-        CpuFpReferenceBatchnormImpl<InputDataType, ScaleBiasDataType, MeanVarianceDataType>::
-            batchnormFwdTraining(*shallowXTensor,
-                                 *shallowScaleTensor,
-                                 *shallowBiasTensor,
-                                 *shallowYTensor,
-                                 shallowEpsilonTensor->getHostValue(0),
-                                 momentum == nullptr ? static_cast<MeanVarianceDataType>(0.1f)
-                                                     : momentum->getHostValue(0),
-                                 shallowMeanTensor.get(),
-                                 shallowInvVarianceTensor.get(),
-                                 prevRunningMeanPtr,
-                                 prevRunningVariancePtr,
-                                 nextRunningMeanPtr,
-                                 nextRunningVariancePtr);
+        CpuFpReferenceBatchnormImpl<InputDataType,
+                                    ScaleBiasDataType,
+                                    MeanVarianceDataType,
+                                    ComputeDataType>::batchnormFwdTraining(*shallowXTensor,
+                                                                           *shallowScaleTensor,
+                                                                           *shallowBiasTensor,
+                                                                           *shallowYTensor,
+                                                                           epsilon,
+                                                                           momentumValue,
+                                                                           meanPtr,
+                                                                           invVariancePtr,
+                                                                           prevRunningMeanPtr,
+                                                                           prevRunningVariancePtr,
+                                                                           nextRunningMeanPtr,
+                                                                           nextRunningVariancePtr);
     }
 
 private:
@@ -173,77 +203,96 @@ private:
 
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormTrainPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
         if(nodeAttributes == nullptr)
         {
             return false;
         }
 
-        if(!nodeAttributes->mean_tensor_uid().has_value()
-           || !nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
-            throw std::runtime_error(
-                "BatchnormTrainPlanBuilder mean or inv_variance tensor is optional.  Cpu ref "
-                "implementation currently doesnt support optional tensors for these params");
-        }
-
+        // Check required tensors
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->epsilon_tensor_uid(), MeanVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->inv_variance_tensor_uid().value(), MeanVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->epsilon_tensor_uid(), MeanVarianceDataTypeEnum);
+
+        // Optional batch statistics tensors
+        if(nodeAttributes->mean_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
+        }
+
+        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->inv_variance_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
+        }
+
+        // Momentum can be any type - will be cast to double during extraction
+        if(nodeAttributes->momentum_tensor_uid())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->momentum_tensor_uid().value());
+        }
 
         // Optional running mean/variance tensors
-        if(nodeAttributes->prev_running_mean_tensor_uid()
-           && nodeAttributes->prev_running_variance_tensor_uid()
-           && nodeAttributes->next_running_mean_tensor_uid()
-           && nodeAttributes->next_running_variance_tensor_uid())
+        if(nodeAttributes->prev_running_mean_tensor_uid())
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->prev_running_mean_tensor_uid().value());
-            CHECK_TENSOR_EXISTS(tensorMap,
-                                nodeAttributes->prev_running_variance_tensor_uid().value());
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid().value());
-            CHECK_TENSOR_EXISTS(tensorMap,
-                                nodeAttributes->next_running_variance_tensor_uid().value());
-
             CHECK_TENSOR_TYPE(tensorMap,
                               nodeAttributes->prev_running_mean_tensor_uid().value(),
                               MeanVarianceDataTypeEnum);
+        }
+
+        if(nodeAttributes->prev_running_variance_tensor_uid())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap,
+                                nodeAttributes->prev_running_variance_tensor_uid().value());
             CHECK_TENSOR_TYPE(tensorMap,
                               nodeAttributes->prev_running_variance_tensor_uid().value(),
                               MeanVarianceDataTypeEnum);
+        }
+
+        if(nodeAttributes->next_running_mean_tensor_uid())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid().value());
             CHECK_TENSOR_TYPE(tensorMap,
                               nodeAttributes->next_running_mean_tensor_uid().value(),
                               MeanVarianceDataTypeEnum);
+        }
+
+        if(nodeAttributes->next_running_variance_tensor_uid())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap,
+                                nodeAttributes->next_running_variance_tensor_uid().value());
             CHECK_TENSOR_TYPE(tensorMap,
                               nodeAttributes->next_running_variance_tensor_uid().value(),
                               MeanVarianceDataTypeEnum);
@@ -264,11 +313,23 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
+        const hipdnn_sdk::data_objects::TensorAttributes* mean = nullptr;
+        const hipdnn_sdk::data_objects::TensorAttributes* invVariance = nullptr;
         const hipdnn_sdk::data_objects::TensorAttributes* momentum = nullptr;
         const hipdnn_sdk::data_objects::TensorAttributes* prevRunningMean = nullptr;
         const hipdnn_sdk::data_objects::TensorAttributes* prevRunningVariance = nullptr;
         const hipdnn_sdk::data_objects::TensorAttributes* nextRunningMean = nullptr;
         const hipdnn_sdk::data_objects::TensorAttributes* nextRunningVariance = nullptr;
+
+        if(nodeAttributes->mean_tensor_uid().has_value())
+        {
+            mean = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+        }
+
+        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+        {
+            invVariance = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+        }
 
         if(nodeAttributes->momentum_tensor_uid())
         {
@@ -293,18 +354,19 @@ public:
             *tensorMap.at(nodeAttributes->scale_tensor_uid()),
             *tensorMap.at(nodeAttributes->bias_tensor_uid()),
             *tensorMap.at(nodeAttributes->y_tensor_uid()),
-            *tensorMap.at(nodeAttributes->mean_tensor_uid().value()),
-            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value()),
             *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
+            mean,
+            invVariance,
             momentum,
             prevRunningMean,
             prevRunningVariance,
             nextRunningMean,
             nextRunningVariance);
 
-        return std::make_unique<
-            BatchnormTrainPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(
-            std::move(params));
+        return std::make_unique<BatchnormTrainPlan<InputDataType,
+                                                   ScaleBiasDataType,
+                                                   MeanVarianceDataType,
+                                                   ComputeDataType>>(std::move(params));
     }
 };
 

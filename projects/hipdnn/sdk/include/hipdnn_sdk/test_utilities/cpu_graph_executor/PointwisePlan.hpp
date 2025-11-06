@@ -25,10 +25,22 @@ struct PointwiseParams
     PointwiseParams(const hipdnn_sdk::data_objects::PointwiseMode pointwiseMode,
                     const hipdnn_sdk::data_objects::TensorAttributes& in0Attributes,
                     const hipdnn_sdk::data_objects::TensorAttributes* optionalIn1Attributes,
-                    const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes)
+                    const hipdnn_sdk::data_objects::TensorAttributes& out0Attributes,
+                    std::optional<float> reluLowerClipLocal,
+                    std::optional<float> reluUpperClipLocal,
+                    std::optional<float> reluLowerClipSlopeLocal,
+                    std::optional<float> swishBetaLocal,
+                    std::optional<float> eluAlphaLocal,
+                    std::optional<float> softplusBetaLocal)
         : in0Tensor(unpackTensorAttributes(in0Attributes))
         , out0Tensor(unpackTensorAttributes(out0Attributes))
         , mode(pointwiseMode)
+        , reluLowerClip(reluLowerClipLocal)
+        , reluUpperClip(reluUpperClipLocal)
+        , reluLowerClipSlope(reluLowerClipSlopeLocal)
+        , swishBeta(swishBetaLocal)
+        , eluAlpha(eluAlphaLocal)
+        , softplusBeta(softplusBetaLocal)
     {
         if(optionalIn1Attributes != nullptr)
         {
@@ -40,6 +52,13 @@ struct PointwiseParams
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> in1Tensor;
     hipdnn_sdk::data_objects::TensorAttributesT out0Tensor;
     hipdnn_sdk::data_objects::PointwiseMode mode;
+
+    std::optional<float> reluLowerClip;
+    std::optional<float> reluUpperClip;
+    std::optional<float> reluLowerClipSlope;
+    std::optional<float> swishBeta;
+    std::optional<float> eluAlpha;
+    std::optional<float> softplusBeta;
 };
 
 template <typename DataType>
@@ -53,6 +72,20 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
+        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
+           || _params.reluLowerClipSlope.has_value())
+        {
+            executeParameterized(variantPack);
+        }
+        else
+        {
+            executeNonParameterized(variantPack);
+        }
+    }
+
+private:
+    void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
+    {
         auto shallowIn0Tensor = createShallowTensor<DataType>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
@@ -61,6 +94,7 @@ public:
 
         if(isUnaryPointwiseMode(_params.mode))
         {
+
             CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
@@ -83,7 +117,59 @@ public:
         }
     }
 
-private:
+    void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
+    {
+        auto shallowIn0Tensor = createShallowTensor<DataType>(
+            _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
+
+        auto shallowOut0Tensor = createShallowTensor<DataType>(
+            _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
+
+        if(isUnaryPointwiseMode(_params.mode))
+        {
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                _params.mode,
+                *shallowOut0Tensor,
+                *shallowIn0Tensor,
+                static_cast<DataType>(
+                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
+        }
+        else if(isBinaryPointwiseMode(_params.mode))
+        {
+            if(!_params.in1Tensor.has_value())
+            {
+                throw std::runtime_error("Binary pointwise operation requires in1 tensor");
+            }
+
+            auto shallowIn1Tensor = createShallowTensor<DataType>(
+                _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
+
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
+                _params.mode,
+                *shallowOut0Tensor,
+                *shallowIn0Tensor,
+                *shallowIn1Tensor,
+                static_cast<DataType>(
+                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported pointwise operation mode");
+        }
+    }
+
     PointwiseParams _params;
 };
 
@@ -156,15 +242,35 @@ public:
         const auto* out0Tensor = tensorMap.at(nodeAttributes->out_0_tensor_uid());
 
         // Get optional tensors
-        const auto* in1Tensor
-            = (nodeAttributes->in_1_tensor_uid() && *nodeAttributes->in_1_tensor_uid() != 0)
-                  ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
-                  : nullptr;
+        const auto* in1Tensor = (nodeAttributes->in_1_tensor_uid().has_value()
+                                     ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
+                                     : nullptr);
 
-        PointwiseParams params(nodeAttributes->operation(), *in0Tensor, in1Tensor, *out0Tensor);
+        //grab the node values
+
+        PointwiseParams params(nodeAttributes->operation(),
+                               *in0Tensor,
+                               in1Tensor,
+                               *out0Tensor,
+                               nodeAttributes->relu_lower_clip(),
+                               nodeAttributes->relu_upper_clip(),
+                               nodeAttributes->relu_lower_clip_slope(),
+                               nodeAttributes->swish_beta(),
+                               nodeAttributes->elu_alpha(),
+                               nodeAttributes->softplus_beta());
+
+        // Throw if these values get set so its clear to any future users they are not supported.
+        // Throwing here also makes it clear that we need to update PointwisePlan::execute
+        // to use the params once there are implementations that can use them.
+        // Cant throw in isApplicable and I want better error messaging than just returning false
+        if(params.swishBeta.has_value() || params.eluAlpha.has_value()
+           || params.softplusBeta.has_value())
+        {
+            throw std::runtime_error("Swish, ELU, and Softplus parameters are not supported "
+                                     "in PointwisePlanBuilder for the Cpu Graph Executor yet");
+        }
 
         return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }
 };
-
 }

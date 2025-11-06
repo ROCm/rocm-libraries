@@ -61,6 +61,8 @@ struct ReluBackward
     }
 };
 
+// The Two bwd relus are split because this one is inclusive of your lower clip, whereas default
+// bwd relu is exclusive of 0.
 template <typename ComputeType = float>
 struct ParameterizedReluBackward
 {

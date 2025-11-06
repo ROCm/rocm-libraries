@@ -36,6 +36,35 @@ namespace rocRoller
         {
         }
 
+        std::vector<ExpressionTransformType> FastArithmetic::getTransforms() const
+        {
+            std::vector<ExpressionTransformType> transforms
+                = {splitBitfieldCombine,
+                   lowerBitfieldCombine,
+                   convertPropagation,
+                   [this](auto e) { return fastDivision(e, m_context); },
+                   simplify,
+                   lowerExponential,
+                   fastMultiplication,
+                   lowerUnsignedArithmeticShiftR,
+                   fuseAssociative,
+                   combineShifts,
+                   fuseTernary,
+                   [this](auto e) { return launchTimeSubExpressions(e, m_context); },
+                   convertPropagation,
+                   simplify};
+
+            return transforms;
+        }
+
+        ExpressionPtr FastArithmetic::applyTransforms(
+            ExpressionPtr expr, const std::vector<ExpressionTransformType>& transforms) const
+        {
+            for(const auto& transform : transforms)
+                expr = transform(expr);
+            return expr;
+        }
+
         ExpressionPtr FastArithmetic::operator()(ExpressionPtr x) const
         {
             if(!x)
@@ -44,19 +73,8 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
-            x = splitBitfieldCombine(x);
-            x = lowerBitfieldCombine(x);
-            x = convertPropagation(x);
-            x = fastDivision(x, m_context);
-            x = simplify(x);
-            x = lowerExponential(x);
-            x = fastMultiplication(x);
-            x = lowerUnsignedArithmeticShiftR(x);
-            x = fuseAssociative(x);
-            x = combineShifts(x);
-            x = fuseTernary(x);
-            x = launchTimeSubExpressions(x, m_context);
-            x = convertPropagation(x);
+            auto transforms = getTransforms();
+            x               = applyTransforms(x, transforms);
 
             if(!identical(orig, x))
             {
