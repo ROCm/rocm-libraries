@@ -27,260 +27,260 @@
 #define C3QA 0.50000000000000000000000000000000f
 #define C3QB 0.86602540378443864676372317075294f
 
-__device__ void FwdRad3B1(float2* R0, float2* R1, float2* R2)
+__device__ void FwdRad3B1(float2& R0, float2& R1, float2& R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
 
-    TR0 = (*R0).x + (*R1).x + (*R2).x;
-    TR1 = ((*R0).x - C3QA * ((*R1).x + (*R2).x)) + C3QB * ((*R1).y - (*R2).y);
-    TR2 = ((*R0).x - C3QA * ((*R1).x + (*R2).x)) - C3QB * ((*R1).y - (*R2).y);
+    TR0 = R0.x + R1.x + R2.x;
+    TR1 = (R0.x - C3QA * (R1.x + R2.x)) + C3QB * (R1.y - R2.y);
+    TR2 = (R0.x - C3QA * (R1.x + R2.x)) - C3QB * (R1.y - R2.y);
 
-    TI0 = (*R0).y + (*R1).y + (*R2).y;
-    TI1 = ((*R0).y - C3QA * ((*R1).y + (*R2).y)) - C3QB * ((*R1).x - (*R2).x);
-    TI2 = ((*R0).y - C3QA * ((*R1).y + (*R2).y)) + C3QB * ((*R1).x - (*R2).x);
+    TI0 = R0.y + R1.y + R2.y;
+    TI1 = (R0.y - C3QA * (R1.y + R2.y)) - C3QB * (R1.x - R2.x);
+    TI2 = (R0.y - C3QA * (R1.y + R2.y)) + C3QB * (R1.x - R2.x);
 
-    ((*R0).x) = TR0;
-    ((*R0).y) = TI0;
-    ((*R1).x) = TR1;
-    ((*R1).y) = TI1;
-    ((*R2).x) = TR2;
-    ((*R2).y) = TI2;
+    R0.x = TR0;
+    R0.y = TI0;
+    R1.x = TR1;
+    R1.y = TI1;
+    R2.x = TR2;
+    R2.y = TI2;
 }
 
-__device__ void InvRad3B1(float2* R0, float2* R1, float2* R2)
+__device__ void InvRad3B1(float2& R0, float2& R1, float2& R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
 
-    TR0 = (*R0).x + (*R1).x + (*R2).x;
-    TR1 = ((*R0).x - C3QA * ((*R1).x + (*R2).x)) - C3QB * ((*R1).y - (*R2).y);
-    TR2 = ((*R0).x - C3QA * ((*R1).x + (*R2).x)) + C3QB * ((*R1).y - (*R2).y);
+    TR0 = R0.x + R1.x + R2.x;
+    TR1 = (R0.x - C3QA * (R1.x + R2.x)) - C3QB * (R1.y - R2.y);
+    TR2 = (R0.x - C3QA * (R1.x + R2.x)) + C3QB * (R1.y - R2.y);
 
-    TI0 = (*R0).y + (*R1).y + (*R2).y;
-    TI1 = ((*R0).y - C3QA * ((*R1).y + (*R2).y)) + C3QB * ((*R1).x - (*R2).x);
-    TI2 = ((*R0).y - C3QA * ((*R1).y + (*R2).y)) - C3QB * ((*R1).x - (*R2).x);
+    TI0 = R0.y + R1.y + R2.y;
+    TI1 = (R0.y - C3QA * (R1.y + R2.y)) + C3QB * (R1.x - R2.x);
+    TI2 = (R0.y - C3QA * (R1.y + R2.y)) - C3QB * (R1.x - R2.x);
 
-    ((*R0).x) = TR0;
-    ((*R0).y) = TI0;
-    ((*R1).x) = TR1;
-    ((*R1).y) = TI1;
-    ((*R2).x) = TR2;
-    ((*R2).y) = TI2;
+    R0.x = TR0;
+    R0.y = TI0;
+    R1.x = TR1;
+    R1.y = TI1;
+    R2.x = TR2;
+    R2.y = TI2;
 }
 
-__device__ void FwdRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
+__device__ void FwdRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
 
-    TR0 = (*R0).x + (*R2).x + (*R4).x;
-    TR2 = ((*R0).x - C3QA * ((*R2).x + (*R4).x)) + C3QB * ((*R2).y - (*R4).y);
-    TR4 = ((*R0).x - C3QA * ((*R2).x + (*R4).x)) - C3QB * ((*R2).y - (*R4).y);
+    TR0 = R0.x + R2.x + R4.x;
+    TR2 = (R0.x - C3QA * (R2.x + R4.x)) + C3QB * (R2.y - R4.y);
+    TR4 = (R0.x - C3QA * (R2.x + R4.x)) - C3QB * (R2.y - R4.y);
 
-    TI0 = (*R0).y + (*R2).y + (*R4).y;
-    TI2 = ((*R0).y - C3QA * ((*R2).y + (*R4).y)) - C3QB * ((*R2).x - (*R4).x);
-    TI4 = ((*R0).y - C3QA * ((*R2).y + (*R4).y)) + C3QB * ((*R2).x - (*R4).x);
+    TI0 = R0.y + R2.y + R4.y;
+    TI2 = (R0.y - C3QA * (R2.y + R4.y)) - C3QB * (R2.x - R4.x);
+    TI4 = (R0.y - C3QA * (R2.y + R4.y)) + C3QB * (R2.x - R4.x);
 
-    TR1 = (*R1).x + (*R3).x + (*R5).x;
-    TR3 = ((*R1).x - C3QA * ((*R3).x + (*R5).x)) + C3QB * ((*R3).y - (*R5).y);
-    TR5 = ((*R1).x - C3QA * ((*R3).x + (*R5).x)) - C3QB * ((*R3).y - (*R5).y);
+    TR1 = R1.x + R3.x + R5.x;
+    TR3 = (R1.x - C3QA * (R3.x + R5.x)) + C3QB * (R3.y - R5.y);
+    TR5 = (R1.x - C3QA * (R3.x + R5.x)) - C3QB * (R3.y - R5.y);
 
-    TI1 = (*R1).y + (*R3).y + (*R5).y;
-    TI3 = ((*R1).y - C3QA * ((*R3).y + (*R5).y)) - C3QB * ((*R3).x - (*R5).x);
-    TI5 = ((*R1).y - C3QA * ((*R3).y + (*R5).y)) + C3QB * ((*R3).x - (*R5).x);
+    TI1 = R1.y + R3.y + R5.y;
+    TI3 = (R1.y - C3QA * (R3.y + R5.y)) - C3QB * (R3.x - R5.x);
+    TI5 = (R1.y - C3QA * (R3.y + R5.y)) + C3QB * (R3.x - R5.x);
 
-    (*R0).x = TR0 + TR1;
-    (*R1).x = TR2 + (C3QA * TR3 + C3QB * TI3);
-    (*R2).x = TR4 + (-C3QA * TR5 + C3QB * TI5);
+    R0.x = TR0 + TR1;
+    R1.x = TR2 + (C3QA * TR3 + C3QB * TI3);
+    R2.x = TR4 + (-C3QA * TR5 + C3QB * TI5);
 
-    (*R0).y = TI0 + TI1;
-    (*R1).y = TI2 + (-C3QB * TR3 + C3QA * TI3);
-    (*R2).y = TI4 + (-C3QB * TR5 - C3QA * TI5);
+    R0.y = TI0 + TI1;
+    R1.y = TI2 + (-C3QB * TR3 + C3QA * TI3);
+    R2.y = TI4 + (-C3QB * TR5 - C3QA * TI5);
 
-    (*R3).x = TR0 - TR1;
-    (*R4).x = TR2 - (C3QA * TR3 + C3QB * TI3);
-    (*R5).x = TR4 - (-C3QA * TR5 + C3QB * TI5);
+    R3.x = TR0 - TR1;
+    R4.x = TR2 - (C3QA * TR3 + C3QB * TI3);
+    R5.x = TR4 - (-C3QA * TR5 + C3QB * TI5);
 
-    (*R3).y = TI0 - TI1;
-    (*R4).y = TI2 - (-C3QB * TR3 + C3QA * TI3);
-    (*R5).y = TI4 - (-C3QB * TR5 - C3QA * TI5);
+    R3.y = TI0 - TI1;
+    R4.y = TI2 - (-C3QB * TR3 + C3QA * TI3);
+    R5.y = TI4 - (-C3QB * TR5 - C3QA * TI5);
 }
 
-__device__ void InvRad6B1(float2* R0, float2* R1, float2* R2, float2* R3, float2* R4, float2* R5)
+__device__ void InvRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
 
-    TR0 = (*R0).x + (*R2).x + (*R4).x;
-    TR2 = ((*R0).x - C3QA * ((*R2).x + (*R4).x)) - C3QB * ((*R2).y - (*R4).y);
-    TR4 = ((*R0).x - C3QA * ((*R2).x + (*R4).x)) + C3QB * ((*R2).y - (*R4).y);
+    TR0 = R0.x + R2.x + R4.x;
+    TR2 = (R0.x - C3QA * (R2.x + R4.x)) - C3QB * (R2.y - R4.y);
+    TR4 = (R0.x - C3QA * (R2.x + R4.x)) + C3QB * (R2.y - R4.y);
 
-    TI0 = (*R0).y + (*R2).y + (*R4).y;
-    TI2 = ((*R0).y - C3QA * ((*R2).y + (*R4).y)) + C3QB * ((*R2).x - (*R4).x);
-    TI4 = ((*R0).y - C3QA * ((*R2).y + (*R4).y)) - C3QB * ((*R2).x - (*R4).x);
+    TI0 = R0.y + R2.y + R4.y;
+    TI2 = (R0.y - C3QA * (R2.y + R4.y)) + C3QB * (R2.x - R4.x);
+    TI4 = (R0.y - C3QA * (R2.y + R4.y)) - C3QB * (R2.x - R4.x);
 
-    TR1 = (*R1).x + (*R3).x + (*R5).x;
-    TR3 = ((*R1).x - C3QA * ((*R3).x + (*R5).x)) - C3QB * ((*R3).y - (*R5).y);
-    TR5 = ((*R1).x - C3QA * ((*R3).x + (*R5).x)) + C3QB * ((*R3).y - (*R5).y);
+    TR1 = R1.x + R3.x + R5.x;
+    TR3 = (R1.x - C3QA * (R3.x + R5.x)) - C3QB * (R3.y - R5.y);
+    TR5 = (R1.x - C3QA * (R3.x + R5.x)) + C3QB * (R3.y - R5.y);
 
-    TI1 = (*R1).y + (*R3).y + (*R5).y;
-    TI3 = ((*R1).y - C3QA * ((*R3).y + (*R5).y)) + C3QB * ((*R3).x - (*R5).x);
-    TI5 = ((*R1).y - C3QA * ((*R3).y + (*R5).y)) - C3QB * ((*R3).x - (*R5).x);
+    TI1 = R1.y + R3.y + R5.y;
+    TI3 = (R1.y - C3QA * (R3.y + R5.y)) + C3QB * (R3.x - R5.x);
+    TI5 = (R1.y - C3QA * (R3.y + R5.y)) - C3QB * (R3.x - R5.x);
 
-    (*R0).x = TR0 + TR1;
-    (*R1).x = TR2 + (C3QA * TR3 - C3QB * TI3);
-    (*R2).x = TR4 + (-C3QA * TR5 - C3QB * TI5);
+    R0.x = TR0 + TR1;
+    R1.x = TR2 + (C3QA * TR3 - C3QB * TI3);
+    R2.x = TR4 + (-C3QA * TR5 - C3QB * TI5);
 
-    (*R0).y = TI0 + TI1;
-    (*R1).y = TI2 + (C3QB * TR3 + C3QA * TI3);
-    (*R2).y = TI4 + (C3QB * TR5 - C3QA * TI5);
+    R0.y = TI0 + TI1;
+    R1.y = TI2 + (C3QB * TR3 + C3QA * TI3);
+    R2.y = TI4 + (C3QB * TR5 - C3QA * TI5);
 
-    (*R3).x = TR0 - TR1;
-    (*R4).x = TR2 - (C3QA * TR3 - C3QB * TI3);
-    (*R5).x = TR4 - (-C3QA * TR5 - C3QB * TI5);
+    R3.x = TR0 - TR1;
+    R4.x = TR2 - (C3QA * TR3 - C3QB * TI3);
+    R5.x = TR4 - (-C3QA * TR5 - C3QB * TI5);
 
-    (*R3).y = TI0 - TI1;
-    (*R4).y = TI2 - (C3QB * TR3 + C3QA * TI3);
-    (*R5).y = TI4 - (C3QB * TR5 - C3QA * TI5);
+    R3.y = TI0 - TI1;
+    R4.y = TI2 - (C3QB * TR3 + C3QA * TI3);
+    R5.y = TI4 - (C3QB * TR5 - C3QA * TI5);
 }
 
-__device__ void FwdRad2B1(float2* R0, float2* R1)
+__device__ void FwdRad2B1(float2& R0, float2& R1)
 {
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
 }
 
-__device__ void InvRad2B1(float2* R0, float2* R1)
+__device__ void InvRad2B1(float2& R0, float2& R1)
 {
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
 }
 
 #define C8Q 0.70710678118654752440084436210485f
 
-__device__ void FwdRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
+__device__ void FwdRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
 {
 
     float2 T;
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
-    (*R3) = (*R2) - (*R3);
-    (*R2) = 2.0f * (*R2) - (*R3);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
+    R3 = R2 - R3;
+    R2 = 2.0f * R2 - R3;
 
-    (*R2) = (*R0) - (*R2);
-    (*R0) = 2.0f * (*R0) - (*R2);
-    (*R3) = (*R1) + float2(-(*R3).y, (*R3).x);
-    (*R1) = 2.0f * (*R1) - (*R3);
+    R2 = R0 - R2;
+    R0 = 2.0f * R0 - R2;
+    R3 = R1 + float2(-R3.y, R3.x);
+    R1 = 2.0f * R1 - R3;
 
-    T     = (*R1);
-    (*R1) = (*R2);
-    (*R2) = T;
+    T  = R1;
+    R1 = R2;
+    R2 = T;
 }
 
-__device__ void InvRad4B1(float2* R0, float2* R2, float2* R1, float2* R3)
+__device__ void InvRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
 {
 
     float2 T;
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
-    (*R3) = (*R2) - (*R3);
-    (*R2) = 2.0f * (*R2) - (*R3);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
+    R3 = R2 - R3;
+    R2 = 2.0f * R2 - R3;
 
-    (*R2) = (*R0) - (*R2);
-    (*R0) = 2.0f * (*R0) - (*R2);
-    (*R3) = (*R1) + float2((*R3).y, -(*R3).x);
-    (*R1) = 2.0f * (*R1) - (*R3);
+    R2 = R0 - R2;
+    R0 = 2.0f * R0 - R2;
+    R3 = R1 + float2(R3.y, -R3.x);
+    R1 = 2.0f * R1 - R3;
 
-    T     = (*R1);
-    (*R1) = (*R2);
-    (*R2) = T;
+    T  = R1;
+    R1 = R2;
+    R2 = T;
 }
 
 __device__ void FwdRad8B1(
-    float2* R0, float2* R4, float2* R2, float2* R6, float2* R1, float2* R5, float2* R3, float2* R7)
+    float2& R0, float2& R4, float2& R2, float2& R6, float2& R1, float2& R5, float2& R3, float2& R7)
 {
 
     float2 T;
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
-    (*R3) = (*R2) - (*R3);
-    (*R2) = 2.0f * (*R2) - (*R3);
-    (*R5) = (*R4) - (*R5);
-    (*R4) = 2.0f * (*R4) - (*R5);
-    (*R7) = (*R6) - (*R7);
-    (*R6) = 2.0f * (*R6) - (*R7);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
+    R3 = R2 - R3;
+    R2 = 2.0f * R2 - R3;
+    R5 = R4 - R5;
+    R4 = 2.0f * R4 - R5;
+    R7 = R6 - R7;
+    R6 = 2.0f * R6 - R7;
 
-    (*R2) = (*R0) - (*R2);
-    (*R0) = 2.0f * (*R0) - (*R2);
-    (*R3) = (*R1) + float2(-(*R3).y, (*R3).x);
-    (*R1) = 2.0f * (*R1) - (*R3);
-    (*R6) = (*R4) - (*R6);
-    (*R4) = 2.0f * (*R4) - (*R6);
-    (*R7) = (*R5) + float2(-(*R7).y, (*R7).x);
-    (*R5) = 2.0f * (*R5) - (*R7);
+    R2 = R0 - R2;
+    R0 = 2.0f * R0 - R2;
+    R3 = R1 + float2(-R3.y, R3.x);
+    R1 = 2.0f * R1 - R3;
+    R6 = R4 - R6;
+    R4 = 2.0f * R4 - R6;
+    R7 = R5 + float2(-R7.y, R7.x);
+    R5 = 2.0f * R5 - R7;
 
-    (*R4) = (*R0) - (*R4);
-    (*R0) = 2.0f * (*R0) - (*R4);
-    (*R5) = ((*R1) - C8Q * (*R5)) - C8Q * float2((*R5).y, -(*R5).x);
-    (*R1) = 2.0f * (*R1) - (*R5);
-    (*R6) = (*R2) + float2(-(*R6).y, (*R6).x);
-    (*R2) = 2.0f * (*R2) - (*R6);
-    (*R7) = ((*R3) + C8Q * (*R7)) - C8Q * float2((*R7).y, -(*R7).x);
-    (*R3) = 2.0f * (*R3) - (*R7);
+    R4 = R0 - R4;
+    R0 = 2.0f * R0 - R4;
+    R5 = (R1 - C8Q * R5) - C8Q * float2(R5.y, -R5.x);
+    R1 = 2.0f * R1 - R5;
+    R6 = R2 + float2(-R6.y, R6.x);
+    R2 = 2.0f * R2 - R6;
+    R7 = (R3 + C8Q * R7) - C8Q * float2(R7.y, -R7.x);
+    R3 = 2.0f * R3 - R7;
 
-    T     = (*R1);
-    (*R1) = (*R4);
-    (*R4) = T;
-    T     = (*R3);
-    (*R3) = (*R6);
-    (*R6) = T;
+    T  = R1;
+    R1 = R4;
+    R4 = T;
+    T  = R3;
+    R3 = R6;
+    R6 = T;
 }
 
 __device__ void InvRad8B1(
-    float2* R0, float2* R4, float2* R2, float2* R6, float2* R1, float2* R5, float2* R3, float2* R7)
+    float2& R0, float2& R4, float2& R2, float2& R6, float2& R1, float2& R5, float2& R3, float2& R7)
 {
 
     float2 T;
 
-    (*R1) = (*R0) - (*R1);
-    (*R0) = 2.0f * (*R0) - (*R1);
-    (*R3) = (*R2) - (*R3);
-    (*R2) = 2.0f * (*R2) - (*R3);
-    (*R5) = (*R4) - (*R5);
-    (*R4) = 2.0f * (*R4) - (*R5);
-    (*R7) = (*R6) - (*R7);
-    (*R6) = 2.0f * (*R6) - (*R7);
+    R1 = R0 - R1;
+    R0 = 2.0f * R0 - R1;
+    R3 = R2 - R3;
+    R2 = 2.0f * R2 - R3;
+    R5 = R4 - R5;
+    R4 = 2.0f * R4 - R5;
+    R7 = R6 - R7;
+    R6 = 2.0f * R6 - R7;
 
-    (*R2) = (*R0) - (*R2);
-    (*R0) = 2.0f * (*R0) - (*R2);
-    (*R3) = (*R1) + float2((*R3).y, -(*R3).x);
-    (*R1) = 2.0f * (*R1) - (*R3);
-    (*R6) = (*R4) - (*R6);
-    (*R4) = 2.0f * (*R4) - (*R6);
-    (*R7) = (*R5) + float2((*R7).y, -(*R7).x);
-    (*R5) = 2.0f * (*R5) - (*R7);
+    R2 = R0 - R2;
+    R0 = 2.0f * R0 - R2;
+    R3 = R1 + float2(R3.y, -R3.x);
+    R1 = 2.0f * R1 - R3;
+    R6 = R4 - R6;
+    R4 = 2.0f * R4 - R6;
+    R7 = R5 + float2(R7.y, -R7.x);
+    R5 = 2.0f * R5 - R7;
 
-    (*R4) = (*R0) - (*R4);
-    (*R0) = 2.0f * (*R0) - (*R4);
-    (*R5) = ((*R1) - C8Q * (*R5)) + C8Q * float2((*R5).y, -(*R5).x);
-    (*R1) = 2.0f * (*R1) - (*R5);
-    (*R6) = (*R2) + float2((*R6).y, -(*R6).x);
-    (*R2) = 2.0f * (*R2) - (*R6);
-    (*R7) = ((*R3) + C8Q * (*R7)) + C8Q * float2((*R7).y, -(*R7).x);
-    (*R3) = 2.0f * (*R3) - (*R7);
+    R4 = R0 - R4;
+    R0 = 2.0f * R0 - R4;
+    R5 = (R1 - C8Q * R5) + C8Q * float2(R5.y, -R5.x);
+    R1 = 2.0f * R1 - R5;
+    R6 = R2 + float2(R6.y, -R6.x);
+    R2 = 2.0f * R2 - R6;
+    R7 = (R3 + C8Q * R7) + C8Q * float2(R7.y, -R7.x);
+    R3 = 2.0f * R3 - R7;
 
-    T     = (*R1);
-    (*R1) = (*R4);
-    (*R4) = T;
-    T     = (*R3);
-    (*R3) = (*R6);
-    (*R6) = T;
+    T  = R1;
+    R1 = R4;
+    R4 = T;
+    T  = R3;
+    R3 = R6;
+    R6 = T;
 }
 
 #if defined(CFF_IMG_SZ_7_7)
@@ -295,80 +295,78 @@ static __constant__ float2 twiddles[11] = {
     float2(8.6602540378443870761060452423407696e-01f, -4.9999999999999994448884876874217298e-01f),
     float2(5.0000000000000011102230246251565404e-01f, -8.6602540378443859658830206171842292e-01f),
     float2(6.1232339957367660358688201472919830e-17f, -1.0000000000000000000000000000000000e+00f),
-    float2(-4.9999999999999977795539507496869192e-01f,
-             -8.6602540378443870761060452423407696e-01f),
-    float2(-8.6602540378443870761060452423407696e-01f,
-             -4.9999999999999994448884876874217298e-01f),
+    float2(-4.9999999999999977795539507496869192e-01f, -8.6602540378443870761060452423407696e-01f),
+    float2(-8.6602540378443870761060452423407696e-01f, -4.9999999999999994448884876874217298e-01f),
 };
 
-__device__ void FwdPassIN(uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPassIN(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
-    uint met            = me % 48;
-    float* ldsf = (float*)(bufOut + outOffset);
+    unsigned int met = me % 48;
+    float* ldsf      = (float*)(bufOut + outOffset);
 
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
 
-    bufOut[outOffset + me + 0 * 192] = (*R0);
-    bufOut[outOffset + me + 1 * 192] = (*R0);
-    bufOut[outOffset + me + 2 * 192] = (*R0);
-    bufOut[outOffset + me + 3 * 192] = (*R0);
-    bufOut[outOffset + me + 4 * 192] = (*R0);
-    bufOut[outOffset + me + 5 * 192] = (*R0);
-    bufOut[outOffset + me + 6 * 192] = (*R0);
+    bufOut[outOffset + me + 0 * 192] = R0;
+    bufOut[outOffset + me + 1 * 192] = R0;
+    bufOut[outOffset + me + 2 * 192] = R0;
+    bufOut[outOffset + me + 3 * 192] = R0;
+    bufOut[outOffset + me + 4 * 192] = R0;
+    bufOut[outOffset + me + 5 * 192] = R0;
+    bufOut[outOffset + me + 6 * 192] = R0;
 
     __syncthreads();
 
-    (*R0).x = bufIn[inOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)];
-    (*R1).x = bufIn[inOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)];
-    (*R2).x = bufIn[inOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)];
-    (*R3).x = bufIn[inOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)];
+    R0.x = bufIn[inOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)];
+    R1.x = bufIn[inOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)];
+    R2.x = bufIn[inOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)];
+    R3.x = bufIn[inOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)];
 
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 0 * 672] =
-        (*R0).x;
+        R0.x;
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 1 * 672] =
-        (*R1).x;
+        R1.x;
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 2 * 672] =
-        (*R2).x;
+        R2.x;
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 3 * 672] =
-        (*R3).x;
+        R3.x;
 
     if(me < 16)
     {
-        (*R4).x              = bufIn[inOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)];
-        ldsf[me * 168 + 112] = (*R4).x;
+        R4.x                 = bufIn[inOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)];
+        ldsf[me * 168 + 112] = R4.x;
     }
 }
 
-__device__ void FwdPassWE(uint batch,
-               uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPassWE(unsigned int batch,
+                          unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
-    uint met            = me % 24;
-    float* ldsf = (float*)(bufOut + outOffset);
+    unsigned int met = me % 24;
+    float* ldsf      = (float*)(bufOut + outOffset);
 
 #ifdef CFF_BACKWARD
     inOffset =
@@ -377,136 +375,136 @@ __device__ void FwdPassWE(uint batch,
     inOffset = batch * 25 * 16;
 #endif
 
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
 
 #ifdef CFF_BACKWARD
-    (*R0).x = bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
-    (*R1).x = bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
+    R0.x = bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
+    R1.x = bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
 
-    ldsf[met + ((me / 24) + 0) * 25] = (*R0).x;
-    ldsf[met + ((me / 24) + 8) * 25] = (*R1).x;
+    ldsf[met + ((me / 24) + 0) * 25] = R0.x;
+    ldsf[met + ((me / 24) + 8) * 25] = R1.x;
 #else
-    (*R0).x  = bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
-    (*R1).x  = bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
+    R0.x = bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
+    R1.x = bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
 
-    ldsf[(23 - met) + ((me / 24) + 0) * 25] = (*R0).x;
-    ldsf[(23 - met) + ((me / 24) + 8) * 25] = (*R1).x;
+    ldsf[(23 - met) + ((me / 24) + 0) * 25] = R0.x;
+    ldsf[(23 - met) + ((me / 24) + 8) * 25] = R1.x;
 #endif
 
     __syncthreads();
 
-    (*R0).x = ldsf[((me / 24) + 0) * 25 + met];
-    (*R1).x = ldsf[((me / 24) + 8) * 25 + met];
+    R0.x = ldsf[((me / 24) + 0) * 25 + met];
+    R1.x = ldsf[((me / 24) + 8) * 25 + met];
 
     __syncthreads();
 
-    bufOut[outOffset + me + 0 * 192] = (*R5);
-    bufOut[outOffset + me + 1 * 192] = (*R5);
-    bufOut[outOffset + me + 2 * 192] = (*R5);
-    bufOut[outOffset + me + 3 * 192] = (*R5);
-    bufOut[outOffset + me + 4 * 192] = (*R5);
-    bufOut[outOffset + me + 5 * 192] = (*R5);
-    bufOut[outOffset + me + 6 * 192] = (*R5);
+    bufOut[outOffset + me + 0 * 192] = R5;
+    bufOut[outOffset + me + 1 * 192] = R5;
+    bufOut[outOffset + me + 2 * 192] = R5;
+    bufOut[outOffset + me + 3 * 192] = R5;
+    bufOut[outOffset + me + 4 * 192] = R5;
+    bufOut[outOffset + me + 5 * 192] = R5;
+    bufOut[outOffset + me + 6 * 192] = R5;
 
     __syncthreads();
 
-    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 0 * 1344] = (*R0).x;
-    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 1 * 1344] = (*R1).x;
+    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 0 * 1344] = R0.x;
+    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 1 * 1344] = R1.x;
 
     if(me < 16)
     {
 #ifdef CFF_BACKWARD
-        (*R4).x = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
+        R4.x = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
 #else
-        (*R4).x = bufIn[inOffset + (me * 25)];
+        R4.x = bufIn[inOffset + (me * 25)];
 #endif
 
-        ldsf[me * 168 + 56] = (*R4).x;
+        ldsf[me * 168 + 56] = R4.x;
     }
 }
 
-__device__ void FwdPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 2)];
-    (*R2) = bufIn[inOffset + (me + 4)];
-    (*R3) = bufIn[inOffset + (me + 6)];
-    (*R4) = bufIn[inOffset + (me + 8)];
-    (*R5) = bufIn[inOffset + (me + 10)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 2)];
+    R2 = bufIn[inOffset + (me + 4)];
+    R3 = bufIn[inOffset + (me + 6)];
+    R4 = bufIn[inOffset + (me + 8)];
+    R5 = bufIn[inOffset + (me + 10)];
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0)] = (*R0);
-    bufOut[outOffset + (me * 6 + 1)] = (*R1);
-    bufOut[outOffset + (me * 6 + 2)] = (*R2);
-    bufOut[outOffset + (me * 6 + 3)] = (*R3);
-    bufOut[outOffset + (me * 6 + 4)] = (*R4);
-    bufOut[outOffset + (me * 6 + 5)] = (*R5);
+    bufOut[outOffset + (me * 6 + 0)] = R0;
+    bufOut[outOffset + (me * 6 + 1)] = R1;
+    bufOut[outOffset + (me * 6 + 2)] = R2;
+    bufOut[outOffset + (me * 6 + 3)] = R3;
+    bufOut[outOffset + (me * 6 + 4)] = R4;
+    bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void FwdPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 3 + 0 + 0)];
-    (*R2) = bufIn[inOffset + (me * 3 + 1 + 0)];
-    (*R4) = bufIn[inOffset + (me * 3 + 2 + 0)];
-    (*R1) = bufIn[inOffset + (me * 3 + 0 + 6)];
-    (*R3) = bufIn[inOffset + (me * 3 + 1 + 6)];
-    (*R5) = bufIn[inOffset + (me * 3 + 2 + 6)];
+    R0 = bufIn[inOffset + (me * 3 + 0 + 0)];
+    R2 = bufIn[inOffset + (me * 3 + 1 + 0)];
+    R4 = bufIn[inOffset + (me * 3 + 2 + 0)];
+    R1 = bufIn[inOffset + (me * 3 + 0 + 6)];
+    R3 = bufIn[inOffset + (me * 3 + 1 + 6)];
+    R5 = bufIn[inOffset + (me * 3 + 2 + 6)];
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R3).x) - (W.y * (*R3).y);
-        TI      = (W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) - (W.y * R3.y);
+        TI   = (W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 2) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     FwdRad2B1(R0, R1);
@@ -515,33 +513,33 @@ __device__ void FwdPass1(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (3 * me + 0 + 0)] = (*R0);
-    bufOut[outOffset + (3 * me + 1 + 0)] = (*R2);
-    bufOut[outOffset + (3 * me + 2 + 0)] = (*R4);
-    bufOut[outOffset + (3 * me + 0 + 6)] = (*R1);
-    bufOut[outOffset + (3 * me + 1 + 6)] = (*R3);
-    bufOut[outOffset + (3 * me + 2 + 6)] = (*R5);
+    bufOut[outOffset + (3 * me + 0 + 0)] = R0;
+    bufOut[outOffset + (3 * me + 1 + 0)] = R2;
+    bufOut[outOffset + (3 * me + 2 + 0)] = R4;
+    bufOut[outOffset + (3 * me + 0 + 6)] = R1;
+    bufOut[outOffset + (3 * me + 1 + 6)] = R3;
+    bufOut[outOffset + (3 * me + 2 + 6)] = R5;
 }
 
-__device__ void FwdPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (3 * me + 1)];
-    (*R1) = bufIn[inOffset + (3 * me + 2)];
-    (*R2) = bufIn[inOffset + (3 * me + 3)];
-    (*R3) = bufIn[inOffset + (12 - (3 * me + 1))];
-    (*R4) = bufIn[inOffset + (12 - (3 * me + 2))];
-    (*R5) = bufIn[inOffset + (12 - (3 * me + 3))];
+    R0 = bufIn[inOffset + (3 * me + 1)];
+    R1 = bufIn[inOffset + (3 * me + 2)];
+    R2 = bufIn[inOffset + (3 * me + 3)];
+    R3 = bufIn[inOffset + (12 - (3 * me + 1))];
+    R4 = bufIn[inOffset + (12 - (3 * me + 2))];
+    R5 = bufIn[inOffset + (12 - (3 * me + 3))];
 
     float2 dc;
     if(me < 1)
@@ -551,19 +549,13 @@ __device__ void FwdPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + 0 + (3 * me + 1)] =
-        float2(((*R0).x + (*R3).x) * 0.5, +((*R0).y - (*R3).y) * 0.5);
-    bufOut[outOffset + 0 + (3 * me + 2)] =
-        float2(((*R1).x + (*R4).x) * 0.5, +((*R1).y - (*R4).y) * 0.5);
-    bufOut[outOffset + 0 + (3 * me + 3)] =
-        float2(((*R2).x + (*R5).x) * 0.5, +((*R2).y - (*R5).y) * 0.5);
+    bufOut[outOffset + 0 + (3 * me + 1)] = float2((R0.x + R3.x) * 0.5f, +(R0.y - R3.y) * 0.5f);
+    bufOut[outOffset + 0 + (3 * me + 2)] = float2((R1.x + R4.x) * 0.5f, +(R1.y - R4.y) * 0.5f);
+    bufOut[outOffset + 0 + (3 * me + 3)] = float2((R2.x + R5.x) * 0.5f, +(R2.y - R5.y) * 0.5f);
 
-    bufOut[outOffset + 7 + (3 * me + 1)] =
-        float2(((*R0).y + (*R3).y) * 0.5, +(-(*R0).x + (*R3).x) * 0.5);
-    bufOut[outOffset + 7 + (3 * me + 2)] =
-        float2(((*R1).y + (*R4).y) * 0.5, +(-(*R1).x + (*R4).x) * 0.5);
-    bufOut[outOffset + 7 + (3 * me + 3)] =
-        float2(((*R2).y + (*R5).y) * 0.5, +(-(*R2).x + (*R5).x) * 0.5);
+    bufOut[outOffset + 7 + (3 * me + 1)] = float2((R0.y + R3.y) * 0.5f, +(-R0.x + R3.x) * 0.5f);
+    bufOut[outOffset + 7 + (3 * me + 2)] = float2((R1.y + R4.y) * 0.5f, +(-R1.x + R4.x) * 0.5f);
+    bufOut[outOffset + 7 + (3 * me + 3)] = float2((R2.y + R5.y) * 0.5f, +(-R2.x + R5.x) * 0.5f);
 
     if(me < 1)
     {
@@ -572,83 +564,83 @@ __device__ void FwdPass1b(uint me,
     }
 }
 
-__device__ void FwdPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 7];
-    (*R1) = bufIn[inOffset + (me + 2) * 7];
-    (*R2) = bufIn[inOffset + (me + 4) * 7];
-    (*R3) = bufIn[inOffset + (me + 6) * 7];
-    (*R4) = bufIn[inOffset + (me + 8) * 7];
-    (*R5) = bufIn[inOffset + (me + 10) * 7];
+    R0 = bufIn[inOffset + (me + 0) * 7];
+    R1 = bufIn[inOffset + (me + 2) * 7];
+    R2 = bufIn[inOffset + (me + 4) * 7];
+    R3 = bufIn[inOffset + (me + 6) * 7];
+    R4 = bufIn[inOffset + (me + 8) * 7];
+    R5 = bufIn[inOffset + (me + 10) * 7];
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0) * 7] = (*R0);
-    bufOut[outOffset + (me * 6 + 1) * 7] = (*R1);
-    bufOut[outOffset + (me * 6 + 2) * 7] = (*R2);
-    bufOut[outOffset + (me * 6 + 3) * 7] = (*R3);
-    bufOut[outOffset + (me * 6 + 4) * 7] = (*R4);
-    bufOut[outOffset + (me * 6 + 5) * 7] = (*R5);
+    bufOut[outOffset + (me * 6 + 0) * 7] = R0;
+    bufOut[outOffset + (me * 6 + 1) * 7] = R1;
+    bufOut[outOffset + (me * 6 + 2) * 7] = R2;
+    bufOut[outOffset + (me * 6 + 3) * 7] = R3;
+    bufOut[outOffset + (me * 6 + 4) * 7] = R4;
+    bufOut[outOffset + (me * 6 + 5) * 7] = R5;
 }
 
-__device__ void FwdPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
-    (*R2) = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
-    (*R4) = bufIn[inOffset + (me * 3 + 2 + 0) * 7];
-    (*R1) = bufIn[inOffset + (me * 3 + 0 + 6) * 7];
-    (*R3) = bufIn[inOffset + (me * 3 + 1 + 6) * 7];
-    (*R5) = bufIn[inOffset + (me * 3 + 2 + 6) * 7];
+    R0 = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
+    R2 = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
+    R4 = bufIn[inOffset + (me * 3 + 2 + 0) * 7];
+    R1 = bufIn[inOffset + (me * 3 + 0 + 6) * 7];
+    R3 = bufIn[inOffset + (me * 3 + 1 + 6) * 7];
+    R5 = bufIn[inOffset + (me * 3 + 2 + 6) * 7];
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R3).x) - (W.y * (*R3).y);
-        TI      = (W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) - (W.y * R3.y);
+        TI   = (W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 2) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     FwdRad2B1(R0, R1);
@@ -657,97 +649,84 @@ __device__ void FwdPass3(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (3 * me + 0 + 0) * 7] = (*R0);
-    bufOut[outOffset + (3 * me + 1 + 0) * 7] = (*R2);
-    bufOut[outOffset + (3 * me + 2 + 0) * 7] = (*R4);
-    bufOut[outOffset + (3 * me + 0 + 6) * 7] = (*R1);
-    bufOut[outOffset + (3 * me + 1 + 6) * 7] = (*R3);
-    bufOut[outOffset + (3 * me + 2 + 6) * 7] = (*R5);
+    bufOut[outOffset + (3 * me + 0 + 0) * 7] = R0;
+    bufOut[outOffset + (3 * me + 1 + 0) * 7] = R2;
+    bufOut[outOffset + (3 * me + 2 + 0) * 7] = R4;
+    bufOut[outOffset + (3 * me + 0 + 6) * 7] = R1;
+    bufOut[outOffset + (3 * me + 1 + 6) * 7] = R3;
+    bufOut[outOffset + (3 * me + 2 + 6) * 7] = R5;
 }
 
-__device__ void FwdPass4_IN(uint me,
-                 uint inOffset,
-                 uint outOffset,
-                 float2* bufIn,
-                 float2* bufOut,
-                 float2* R0,
-                 float2* R1,
-                 float2* R2,
-                 float2* R3,
-                 float2* R4,
-                 float2* R5,
-                 float2* R6)
+__device__ void FwdPass4_IN(unsigned int me,
+                            unsigned int inOffset,
+                            unsigned int outOffset,
+                            float2* bufIn,
+                            float2* bufOut,
+                            float2& R0,
+                            float2& R1,
+                            float2& R2,
+                            float2& R3,
+                            float2& R4,
+                            float2& R5,
+                            float2& R6)
 {
-    (*R0) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
-    (*R1) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
-    (*R2) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
-    (*R3) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 3 * 12)];
-    (*R4) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 4 * 12)];
-    (*R5) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
-    (*R6) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
+    R0 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
+    R1 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
+    R2 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
+    R3 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 3 * 12)];
+    R4 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 4 * 12)];
+    R5 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
+    R6 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
 
     __syncthreads();
 
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R0);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 1 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R1);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 2 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R2);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 3 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R3);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 4 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R4);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 5 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R5);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 6 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] =
-        (*R6);
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R0;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 1 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R1;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 2 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R2;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 3 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R3;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 4 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R4;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 5 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R5;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 6 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R6;
 }
 
-__device__ void FwdPass4_WE(uint me,
-                 uint inOffset,
-                 uint outOffset,
-                 float2* bufIn,
-                 float2* bufOut,
-                 float2* R0,
-                 float2* R1,
-                 float2* R2,
-                 float2* R3,
-                 float2* R4,
-                 float2* R5,
-                 float2* R6)
+__device__ void FwdPass4_WE(unsigned int me,
+                            unsigned int inOffset,
+                            unsigned int outOffset,
+                            float2* bufIn,
+                            float2* bufOut,
+                            float2& R0,
+                            float2& R1,
+                            float2& R2,
+                            float2& R3,
+                            float2& R4,
+                            float2& R5,
+                            float2& R6)
 {
-    (*R0) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
-    (*R1) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
-    (*R2) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
-    (*R3) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 3 * 12)];
-    (*R4) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 4 * 12)];
-    (*R5) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
-    (*R6) = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
+    R0 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
+    R1 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
+    R2 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
+    R3 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 3 * 12)];
+    R4 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 4 * 12)];
+    R5 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 5 * 12)];
+    R6 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 6 * 12)];
 
     __syncthreads();
 
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R0);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 1 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R1);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 2 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R2);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 3 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R3);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 4 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R4);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 5 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R5);
-    bufOut[outOffset + ((me % 16) + ((me / 16) + 6 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] =
-        (*R6);
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 0 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R0;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 1 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R1;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 2 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R2;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 3 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R3;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 4 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R4;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 5 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R5;
+    bufOut[outOffset + ((me % 16) + ((me / 16) + 6 * 12) * (CFF_CHANNELS * CFF_NFILTER + 64))] = R6;
 }
 
-extern "C" __global__ __launch_bounds__(192) void
-MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(192) void MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn,
+                                                     float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1344];
 
@@ -760,9 +739,9 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 16;
     lwbOut = gbOut + CFF_HALFW + batch * 16;
 
-    uint met = me % 12;
+    unsigned int met = me % 12;
 
-    FwdPassIN(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPassIN(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
     __syncthreads();
 
     FwdPass0(me % 2,
@@ -770,24 +749,24 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     FwdPass1(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
     FwdPass1b(me % 2,
@@ -795,12 +774,12 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
               (me / 12) * 84 + (met / 2) * 14,
               lds,
               lds,
-              &R0,
-              &R1,
-              &R2,
-              &R3,
-              &R4,
-              &R5);
+              R0,
+              R1,
+              R2,
+              R3,
+              R4,
+              R5);
     __syncthreads();
 
     FwdPass2(me % 2,
@@ -808,44 +787,43 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     FwdPass3(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
     if(met < 2)
     {
-        FwdPass2(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
-        FwdPass3(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
     }
 
-    FwdPass4_IN(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6);
+    FwdPass4_IN(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6);
 }
 
-extern "C" __global__ __launch_bounds__(192) void
-MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(192) void MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn,
+                                                     float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1344];
 
@@ -858,9 +836,9 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
     lwbIn  = gbIn;
     lwbOut = gbOut + CFF_HALFW + 84 * (CFF_CHANNELS * CFF_BATCH + 64) + batch * 16;
 
-    uint met = me % 12;
+    unsigned int met = me % 12;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPassWE(batch, me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
     __syncthreads();
 
     FwdPass0(me % 2,
@@ -868,24 +846,24 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     FwdPass1(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
     FwdPass1b(me % 2,
@@ -893,12 +871,12 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
               (me / 12) * 84 + (met / 2) * 14,
               lds,
               lds,
-              &R0,
-              &R1,
-              &R2,
-              &R3,
-              &R4,
-              &R5);
+              R0,
+              R1,
+              R2,
+              R3,
+              R4,
+              R5);
     __syncthreads();
 
     FwdPass2(me % 2,
@@ -906,56 +884,54 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     FwdPass3(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
     if(met < 2)
     {
-        FwdPass2(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
-        FwdPass3(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
     }
 
-    FwdPass4_WE(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6);
+    FwdPass4_WE(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6);
 }
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 6;
-    uint bd = batch / 6;
+    unsigned int bm = batch % 6;
+    unsigned int bd = batch / 6;
 
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
     oOffset = CFF_HALFW + bm * 16 + bd * 84 * 16;
@@ -994,114 +970,114 @@ MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
     }
 }
 
-__device__ void InvPassA(uint me,
-              uint inOffset,
-              uint outOffset,
-              const float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPassA(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         const float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0 * 192)];
-    (*R1) = bufIn[inOffset + (me + 1 * 192)];
-    (*R2) = bufIn[inOffset + (me + 2 * 192)];
-    (*R3) = bufIn[inOffset + (me + 3 * 192)];
-    (*R4) = bufIn[inOffset + (me + 4 * 192)];
-    (*R5) = bufIn[inOffset + (me + 5 * 192)];
+    R0 = bufIn[inOffset + (me + 0 * 192)];
+    R1 = bufIn[inOffset + (me + 1 * 192)];
+    R2 = bufIn[inOffset + (me + 2 * 192)];
+    R3 = bufIn[inOffset + (me + 3 * 192)];
+    R4 = bufIn[inOffset + (me + 4 * 192)];
+    R5 = bufIn[inOffset + (me + 5 * 192)];
 
-    bufOut[outOffset + (me + 0 * 192)] = (*R0);
-    bufOut[outOffset + (me + 1 * 192)] = (*R1);
-    bufOut[outOffset + (me + 2 * 192)] = (*R2);
-    bufOut[outOffset + (me + 3 * 192)] = (*R3);
-    bufOut[outOffset + (me + 4 * 192)] = (*R4);
-    bufOut[outOffset + (me + 5 * 192)] = (*R5);
+    bufOut[outOffset + (me + 0 * 192)] = R0;
+    bufOut[outOffset + (me + 1 * 192)] = R1;
+    bufOut[outOffset + (me + 2 * 192)] = R2;
+    bufOut[outOffset + (me + 3 * 192)] = R3;
+    bufOut[outOffset + (me + 4 * 192)] = R4;
+    bufOut[outOffset + (me + 5 * 192)] = R5;
 
-    (*R0)                              = bufIn[inOffset + (me + 6 * 192)];
-    bufOut[outOffset + (me + 6 * 192)] = (*R0);
+    R0                                 = bufIn[inOffset + (me + 6 * 192)];
+    bufOut[outOffset + (me + 6 * 192)] = R0;
 }
 
-__device__ void InvPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 7];
-    (*R1) = bufIn[inOffset + (me + 2) * 7];
-    (*R2) = bufIn[inOffset + (me + 4) * 7];
-    (*R3) = bufIn[inOffset + (me + 6) * 7];
-    (*R4) = bufIn[inOffset + (me + 8) * 7];
-    (*R5) = bufIn[inOffset + (me + 10) * 7];
+    R0 = bufIn[inOffset + (me + 0) * 7];
+    R1 = bufIn[inOffset + (me + 2) * 7];
+    R2 = bufIn[inOffset + (me + 4) * 7];
+    R3 = bufIn[inOffset + (me + 6) * 7];
+    R4 = bufIn[inOffset + (me + 8) * 7];
+    R5 = bufIn[inOffset + (me + 10) * 7];
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0) * 7] = (*R0);
-    bufOut[outOffset + (me * 6 + 1) * 7] = (*R1);
-    bufOut[outOffset + (me * 6 + 2) * 7] = (*R2);
-    bufOut[outOffset + (me * 6 + 3) * 7] = (*R3);
-    bufOut[outOffset + (me * 6 + 4) * 7] = (*R4);
-    bufOut[outOffset + (me * 6 + 5) * 7] = (*R5);
+    bufOut[outOffset + (me * 6 + 0) * 7] = R0;
+    bufOut[outOffset + (me * 6 + 1) * 7] = R1;
+    bufOut[outOffset + (me * 6 + 2) * 7] = R2;
+    bufOut[outOffset + (me * 6 + 3) * 7] = R3;
+    bufOut[outOffset + (me * 6 + 4) * 7] = R4;
+    bufOut[outOffset + (me * 6 + 5) * 7] = R5;
 }
 
-__device__ void InvPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
-    (*R2) = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
-    (*R4) = bufIn[inOffset + (me * 3 + 2 + 0) * 7];
-    (*R1) = bufIn[inOffset + (me * 3 + 0 + 6) * 7];
-    (*R3) = bufIn[inOffset + (me * 3 + 1 + 6) * 7];
-    (*R5) = bufIn[inOffset + (me * 3 + 2 + 6) * 7];
+    R0 = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
+    R2 = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
+    R4 = bufIn[inOffset + (me * 3 + 2 + 0) * 7];
+    R1 = bufIn[inOffset + (me * 3 + 0 + 6) * 7];
+    R3 = bufIn[inOffset + (me * 3 + 1 + 6) * 7];
+    R5 = bufIn[inOffset + (me * 3 + 2 + 6) * 7];
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R3).x) + (W.y * (*R3).y);
-        TI      = -(W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) + (W.y * R3.y);
+        TI   = -(W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 2) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     InvRad2B1(R0, R1);
@@ -1110,33 +1086,33 @@ __device__ void InvPass1(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (3 * me + 0 + 0) * 7] = (*R0) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 1 + 0) * 7] = (*R2) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 2 + 0) * 7] = (*R4) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 0 + 6) * 7] = (*R1) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 1 + 6) * 7] = (*R3) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 2 + 6) * 7] = (*R5) * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 0 + 0) * 7] = R0 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 1 + 0) * 7] = R2 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 2 + 0) * 7] = R4 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 0 + 6) * 7] = R1 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 1 + 6) * 7] = R3 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 2 + 6) * 7] = R5 * 8.3333333333333329e-02f;
 }
 
-__device__ void InvPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void InvPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + 0 + (3 * me + 1)];
-    (*R1) = bufIn[inOffset + 0 + (3 * me + 2)];
-    (*R2) = bufIn[inOffset + 0 + (3 * me + 3)];
-    (*R3) = bufIn[inOffset + 7 + (3 * me + 1)];
-    (*R4) = bufIn[inOffset + 7 + (3 * me + 2)];
-    (*R5) = bufIn[inOffset + 7 + (3 * me + 3)];
+    R0 = bufIn[inOffset + 0 + (3 * me + 1)];
+    R1 = bufIn[inOffset + 0 + (3 * me + 2)];
+    R2 = bufIn[inOffset + 0 + (3 * me + 3)];
+    R3 = bufIn[inOffset + 7 + (3 * me + 1)];
+    R4 = bufIn[inOffset + 7 + (3 * me + 2)];
+    R5 = bufIn[inOffset + 7 + (3 * me + 3)];
 
     float2 dc{};
     if(me < 1)
@@ -1147,12 +1123,12 @@ __device__ void InvPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (12 - (3 * me + 1))] = float2((*R0).x + (*R3).y, -(*R0).y + (*R3).x);
-    bufOut[outOffset + (12 - (3 * me + 2))] = float2((*R1).x + (*R4).y, -(*R1).y + (*R4).x);
-    bufOut[outOffset + (12 - (3 * me + 3))] = float2((*R2).x + (*R5).y, -(*R2).y + (*R5).x);
-    bufOut[outOffset + (3 * me + 1)]        = float2((*R0).x - (*R3).y, (*R0).y + (*R3).x);
-    bufOut[outOffset + (3 * me + 2)]        = float2((*R1).x - (*R4).y, (*R1).y + (*R4).x);
-    bufOut[outOffset + (3 * me + 3)]        = float2((*R2).x - (*R5).y, (*R2).y + (*R5).x);
+    bufOut[outOffset + (12 - (3 * me + 1))] = float2(R0.x + R3.y, -R0.y + R3.x);
+    bufOut[outOffset + (12 - (3 * me + 2))] = float2(R1.x + R4.y, -R1.y + R4.x);
+    bufOut[outOffset + (12 - (3 * me + 3))] = float2(R2.x + R5.y, -R2.y + R5.x);
+    bufOut[outOffset + (3 * me + 1)]        = float2(R0.x - R3.y, R0.y + R3.x);
+    bufOut[outOffset + (3 * me + 2)]        = float2(R1.x - R4.y, R1.y + R4.x);
+    bufOut[outOffset + (3 * me + 3)]        = float2(R2.x - R5.y, R2.y + R5.x);
 
     if(me < 1)
     {
@@ -1160,83 +1136,83 @@ __device__ void InvPass1b(uint me,
     }
 }
 
-__device__ void InvPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 2)];
-    (*R2) = bufIn[inOffset + (me + 4)];
-    (*R3) = bufIn[inOffset + (me + 6)];
-    (*R4) = bufIn[inOffset + (me + 8)];
-    (*R5) = bufIn[inOffset + (me + 10)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 2)];
+    R2 = bufIn[inOffset + (me + 4)];
+    R3 = bufIn[inOffset + (me + 6)];
+    R4 = bufIn[inOffset + (me + 8)];
+    R5 = bufIn[inOffset + (me + 10)];
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0)] = (*R0);
-    bufOut[outOffset + (me * 6 + 1)] = (*R1);
-    bufOut[outOffset + (me * 6 + 2)] = (*R2);
-    bufOut[outOffset + (me * 6 + 3)] = (*R3);
-    bufOut[outOffset + (me * 6 + 4)] = (*R4);
-    bufOut[outOffset + (me * 6 + 5)] = (*R5);
+    bufOut[outOffset + (me * 6 + 0)] = R0;
+    bufOut[outOffset + (me * 6 + 1)] = R1;
+    bufOut[outOffset + (me * 6 + 2)] = R2;
+    bufOut[outOffset + (me * 6 + 3)] = R3;
+    bufOut[outOffset + (me * 6 + 4)] = R4;
+    bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void InvPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 3 + 0 + 0)];
-    (*R2) = bufIn[inOffset + (me * 3 + 1 + 0)];
-    (*R4) = bufIn[inOffset + (me * 3 + 2 + 0)];
-    (*R1) = bufIn[inOffset + (me * 3 + 0 + 6)];
-    (*R3) = bufIn[inOffset + (me * 3 + 1 + 6)];
-    (*R5) = bufIn[inOffset + (me * 3 + 2 + 6)];
+    R0 = bufIn[inOffset + (me * 3 + 0 + 0)];
+    R2 = bufIn[inOffset + (me * 3 + 1 + 0)];
+    R4 = bufIn[inOffset + (me * 3 + 2 + 0)];
+    R1 = bufIn[inOffset + (me * 3 + 0 + 6)];
+    R3 = bufIn[inOffset + (me * 3 + 1 + 6)];
+    R5 = bufIn[inOffset + (me * 3 + 2 + 6)];
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R3).x) + (W.y * (*R3).y);
-        TI      = -(W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) + (W.y * R3.y);
+        TI   = -(W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 1 * ((3 * me + 2) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     InvRad2B1(R0, R1);
@@ -1245,56 +1221,57 @@ __device__ void InvPass3(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (3 * me + 0 + 0)] = (*R0) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 1 + 0)] = (*R2) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 2 + 0)] = (*R4) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 0 + 6)] = (*R1) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 1 + 6)] = (*R3) * 8.3333333333333329e-02f;
-    bufOut[outOffset + (3 * me + 2 + 6)] = (*R5) * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 0 + 0)] = R0 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 1 + 0)] = R2 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 2 + 0)] = R4 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 0 + 6)] = R1 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 1 + 6)] = R3 * 8.3333333333333329e-02f;
+    bufOut[outOffset + (3 * me + 2 + 6)] = R5 * 8.3333333333333329e-02f;
 }
 
-__device__ void InvPassOUT(uint me,
-                uint inOffset,
-                uint outOffset,
-                float2* bufIn,
-                float* bufOut,
-                float2* R0,
-                float2* R1,
-                float2* R2,
-                float2* R3,
-                float2* R4)
+__device__ void InvPassOUT(unsigned int me,
+                           unsigned int inOffset,
+                           unsigned int outOffset,
+                           float2* bufIn,
+                           float* bufOut,
+                           float2& R0,
+                           float2& R1,
+                           float2& R2,
+                           float2& R3,
+                           float2& R4)
 {
 
-    uint met            = me % 48;
-    float* ldsf = (float*)(bufIn + inOffset);
+    unsigned int met = me % 48;
+    float* ldsf      = (float*)(bufIn + inOffset);
 
-    (*R0).x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
-                   0 * 672];
-    (*R1).x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
-                   1 * 672];
-    (*R2).x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
-                   2 * 672];
-    (*R3).x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
-                   3 * 672];
+    R0.x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
+                0 * 672];
+    R1.x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
+                1 * 672];
+    R2.x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
+                2 * 672];
+    R3.x = ldsf[(4 + (met % 7)) * 2 + ((met / 7) % 2) + (2 + met / 14) * 24 + (me / 48) * 168 +
+                3 * 672];
 
-    bufOut[outOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)]  = (*R0).x;
-    bufOut[outOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)]  = (*R1).x;
-    bufOut[outOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)]  = (*R2).x;
-    bufOut[outOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)] = (*R3).x;
+    bufOut[outOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)]  = R0.x;
+    bufOut[outOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)]  = R1.x;
+    bufOut[outOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)]  = R2.x;
+    bufOut[outOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)] = R3.x;
 
     if(me < 16)
     {
-        (*R4).x                                               = ldsf[me * 168 + 140];
-        bufOut[outOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)] = (*R4).x;
+        R4.x                                                  = ldsf[me * 168 + 140];
+        bufOut[outOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)] = R4.x;
     }
 }
 
-extern "C" __global__ __launch_bounds__(192) void
-MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(192) void MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn,
+                                                      float* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
-    uint met   = me % 12;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
+    unsigned int met   = me % 12;
 
     __shared__ float2 lds[1344];
 
@@ -1306,7 +1283,7 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
     lwbIn  = gbIn + CFF_HALFW + batch * 1344;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 16;
 
-    InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
     __syncthreads();
 
     InvPass0(me % 2,
@@ -1314,33 +1291,31 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     InvPass1(me % 2,
              (me / 12) * 84 + (met / 2),
              (me / 12) * 84 + (met / 2),
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
     if(met < 2)
     {
-        InvPass0(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        InvPass0(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
-        InvPass1(
-            me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+        InvPass1(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
         __syncthreads();
     }
 
@@ -1349,12 +1324,12 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
               (me / 12) * 84 + (met / 2) * 12,
               lds,
               lds,
-              &R0,
-              &R1,
-              &R2,
-              &R3,
-              &R4,
-              &R5);
+              R0,
+              R1,
+              R2,
+              R3,
+              R4,
+              R5);
     __syncthreads();
 
     InvPass2(me % 2,
@@ -1362,27 +1337,27 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
     InvPass3(me % 2,
              (me / 12) * 84 + (met / 2) * 12,
              (me / 12) * 84 + (met / 2) * 12,
              lds,
              lds,
-             &R0,
-             &R1,
-             &R2,
-             &R3,
-             &R4,
-             &R5);
+             R0,
+             R1,
+             R2,
+             R3,
+             R4,
+             R5);
     __syncthreads();
 
-    InvPassOUT(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4);
+    InvPassOUT(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4);
 }
 
 #elif defined(CFF_IMG_SZ_14_14)
@@ -1400,134 +1375,131 @@ static __constant__ float2 twiddles[17] = {
     float2(7.6604444311897801345168090847437270e-01f, -6.4278760968653925189641995530109853e-01f),
     float2(1.7364817766693041445336120887077413e-01f, -9.8480775301220802031565426659653895e-01f),
     float2(5.0000000000000011102230246251565404e-01f, -8.6602540378443859658830206171842292e-01f),
-    float2(-4.9999999999999977795539507496869192e-01f,
-             -8.6602540378443870761060452423407696e-01f),
+    float2(-4.9999999999999977795539507496869192e-01f, -8.6602540378443870761060452423407696e-01f),
     float2(1.7364817766693041445336120887077413e-01f, -9.8480775301220802031565426659653895e-01f),
-    float2(-9.3969262078590831688273965482949279e-01f,
-             -3.4202014332566887944153677381109446e-01f),
-    float2(-1.7364817766693030343105874635512009e-01f,
-             -9.8480775301220802031565426659653895e-01f),
+    float2(-9.3969262078590831688273965482949279e-01f, -3.4202014332566887944153677381109446e-01f),
+    float2(-1.7364817766693030343105874635512009e-01f, -9.8480775301220802031565426659653895e-01f),
     float2(-9.3969262078590842790504211734514683e-01f, 3.4202014332566865739693184877978638e-01f),
 };
 
-__device__ void FwdPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 3)];
-    (*R2) = bufIn[inOffset + (me + 6)];
-    (*R3) = bufIn[inOffset + (me + 9)];
-    (*R4) = bufIn[inOffset + (me + 12)];
-    (*R5) = bufIn[inOffset + (me + 15)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 3)];
+    R2 = bufIn[inOffset + (me + 6)];
+    R3 = bufIn[inOffset + (me + 9)];
+    R4 = bufIn[inOffset + (me + 12)];
+    R5 = bufIn[inOffset + (me + 15)];
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0)] = (*R0);
-    bufOut[outOffset + (me * 6 + 1)] = (*R1);
-    bufOut[outOffset + (me * 6 + 2)] = (*R2);
-    bufOut[outOffset + (me * 6 + 3)] = (*R3);
-    bufOut[outOffset + (me * 6 + 4)] = (*R4);
-    bufOut[outOffset + (me * 6 + 5)] = (*R5);
+    bufOut[outOffset + (me * 6 + 0)] = R0;
+    bufOut[outOffset + (me * 6 + 1)] = R1;
+    bufOut[outOffset + (me * 6 + 2)] = R2;
+    bufOut[outOffset + (me * 6 + 3)] = R3;
+    bufOut[outOffset + (me * 6 + 4)] = R4;
+    bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void FwdPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0)];
-    (*R3) = bufIn[inOffset + (me * 2 + 1 + 0)];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 6)];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 6)];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 12)];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 12)];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
+    R3 = bufIn[inOffset + (me * 2 + 1 + 0)];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 6)];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 6)];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 12)];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 12)];
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) - (W.y * (*R2).y);
-        TI      = (W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) - (W.y * R2.y);
+        TI   = (W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R4).x) - (W.y * (*R4).y);
-        TI      = (W.y * (*R4).x) + (W.x * (*R4).y);
-        (*R4).x = TR;
-        (*R4).y = TI;
+        TR   = (W.x * R4.x) - (W.y * R4.y);
+        TI   = (W.y * R4.x) + (W.x * R4.y);
+        R4.x = TR;
+        R4.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     FwdRad3B1(R0, R1, R2);
     FwdRad3B1(R3, R4, R5);
 
-    bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0);
-    bufOut[outOffset + (2 * me + 1 + 0)]  = (*R3);
-    bufOut[outOffset + (2 * me + 0 + 6)]  = (*R1);
-    bufOut[outOffset + (2 * me + 1 + 6)]  = (*R4);
-    bufOut[outOffset + (2 * me + 0 + 12)] = (*R2);
-    bufOut[outOffset + (2 * me + 1 + 12)] = (*R5);
+    bufOut[outOffset + (2 * me + 0 + 0)]  = R0;
+    bufOut[outOffset + (2 * me + 1 + 0)]  = R3;
+    bufOut[outOffset + (2 * me + 0 + 6)]  = R1;
+    bufOut[outOffset + (2 * me + 1 + 6)]  = R4;
+    bufOut[outOffset + (2 * me + 0 + 12)] = R2;
+    bufOut[outOffset + (2 * me + 1 + 12)] = R5;
 }
 
-__device__ void FwdPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (3 * me + 1)];
-    (*R1) = bufIn[inOffset + (3 * me + 2)];
-    (*R2) = bufIn[inOffset + (3 * me + 3)];
-    (*R3) = bufIn[inOffset + (18 - (3 * me + 1))];
-    (*R4) = bufIn[inOffset + (18 - (3 * me + 2))];
-    (*R5) = bufIn[inOffset + (18 - (3 * me + 3))];
+    R0 = bufIn[inOffset + (3 * me + 1)];
+    R1 = bufIn[inOffset + (3 * me + 2)];
+    R2 = bufIn[inOffset + (3 * me + 3)];
+    R3 = bufIn[inOffset + (18 - (3 * me + 1))];
+    R4 = bufIn[inOffset + (18 - (3 * me + 2))];
+    R5 = bufIn[inOffset + (18 - (3 * me + 3))];
 
     float2 dc;
     if(me < 1)
@@ -1537,19 +1509,13 @@ __device__ void FwdPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + 0 + (3 * me + 1)] =
-        float2(((*R0).x + (*R3).x) * 0.5, +((*R0).y - (*R3).y) * 0.5);
-    bufOut[outOffset + 0 + (3 * me + 2)] =
-        float2(((*R1).x + (*R4).x) * 0.5, +((*R1).y - (*R4).y) * 0.5);
-    bufOut[outOffset + 0 + (3 * me + 3)] =
-        float2(((*R2).x + (*R5).x) * 0.5, +((*R2).y - (*R5).y) * 0.5);
+    bufOut[outOffset + 0 + (3 * me + 1)] = float2((R0.x + R3.x) * 0.5f, +(R0.y - R3.y) * 0.5f);
+    bufOut[outOffset + 0 + (3 * me + 2)] = float2((R1.x + R4.x) * 0.5f, +(R1.y - R4.y) * 0.5f);
+    bufOut[outOffset + 0 + (3 * me + 3)] = float2((R2.x + R5.x) * 0.5f, +(R2.y - R5.y) * 0.5f);
 
-    bufOut[outOffset + 10 + (3 * me + 1)] =
-        float2(((*R0).y + (*R3).y) * 0.5, +(-(*R0).x + (*R3).x) * 0.5);
-    bufOut[outOffset + 10 + (3 * me + 2)] =
-        float2(((*R1).y + (*R4).y) * 0.5, +(-(*R1).x + (*R4).x) * 0.5);
-    bufOut[outOffset + 10 + (3 * me + 3)] =
-        float2(((*R2).y + (*R5).y) * 0.5, +(-(*R2).x + (*R5).x) * 0.5);
+    bufOut[outOffset + 10 + (3 * me + 1)] = float2((R0.y + R3.y) * 0.5f, +(-R0.x + R3.x) * 0.5f);
+    bufOut[outOffset + 10 + (3 * me + 2)] = float2((R1.y + R4.y) * 0.5f, +(-R1.x + R4.x) * 0.5f);
+    bufOut[outOffset + 10 + (3 * me + 3)] = float2((R2.y + R5.y) * 0.5f, +(-R2.x + R5.x) * 0.5f);
 
     if(me < 1)
     {
@@ -1558,213 +1524,213 @@ __device__ void FwdPass1b(uint me,
     }
 }
 
-__device__ void FwdPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 10];
-    (*R1) = bufIn[inOffset + (me + 3) * 10];
-    (*R2) = bufIn[inOffset + (me + 6) * 10];
-    (*R3) = bufIn[inOffset + (me + 9) * 10];
-    (*R4) = bufIn[inOffset + (me + 12) * 10];
-    (*R5) = bufIn[inOffset + (me + 15) * 10];
+    R0 = bufIn[inOffset + (me + 0) * 10];
+    R1 = bufIn[inOffset + (me + 3) * 10];
+    R2 = bufIn[inOffset + (me + 6) * 10];
+    R3 = bufIn[inOffset + (me + 9) * 10];
+    R4 = bufIn[inOffset + (me + 12) * 10];
+    R5 = bufIn[inOffset + (me + 15) * 10];
 
     FwdRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0) * 10] = (*R0);
-    bufOut[outOffset + (me * 6 + 1) * 10] = (*R1);
-    bufOut[outOffset + (me * 6 + 2) * 10] = (*R2);
-    bufOut[outOffset + (me * 6 + 3) * 10] = (*R3);
-    bufOut[outOffset + (me * 6 + 4) * 10] = (*R4);
-    bufOut[outOffset + (me * 6 + 5) * 10] = (*R5);
+    bufOut[outOffset + (me * 6 + 0) * 10] = R0;
+    bufOut[outOffset + (me * 6 + 1) * 10] = R1;
+    bufOut[outOffset + (me * 6 + 2) * 10] = R2;
+    bufOut[outOffset + (me * 6 + 3) * 10] = R3;
+    bufOut[outOffset + (me * 6 + 4) * 10] = R4;
+    bufOut[outOffset + (me * 6 + 5) * 10] = R5;
 }
 
-__device__ void FwdPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
-    (*R3) = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 6) * 10];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 6) * 10];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 12) * 10];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 12) * 10];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
+    R3 = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 6) * 10];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 6) * 10];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 12) * 10];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 12) * 10];
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) - (W.y * (*R2).y);
-        TI      = (W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) - (W.y * R2.y);
+        TI   = (W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R4).x) - (W.y * (*R4).y);
-        TI      = (W.y * (*R4).x) + (W.x * (*R4).y);
-        (*R4).x = TR;
-        (*R4).y = TI;
+        TR   = (W.x * R4.x) - (W.y * R4.y);
+        TI   = (W.y * R4.x) + (W.x * R4.y);
+        R4.x = TR;
+        R4.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     FwdRad3B1(R0, R1, R2);
     FwdRad3B1(R3, R4, R5);
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 10]  = (*R0);
-    bufOut[outOffset + (2 * me + 1 + 0) * 10]  = (*R3);
-    bufOut[outOffset + (2 * me + 0 + 6) * 10]  = (*R1);
-    bufOut[outOffset + (2 * me + 1 + 6) * 10]  = (*R4);
-    bufOut[outOffset + (2 * me + 0 + 12) * 10] = (*R2);
-    bufOut[outOffset + (2 * me + 1 + 12) * 10] = (*R5);
+    bufOut[outOffset + (2 * me + 0 + 0) * 10]  = R0;
+    bufOut[outOffset + (2 * me + 1 + 0) * 10]  = R3;
+    bufOut[outOffset + (2 * me + 0 + 6) * 10]  = R1;
+    bufOut[outOffset + (2 * me + 1 + 6) * 10]  = R4;
+    bufOut[outOffset + (2 * me + 0 + 12) * 10] = R2;
+    bufOut[outOffset + (2 * me + 1 + 12) * 10] = R5;
 }
 
-__device__ void FwdPass4(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void FwdPass4(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
     if(me < 120)
     {
-        (*R0) = bufIn[inOffset + (me + 0 * 120)];
-        (*R1) = bufIn[inOffset + (me + 1 * 120)];
-        (*R2) = bufIn[inOffset + (me + 2 * 120)];
-        (*R3) = bufIn[inOffset + (me + 3 * 120)];
-        (*R4) = bufIn[inOffset + (me + 4 * 120)];
-        (*R5) = bufIn[inOffset + (me + 5 * 120)];
+        R0 = bufIn[inOffset + (me + 0 * 120)];
+        R1 = bufIn[inOffset + (me + 1 * 120)];
+        R2 = bufIn[inOffset + (me + 2 * 120)];
+        R3 = bufIn[inOffset + (me + 3 * 120)];
+        R4 = bufIn[inOffset + (me + 4 * 120)];
+        R5 = bufIn[inOffset + (me + 5 * 120)];
 
-        bufOut[outOffset + (me + 0 * 120)] = (*R0);
-        bufOut[outOffset + (me + 1 * 120)] = (*R1);
-        bufOut[outOffset + (me + 2 * 120)] = (*R2);
-        bufOut[outOffset + (me + 3 * 120)] = (*R3);
-        bufOut[outOffset + (me + 4 * 120)] = (*R4);
-        bufOut[outOffset + (me + 5 * 120)] = (*R5);
+        bufOut[outOffset + (me + 0 * 120)] = R0;
+        bufOut[outOffset + (me + 1 * 120)] = R1;
+        bufOut[outOffset + (me + 2 * 120)] = R2;
+        bufOut[outOffset + (me + 3 * 120)] = R3;
+        bufOut[outOffset + (me + 4 * 120)] = R4;
+        bufOut[outOffset + (me + 5 * 120)] = R5;
     }
 }
 
-__device__ void FwdPassIN(uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPassIN(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
 
     if(me < 120)
     {
-        bufOut[outOffset + me + 0 * 120] = (*R0);
-        bufOut[outOffset + me + 1 * 120] = (*R1);
-        bufOut[outOffset + me + 2 * 120] = (*R2);
-        bufOut[outOffset + me + 3 * 120] = (*R3);
-        bufOut[outOffset + me + 4 * 120] = (*R4);
-        bufOut[outOffset + me + 5 * 120] = (*R5);
+        bufOut[outOffset + me + 0 * 120] = R0;
+        bufOut[outOffset + me + 1 * 120] = R1;
+        bufOut[outOffset + me + 2 * 120] = R2;
+        bufOut[outOffset + me + 3 * 120] = R3;
+        bufOut[outOffset + me + 4 * 120] = R4;
+        bufOut[outOffset + me + 5 * 120] = R5;
     }
 
     __syncthreads();
 
     if((me % 16) < CFF_IMG_W)
     {
-        (*R0).x = bufIn[inOffset +
-                        (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 0 * 2 * CFF_IMG_W)];
-        (*R1).x = bufIn[inOffset +
-                        (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 1 * 2 * CFF_IMG_W)];
-        (*R2).x = bufIn[inOffset +
-                        (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 2 * 2 * CFF_IMG_W)];
+        R0.x = bufIn[inOffset +
+                     (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 0 * 2 * CFF_IMG_W)];
+        R1.x = bufIn[inOffset +
+                     (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 1 * 2 * CFF_IMG_W)];
+        R2.x = bufIn[inOffset +
+                     (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 2 * 2 * CFF_IMG_W)];
 
-        (*R0).y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                                    0 * 2 * CFF_IMG_W)];
-        (*R1).y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                                    1 * 2 * CFF_IMG_W)];
-        (*R2).y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                                    2 * 2 * CFF_IMG_W)];
+        R0.y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
+                                 0 * 2 * CFF_IMG_W)];
+        R1.y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
+                                 1 * 2 * CFF_IMG_W)];
+        R2.y = bufIn[inOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
+                                 2 * 2 * CFF_IMG_W)];
 
         bufOut[outOffset + (me / 32) * 180 + (1 + 0 + ((me % 32) / 16) * 3 + 0) * 18 +
-               (2 + (me % 16))] = (*R0);
+               (2 + (me % 16))] = R0;
         bufOut[outOffset + (me / 32) * 180 + (1 + 0 + ((me % 32) / 16) * 3 + 1) * 18 +
-               (2 + (me % 16))] = (*R1);
+               (2 + (me % 16))] = R1;
         bufOut[outOffset + (me / 32) * 180 + (1 + 0 + ((me % 32) / 16) * 3 + 2) * 18 +
-               (2 + (me % 16))] = (*R2);
+               (2 + (me % 16))] = R2;
     }
 
     if((me % 32) < CFF_IMG_W)
     {
-        (*R3).x = bufIn[inOffset + ((me % 32) + 12 * CFF_IMG_W)];
-        (*R3).y = bufIn[inOffset + ((me % 32) + 13 * CFF_IMG_W)];
+        R3.x = bufIn[inOffset + ((me % 32) + 12 * CFF_IMG_W)];
+        R3.y = bufIn[inOffset + ((me % 32) + 13 * CFF_IMG_W)];
 
-        bufOut[outOffset + (me / 32) * 180 + (1 + 6) * 18 + (2 + (me % 32))] = (*R3);
+        bufOut[outOffset + (me / 32) * 180 + (1 + 6) * 18 + (2 + (me % 32))] = R3;
     }
 }
 
-__device__ void FwdPassWE(uint batch,
-               uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void FwdPassWE(unsigned int batch,
+                          unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
-    uint met = me % 32;
+    unsigned int met = me % 32;
 
 #ifdef CFF_BACKWARD
     inOffset = ((batch * 4 + (me / 32)) % CFF_CHANNELS) * 25 * CFF_NFILTER +
@@ -1773,25 +1739,25 @@ __device__ void FwdPassWE(uint batch,
     inOffset = batch * 25 * 4 + (me / 32) * 25;
 #endif
 
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
 
     float* ldsf = (float*)(bufOut + outOffset);
 
-    ldsf[(me / 32) * 180 * 2 + met] = (*R0).x;
+    ldsf[(me / 32) * 180 * 2 + met] = R0.x;
 
     if(met < 25)
     {
-        (*R0).x                         = bufIn[inOffset + met];
+        R0.x = bufIn[inOffset + met];
 
 #ifdef CFF_BACKWARD
-        ldsf[(me / 32) * 180 * 2 + met] = (*R0).x;
+        ldsf[(me / 32) * 180 * 2 + met] = R0.x;
 #else
-        ldsf[(me / 32) * 180 * 2 + met + 5] = (*R0).x;
+        ldsf[(me / 32) * 180 * 2 + met + 5] = R0.x;
 #endif
     }
 
@@ -1800,10 +1766,10 @@ __device__ void FwdPassWE(uint batch,
     if(met < 30)
     {
 #ifdef CFF_BACKWARD
-        (*R0).x = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
+        R0.x = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
 #else
-        (*R0).x                             = ldsf[(me / 32) * 180 * 2 + 5 +
-                       (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
+        R0.x = ldsf[(me / 32) * 180 * 2 + 5 +
+                    (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
 #endif
     }
 
@@ -1811,35 +1777,35 @@ __device__ void FwdPassWE(uint batch,
 
     if(me < 120)
     {
-        bufOut[outOffset + me + 0 * 120] = (*R5);
-        bufOut[outOffset + me + 1 * 120] = (*R5);
-        bufOut[outOffset + me + 2 * 120] = (*R5);
-        bufOut[outOffset + me + 3 * 120] = (*R5);
-        bufOut[outOffset + me + 4 * 120] = (*R5);
-        bufOut[outOffset + me + 5 * 120] = (*R5);
+        bufOut[outOffset + me + 0 * 120] = R5;
+        bufOut[outOffset + me + 1 * 120] = R5;
+        bufOut[outOffset + me + 2 * 120] = R5;
+        bufOut[outOffset + me + 3 * 120] = R5;
+        bufOut[outOffset + me + 4 * 120] = R5;
+        bufOut[outOffset + me + 5 * 120] = R5;
     }
 
     __syncthreads();
 
     if(met < 30)
     {
-        ldsf[(me / 32) * 180 * 2 + (met / 10) * 18 * 2 + met % 10] = (*R0).x;
+        ldsf[(me / 32) * 180 * 2 + (met / 10) * 18 * 2 + met % 10] = R0.x;
     }
 
-    (*R0) = float2(0, 0);
+    R0 = float2(0, 0);
 }
 
-__device__ void FwdPass(uint me,
-             float2* lds,
-             float2* lwbOut,
-             float2* R0,
-             float2* R1,
-             float2* R2,
-             float2* R3,
-             float2* R4,
-             float2* R5)
+__device__ void FwdPass(unsigned int me,
+                        float2* lds,
+                        float2* lwbOut,
+                        float2& R0,
+                        float2& R1,
+                        float2& R2,
+                        float2& R3,
+                        float2& R4,
+                        float2& R5)
 {
-    uint met = me % 32;
+    unsigned int met = me % 32;
 
     if(met < 27)
     {
@@ -1929,11 +1895,12 @@ __device__ void FwdPass(uint me,
     FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5);
 }
 
-extern "C" __global__ __launch_bounds__(128) void
-MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(128) void MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn,
+                                                     float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[720];
 
@@ -1945,18 +1912,19 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 4;
     lwbOut = gbOut + batch * 720;
 
-    FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    FwdPass(me, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPass(me, lds, lwbOut, R0, R1, R2, R3, R4, R5);
 }
 
-extern "C" __global__ __launch_bounds__(128) void
-MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(128) void MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn,
+                                                     float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[720];
 
@@ -1969,30 +1937,30 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 
     lwbOut = gbOut + 180 * CFF_CHANNELS * CFF_BATCH + batch * 720;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPassWE(batch, me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    FwdPass(me, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5);
+    FwdPass(me, lds, lwbOut, R0, R1, R2, R3, R4, R5);
 }
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 12;
-    uint bd = batch / 12;
+    unsigned int bm = batch % 12;
+    unsigned int bd = batch / 12;
 
     iOffset = bm * 16 + bd * 180 * 16;
     oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
@@ -2031,23 +1999,23 @@ MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
     }
 }
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 12;
-    uint bd = batch / 12;
+    unsigned int bm = batch % 12;
+    unsigned int bd = batch / 12;
 
     iOffset = 180 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 180 * 16;
     oOffset = CFF_HALFW + 180 * (CFF_CHANNELS * CFF_BATCH + 64) +
@@ -2087,23 +2055,23 @@ MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
     }
 }
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 12;
-    uint bd = batch / 12;
+    unsigned int bm = batch % 12;
+    unsigned int bd = batch / 12;
 
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
     oOffset = CFF_HALFW + bm * 16 + bd * 180 * 16;
@@ -2142,155 +2110,155 @@ MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
     }
 }
 
-__device__ void InvPassA(uint me,
-              uint inOffset,
-              uint outOffset,
-              const float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPassA(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         const float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
     if(me < 120)
     {
-        (*R0) = bufIn[inOffset + (me + 0 * 120)];
-        (*R1) = bufIn[inOffset + (me + 1 * 120)];
-        (*R2) = bufIn[inOffset + (me + 2 * 120)];
-        (*R3) = bufIn[inOffset + (me + 3 * 120)];
-        (*R4) = bufIn[inOffset + (me + 4 * 120)];
-        (*R5) = bufIn[inOffset + (me + 5 * 120)];
+        R0 = bufIn[inOffset + (me + 0 * 120)];
+        R1 = bufIn[inOffset + (me + 1 * 120)];
+        R2 = bufIn[inOffset + (me + 2 * 120)];
+        R3 = bufIn[inOffset + (me + 3 * 120)];
+        R4 = bufIn[inOffset + (me + 4 * 120)];
+        R5 = bufIn[inOffset + (me + 5 * 120)];
 
-        bufOut[outOffset + (me + 0 * 120)] = (*R0);
-        bufOut[outOffset + (me + 1 * 120)] = (*R1);
-        bufOut[outOffset + (me + 2 * 120)] = (*R2);
-        bufOut[outOffset + (me + 3 * 120)] = (*R3);
-        bufOut[outOffset + (me + 4 * 120)] = (*R4);
-        bufOut[outOffset + (me + 5 * 120)] = (*R5);
+        bufOut[outOffset + (me + 0 * 120)] = R0;
+        bufOut[outOffset + (me + 1 * 120)] = R1;
+        bufOut[outOffset + (me + 2 * 120)] = R2;
+        bufOut[outOffset + (me + 3 * 120)] = R3;
+        bufOut[outOffset + (me + 4 * 120)] = R4;
+        bufOut[outOffset + (me + 5 * 120)] = R5;
     }
 }
 
-__device__ void InvPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 10];
-    (*R1) = bufIn[inOffset + (me + 3) * 10];
-    (*R2) = bufIn[inOffset + (me + 6) * 10];
-    (*R3) = bufIn[inOffset + (me + 9) * 10];
-    (*R4) = bufIn[inOffset + (me + 12) * 10];
-    (*R5) = bufIn[inOffset + (me + 15) * 10];
+    R0 = bufIn[inOffset + (me + 0) * 10];
+    R1 = bufIn[inOffset + (me + 3) * 10];
+    R2 = bufIn[inOffset + (me + 6) * 10];
+    R3 = bufIn[inOffset + (me + 9) * 10];
+    R4 = bufIn[inOffset + (me + 12) * 10];
+    R5 = bufIn[inOffset + (me + 15) * 10];
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0) * 10] = (*R0);
-    bufOut[outOffset + (me * 6 + 1) * 10] = (*R1);
-    bufOut[outOffset + (me * 6 + 2) * 10] = (*R2);
-    bufOut[outOffset + (me * 6 + 3) * 10] = (*R3);
-    bufOut[outOffset + (me * 6 + 4) * 10] = (*R4);
-    bufOut[outOffset + (me * 6 + 5) * 10] = (*R5);
+    bufOut[outOffset + (me * 6 + 0) * 10] = R0;
+    bufOut[outOffset + (me * 6 + 1) * 10] = R1;
+    bufOut[outOffset + (me * 6 + 2) * 10] = R2;
+    bufOut[outOffset + (me * 6 + 3) * 10] = R3;
+    bufOut[outOffset + (me * 6 + 4) * 10] = R4;
+    bufOut[outOffset + (me * 6 + 5) * 10] = R5;
 }
 
-__device__ void InvPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
-    (*R3) = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 6) * 10];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 6) * 10];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 12) * 10];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 12) * 10];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
+    R3 = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 6) * 10];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 6) * 10];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 12) * 10];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 12) * 10];
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) + (W.y * (*R2).y);
-        TI      = -(W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) + (W.y * R2.y);
+        TI   = -(W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R4).x) + (W.y * (*R4).y);
-        TI      = -(W.y * (*R4).x) + (W.x * (*R4).y);
-        (*R4).x = TR;
-        (*R4).y = TI;
+        TR   = (W.x * R4.x) + (W.y * R4.y);
+        TI   = -(W.y * R4.x) + (W.x * R4.y);
+        R4.x = TR;
+        R4.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     InvRad3B1(R0, R1, R2);
     InvRad3B1(R3, R4, R5);
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 10]  = (*R0) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 0) * 10]  = (*R3) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 0 + 6) * 10]  = (*R1) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 6) * 10]  = (*R4) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 0 + 12) * 10] = (*R2) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 12) * 10] = (*R5) * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 0) * 10]  = R0 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 0) * 10]  = R3 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 6) * 10]  = R1 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 6) * 10]  = R4 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 12) * 10] = R2 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 12) * 10] = R5 * 5.5555555555555555e-02f;
 }
 
-__device__ void InvPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5)
+__device__ void InvPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + 0 + (3 * me + 1)];
-    (*R1) = bufIn[inOffset + 0 + (3 * me + 2)];
-    (*R2) = bufIn[inOffset + 0 + (3 * me + 3)];
-    (*R3) = bufIn[inOffset + 10 + (3 * me + 1)];
-    (*R4) = bufIn[inOffset + 10 + (3 * me + 2)];
-    (*R5) = bufIn[inOffset + 10 + (3 * me + 3)];
+    R0 = bufIn[inOffset + 0 + (3 * me + 1)];
+    R1 = bufIn[inOffset + 0 + (3 * me + 2)];
+    R2 = bufIn[inOffset + 0 + (3 * me + 3)];
+    R3 = bufIn[inOffset + 10 + (3 * me + 1)];
+    R4 = bufIn[inOffset + 10 + (3 * me + 2)];
+    R5 = bufIn[inOffset + 10 + (3 * me + 3)];
 
     float2 dc{};
     if(me < 1)
@@ -2301,12 +2269,12 @@ __device__ void InvPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (18 - (3 * me + 1))] = float2((*R0).x + (*R3).y, -(*R0).y + (*R3).x);
-    bufOut[outOffset + (18 - (3 * me + 2))] = float2((*R1).x + (*R4).y, -(*R1).y + (*R4).x);
-    bufOut[outOffset + (18 - (3 * me + 3))] = float2((*R2).x + (*R5).y, -(*R2).y + (*R5).x);
-    bufOut[outOffset + (3 * me + 1)]        = float2((*R0).x - (*R3).y, (*R0).y + (*R3).x);
-    bufOut[outOffset + (3 * me + 2)]        = float2((*R1).x - (*R4).y, (*R1).y + (*R4).x);
-    bufOut[outOffset + (3 * me + 3)]        = float2((*R2).x - (*R5).y, (*R2).y + (*R5).x);
+    bufOut[outOffset + (18 - (3 * me + 1))] = float2(R0.x + R3.y, -R0.y + R3.x);
+    bufOut[outOffset + (18 - (3 * me + 2))] = float2(R1.x + R4.y, -R1.y + R4.x);
+    bufOut[outOffset + (18 - (3 * me + 3))] = float2(R2.x + R5.y, -R2.y + R5.x);
+    bufOut[outOffset + (3 * me + 1)]        = float2(R0.x - R3.y, R0.y + R3.x);
+    bufOut[outOffset + (3 * me + 2)]        = float2(R1.x - R4.y, R1.y + R4.x);
+    bufOut[outOffset + (3 * me + 3)]        = float2(R2.x - R5.y, R2.y + R5.x);
 
     if(me < 1)
     {
@@ -2314,129 +2282,129 @@ __device__ void InvPass1b(uint me,
     }
 }
 
-__device__ void InvPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 3)];
-    (*R2) = bufIn[inOffset + (me + 6)];
-    (*R3) = bufIn[inOffset + (me + 9)];
-    (*R4) = bufIn[inOffset + (me + 12)];
-    (*R5) = bufIn[inOffset + (me + 15)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 3)];
+    R2 = bufIn[inOffset + (me + 6)];
+    R3 = bufIn[inOffset + (me + 9)];
+    R4 = bufIn[inOffset + (me + 12)];
+    R5 = bufIn[inOffset + (me + 15)];
 
     InvRad6B1(R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 6 + 0)] = (*R0);
-    bufOut[outOffset + (me * 6 + 1)] = (*R1);
-    bufOut[outOffset + (me * 6 + 2)] = (*R2);
-    bufOut[outOffset + (me * 6 + 3)] = (*R3);
-    bufOut[outOffset + (me * 6 + 4)] = (*R4);
-    bufOut[outOffset + (me * 6 + 5)] = (*R5);
+    bufOut[outOffset + (me * 6 + 0)] = R0;
+    bufOut[outOffset + (me * 6 + 1)] = R1;
+    bufOut[outOffset + (me * 6 + 2)] = R2;
+    bufOut[outOffset + (me * 6 + 3)] = R3;
+    bufOut[outOffset + (me * 6 + 4)] = R4;
+    bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void InvPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5)
+__device__ void InvPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0)];
-    (*R3) = bufIn[inOffset + (me * 2 + 1 + 0)];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 6)];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 6)];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 12)];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 12)];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
+    R3 = bufIn[inOffset + (me * 2 + 1 + 0)];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 6)];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 6)];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 12)];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 12)];
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 0) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) + (W.y * (*R2).y);
-        TI      = -(W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) + (W.y * R2.y);
+        TI   = -(W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 0];
         float TR, TI;
-        TR      = (W.x * (*R4).x) + (W.y * (*R4).y);
-        TI      = -(W.y * (*R4).x) + (W.x * (*R4).y);
-        (*R4).x = TR;
-        (*R4).y = TI;
+        TR   = (W.x * R4.x) + (W.y * R4.y);
+        TI   = -(W.y * R4.x) + (W.x * R4.y);
+        R4.x = TR;
+        R4.y = TI;
     }
 
     {
         float2 W = twiddles[5 + 2 * ((2 * me + 1) % 6) + 1];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     InvRad3B1(R0, R1, R2);
     InvRad3B1(R3, R4, R5);
 
-    bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 0)]  = (*R3) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 0 + 6)]  = (*R1) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 6)]  = (*R4) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 0 + 12)] = (*R2) * 5.5555555555555555e-02f;
-    bufOut[outOffset + (2 * me + 1 + 12)] = (*R5) * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 0)]  = R0 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 0)]  = R3 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 6)]  = R1 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 6)]  = R4 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 0 + 12)] = R2 * 5.5555555555555555e-02f;
+    bufOut[outOffset + (2 * me + 1 + 12)] = R5 * 5.5555555555555555e-02f;
 }
 
-__device__ void InvPassOUT(uint me,
-                uint inOffset,
-                uint outOffset,
-                float2* bufIn,
-                float* bufOut,
-                float2* R0,
-                float2* R1,
-                float2* R2,
-                float2* R3)
+__device__ void InvPassOUT(unsigned int me,
+                           unsigned int inOffset,
+                           unsigned int outOffset,
+                           float2* bufIn,
+                           float* bufOut,
+                           float2& R0,
+                           float2& R1,
+                           float2& R2,
+                           float2& R3)
 {
 
     if((me % 16) < CFF_IMG_W)
     {
-        (*R0) = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 0) * 18 +
-                      (4 + (me % 16))];
-        (*R1) = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 1) * 18 +
-                      (4 + (me % 16))];
-        (*R2) = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 2) * 18 +
-                      (4 + (me % 16))];
+        R0 = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 0) * 18 +
+                   (4 + (me % 16))];
+        R1 = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 1) * 18 +
+                   (4 + (me % 16))];
+        R2 = bufIn[inOffset + (me / 32) * 180 + (2 + 0 + ((me % 32) / 16) * 3 + 2) * 18 +
+                   (4 + (me % 16))];
     }
 
     if((me % 32) < CFF_IMG_W)
     {
-        (*R3) = bufIn[inOffset + (me / 32) * 180 + (2 + 6) * 18 + (4 + (me % 32))];
+        R3 = bufIn[inOffset + (me / 32) * 180 + (2 + 6) * 18 + (4 + (me % 32))];
     }
 
     __syncthreads();
@@ -2444,33 +2412,34 @@ __device__ void InvPassOUT(uint me,
     if((me % 16) < CFF_IMG_W)
     {
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 0 * 2 * CFF_IMG_W)] =
-            (*R0).x;
+            R0.x;
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 1 * 2 * CFF_IMG_W)] =
-            (*R1).x;
+            R1.x;
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + 0 + 2 * 2 * CFF_IMG_W)] =
-            (*R2).x;
+            R2.x;
 
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                            0 * 2 * CFF_IMG_W)] = (*R0).y;
+                            0 * 2 * CFF_IMG_W)] = R0.y;
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                            1 * 2 * CFF_IMG_W)] = (*R1).y;
+                            1 * 2 * CFF_IMG_W)] = R1.y;
         bufOut[outOffset + (((me % 32) / 16) * 6 * CFF_IMG_W + (me % 16) + CFF_IMG_W +
-                            2 * 2 * CFF_IMG_W)] = (*R2).y;
+                            2 * 2 * CFF_IMG_W)] = R2.y;
     }
 
     if((me % 32) < CFF_IMG_W)
     {
-        bufOut[outOffset + ((me % 32) + 12 * CFF_IMG_W)] = (*R3).x;
-        bufOut[outOffset + ((me % 32) + 13 * CFF_IMG_W)] = (*R3).y;
+        bufOut[outOffset + ((me % 32) + 12 * CFF_IMG_W)] = R3.x;
+        bufOut[outOffset + ((me % 32) + 13 * CFF_IMG_W)] = R3.y;
     }
 }
 
-extern "C" __global__ __launch_bounds__(128) void
-MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(128) void MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn,
+                                                      float* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
-    uint met   = me % 32;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
+    unsigned int met   = me % 32;
 
     __shared__ float2 lds[720];
 
@@ -2482,7 +2451,7 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
     lwbIn  = gbIn + CFF_HALFW + batch * 720;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 4;
 
-    InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5);
+    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
 
     __syncthreads();
 
@@ -2493,12 +2462,12 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
                  (me / 32) * 180 + (met / 3),
                  lds,
                  lds,
-                 &R0,
-                 &R1,
-                 &R2,
-                 &R3,
-                 &R4,
-                 &R5);
+                 R0,
+                 R1,
+                 R2,
+                 R3,
+                 R4,
+                 R5);
     }
 
     __syncthreads();
@@ -2510,12 +2479,12 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
                  (me / 32) * 180 + (met / 3),
                  lds,
                  lds,
-                 &R0,
-                 &R1,
-                 &R2,
-                 &R3,
-                 &R4,
-                 &R5);
+                 R0,
+                 R1,
+                 R2,
+                 R3,
+                 R4,
+                 R5);
     }
 
     __syncthreads();
@@ -2527,12 +2496,12 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
                   (me / 32) * 180 + (met / 3) * 18,
                   lds,
                   lds,
-                  &R0,
-                  &R1,
-                  &R2,
-                  &R3,
-                  &R4,
-                  &R5);
+                  R0,
+                  R1,
+                  R2,
+                  R3,
+                  R4,
+                  R5);
     }
 
     __syncthreads();
@@ -2544,12 +2513,12 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
                  (me / 32) * 180 + (met / 3) * 18,
                  lds,
                  lds,
-                 &R0,
-                 &R1,
-                 &R2,
-                 &R3,
-                 &R4,
-                 &R5);
+                 R0,
+                 R1,
+                 R2,
+                 R3,
+                 R4,
+                 R5);
     }
 
     __syncthreads();
@@ -2561,17 +2530,17 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
                  (me / 32) * 180 + (met / 3) * 18,
                  lds,
                  lds,
-                 &R0,
-                 &R1,
-                 &R2,
-                 &R3,
-                 &R4,
-                 &R5);
+                 R0,
+                 R1,
+                 R2,
+                 R3,
+                 R4,
+                 R5);
     }
 
     __syncthreads();
 
-    InvPassOUT(me, 0, (me / 32) * CFF_IMG_W * CFF_IMG_H, lds, lwbOut, &R0, &R1, &R2, &R3);
+    InvPassOUT(me, 0, (me / 32) * CFF_IMG_W * CFF_IMG_H, lds, lwbOut, R0, R1, R2, R3);
 }
 
 // =================================================================================================
@@ -2597,90 +2566,78 @@ static __constant__ float2 twiddles[31] = {
     float2(3.8268343236508983729038391174981371e-01f, -9.2387953251128673848313610506011173e-01f),
     float2(8.3146961230254523567140267914510332e-01f, -5.5557023301960217764872140833176672e-01f),
     float2(3.8268343236508983729038391174981371e-01f, -9.2387953251128673848313610506011173e-01f),
-    float2(-1.9509032201612819257263709005201235e-01f,
-             -9.8078528040323043057924223830923438e-01f),
+    float2(-1.9509032201612819257263709005201235e-01f, -9.8078528040323043057924223830923438e-01f),
     float2(7.0710678118654757273731092936941423e-01f, -7.0710678118654757273731092936941423e-01f),
     float2(6.1232339957367660358688201472919830e-17f, -1.0000000000000000000000000000000000e+00f),
-    float2(-7.0710678118654746171500846685376018e-01f,
-             -7.0710678118654757273731092936941423e-01f),
+    float2(-7.0710678118654746171500846685376018e-01f, -7.0710678118654757273731092936941423e-01f),
     float2(5.5557023301960228867102387084742077e-01f, -8.3146961230254523567140267914510332e-01f),
-    float2(-3.8268343236508972626808144923415966e-01f,
-             -9.2387953251128673848313610506011173e-01f),
-    float2(-9.8078528040323043057924223830923438e-01f,
-             -1.9509032201612860890627132448571501e-01f),
+    float2(-3.8268343236508972626808144923415966e-01f, -9.2387953251128673848313610506011173e-01f),
+    float2(-9.8078528040323043057924223830923438e-01f, -1.9509032201612860890627132448571501e-01f),
     float2(3.8268343236508983729038391174981371e-01f, -9.2387953251128673848313610506011173e-01f),
-    float2(-7.0710678118654746171500846685376018e-01f,
-             -7.0710678118654757273731092936941423e-01f),
+    float2(-7.0710678118654746171500846685376018e-01f, -7.0710678118654757273731092936941423e-01f),
     float2(-9.2387953251128684950543856757576577e-01f, 3.8268343236508967075693021797633264e-01f),
     float2(1.9509032201612833135051516819657991e-01f, -9.8078528040323043057924223830923438e-01f),
-    float2(-9.2387953251128673848313610506011173e-01f,
-             -3.8268343236508989280153514300764073e-01f),
+    float2(-9.2387953251128673848313610506011173e-01f, -3.8268343236508989280153514300764073e-01f),
     float2(-5.5557023301960217764872140833176672e-01f, 8.3146961230254523567140267914510332e-01f),
 };
 
-__device__ void FwdPassIN(uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5,
-               float2* R6,
-               float2* R7)
+__device__ void FwdPassIN(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5,
+                          float2& R6,
+                          float2& R7)
 {
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
-    (*R6) = float2(0, 0);
-    (*R7) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
+    R6 = float2(0, 0);
+    R7 = float2(0, 0);
 
     if((me % 32) < CFF_IMG_W)
     {
-        (*R0).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 0 * 2 * CFF_IMG_W)];
-        (*R1).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 1 * 2 * CFF_IMG_W)];
-        (*R2).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 2 * 2 * CFF_IMG_W)];
-        (*R3).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 3 * 2 * CFF_IMG_W)];
-        (*R4).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 4 * 2 * CFF_IMG_W)];
-        (*R5).x =
-            bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 5 * 2 * CFF_IMG_W)];
+        R0.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 0 * 2 * CFF_IMG_W)];
+        R1.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 1 * 2 * CFF_IMG_W)];
+        R2.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 2 * 2 * CFF_IMG_W)];
+        R3.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 3 * 2 * CFF_IMG_W)];
+        R4.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 4 * 2 * CFF_IMG_W)];
+        R5.x = bufIn[inOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 5 * 2 * CFF_IMG_W)];
 
-        (*R0).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 0 * 2 * CFF_IMG_W)];
-        (*R1).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 1 * 2 * CFF_IMG_W)];
-        (*R2).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 2 * 2 * CFF_IMG_W)];
-        (*R3).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 3 * 2 * CFF_IMG_W)];
-        (*R4).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 4 * 2 * CFF_IMG_W)];
-        (*R5).y = bufIn[inOffset +
-                        ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 5 * 2 * CFF_IMG_W)];
+        R0.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 0 * 2 * CFF_IMG_W)];
+        R1.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 1 * 2 * CFF_IMG_W)];
+        R2.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 2 * 2 * CFF_IMG_W)];
+        R3.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 3 * 2 * CFF_IMG_W)];
+        R4.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 4 * 2 * CFF_IMG_W)];
+        R5.y = bufIn[inOffset +
+                     ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 5 * 2 * CFF_IMG_W)];
     }
 
     if(me < CFF_IMG_W)
     {
-        (*R6).x = bufIn[inOffset + (me + 24 * CFF_IMG_W)];
-        (*R6).y = bufIn[inOffset + (me + 25 * CFF_IMG_W)];
+        R6.x = bufIn[inOffset + (me + 24 * CFF_IMG_W)];
+        R6.y = bufIn[inOffset + (me + 25 * CFF_IMG_W)];
 
-        (*R7).x = bufIn[inOffset + (me + 26 * CFF_IMG_W)];
+        R7.x = bufIn[inOffset + (me + 26 * CFF_IMG_W)];
 
 #ifdef CFF_IMG_SZ_28_28
-        (*R7).y = bufIn[inOffset + (me + 27 * CFF_IMG_W)];
+        R7.y = bufIn[inOffset + (me + 27 * CFF_IMG_W)];
 #else
-        (*R7).y = 0;
+        R7.y = 0;
 #endif
     }
 
@@ -2691,80 +2648,80 @@ __device__ void FwdPassIN(uint me,
         bufOut[outOffset + me] = float2(0, 0);
     }
 
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 0) % 17) * 32 + ((2 + me) % 32)]  = (*R0);
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 1) % 17) * 32 + ((2 + me) % 32)]  = (*R1);
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 2) % 17) * 32 + ((2 + me) % 32)]  = (*R2);
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 3) % 17) * 32 + ((2 + me) % 32)]  = (*R3);
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 4) % 17) * 32 + ((2 + me) % 32)]  = (*R4);
-    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 5) % 17) * 32 + ((2 + me) % 32)]  = (*R5);
-    bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 0) % 17) * 32 + ((2 + me) % 32)] = (*R6);
-    bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 1) % 17) * 32 + ((2 + me) % 32)] = (*R7);
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 0) % 17) * 32 + ((2 + me) % 32)]  = R0;
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 1) % 17) * 32 + ((2 + me) % 32)]  = R1;
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 2) % 17) * 32 + ((2 + me) % 32)]  = R2;
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 3) % 17) * 32 + ((2 + me) % 32)]  = R3;
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 4) % 17) * 32 + ((2 + me) % 32)]  = R4;
+    bufOut[outOffset + ((1 + 0 + (me / 32) * 6 + 5) % 17) * 32 + ((2 + me) % 32)]  = R5;
+    bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 0) % 17) * 32 + ((2 + me) % 32)] = R6;
+    bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 1) % 17) * 32 + ((2 + me) % 32)] = R7;
 }
 
-__device__ void FwdPassWE(uint me,
-               uint inOffset,
-               uint outOffset,
-               const float* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5,
-               float2* R6,
-               float2* R7)
+__device__ void FwdPassWE(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          const float* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5,
+                          float2& R6,
+                          float2& R7)
 {
 
     float* ldsf = (float*)bufOut;
 
     if(me < 25)
     {
-        (*R0).x  = bufIn[inOffset + me];
-        ldsf[me] = (*R0).x;
+        R0.x     = bufIn[inOffset + me];
+        ldsf[me] = R0.x;
     }
 
     __syncthreads();
 
-    (*R0) = float2(0, 0);
-    (*R1) = float2(0, 0);
-    (*R2) = float2(0, 0);
-    (*R3) = float2(0, 0);
-    (*R4) = float2(0, 0);
-    (*R5) = float2(0, 0);
-    (*R6) = float2(0, 0);
-    (*R7) = float2(0, 0);
+    R0 = float2(0, 0);
+    R1 = float2(0, 0);
+    R2 = float2(0, 0);
+    R3 = float2(0, 0);
+    R4 = float2(0, 0);
+    R5 = float2(0, 0);
+    R6 = float2(0, 0);
+    R7 = float2(0, 0);
 
 #ifdef CFF_BACKWARD
     if(me < 5)
     {
-        (*R0).x = ldsf[0 * 5 + me];
-        (*R0).y = ldsf[1 * 5 + me];
-        (*R1).x = ldsf[2 * 5 + me];
-        (*R1).y = ldsf[3 * 5 + me];
-        (*R2).x = ldsf[4 * 5 + me];
+        R0.x = ldsf[0 * 5 + me];
+        R0.y = ldsf[1 * 5 + me];
+        R1.x = ldsf[2 * 5 + me];
+        R1.y = ldsf[3 * 5 + me];
+        R2.x = ldsf[4 * 5 + me];
     }
 #else
     if(me < 5)
     {
-        (*R0).x = ldsf[4 * 5 + 4 - me];
-        (*R0).y = ldsf[3 * 5 + 4 - me];
-        (*R1).x = ldsf[2 * 5 + 4 - me];
-        (*R1).y = ldsf[1 * 5 + 4 - me];
-        (*R2).x = ldsf[0 * 5 + 4 - me];
+        R0.x = ldsf[4 * 5 + 4 - me];
+        R0.y = ldsf[3 * 5 + 4 - me];
+        R1.x = ldsf[2 * 5 + 4 - me];
+        R1.y = ldsf[1 * 5 + 4 - me];
+        R2.x = ldsf[0 * 5 + 4 - me];
     }
 #endif
 
     __syncthreads();
 
-    bufOut[outOffset + ((me / 32) * 8 + 0) * 32 + (me % 32)] = (*R0);
-    bufOut[outOffset + ((me / 32) * 8 + 1) * 32 + (me % 32)] = (*R1);
-    bufOut[outOffset + ((me / 32) * 8 + 2) * 32 + (me % 32)] = (*R2);
-    bufOut[outOffset + ((me / 32) * 8 + 3) * 32 + (me % 32)] = (*R3);
-    bufOut[outOffset + ((me / 32) * 8 + 4) * 32 + (me % 32)] = (*R4);
-    bufOut[outOffset + ((me / 32) * 8 + 5) * 32 + (me % 32)] = (*R5);
-    bufOut[outOffset + ((me / 32) * 8 + 6) * 32 + (me % 32)] = (*R6);
-    bufOut[outOffset + ((me / 32) * 8 + 7) * 32 + (me % 32)] = (*R7);
+    bufOut[outOffset + ((me / 32) * 8 + 0) * 32 + (me % 32)] = R0;
+    bufOut[outOffset + ((me / 32) * 8 + 1) * 32 + (me % 32)] = R1;
+    bufOut[outOffset + ((me / 32) * 8 + 2) * 32 + (me % 32)] = R2;
+    bufOut[outOffset + ((me / 32) * 8 + 3) * 32 + (me % 32)] = R3;
+    bufOut[outOffset + ((me / 32) * 8 + 4) * 32 + (me % 32)] = R4;
+    bufOut[outOffset + ((me / 32) * 8 + 5) * 32 + (me % 32)] = R5;
+    bufOut[outOffset + ((me / 32) * 8 + 6) * 32 + (me % 32)] = R6;
+    bufOut[outOffset + ((me / 32) * 8 + 7) * 32 + (me % 32)] = R7;
 
     if(me < 32)
     {
@@ -2772,120 +2729,120 @@ __device__ void FwdPassWE(uint me,
     }
 }
 
-__device__ void FwdPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void FwdPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 4)];
-    (*R2) = bufIn[inOffset + (me + 8)];
-    (*R3) = bufIn[inOffset + (me + 12)];
-    (*R4) = bufIn[inOffset + (me + 16)];
-    (*R5) = bufIn[inOffset + (me + 20)];
-    (*R6) = bufIn[inOffset + (me + 24)];
-    (*R7) = bufIn[inOffset + (me + 28)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 4)];
+    R2 = bufIn[inOffset + (me + 8)];
+    R3 = bufIn[inOffset + (me + 12)];
+    R4 = bufIn[inOffset + (me + 16)];
+    R5 = bufIn[inOffset + (me + 20)];
+    R6 = bufIn[inOffset + (me + 24)];
+    R7 = bufIn[inOffset + (me + 28)];
 
     FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0)] = (*R0);
-    bufOut[outOffset + (me * 8 + 1)] = (*R1);
-    bufOut[outOffset + (me * 8 + 2)] = (*R2);
-    bufOut[outOffset + (me * 8 + 3)] = (*R3);
-    bufOut[outOffset + (me * 8 + 4)] = (*R4);
-    bufOut[outOffset + (me * 8 + 5)] = (*R5);
-    bufOut[outOffset + (me * 8 + 6)] = (*R6);
-    bufOut[outOffset + (me * 8 + 7)] = (*R7);
+    bufOut[outOffset + (me * 8 + 0)] = R0;
+    bufOut[outOffset + (me * 8 + 1)] = R1;
+    bufOut[outOffset + (me * 8 + 2)] = R2;
+    bufOut[outOffset + (me * 8 + 3)] = R3;
+    bufOut[outOffset + (me * 8 + 4)] = R4;
+    bufOut[outOffset + (me * 8 + 5)] = R5;
+    bufOut[outOffset + (me * 8 + 6)] = R6;
+    bufOut[outOffset + (me * 8 + 7)] = R7;
 }
 
-__device__ void FwdPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void FwdPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0)];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 0)];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 8)];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 8)];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 16)];
-    (*R6) = bufIn[inOffset + (me * 2 + 1 + 16)];
-    (*R3) = bufIn[inOffset + (me * 2 + 0 + 24)];
-    (*R7) = bufIn[inOffset + (me * 2 + 1 + 24)];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 0)];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 8)];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 8)];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 16)];
+    R6 = bufIn[inOffset + (me * 2 + 1 + 16)];
+    R3 = bufIn[inOffset + (me * 2 + 0 + 24)];
+    R7 = bufIn[inOffset + (me * 2 + 1 + 24)];
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) - (W.y * (*R2).y);
-        TI      = (W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) - (W.y * R2.y);
+        TI   = (W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R3).x) - (W.y * (*R3).y);
-        TI      = (W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) - (W.y * R3.y);
+        TI   = (W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R6).x) - (W.y * (*R6).y);
-        TI      = (W.y * (*R6).x) + (W.x * (*R6).y);
-        (*R6).x = TR;
-        (*R6).y = TI;
+        TR   = (W.x * R6.x) - (W.y * R6.y);
+        TI   = (W.y * R6.x) + (W.x * R6.y);
+        R6.x = TR;
+        R6.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R7).x) - (W.y * (*R7).y);
-        TI      = (W.y * (*R7).x) + (W.x * (*R7).y);
-        (*R7).x = TR;
-        (*R7).y = TI;
+        TR   = (W.x * R7.x) - (W.y * R7.y);
+        TI   = (W.y * R7.x) + (W.x * R7.y);
+        R7.x = TR;
+        R7.y = TI;
     }
 
     FwdRad4B1(R0, R1, R2, R3);
@@ -2893,38 +2850,38 @@ __device__ void FwdPass1(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0);
-    bufOut[outOffset + (2 * me + 1 + 0)]  = (*R4);
-    bufOut[outOffset + (2 * me + 0 + 8)]  = (*R1);
-    bufOut[outOffset + (2 * me + 1 + 8)]  = (*R5);
-    bufOut[outOffset + (2 * me + 0 + 16)] = (*R2);
-    bufOut[outOffset + (2 * me + 1 + 16)] = (*R6);
-    bufOut[outOffset + (2 * me + 0 + 24)] = (*R3);
-    bufOut[outOffset + (2 * me + 1 + 24)] = (*R7);
+    bufOut[outOffset + (2 * me + 0 + 0)]  = R0;
+    bufOut[outOffset + (2 * me + 1 + 0)]  = R4;
+    bufOut[outOffset + (2 * me + 0 + 8)]  = R1;
+    bufOut[outOffset + (2 * me + 1 + 8)]  = R5;
+    bufOut[outOffset + (2 * me + 0 + 16)] = R2;
+    bufOut[outOffset + (2 * me + 1 + 16)] = R6;
+    bufOut[outOffset + (2 * me + 0 + 24)] = R3;
+    bufOut[outOffset + (2 * me + 1 + 24)] = R7;
 }
 
-__device__ void FwdPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5,
-               float2* R6,
-               float2* R7)
+__device__ void FwdPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5,
+                          float2& R6,
+                          float2& R7)
 {
-    (*R0) = bufIn[inOffset + (me + 1)];
-    (*R1) = bufIn[inOffset + (me + 5)];
-    (*R2) = bufIn[inOffset + (me + 9)];
-    (*R3) = bufIn[inOffset + (me + 13)];
-    (*R4) = bufIn[inOffset + (32 - (me + 1))];
-    (*R5) = bufIn[inOffset + (32 - (me + 5))];
-    (*R6) = bufIn[inOffset + (32 - (me + 9))];
-    (*R7) = bufIn[inOffset + (32 - (me + 13))];
+    R0 = bufIn[inOffset + (me + 1)];
+    R1 = bufIn[inOffset + (me + 5)];
+    R2 = bufIn[inOffset + (me + 9)];
+    R3 = bufIn[inOffset + (me + 13)];
+    R4 = bufIn[inOffset + (32 - (me + 1))];
+    R5 = bufIn[inOffset + (32 - (me + 5))];
+    R6 = bufIn[inOffset + (32 - (me + 9))];
+    R7 = bufIn[inOffset + (32 - (me + 13))];
 
     float2 dc;
     if(me < 1)
@@ -2934,23 +2891,15 @@ __device__ void FwdPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + 0 + (me + 1)] =
-        float2(((*R0).x + (*R4).x) * 0.5, +((*R0).y - (*R4).y) * 0.5);
-    bufOut[outOffset + 0 + (me + 5)] =
-        float2(((*R1).x + (*R5).x) * 0.5, +((*R1).y - (*R5).y) * 0.5);
-    bufOut[outOffset + 0 + (me + 9)] =
-        float2(((*R2).x + (*R6).x) * 0.5, +((*R2).y - (*R6).y) * 0.5);
-    bufOut[outOffset + 0 + (me + 13)] =
-        float2(((*R3).x + (*R7).x) * 0.5, +((*R3).y - (*R7).y) * 0.5);
+    bufOut[outOffset + 0 + (me + 1)]  = float2((R0.x + R4.x) * 0.5f, +(R0.y - R4.y) * 0.5f);
+    bufOut[outOffset + 0 + (me + 5)]  = float2((R1.x + R5.x) * 0.5f, +(R1.y - R5.y) * 0.5f);
+    bufOut[outOffset + 0 + (me + 9)]  = float2((R2.x + R6.x) * 0.5f, +(R2.y - R6.y) * 0.5f);
+    bufOut[outOffset + 0 + (me + 13)] = float2((R3.x + R7.x) * 0.5f, +(R3.y - R7.y) * 0.5f);
 
-    bufOut[outOffset + 17 + (me + 1)] =
-        float2(((*R0).y + (*R4).y) * 0.5, +(-(*R0).x + (*R4).x) * 0.5);
-    bufOut[outOffset + 17 + (me + 5)] =
-        float2(((*R1).y + (*R5).y) * 0.5, +(-(*R1).x + (*R5).x) * 0.5);
-    bufOut[outOffset + 17 + (me + 9)] =
-        float2(((*R2).y + (*R6).y) * 0.5, +(-(*R2).x + (*R6).x) * 0.5);
-    bufOut[outOffset + 17 + (me + 13)] =
-        float2(((*R3).y + (*R7).y) * 0.5, +(-(*R3).x + (*R7).x) * 0.5);
+    bufOut[outOffset + 17 + (me + 1)]  = float2((R0.y + R4.y) * 0.5f, +(-R0.x + R4.x) * 0.5f);
+    bufOut[outOffset + 17 + (me + 5)]  = float2((R1.y + R5.y) * 0.5f, +(-R1.x + R5.x) * 0.5f);
+    bufOut[outOffset + 17 + (me + 9)]  = float2((R2.y + R6.y) * 0.5f, +(-R2.x + R6.x) * 0.5f);
+    bufOut[outOffset + 17 + (me + 13)] = float2((R3.y + R7.y) * 0.5f, +(-R3.x + R7.x) * 0.5f);
 
     if(me < 1)
     {
@@ -2959,120 +2908,120 @@ __device__ void FwdPass1b(uint me,
     }
 }
 
-__device__ void FwdPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void FwdPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 17];
-    (*R1) = bufIn[inOffset + (me + 4) * 17];
-    (*R2) = bufIn[inOffset + (me + 8) * 17];
-    (*R3) = bufIn[inOffset + (me + 12) * 17];
-    (*R4) = bufIn[inOffset + (me + 16) * 17];
-    (*R5) = bufIn[inOffset + (me + 20) * 17];
-    (*R6) = bufIn[inOffset + (me + 24) * 17];
-    (*R7) = bufIn[inOffset + (me + 28) * 17];
+    R0 = bufIn[inOffset + (me + 0) * 17];
+    R1 = bufIn[inOffset + (me + 4) * 17];
+    R2 = bufIn[inOffset + (me + 8) * 17];
+    R3 = bufIn[inOffset + (me + 12) * 17];
+    R4 = bufIn[inOffset + (me + 16) * 17];
+    R5 = bufIn[inOffset + (me + 20) * 17];
+    R6 = bufIn[inOffset + (me + 24) * 17];
+    R7 = bufIn[inOffset + (me + 28) * 17];
 
     FwdRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0) * 17] = (*R0);
-    bufOut[outOffset + (me * 8 + 1) * 17] = (*R1);
-    bufOut[outOffset + (me * 8 + 2) * 17] = (*R2);
-    bufOut[outOffset + (me * 8 + 3) * 17] = (*R3);
-    bufOut[outOffset + (me * 8 + 4) * 17] = (*R4);
-    bufOut[outOffset + (me * 8 + 5) * 17] = (*R5);
-    bufOut[outOffset + (me * 8 + 6) * 17] = (*R6);
-    bufOut[outOffset + (me * 8 + 7) * 17] = (*R7);
+    bufOut[outOffset + (me * 8 + 0) * 17] = R0;
+    bufOut[outOffset + (me * 8 + 1) * 17] = R1;
+    bufOut[outOffset + (me * 8 + 2) * 17] = R2;
+    bufOut[outOffset + (me * 8 + 3) * 17] = R3;
+    bufOut[outOffset + (me * 8 + 4) * 17] = R4;
+    bufOut[outOffset + (me * 8 + 5) * 17] = R5;
+    bufOut[outOffset + (me * 8 + 6) * 17] = R6;
+    bufOut[outOffset + (me * 8 + 7) * 17] = R7;
 }
 
-__device__ void FwdPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void FwdPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
-    (*R6) = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
-    (*R3) = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
-    (*R7) = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
+    R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
+    R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
+    R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) - (W.y * (*R1).y);
-        TI      = (W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) - (W.y * R1.y);
+        TI   = (W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) - (W.y * (*R2).y);
-        TI      = (W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) - (W.y * R2.y);
+        TI   = (W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R3).x) - (W.y * (*R3).y);
-        TI      = (W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) - (W.y * R3.y);
+        TI   = (W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) - (W.y * (*R5).y);
-        TI      = (W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) - (W.y * R5.y);
+        TI   = (W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R6).x) - (W.y * (*R6).y);
-        TI      = (W.y * (*R6).x) + (W.x * (*R6).y);
-        (*R6).x = TR;
-        (*R6).y = TI;
+        TR   = (W.x * R6.x) - (W.y * R6.y);
+        TI   = (W.y * R6.x) + (W.x * R6.y);
+        R6.x = TR;
+        R6.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R7).x) - (W.y * (*R7).y);
-        TI      = (W.y * (*R7).x) + (W.x * (*R7).y);
-        (*R7).x = TR;
-        (*R7).y = TI;
+        TR   = (W.x * R7.x) - (W.y * R7.y);
+        TI   = (W.y * R7.x) + (W.x * R7.y);
+        R7.x = TR;
+        R7.y = TI;
     }
 
     FwdRad4B1(R0, R1, R2, R3);
@@ -3080,61 +3029,62 @@ __device__ void FwdPass3(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = (*R0);
-    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = (*R4);
-    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = (*R1);
-    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = (*R5);
-    bufOut[outOffset + (2 * me + 0 + 16) * 17] = (*R2);
-    bufOut[outOffset + (2 * me + 1 + 16) * 17] = (*R6);
-    bufOut[outOffset + (2 * me + 0 + 24) * 17] = (*R3);
-    bufOut[outOffset + (2 * me + 1 + 24) * 17] = (*R7);
+    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0;
+    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4;
+    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1;
+    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5;
+    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2;
+    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6;
+    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3;
+    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
 }
 
-__device__ void FwdPass4(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void FwdPass4(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0 * 64)];
-    (*R1) = bufIn[inOffset + (me + 1 * 64)];
-    (*R2) = bufIn[inOffset + (me + 2 * 64)];
-    (*R3) = bufIn[inOffset + (me + 3 * 64)];
-    (*R4) = bufIn[inOffset + (me + 4 * 64)];
-    (*R5) = bufIn[inOffset + (me + 5 * 64)];
-    (*R6) = bufIn[inOffset + (me + 6 * 64)];
-    (*R7) = bufIn[inOffset + (me + 7 * 64)];
+    R0 = bufIn[inOffset + (me + 0 * 64)];
+    R1 = bufIn[inOffset + (me + 1 * 64)];
+    R2 = bufIn[inOffset + (me + 2 * 64)];
+    R3 = bufIn[inOffset + (me + 3 * 64)];
+    R4 = bufIn[inOffset + (me + 4 * 64)];
+    R5 = bufIn[inOffset + (me + 5 * 64)];
+    R6 = bufIn[inOffset + (me + 6 * 64)];
+    R7 = bufIn[inOffset + (me + 7 * 64)];
 
-    bufOut[outOffset + (me + 0 * 64)] = (*R0);
-    bufOut[outOffset + (me + 1 * 64)] = (*R1);
-    bufOut[outOffset + (me + 2 * 64)] = (*R2);
-    bufOut[outOffset + (me + 3 * 64)] = (*R3);
-    bufOut[outOffset + (me + 4 * 64)] = (*R4);
-    bufOut[outOffset + (me + 5 * 64)] = (*R5);
-    bufOut[outOffset + (me + 6 * 64)] = (*R6);
-    bufOut[outOffset + (me + 7 * 64)] = (*R7);
+    bufOut[outOffset + (me + 0 * 64)] = R0;
+    bufOut[outOffset + (me + 1 * 64)] = R1;
+    bufOut[outOffset + (me + 2 * 64)] = R2;
+    bufOut[outOffset + (me + 3 * 64)] = R3;
+    bufOut[outOffset + (me + 4 * 64)] = R4;
+    bufOut[outOffset + (me + 5 * 64)] = R5;
+    bufOut[outOffset + (me + 6 * 64)] = R6;
+    bufOut[outOffset + (me + 7 * 64)] = R7;
 
     if(me < 32)
     {
-        (*R0)                          = bufIn[inOffset + (512 + me)];
-        bufOut[outOffset + (512 + me)] = (*R0);
+        R0                             = bufIn[inOffset + (512 + me)];
+        bufOut[outOffset + (512 + me)] = R0;
     }
 }
 
-extern "C" __global__ __launch_bounds__(64) void
-MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(64) void MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn,
+                                                    float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[544];
 
@@ -3146,40 +3096,38 @@ MIOpenConvFFT_fwd_in(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H;
     lwbOut = gbOut + batch * 544;
 
-    FwdPassIN(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPassIN(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass0(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass1(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
-    FwdPass1b(
-        me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
-    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
     if(me < 4)
     {
-        FwdPass2(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        FwdPass2(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        FwdPass3(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
     }
 
-    FwdPass4(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
 }
 
-extern "C" __global__ __launch_bounds__(64) void
-MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(64) void MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn,
+                                                    float2* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[544];
 
@@ -3196,54 +3144,51 @@ MIOpenConvFFT_fwd_we(const float* __restrict__ gbIn, float2* __restrict__ gbOut)
 
     lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
 
-    FwdPassWE(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPassWE(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass0(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass1(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
-    FwdPass1b(
-        me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
-    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
     if(me < 4)
     {
-        FwdPass2(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        FwdPass2(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        FwdPass3(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
     }
 
-    FwdPass4(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
 }
 
 #if defined(CFF_TRANSP_IN_MOD16)
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 34;
-    uint bd = batch / 34;
+    unsigned int bm = batch % 34;
+    unsigned int bd = batch / 34;
 
     iOffset = bm * 16 + bd * 544 * 16;
     oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
@@ -3262,41 +3207,41 @@ MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 
 #else
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    uint me = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 17;
-    uint bd = batch / 17;
+    unsigned int bm = batch % 17;
+    unsigned int bd = batch / 17;
 
     iOffset = bm * 32 + bd * 544 * 32;
     oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 32 + bd * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
     __syncthreads();
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                              = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_BATCH + 64) +
                t * 8 * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
     }
@@ -3306,23 +3251,23 @@ MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 
 #if defined(CFF_TRANSP_WT_MOD16)
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 34;
-    uint bd = batch / 34;
+    unsigned int bm = batch % 34;
+    unsigned int bd = batch / 34;
 
     iOffset = 544 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 544 * 16;
     oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
@@ -3342,42 +3287,42 @@ MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 
 #else
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    uint me = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 17;
-    uint bd = batch / 17;
+    unsigned int bm = batch % 17;
+    unsigned int bd = batch / 17;
 
     iOffset = 544 * CFF_CHANNELS * CFF_BATCH + bm * 32 + bd * 544 * 32;
     oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
               bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 32 + bd * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
     __syncthreads();
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                                = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_NFILTER + 64) +
                t * 8 * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
     }
@@ -3387,23 +3332,23 @@ MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 
 #if defined(CFF_TRANSP_OT_MOD16)
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 34;
-    uint bd = batch / 34;
+    unsigned int bm = batch % 34;
+    unsigned int bd = batch / 34;
 
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
     oOffset = CFF_HALFW + bm * 16 + bd * 544 * 16;
@@ -3422,31 +3367,31 @@ MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 
 #else
 
-extern "C" __global__ __launch_bounds__(256) void
-MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+extern "C" __global__
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    uint me = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    uint iOffset;
-    uint oOffset;
+    unsigned int iOffset;
+    unsigned int oOffset;
     const float2* lwbIn;
     float2* lwbOut;
 
     float2 R0;
 
-    uint bm = batch % 17;
-    uint bd = batch / 17;
+    unsigned int bm = batch % 17;
+    unsigned int bd = batch / 17;
 
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 32 + bd * 32;
     oOffset = CFF_HALFW + bm * 32 + bd * 544 * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
         R0 = lwbIn[(me % 32) + (me / 32) * (CFF_NFILTER * CFF_BATCH + 64) +
                    t * 8 * (CFF_NFILTER * CFF_BATCH + 64)];
@@ -3455,169 +3400,169 @@ MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 
     __syncthreads();
 
-    for(uint t = 0; t < 4; t++)
+    for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                                = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * 544 + t * 8 * 544] = R0;
     }
 }
 
 #endif
 
-__device__ void InvPassA(uint me,
-              uint inOffset,
-              uint outOffset,
-              const float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void InvPassA(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         const float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0 * 64)];
-    (*R1) = bufIn[inOffset + (me + 1 * 64)];
-    (*R2) = bufIn[inOffset + (me + 2 * 64)];
-    (*R3) = bufIn[inOffset + (me + 3 * 64)];
-    (*R4) = bufIn[inOffset + (me + 4 * 64)];
-    (*R5) = bufIn[inOffset + (me + 5 * 64)];
-    (*R6) = bufIn[inOffset + (me + 6 * 64)];
-    (*R7) = bufIn[inOffset + (me + 7 * 64)];
+    R0 = bufIn[inOffset + (me + 0 * 64)];
+    R1 = bufIn[inOffset + (me + 1 * 64)];
+    R2 = bufIn[inOffset + (me + 2 * 64)];
+    R3 = bufIn[inOffset + (me + 3 * 64)];
+    R4 = bufIn[inOffset + (me + 4 * 64)];
+    R5 = bufIn[inOffset + (me + 5 * 64)];
+    R6 = bufIn[inOffset + (me + 6 * 64)];
+    R7 = bufIn[inOffset + (me + 7 * 64)];
 
-    bufOut[outOffset + (me + 0 * 64)] = (*R0);
-    bufOut[outOffset + (me + 1 * 64)] = (*R1);
-    bufOut[outOffset + (me + 2 * 64)] = (*R2);
-    bufOut[outOffset + (me + 3 * 64)] = (*R3);
-    bufOut[outOffset + (me + 4 * 64)] = (*R4);
-    bufOut[outOffset + (me + 5 * 64)] = (*R5);
-    bufOut[outOffset + (me + 6 * 64)] = (*R6);
-    bufOut[outOffset + (me + 7 * 64)] = (*R7);
+    bufOut[outOffset + (me + 0 * 64)] = R0;
+    bufOut[outOffset + (me + 1 * 64)] = R1;
+    bufOut[outOffset + (me + 2 * 64)] = R2;
+    bufOut[outOffset + (me + 3 * 64)] = R3;
+    bufOut[outOffset + (me + 4 * 64)] = R4;
+    bufOut[outOffset + (me + 5 * 64)] = R5;
+    bufOut[outOffset + (me + 6 * 64)] = R6;
+    bufOut[outOffset + (me + 7 * 64)] = R7;
 
     if(me < 32)
     {
-        (*R0)                          = bufIn[inOffset + (512 + me)];
-        bufOut[outOffset + (512 + me)] = (*R0);
+        R0                             = bufIn[inOffset + (512 + me)];
+        bufOut[outOffset + (512 + me)] = R0;
     }
 }
 
-__device__ void InvPass0(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void InvPass0(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0) * 17];
-    (*R1) = bufIn[inOffset + (me + 4) * 17];
-    (*R2) = bufIn[inOffset + (me + 8) * 17];
-    (*R3) = bufIn[inOffset + (me + 12) * 17];
-    (*R4) = bufIn[inOffset + (me + 16) * 17];
-    (*R5) = bufIn[inOffset + (me + 20) * 17];
-    (*R6) = bufIn[inOffset + (me + 24) * 17];
-    (*R7) = bufIn[inOffset + (me + 28) * 17];
+    R0 = bufIn[inOffset + (me + 0) * 17];
+    R1 = bufIn[inOffset + (me + 4) * 17];
+    R2 = bufIn[inOffset + (me + 8) * 17];
+    R3 = bufIn[inOffset + (me + 12) * 17];
+    R4 = bufIn[inOffset + (me + 16) * 17];
+    R5 = bufIn[inOffset + (me + 20) * 17];
+    R6 = bufIn[inOffset + (me + 24) * 17];
+    R7 = bufIn[inOffset + (me + 28) * 17];
 
     InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0) * 17] = (*R0);
-    bufOut[outOffset + (me * 8 + 1) * 17] = (*R1);
-    bufOut[outOffset + (me * 8 + 2) * 17] = (*R2);
-    bufOut[outOffset + (me * 8 + 3) * 17] = (*R3);
-    bufOut[outOffset + (me * 8 + 4) * 17] = (*R4);
-    bufOut[outOffset + (me * 8 + 5) * 17] = (*R5);
-    bufOut[outOffset + (me * 8 + 6) * 17] = (*R6);
-    bufOut[outOffset + (me * 8 + 7) * 17] = (*R7);
+    bufOut[outOffset + (me * 8 + 0) * 17] = R0;
+    bufOut[outOffset + (me * 8 + 1) * 17] = R1;
+    bufOut[outOffset + (me * 8 + 2) * 17] = R2;
+    bufOut[outOffset + (me * 8 + 3) * 17] = R3;
+    bufOut[outOffset + (me * 8 + 4) * 17] = R4;
+    bufOut[outOffset + (me * 8 + 5) * 17] = R5;
+    bufOut[outOffset + (me * 8 + 6) * 17] = R6;
+    bufOut[outOffset + (me * 8 + 7) * 17] = R7;
 }
 
-__device__ void InvPass1(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void InvPass1(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
-    (*R6) = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
-    (*R3) = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
-    (*R7) = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 8) * 17];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 8) * 17];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 16) * 17];
+    R6 = bufIn[inOffset + (me * 2 + 1 + 16) * 17];
+    R3 = bufIn[inOffset + (me * 2 + 0 + 24) * 17];
+    R7 = bufIn[inOffset + (me * 2 + 1 + 24) * 17];
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) + (W.y * (*R2).y);
-        TI      = -(W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) + (W.y * R2.y);
+        TI   = -(W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R3).x) + (W.y * (*R3).y);
-        TI      = -(W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) + (W.y * R3.y);
+        TI   = -(W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R6).x) + (W.y * (*R6).y);
-        TI      = -(W.y * (*R6).x) + (W.x * (*R6).y);
-        (*R6).x = TR;
-        (*R6).y = TI;
+        TR   = (W.x * R6.x) + (W.y * R6.y);
+        TI   = -(W.y * R6.x) + (W.x * R6.y);
+        R6.x = TR;
+        R6.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R7).x) + (W.y * (*R7).y);
-        TI      = -(W.y * (*R7).x) + (W.x * (*R7).y);
-        (*R7).x = TR;
-        (*R7).y = TI;
+        TR   = (W.x * R7.x) + (W.y * R7.y);
+        TI   = -(W.y * R7.x) + (W.x * R7.y);
+        R7.x = TR;
+        R7.y = TI;
     }
 
     InvRad4B1(R0, R1, R2, R3);
@@ -3625,48 +3570,48 @@ __device__ void InvPass1(uint me,
 
     __syncthreads();
 
-    (*R0) = (*R0) * 3.1250000000000000e-02f;
-    (*R4) = (*R4) * 3.1250000000000000e-02f;
-    (*R1) = (*R1) * 3.1250000000000000e-02f;
-    (*R5) = (*R5) * 3.1250000000000000e-02f;
-    (*R2) = (*R2) * 3.1250000000000000e-02f;
-    (*R6) = (*R6) * 3.1250000000000000e-02f;
-    (*R3) = (*R3) * 3.1250000000000000e-02f;
-    (*R7) = (*R7) * 3.1250000000000000e-02f;
+    R0 = R0 * 3.1250000000000000e-02f;
+    R4 = R4 * 3.1250000000000000e-02f;
+    R1 = R1 * 3.1250000000000000e-02f;
+    R5 = R5 * 3.1250000000000000e-02f;
+    R2 = R2 * 3.1250000000000000e-02f;
+    R6 = R6 * 3.1250000000000000e-02f;
+    R3 = R3 * 3.1250000000000000e-02f;
+    R7 = R7 * 3.1250000000000000e-02f;
 
-    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = (*R0);
-    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = (*R4);
-    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = (*R1);
-    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = (*R5);
-    bufOut[outOffset + (2 * me + 0 + 16) * 17] = (*R2);
-    bufOut[outOffset + (2 * me + 1 + 16) * 17] = (*R6);
-    bufOut[outOffset + (2 * me + 0 + 24) * 17] = (*R3);
-    bufOut[outOffset + (2 * me + 1 + 24) * 17] = (*R7);
+    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0;
+    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4;
+    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1;
+    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5;
+    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2;
+    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6;
+    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3;
+    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
 }
 
-__device__ void InvPass1b(uint me,
-               uint inOffset,
-               uint outOffset,
-               float2* bufIn,
-               float2* bufOut,
-               float2* R0,
-               float2* R1,
-               float2* R2,
-               float2* R3,
-               float2* R4,
-               float2* R5,
-               float2* R6,
-               float2* R7)
+__device__ void InvPass1b(unsigned int me,
+                          unsigned int inOffset,
+                          unsigned int outOffset,
+                          float2* bufIn,
+                          float2* bufOut,
+                          float2& R0,
+                          float2& R1,
+                          float2& R2,
+                          float2& R3,
+                          float2& R4,
+                          float2& R5,
+                          float2& R6,
+                          float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + 0 + (me + 1)];
-    (*R1) = bufIn[inOffset + 0 + (me + 5)];
-    (*R2) = bufIn[inOffset + 0 + (me + 9)];
-    (*R3) = bufIn[inOffset + 0 + (me + 13)];
-    (*R4) = bufIn[inOffset + 17 + (me + 1)];
-    (*R5) = bufIn[inOffset + 17 + (me + 5)];
-    (*R6) = bufIn[inOffset + 17 + (me + 9)];
-    (*R7) = bufIn[inOffset + 17 + (me + 13)];
+    R0 = bufIn[inOffset + 0 + (me + 1)];
+    R1 = bufIn[inOffset + 0 + (me + 5)];
+    R2 = bufIn[inOffset + 0 + (me + 9)];
+    R3 = bufIn[inOffset + 0 + (me + 13)];
+    R4 = bufIn[inOffset + 17 + (me + 1)];
+    R5 = bufIn[inOffset + 17 + (me + 5)];
+    R6 = bufIn[inOffset + 17 + (me + 9)];
+    R7 = bufIn[inOffset + 17 + (me + 13)];
 
     float2 dc{};
     if(me < 1)
@@ -3677,14 +3622,14 @@ __device__ void InvPass1b(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (32 - (me + 1))]  = float2((*R0).x + (*R4).y, -(*R0).y + (*R4).x);
-    bufOut[outOffset + (32 - (me + 5))]  = float2((*R1).x + (*R5).y, -(*R1).y + (*R5).x);
-    bufOut[outOffset + (32 - (me + 9))]  = float2((*R2).x + (*R6).y, -(*R2).y + (*R6).x);
-    bufOut[outOffset + (32 - (me + 13))] = float2((*R3).x + (*R7).y, -(*R3).y + (*R7).x);
-    bufOut[outOffset + (me + 1)]         = float2((*R0).x - (*R4).y, (*R0).y + (*R4).x);
-    bufOut[outOffset + (me + 5)]         = float2((*R1).x - (*R5).y, (*R1).y + (*R5).x);
-    bufOut[outOffset + (me + 9)]         = float2((*R2).x - (*R6).y, (*R2).y + (*R6).x);
-    bufOut[outOffset + (me + 13)]        = float2((*R3).x - (*R7).y, (*R3).y + (*R7).x);
+    bufOut[outOffset + (32 - (me + 1))]  = float2(R0.x + R4.y, -R0.y + R4.x);
+    bufOut[outOffset + (32 - (me + 5))]  = float2(R1.x + R5.y, -R1.y + R5.x);
+    bufOut[outOffset + (32 - (me + 9))]  = float2(R2.x + R6.y, -R2.y + R6.x);
+    bufOut[outOffset + (32 - (me + 13))] = float2(R3.x + R7.y, -R3.y + R7.x);
+    bufOut[outOffset + (me + 1)]         = float2(R0.x - R4.y, R0.y + R4.x);
+    bufOut[outOffset + (me + 5)]         = float2(R1.x - R5.y, R1.y + R5.x);
+    bufOut[outOffset + (me + 9)]         = float2(R2.x - R6.y, R2.y + R6.x);
+    bufOut[outOffset + (me + 13)]        = float2(R3.x - R7.y, R3.y + R7.x);
 
     if(me < 1)
     {
@@ -3692,120 +3637,120 @@ __device__ void InvPass1b(uint me,
     }
 }
 
-__device__ void InvPass2(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void InvPass2(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me + 0)];
-    (*R1) = bufIn[inOffset + (me + 4)];
-    (*R2) = bufIn[inOffset + (me + 8)];
-    (*R3) = bufIn[inOffset + (me + 12)];
-    (*R4) = bufIn[inOffset + (me + 16)];
-    (*R5) = bufIn[inOffset + (me + 20)];
-    (*R6) = bufIn[inOffset + (me + 24)];
-    (*R7) = bufIn[inOffset + (me + 28)];
+    R0 = bufIn[inOffset + (me + 0)];
+    R1 = bufIn[inOffset + (me + 4)];
+    R2 = bufIn[inOffset + (me + 8)];
+    R3 = bufIn[inOffset + (me + 12)];
+    R4 = bufIn[inOffset + (me + 16)];
+    R5 = bufIn[inOffset + (me + 20)];
+    R6 = bufIn[inOffset + (me + 24)];
+    R7 = bufIn[inOffset + (me + 28)];
 
     InvRad8B1(R0, R1, R2, R3, R4, R5, R6, R7);
 
     __syncthreads();
 
-    bufOut[outOffset + (me * 8 + 0)] = (*R0);
-    bufOut[outOffset + (me * 8 + 1)] = (*R1);
-    bufOut[outOffset + (me * 8 + 2)] = (*R2);
-    bufOut[outOffset + (me * 8 + 3)] = (*R3);
-    bufOut[outOffset + (me * 8 + 4)] = (*R4);
-    bufOut[outOffset + (me * 8 + 5)] = (*R5);
-    bufOut[outOffset + (me * 8 + 6)] = (*R6);
-    bufOut[outOffset + (me * 8 + 7)] = (*R7);
+    bufOut[outOffset + (me * 8 + 0)] = R0;
+    bufOut[outOffset + (me * 8 + 1)] = R1;
+    bufOut[outOffset + (me * 8 + 2)] = R2;
+    bufOut[outOffset + (me * 8 + 3)] = R3;
+    bufOut[outOffset + (me * 8 + 4)] = R4;
+    bufOut[outOffset + (me * 8 + 5)] = R5;
+    bufOut[outOffset + (me * 8 + 6)] = R6;
+    bufOut[outOffset + (me * 8 + 7)] = R7;
 }
 
-__device__ void InvPass3(uint me,
-              uint inOffset,
-              uint outOffset,
-              float2* bufIn,
-              float2* bufOut,
-              float2* R0,
-              float2* R1,
-              float2* R2,
-              float2* R3,
-              float2* R4,
-              float2* R5,
-              float2* R6,
-              float2* R7)
+__device__ void InvPass3(unsigned int me,
+                         unsigned int inOffset,
+                         unsigned int outOffset,
+                         float2* bufIn,
+                         float2* bufOut,
+                         float2& R0,
+                         float2& R1,
+                         float2& R2,
+                         float2& R3,
+                         float2& R4,
+                         float2& R5,
+                         float2& R6,
+                         float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + (me * 2 + 0 + 0)];
-    (*R4) = bufIn[inOffset + (me * 2 + 1 + 0)];
-    (*R1) = bufIn[inOffset + (me * 2 + 0 + 8)];
-    (*R5) = bufIn[inOffset + (me * 2 + 1 + 8)];
-    (*R2) = bufIn[inOffset + (me * 2 + 0 + 16)];
-    (*R6) = bufIn[inOffset + (me * 2 + 1 + 16)];
-    (*R3) = bufIn[inOffset + (me * 2 + 0 + 24)];
-    (*R7) = bufIn[inOffset + (me * 2 + 1 + 24)];
+    R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
+    R4 = bufIn[inOffset + (me * 2 + 1 + 0)];
+    R1 = bufIn[inOffset + (me * 2 + 0 + 8)];
+    R5 = bufIn[inOffset + (me * 2 + 1 + 8)];
+    R2 = bufIn[inOffset + (me * 2 + 0 + 16)];
+    R6 = bufIn[inOffset + (me * 2 + 1 + 16)];
+    R3 = bufIn[inOffset + (me * 2 + 0 + 24)];
+    R7 = bufIn[inOffset + (me * 2 + 1 + 24)];
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R1).x) + (W.y * (*R1).y);
-        TI      = -(W.y * (*R1).x) + (W.x * (*R1).y);
-        (*R1).x = TR;
-        (*R1).y = TI;
+        TR   = (W.x * R1.x) + (W.y * R1.y);
+        TI   = -(W.y * R1.x) + (W.x * R1.y);
+        R1.x = TR;
+        R1.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R2).x) + (W.y * (*R2).y);
-        TI      = -(W.y * (*R2).x) + (W.x * (*R2).y);
-        (*R2).x = TR;
-        (*R2).y = TI;
+        TR   = (W.x * R2.x) + (W.y * R2.y);
+        TI   = -(W.y * R2.x) + (W.x * R2.y);
+        R2.x = TR;
+        R2.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 0) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R3).x) + (W.y * (*R3).y);
-        TI      = -(W.y * (*R3).x) + (W.x * (*R3).y);
-        (*R3).x = TR;
-        (*R3).y = TI;
+        TR   = (W.x * R3.x) + (W.y * R3.y);
+        TI   = -(W.y * R3.x) + (W.x * R3.y);
+        R3.x = TR;
+        R3.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 0];
         float TR, TI;
-        TR      = (W.x * (*R5).x) + (W.y * (*R5).y);
-        TI      = -(W.y * (*R5).x) + (W.x * (*R5).y);
-        (*R5).x = TR;
-        (*R5).y = TI;
+        TR   = (W.x * R5.x) + (W.y * R5.y);
+        TI   = -(W.y * R5.x) + (W.x * R5.y);
+        R5.x = TR;
+        R5.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 1];
         float TR, TI;
-        TR      = (W.x * (*R6).x) + (W.y * (*R6).y);
-        TI      = -(W.y * (*R6).x) + (W.x * (*R6).y);
-        (*R6).x = TR;
-        (*R6).y = TI;
+        TR   = (W.x * R6.x) + (W.y * R6.y);
+        TI   = -(W.y * R6.x) + (W.x * R6.y);
+        R6.x = TR;
+        R6.y = TI;
     }
 
     {
         float2 W = twiddles[7 + 3 * ((2 * me + 1) % 8) + 2];
         float TR, TI;
-        TR      = (W.x * (*R7).x) + (W.y * (*R7).y);
-        TI      = -(W.y * (*R7).x) + (W.x * (*R7).y);
-        (*R7).x = TR;
-        (*R7).y = TI;
+        TR   = (W.x * R7.x) + (W.y * R7.y);
+        TI   = -(W.y * R7.x) + (W.x * R7.y);
+        R7.x = TR;
+        R7.y = TI;
     }
 
     InvRad4B1(R0, R1, R2, R3);
@@ -3813,88 +3758,83 @@ __device__ void InvPass3(uint me,
 
     __syncthreads();
 
-    bufOut[outOffset + (2 * me + 0 + 0)]  = (*R0) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 0)]  = (*R4) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 8)]  = (*R1) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 8)]  = (*R5) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 16)] = (*R2) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 16)] = (*R6) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 0 + 24)] = (*R3) * 3.1250000000000000e-02f;
-    bufOut[outOffset + (2 * me + 1 + 24)] = (*R7) * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 0)]  = R0 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 0)]  = R4 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 8)]  = R1 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 8)]  = R5 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 16)] = R2 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 16)] = R6 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 24)] = R3 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 24)] = R7 * 3.1250000000000000e-02f;
 }
 
-__device__ void InvPassOUT(uint me,
-                uint inOffset,
-                uint outOffset,
-                float2* bufIn,
-                float* bufOut,
-                float2* R0,
-                float2* R1,
-                float2* R2,
-                float2* R3,
-                float2* R4,
-                float2* R5,
-                float2* R6,
-                float2* R7)
+__device__ void InvPassOUT(unsigned int me,
+                           unsigned int inOffset,
+                           unsigned int outOffset,
+                           float2* bufIn,
+                           float* bufOut,
+                           float2& R0,
+                           float2& R1,
+                           float2& R2,
+                           float2& R3,
+                           float2& R4,
+                           float2& R5,
+                           float2& R6,
+                           float2& R7)
 {
 
-    (*R0) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 0) % 16) * 32 + ((4 + me) % 32)];
-    (*R1) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 1) % 16) * 32 + ((4 + me) % 32)];
-    (*R2) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 2) % 16) * 32 + ((4 + me) % 32)];
-    (*R3) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 3) % 16) * 32 + ((4 + me) % 32)];
-    (*R4) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 4) % 16) * 32 + ((4 + me) % 32)];
-    (*R5) = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 5) % 16) * 32 + ((4 + me) % 32)];
-    (*R6) = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 0) % 16) * 32 + ((4 + me) % 32)];
-    (*R7) = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 1) % 16) * 32 + ((4 + me) % 32)];
+    R0 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 0) % 16) * 32 + ((4 + me) % 32)];
+    R1 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 1) % 16) * 32 + ((4 + me) % 32)];
+    R2 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 2) % 16) * 32 + ((4 + me) % 32)];
+    R3 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 3) % 16) * 32 + ((4 + me) % 32)];
+    R4 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 4) % 16) * 32 + ((4 + me) % 32)];
+    R5 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 5) % 16) * 32 + ((4 + me) % 32)];
+    R6 = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 0) % 16) * 32 + ((4 + me) % 32)];
+    R7 = bufIn[inOffset + ((2 + 12 + (me / 32) * 2 + 1) % 16) * 32 + ((4 + me) % 32)];
 
     __syncthreads();
 
     if((me % 32) < CFF_IMG_W)
     {
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 0 * 2 * CFF_IMG_W)] =
-            (*R0).x;
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 1 * 2 * CFF_IMG_W)] =
-            (*R1).x;
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 2 * 2 * CFF_IMG_W)] =
-            (*R2).x;
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 3 * 2 * CFF_IMG_W)] =
-            (*R3).x;
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 4 * 2 * CFF_IMG_W)] =
-            (*R4).x;
-        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 5 * 2 * CFF_IMG_W)] =
-            (*R5).x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 0 * 2 * CFF_IMG_W)] = R0.x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 1 * 2 * CFF_IMG_W)] = R1.x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 2 * 2 * CFF_IMG_W)] = R2.x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 3 * 2 * CFF_IMG_W)] = R3.x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 4 * 2 * CFF_IMG_W)] = R4.x;
+        bufOut[outOffset + ((me / 32) * 12 * CFF_IMG_W + (me % 32) + 0 + 5 * 2 * CFF_IMG_W)] = R5.x;
 
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 0 * 2 * CFF_IMG_W)] = (*R0).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 0 * 2 * CFF_IMG_W)] = R0.y;
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 1 * 2 * CFF_IMG_W)] = (*R1).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 1 * 2 * CFF_IMG_W)] = R1.y;
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 2 * 2 * CFF_IMG_W)] = (*R2).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 2 * 2 * CFF_IMG_W)] = R2.y;
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 3 * 2 * CFF_IMG_W)] = (*R3).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 3 * 2 * CFF_IMG_W)] = R3.y;
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 4 * 2 * CFF_IMG_W)] = (*R4).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 4 * 2 * CFF_IMG_W)] = R4.y;
         bufOut[outOffset +
-               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 5 * 2 * CFF_IMG_W)] = (*R5).y;
+               ((me / 32) * 12 * CFF_IMG_W + (me % 32) + CFF_IMG_W + 5 * 2 * CFF_IMG_W)] = R5.y;
     }
 
     if(me < CFF_IMG_W)
     {
-        bufOut[outOffset + (me + 24 * CFF_IMG_W)] = (*R6).x;
-        bufOut[outOffset + (me + 25 * CFF_IMG_W)] = (*R6).y;
+        bufOut[outOffset + (me + 24 * CFF_IMG_W)] = R6.x;
+        bufOut[outOffset + (me + 25 * CFF_IMG_W)] = R6.y;
 
-        bufOut[outOffset + (me + 26 * CFF_IMG_W)] = (*R7).x;
+        bufOut[outOffset + (me + 26 * CFF_IMG_W)] = R7.x;
 #ifdef CFF_IMG_SZ_28_28
-        bufOut[outOffset + (me + 27 * CFF_IMG_W)] = (*R7).y;
+        bufOut[outOffset + (me + 27 * CFF_IMG_W)] = R7.y;
 #endif
     }
 }
 
-extern "C" __global__ __launch_bounds__(64) void
-MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut)
+extern "C" __global__
+    __launch_bounds__(64) void MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn,
+                                                     float* __restrict__ gbOut)
 {
-    uint me    = threadIdx.x;
-    uint batch = blockIdx.x;
+    unsigned int me    = threadIdx.x;
+    unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[544];
 
@@ -3906,33 +3846,30 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
     lwbIn  = CFF_HALFW + gbIn + batch * 544;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H;
 
-    InvPassA(me, 0, 0, lwbIn, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
-    InvPass0(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPass0(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    InvPass1(me % 4, (me / 4), (me / 4), lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPass1(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
 
     if(me < 4)
     {
-        InvPass0(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        InvPass0(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
-        InvPass1(me % 4, 16, 16, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+        InvPass1(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
         __syncthreads();
     }
 
     __syncthreads();
-    InvPass1b(
-        me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPass1b(me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    InvPass2(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPass2(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    InvPass3(
-        me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPass3(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
     __syncthreads();
-    InvPassOUT(me, 0, 0, lds, lwbOut, &R0, &R1, &R2, &R3, &R4, &R5, &R6, &R7);
+    InvPassOUT(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
 }
 
 // =================================================================================================
@@ -3966,20 +3903,18 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
 #define LS_PERP_B (MT_1J / NL_PERP_B)
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK)
-#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK)
-#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK)
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK)
+#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK)
+#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK)
 
 /* data types */
 #define TYPE_A float2
 #define TYPE_B float2
 #define TYPE_C float2
-//#define TYPE_ALPHA float2
-//#define TYPE_BETA  float2
 #define MAD(A, B, DST) fma(A, B, DST)
 
 /* MADs */
-#define TYPE_MAD(MULA, MULB, DST)            \
+#define TYPE_MAD(MULA, MULB, DST)        \
     DST.x = MAD(MULA.x, MULB.x, DST.x);  \
     DST.x = MAD(-MULA.y, MULB.y, DST.x); \
     DST.y = MAD(MULA.x, MULB.y, DST.y);  \
@@ -4028,21 +3963,21 @@ MIOpenConvFFT_inv_out(const float2* __restrict__ gbIn, float* __restrict__ gbOut
 #define strideBL 1
 
 /* kernel */
-extern "C" __global__ __launch_bounds__(WG_0I * WG_1J) void
-MIOpenConvFFT_cgemm(float2* gb,
-                    unsigned int const offsetC,
-                    unsigned int const offsetA,
-                    unsigned int const offsetB,
-                    unsigned int const strideC1J,
-                    unsigned int const strideCK,
-                    unsigned int const strideA0I,
-                    unsigned int const strideAK,
-                    unsigned int const strideB1J,
-                    unsigned int const strideBK,
-                    unsigned int const size0I,
-                    unsigned int const size1J,
-                    unsigned int const sizeK,
-                    unsigned int const sizeL)
+extern "C" __global__
+__launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
+                                                         unsigned int const offsetC,
+                                                         unsigned int const offsetA,
+                                                         unsigned int const offsetB,
+                                                         unsigned int const strideC1J,
+                                                         unsigned int const strideCK,
+                                                         unsigned int const strideA0I,
+                                                         unsigned int const strideAK,
+                                                         unsigned int const strideB1J,
+                                                         unsigned int const strideBK,
+                                                         unsigned int const size0I,
+                                                         unsigned int const size1J,
+                                                         unsigned int const sizeK,
+                                                         unsigned int const sizeL)
 {
 
     /* apply offsets */
@@ -4446,9 +4381,12 @@ MIOpenConvFFT_cgemm(float2* gb,
 #define LDS_NUM_ELEMENTS 1024
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
+    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
+    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
+    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
 
 /* data types */
 #define DATA_TYPE float2
@@ -4456,7 +4394,7 @@ MIOpenConvFFT_cgemm(float2* gb,
 #define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
-#define TYPE_MAC(MULA, MULB, DST)            \
+#define TYPE_MAC(MULA, MULB, DST)        \
     DST.x = MAD(MULA.x, MULB.x, DST.x);  \
     DST.x = MAD(-MULA.y, MULB.y, DST.x); \
     DST.y = MAD(MULA.x, MULB.y, DST.y);  \
@@ -4507,21 +4445,21 @@ MIOpenConvFFT_cgemm(float2* gb,
 /****************************************/
 /* Begin Kernel                         */
 /****************************************/
-extern "C" __global__ __launch_bounds__(NUM_THREADS) void
-MIOpenConvFFT_cgemm(float2* gb,
-                    unsigned int const offsetC,
-                    unsigned int const offsetA,
-                    unsigned int const offsetB,
-                    unsigned int const strideC1J,
-                    unsigned int const strideCK,
-                    unsigned int const strideA0I,
-                    unsigned int const strideAK,
-                    unsigned int const strideB1J,
-                    unsigned int const strideBK,
-                    unsigned int const size0I,
-                    unsigned int const size1J,
-                    unsigned int const sizeK,
-                    unsigned int const sizeL)
+extern "C" __global__
+__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
+                                                        unsigned int const offsetC,
+                                                        unsigned int const offsetA,
+                                                        unsigned int const offsetB,
+                                                        unsigned int const strideC1J,
+                                                        unsigned int const strideCK,
+                                                        unsigned int const strideA0I,
+                                                        unsigned int const strideAK,
+                                                        unsigned int const strideB1J,
+                                                        unsigned int const strideBK,
+                                                        unsigned int const size0I,
+                                                        unsigned int const size1J,
+                                                        unsigned int const sizeK,
+                                                        unsigned int const sizeL)
 {
 
     /* apply offsets */
@@ -4619,24 +4557,16 @@ MIOpenConvFFT_cgemm(float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_3, wgK);
 
     /* global read: addresses a */
-    VECTOR_TYPE const* globalReadA_0_0 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    VECTOR_TYPE const* globalReadA_0_1 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
-    VECTOR_TYPE const* globalReadA_0_2 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_2);
-    VECTOR_TYPE const* globalReadA_0_3 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_3);
+    VECTOR_TYPE const* globalReadA_0_0 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
+    VECTOR_TYPE const* globalReadA_0_1 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
+    VECTOR_TYPE const* globalReadA_0_2 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_2);
+    VECTOR_TYPE const* globalReadA_0_3 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_3);
 
     /* global read: addresses b */
-    VECTOR_TYPE const* globalReadB_0_0 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    VECTOR_TYPE const* globalReadB_0_1 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
-    VECTOR_TYPE const* globalReadB_0_2 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_2);
-    VECTOR_TYPE const* globalReadB_0_3 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_3);
+    VECTOR_TYPE const* globalReadB_0_0 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
+    VECTOR_TYPE const* globalReadB_0_1 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
+    VECTOR_TYPE const* globalReadB_0_2 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_2);
+    VECTOR_TYPE const* globalReadB_0_3 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_3);
 
     /***************************************/
     /* LDS Write Addresses                 */
@@ -4681,10 +4611,9 @@ MIOpenConvFFT_cgemm(float2* gb,
     /***************************************/
     /* LDS Read Addresses                  */
     /***************************************/
-    unsigned int lr0I = (serial % SG0I);
-    unsigned int lr1J = (serial / SG0I) % SG1J;
-    VECTOR_TYPE* ldsReadA =
-        (VECTOR_TYPE*)(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
+    unsigned int lr0I     = (serial % SG0I);
+    unsigned int lr1J     = (serial / SG0I) % SG1J;
+    VECTOR_TYPE* ldsReadA = (VECTOR_TYPE*)(lds + lr0I * VECTOR_WIDTH + sgId * (MT0I + PAD));
     VECTOR_TYPE* ldsReadB =
         (VECTOR_TYPE*)(lds + lr1J * VECTOR_WIDTH + sgId * (MT1J + PAD) + LDS_OFFSET_B);
     VECTOR_TYPE* ldsReadIterA = ldsReadA;
@@ -4730,26 +4659,22 @@ MIOpenConvFFT_cgemm(float2* gb,
         SUMMATION_UNROLL
 
         /* increment global read addresses */
-        globalReadA_0_0 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_0) +
-                                                  ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_1 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_1) +
-                                                  ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_2 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_2) +
-                                                  ((unsigned long)strideAL) * DEPTHU);
-        globalReadA_0_3 = (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_3) +
-                                                  ((unsigned long)strideAL) * DEPTHU);
-        globalReadB_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
-                                          ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
-                                          ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_2 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
-                                          ((unsigned long)strideBL) * DEPTHU);
-        globalReadB_0_3 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
-                                          ((unsigned long)strideBL) * DEPTHU);
+        globalReadA_0_0 =
+            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_0) + ((unsigned long)strideAL) * DEPTHU);
+        globalReadA_0_1 =
+            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_1) + ((unsigned long)strideAL) * DEPTHU);
+        globalReadA_0_2 =
+            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_2) + ((unsigned long)strideAL) * DEPTHU);
+        globalReadA_0_3 =
+            (VECTOR_TYPE*)(((DATA_TYPE*)globalReadA_0_3) + ((unsigned long)strideAL) * DEPTHU);
+        globalReadB_0_0 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
+                                               ((unsigned long)strideBL) * DEPTHU);
+        globalReadB_0_1 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
+                                               ((unsigned long)strideBL) * DEPTHU);
+        globalReadB_0_2 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
+                                               ((unsigned long)strideBL) * DEPTHU);
+        globalReadB_0_3 = (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
+                                               ((unsigned long)strideBL) * DEPTHU);
     }
 
     /***************************************/
@@ -4791,36 +4716,28 @@ MIOpenConvFFT_cgemm(float2* gb,
 
         /* increment global read addresses */
         globalReadA_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) +
-                                          ((long)strideAL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) + ((long)strideAL) * DEPTHU);
         globalReadA_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) +
-                                          ((long)strideAL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) + ((long)strideAL) * DEPTHU);
         globalReadA_0_2 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_2) +
-                                          ((long)strideAL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_2) + ((long)strideAL) * DEPTHU);
         globalReadA_0_3 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_3) +
-                                          ((long)strideAL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_3) + ((long)strideAL) * DEPTHU);
         globalReadB_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
-                                          ((long)strideBL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) + ((long)strideBL) * DEPTHU);
         globalReadB_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
-                                          ((long)strideBL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) + ((long)strideBL) * DEPTHU);
         globalReadB_0_2 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) +
-                                          ((long)strideBL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_2) + ((long)strideBL) * DEPTHU);
         globalReadB_0_3 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) +
-                                          ((long)strideBL) * DEPTHU);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_3) + ((long)strideBL) * DEPTHU);
     }
 
     /***************************************/
     /* SplitU Reduction                    */
     /***************************************/
     __syncthreads();
-    VECTOR_TYPE* ldsSplitU                 = (VECTOR_TYPE*)(lds);
+    VECTOR_TYPE* ldsSplitU                         = (VECTOR_TYPE*)(lds);
     ldsSplitU[lr0I + 0 * SG0I +
               (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
               (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
@@ -5035,9 +4952,12 @@ MIOpenConvFFT_cgemm(float2* gb,
 #define LDS_NUM_ELEMENTS 256
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
+    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
+    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
+    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
 
 /* data types */
 #define DATA_TYPE float2
@@ -5045,7 +4965,7 @@ MIOpenConvFFT_cgemm(float2* gb,
 #define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
-#define TYPE_MAC(MULA, MULB, DST)            \
+#define TYPE_MAC(MULA, MULB, DST)        \
     DST.x = MAD(MULA.x, MULB.x, DST.x);  \
     DST.x = MAD(-MULA.y, MULB.y, DST.x); \
     DST.y = MAD(MULA.x, MULB.y, DST.y);  \
@@ -5071,21 +4991,21 @@ MIOpenConvFFT_cgemm(float2* gb,
 /******************************************/
 /* Begin Kernel                           */
 /******************************************/
-extern "C" __global__ __launch_bounds__(NUM_THREADS) void
-MIOpenConvFFT_cgemm(float2* gb,
-                    unsigned int const offsetC,
-                    unsigned int const offsetA,
-                    unsigned int const offsetB,
-                    unsigned int const strideC1J,
-                    unsigned int const strideCK,
-                    unsigned int const strideA0I,
-                    unsigned int const strideAK,
-                    unsigned int const strideB1J,
-                    unsigned int const strideBK,
-                    unsigned int const size0I,
-                    unsigned int const size1J,
-                    unsigned int const sizeK,
-                    unsigned int const sizeL)
+extern "C" __global__
+__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
+                                                        unsigned int const offsetC,
+                                                        unsigned int const offsetA,
+                                                        unsigned int const offsetB,
+                                                        unsigned int const strideC1J,
+                                                        unsigned int const strideCK,
+                                                        unsigned int const strideA0I,
+                                                        unsigned int const strideAK,
+                                                        unsigned int const strideB1J,
+                                                        unsigned int const strideBK,
+                                                        unsigned int const size0I,
+                                                        unsigned int const size1J,
+                                                        unsigned int const sizeK,
+                                                        unsigned int const sizeL)
 {
 
     /* apply offsets */
@@ -5182,16 +5102,12 @@ MIOpenConvFFT_cgemm(float2* gb,
         GLOBAL_OFFSET_B(globalReadOffsetBL_0, globalReadOffsetB1J_1, wgK);
 
     /* global read addresses: addresses a */
-    VECTOR_TYPE const* globalReadA_0_0 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
-    VECTOR_TYPE const* globalReadA_0_1 =
-        (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
+    VECTOR_TYPE const* globalReadA_0_0 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_0);
+    VECTOR_TYPE const* globalReadA_0_1 = (VECTOR_TYPE const*)(A + globalReadOffsetA_0_1);
 
     /* global read addresses: addresses b */
-    VECTOR_TYPE const* globalReadB_0_0 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
-    VECTOR_TYPE const* globalReadB_0_1 =
-        (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
+    VECTOR_TYPE const* globalReadB_0_0 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_0);
+    VECTOR_TYPE const* globalReadB_0_1 = (VECTOR_TYPE const*)(B + globalReadOffsetB_0_1);
 
     /* global read addresses: increments a */
     long globalReadIncAL = (long)strideAL * DEPTHU;
@@ -5295,19 +5211,15 @@ MIOpenConvFFT_cgemm(float2* gb,
 
         /* global read inc a */
         globalReadA_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) +
-                                          globalReadIncAL);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_0) + globalReadIncAL);
         globalReadA_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) +
-                                          globalReadIncAL);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadA_0_1) + globalReadIncAL);
 
         /* global read inc b */
         globalReadB_0_0 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) +
-                                          globalReadIncBL);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_0) + globalReadIncBL);
         globalReadB_0_1 =
-            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) +
-                                          globalReadIncBL);
+            (VECTOR_TYPE const*)(((DATA_TYPE const*)globalReadB_0_1) + globalReadIncBL);
         __syncthreads();
 
         /* local write a */
@@ -5445,7 +5357,7 @@ MIOpenConvFFT_cgemm(float2* gb,
     __syncthreads();
 
     /* SplitU: local write */
-    VECTOR_TYPE* localSplitU                 = (VECTOR_TYPE*)(localMemory);
+    VECTOR_TYPE* localSplitU                         = (VECTOR_TYPE*)(localMemory);
     localSplitU[lr0I + 0 * SG0I +
                 (MT0I / VECTOR_WIDTH) * (lr1J * VECTOR_WIDTH + 0 + SG1J * VECTOR_WIDTH * 0) +
                 (MT0I * MT1J / VECTOR_WIDTH) * sgId] = rC[0 + 0 * (TT0I / VECTOR_WIDTH) + 0 * TT0I];
