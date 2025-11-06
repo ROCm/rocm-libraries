@@ -74,8 +74,8 @@ public:
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
                              TensorBase<InputDataType>& y,
-                             MeanVarianceDataType epsilon,
-                             MeanVarianceDataType momentum,
+                             double epsilon,
+                             double momentum,
                              TensorBase<MeanVarianceDataType>* mean = nullptr,
                              TensorBase<MeanVarianceDataType>* invVariance = nullptr,
                              const TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
@@ -114,6 +114,8 @@ public:
                     varianceAccum = varianceAccum + (inVal * inVal);
                 });
 
+            // NOTE: Different operation order from MIOpen produces expected FP differences.
+            // Both implementations are correct; validated using RMS error tolerance
             ComputeDataType channelMean = meanAccum / nhw;
             ComputeDataType channelVariance = (varianceAccum / nhw) - (channelMean * channelMean);
 

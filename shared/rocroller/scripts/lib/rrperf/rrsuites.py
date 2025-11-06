@@ -1738,14 +1738,14 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    else:
-        yield from sgemm()
-        yield from hgemm()
-        yield from hgemm_no_store_LDS()
-        yield from streamk()
-        yield from streamk_sweep()
-        yield from scalar_is_zero()
-        yield from codegen()
+
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from streamk()
+    yield from streamk_sweep()
+    yield from scalar_is_zero()
+    yield from codegen()
 
 
 def all_gfx120X():
