@@ -185,7 +185,8 @@ private:
  *  does NOT store the element count. Their destruction is a no-op, so only the raw
  *  deallocation is required. Omitting the size keeps this deleter specialization an
  *  empty (zero-size) type, allowing \p unique_ptr<T[]> instantiations that use it to
- *  remain a zero-cost abstraction (the deleter need not increase the overall object size).
+ *  remain a low/zero-cost abstraction (the default deleter need not increase the overall
+ *  size of unique_ptr<T[]> above the size of a simple pointer `T *`).
  *
  *  \tparam T The array element type (trivially destructible).
  */
