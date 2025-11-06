@@ -158,15 +158,23 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt // softplusBeta
     );
 
-    // Leaky ReLU: lower clip slope
-    cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt, // reluLowerClip
-                       std::nullopt, // reluUpperClip
-                       0.01f, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
+    // Leaky ReLU: NOT supported by MIOpen's batchnorm fusion API
+    // MIOpen's BnFwdTrainingSpatial solver supports:
+    //   - miopenActivationRELU (standard ReLU)
+    //   - miopenActivationCLIPPEDRELU (ReLU with upper clip)
+    //   - miopenActivationCLAMP (ReLU with both upper and lower clips)
+    // but does NOT support:
+    //   - miopenActivationLEAKYRELU (ReLU with lower clip slope)
+    // See: MIOpen's BnFwdTrainingSpatial::IsApplicable() for details.
+    //
+    // cases.emplace_back(PM::RELU_FWD,
+    //                    std::nullopt, // reluLowerClip
+    //                    std::nullopt, // reluUpperClip
+    //                    0.01f, // reluLowerClipSlope
+    //                    std::nullopt, // swishBeta
+    //                    std::nullopt, // eluAlpha
+    //                    std::nullopt // softplusBeta
+    // );
 
     return cases;
 }

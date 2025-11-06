@@ -20,14 +20,23 @@ namespace
 bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
 {
     using PointwiseMode = hipdnn_sdk::data_objects::PointwiseMode;
-    // Only RELU_FWD is supported by MIOpen's miopenBatchNormForwardTrainingActivation fusion
-    switch(attr.operation())
+
+    if(attr.operation() != PointwiseMode::RELU_FWD)
     {
-    case PointwiseMode::RELU_FWD:
-        return true;
-    default:
         return false;
     }
+
+    // MIOpen batchnorm fusion supports:
+    // - Standard ReLU (no parameters)
+    // - Clipped ReLU (relu_upper_clip only)
+    // - CLAMP (relu_lower_clip + relu_upper_clip)
+    // But does NOT support Leaky ReLU (relu_lower_clip_slope)
+    if(attr.relu_lower_clip_slope())
+    {
+        return false; // Leaky ReLU not supported
+    }
+
+    return true;
 }
 
 std::tuple<const hipdnn_sdk::data_objects::BatchnormAttributes&,
