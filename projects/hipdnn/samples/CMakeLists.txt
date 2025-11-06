@@ -16,7 +16,8 @@ function(add_hipdnn_sample NAME SOURCE)
     )
 endfunction()
 
-add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
+# Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
+#add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)

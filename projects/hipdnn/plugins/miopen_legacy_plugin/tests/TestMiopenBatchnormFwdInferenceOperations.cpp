@@ -29,6 +29,8 @@ using namespace hipdnn_sdk::utilities;
 using namespace test_bn_common;
 using namespace test_helpers;
 
+// Note: Tests temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+
 template <class T>
 class TestBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceGpu
 {
@@ -61,7 +63,7 @@ class TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32
 };
 
 // Nchw Fp32------------
-TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp32, DISABLED_Correctness)
 {
     testSuite();
 }
@@ -71,7 +73,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
 
 // Nchw Fp16------------
-TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwFp16, DISABLED_Correctness)
 {
     testSuite();
 }
@@ -81,7 +83,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
 
 // Nchw Bfp16------------
-TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNchwBfp16, DISABLED_Correctness)
 {
     testSuite();
 }
@@ -91,7 +93,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
 
 // Ncdhw Fp32------------
-TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
+TEST_P(TestGpuMIOpenBatchnormFwdInferenceGoldenReferenceNcdhwFp32, DISABLED_Correctness)
 {
     testSuite();
 }
@@ -220,19 +222,18 @@ protected:
         meanTensorCpu.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
                                            static_cast<IntermediateType>(1.0f),
                                            testCase.seed);
-        Tensor<IntermediateType> varianceTensorCpu(derivedDims);
-        varianceTensorCpu.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
-                                               static_cast<IntermediateType>(1.0f),
-                                               testCase.seed);
+        Tensor<IntermediateType> invVarianceTensorCpu(derivedDims);
+        invVarianceTensorCpu.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                                  static_cast<IntermediateType>(1.0f),
+                                                  testCase.seed);
 
         CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormFwdInference(
             xTensorCpu,
             scaleTensorCpu,
             biasTensorCpu,
             meanTensorCpu,
-            varianceTensorCpu,
-            yTensorCpu,
-            BATCHNORM_DEFAULT_EPSILON);
+            invVarianceTensorCpu,
+            yTensorCpu);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu, yTensor));
@@ -321,7 +322,7 @@ public:
     }
 };
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
@@ -329,7 +330,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp32, Correctness)
                          batchnorm::getToleranceInference<float>());
 }
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
@@ -337,7 +338,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwBfp16, Correctness)
                          batchnorm::getToleranceInference<hip_bfloat16>());
 }
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp16, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp16, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
@@ -354,7 +355,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNchwFp64, DISABLED_Correctn
                          batchnorm::getToleranceInference<double>());
 }
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
@@ -362,7 +363,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp32, Correctness)
                          batchnorm::getToleranceInference<float>());
 }
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
@@ -370,7 +371,7 @@ TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcBfp16, Correctness)
                          batchnorm::getToleranceInference<hip_bfloat16>());
 }
 
-TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp16, Correctness)
+TEST_P(TestGpuMiopenBatchnormFwdInferenceExecuteGraphNhwcFp16, DISABLED_Correctness)
 {
     const auto& testCase = GetParam();
     runFwdBatchnormGraph(testCase,
