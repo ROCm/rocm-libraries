@@ -10,6 +10,19 @@
 #include <iostream>
 
 namespace origami {
+
+static int read_heuristics_variance_env_var()
+{
+    const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
+    if (!env) return 1; // Set default variance to 1%
+
+    try {
+        int val = std::stoi(env);
+        return (val > 0) ? val : 0;
+    } catch (...) {
+        return 0;
+    }
+}    
 //
 // Tiebreaker function.
 //
@@ -106,7 +119,7 @@ size_t select_best_grid_size(size_t M, size_t N, size_t K, size_t batch, bool tr
                              const hardware_t& hardware, size_t MT_M, size_t MT_N, size_t MT_K,
                              size_t MI_M, size_t MI_N, size_t MI_K, size_t element_size_A,
                              size_t element_size_B, size_t element_size_out,
-                             data_type_t mi_datatype, size_t mx_block_size, double H_L2, size_t WGM,
+                             data_type_t mi_datatype, size_t mx_block_size, double H_L2, int WGM,
                              size_t biggest_allowable_split, size_t max_cus) {
     // compute how many 32×32 tiles are needed in each dim,
     // then multiply to get total grid size:
@@ -151,7 +164,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
                                                       size_t element_size_B,    // In bits
                                                       size_t element_size_out,  // In bits
                                                       data_type_t mi_datatype, size_t mx_block_size,
-                                                      double H_L2, bool print, size_t defaultWGM,
+                                                      double H_L2, bool print, int defaultWGM,
                                                       size_t max_cus) {
     std::vector<result_tuple> valid_results;
     valid_results.reserve(MT_list.size());
@@ -166,10 +179,10 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
         size_t MI_M = std::get<3>(mt);
         size_t MI_N = std::get<4>(mt);
         size_t MI_K = std::get<5>(mt);
-        size_t occupancy = std::get<6>(mt);
-        size_t WGM = std::get<7>(mt);
-        size_t non_temporal_a = std::get<8>(mt);
-        size_t non_temporal_b = std::get<9>(mt);
+        int occupancy = std::get<6>(mt);
+        int WGM = std::get<7>(mt);
+        int non_temporal_a = std::get<8>(mt);
+        int non_temporal_b = std::get<9>(mt);
 
         if (hardware_t::is_debug_enabled()) {
             std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
@@ -203,15 +216,27 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
     size_t num_the_same = 0;
 
     // Count the number of similar latencies
+    constexpr double epsilon = 1e-9;
+    //variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
+    static const int top_N_heuristic = read_heuristics_variance_env_var();
     for (const auto& res : valid_results) {
-        double diff = std::fabs(std::get<0>(res) - best_latency);
-        diff /= best_latency;
-        // If it's within 1%, include it.
-        if (diff < 0.01)
-            num_the_same++;
-        else
-            break;  // Once we pass best_latency, we can stop.
+        bool within_top;
+        const double diff = std::abs(std::get<0>(res) - best_latency);
+
+        if (top_N_heuristic == 0) {
+            // Absolute tolerance path
+            within_top = diff < epsilon;
+        } else {
+            // Relative tolerance path (guard denom)
+            const double denom = std::max(std::abs(best_latency), epsilon);
+            // If it's within top_N_heuristic%, include it.
+            within_top = (diff / denom) < (static_cast<float>(top_N_heuristic) / 100.0f);
+        }
+
+        if (within_top) ++num_the_same;
+        else break;
     }
+
     // 3) If that tie group has at least 10 entries, we only use those.
     // 4) Otherwise, keep adding the next best latencies until we have 10 total or run out.
     // std::vector<result_tuple> top_candidates = tie_results;
@@ -468,12 +493,12 @@ std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware,
         size_t q = numWGs / hardware.NUM_XCD;
         size_t r = numWGs % hardware.NUM_XCD;
 
-        std::vector<size_t> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
-        size_t bestWGM = 1;
-        size_t bestL2 = std::numeric_limits<size_t>::max();
+        std::vector<int> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
+        int bestWGM = 1;
+        int bestL2 = std::numeric_limits<int>::max();
         for (auto wgm : wgmList)
         {
-            auto slabTiles = numMT_M * std::min(wgm, numMT_N);
+            auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
             auto slabCount = safe_ceil_div(numMT_N, wgm);
             auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
             auto wgmL2Estimate = 0;

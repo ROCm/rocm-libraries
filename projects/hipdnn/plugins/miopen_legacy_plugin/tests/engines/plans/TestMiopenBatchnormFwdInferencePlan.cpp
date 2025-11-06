@@ -28,5 +28,5 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
     EXPECT_NO_THROW(params.scale());
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
-    EXPECT_NO_THROW(params.estVariance());
+    EXPECT_NO_THROW(params.invVariance());
 }

@@ -33,6 +33,7 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
+#include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
 
 template <>
@@ -49,6 +50,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_csr_lrb:
     case rocsparse_spmv_alg_csr_nnzsplit:
+    case rocsparse_spmv_alg_sell:
     {
         return false;
     }
@@ -377,26 +379,28 @@ namespace rocsparse
         //
         //
         //
-        const rocsparse_format    format         = mat->format;
-        const int64_t             rows           = mat->rows;
-        const int64_t             cols           = mat->cols;
-        const int64_t             nnz            = mat->nnz;
-        rocsparse_mat_descr       mat_descr      = mat->descr;
-        const rocsparse_datatype  data_type      = mat->data_type;
-        const rocsparse_indextype row_type       = mat->row_type;
-        const rocsparse_indextype col_type       = mat->col_type;
-        const void*               const_val_data = mat->const_val_data;
-        const void*               const_row_data = mat->const_row_data;
-        const void*               const_ind_data = mat->const_ind_data;
-        const void*               const_col_data = mat->const_col_data;
-        const rocsparse_datatype  x_data_type    = x->data_type;
-        const rocsparse_datatype  y_data_type    = y->data_type;
-        const void*               x_const_values = x->const_values;
-        void*                     y_values       = y->values;
-        const bool                analysed       = mat->analysed;
-        const int64_t             block_dim      = mat->block_dim;
-        const int64_t             ell_width      = mat->ell_width;
-        const rocsparse_direction block_dir      = mat->block_dir;
+        const rocsparse_format    format           = mat->format;
+        const int64_t             rows             = mat->rows;
+        const int64_t             cols             = mat->cols;
+        const int64_t             nnz              = mat->nnz;
+        rocsparse_mat_descr       mat_descr        = mat->descr;
+        const rocsparse_datatype  data_type        = mat->data_type;
+        const rocsparse_indextype row_type         = mat->row_type;
+        const rocsparse_indextype col_type         = mat->col_type;
+        const void*               const_val_data   = mat->const_val_data;
+        const void*               const_row_data   = mat->const_row_data;
+        const void*               const_ind_data   = mat->const_ind_data;
+        const void*               const_col_data   = mat->const_col_data;
+        const rocsparse_datatype  x_data_type      = x->data_type;
+        const rocsparse_datatype  y_data_type      = y->data_type;
+        const void*               x_const_values   = x->const_values;
+        void*                     y_values         = y->values;
+        const bool                analysed         = mat->analysed;
+        const int64_t             block_dim        = mat->block_dim;
+        const int64_t             ell_width        = mat->ell_width;
+        const int64_t             sell_slice_size  = mat->sell_slice_size;
+        const int64_t             sell_colval_size = mat->sell_colval_size;
+        const rocsparse_direction block_dir        = mat->block_dir;
 
         //
         //
@@ -414,6 +418,7 @@ namespace rocsparse
             {
 
             case rocsparse_format_ell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 return rocsparse_status_success;
@@ -763,6 +768,33 @@ namespace rocsparse
                 return rocsparse_status_success;
             }
 
+            case rocsparse_format_sell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmv(handle,
+                                                             operation,
+                                                             rows,
+                                                             cols,
+                                                             nnz,
+                                                             sell_slice_size,
+                                                             sell_colval_size,
+                                                             compute_datatype,
+                                                             local_alpha,
+                                                             mat_descr,
+                                                             data_type,
+                                                             const_val_data,
+                                                             row_type,
+                                                             const_row_data,
+                                                             col_type,
+                                                             const_col_data,
+                                                             x_data_type,
+                                                             x_const_values,
+                                                             compute_datatype,
+                                                             local_beta,
+                                                             y_data_type,
+                                                             y_values)));
+                return rocsparse_status_success;
+            }
+
                 // LCOV_EXCL_START
             case rocsparse_format_bell:
             {
@@ -838,6 +870,7 @@ try
     case rocsparse_format_bsr:
     case rocsparse_format_ell:
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         switch(stage)
         {
