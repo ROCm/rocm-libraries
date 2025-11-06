@@ -618,9 +618,15 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvHipImplicitGemmGroupFwdXdlops{},
                        miopenConvolutionAlgoImplicitGEMM);
+    RegisterWithSolver(
+        registry, ++id, conv::ConvHipImplicitGemmGroupFwdWmma{}, miopenConvolutionAlgoImplicitGEMM);
     RegisterWithSolver(registry,
                        ++id,
                        conv::ConvHipImplicitGemm3DGroupFwdXdlops{},
+                       miopenConvolutionAlgoImplicitGEMM);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::ConvHipImplicitGemm3DGroupFwdWmma{},
                        miopenConvolutionAlgoImplicitGEMM);
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);

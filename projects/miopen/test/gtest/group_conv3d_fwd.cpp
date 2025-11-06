@@ -34,3 +34,7 @@ DEFINE_GROUP_CONV3D_TEST(half, FP16, Forward);
 DEFINE_GROUP_CONV3D_TEST(bfloat16, BFP16, Forward);
 /// \todo int8_t tests don't work. Need debugging
 // DEFINE_GROUP_CONV3D_TEST(int8_t, Forward);
+
+DEFINE_GROUP_CONV3D_WMMA_TEST(float, FP32, Forward);
+DEFINE_GROUP_CONV3D_WMMA_TEST(half, FP16, Forward);
+DEFINE_GROUP_CONV3D_WMMA_TEST(bfloat16, BFP16, Forward);

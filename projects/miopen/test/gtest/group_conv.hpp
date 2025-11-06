@@ -454,28 +454,17 @@ public:
 
     void RunWmmaSolver()
     {
-        // For now, only WRW has WMMA implementation
-        if constexpr(CONV_DIR == Direction::BackwardWeights)
+        if constexpr(NDIM == 2u)
         {
-            if constexpr(NDIM == 2u)
-            {
-                DispatchSolver<
-                    miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops, // Placeholder
-                    miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
-                    miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
-            }
-            else
-            {
-                DispatchSolver<
-                    miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops, // Placeholder
-                    miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops, // Placeholder
-                    miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwWmma>();
-            }
+            DispatchSolver<miopen::solver::conv::ConvHipImplicitGemmGroupFwdWmma,
+                           miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
+                           miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
         }
         else
         {
-            test_skipped = true;
-            GTEST_SKIP() << "WMMA solver only supports BackwardWeights";
+            DispatchSolver<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdWmma,
+                           miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops, // Placeholder
+                           miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwWmma>();
         }
     }
 
