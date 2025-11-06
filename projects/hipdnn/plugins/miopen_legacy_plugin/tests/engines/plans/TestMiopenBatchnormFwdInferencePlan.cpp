@@ -30,11 +30,11 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 
 TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAllTensors)
 {
-    // Create a fused batchnorm backward + activation + bias graph
+    // Create a fused batchnorm fwd + activation graph
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    // Get the three required nodes
+    // Get the two required nodes
     const auto& batchnormInfNode = graph.getNode(0);
     const auto& pointwiseNode = graph.getNode(1);
 

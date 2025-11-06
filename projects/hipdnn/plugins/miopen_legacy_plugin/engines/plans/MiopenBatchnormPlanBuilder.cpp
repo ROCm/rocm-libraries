@@ -249,13 +249,6 @@ void batchnormFwdFusionCheckTensors(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Activation input from batchnorm must be virtual, output must be non virtual");
     }
-
-    if(actTensorIn0.uid() != bnInfTensorY.uid())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation input tensor must match batchnorm inference output tensor");
-    }
 }
 
 bool batchnormBwdFusionCheckTensorsLogErrors(
@@ -354,7 +347,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         bool isPointwiseSecond = node1.attributesType()
                                  == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes;
 
-        //batchnormFwdFusionCheckTensorsLogErrors
         if(!(isFwdInferenceFirst && isPointwiseSecond))
         {
             std::cout << "here";
@@ -473,7 +465,6 @@ void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePlu
                                           const hipdnn_plugin::IGraph& opGraph,
                                           HipdnnEnginePluginExecutionContext& executionContext)
 {
-
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
 

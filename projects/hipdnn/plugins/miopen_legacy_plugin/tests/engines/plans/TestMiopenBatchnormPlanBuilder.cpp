@@ -119,12 +119,12 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedThreeNodeG
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectTwoNodeOrder)
 {
-    // Create a graph with 3 nodes but in wrong order
+    // Create a graph with 2 nodes but in wrong order
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
 
-    // Wrong order: activation -> batchnorm inference -> batchnorm backward
+    // Wrong order: activation -> batchnorm inference
     auto node0 = hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
@@ -209,7 +209,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForIncorrectThree
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForTwoNodeFusionUnsupportedActivatio)
 {
-    // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
+    // Fusion graph with unsupported activation (e.g., MUL instead of RELU_FWD)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
@@ -705,7 +705,6 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttrib
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphFirstNode)
 {
-    // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
@@ -713,9 +712,6 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
 
-    // BN inference
-    // auto bnInfAttr
-    //     = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder, 1, 4, 5, 2, 3, 6);
     nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
         builder,
         "bn_inf",
@@ -725,7 +721,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
     auto actAttr = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, // Unsupported!
+        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -762,7 +758,6 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGr
 
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphSecondNode)
 {
-    // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
@@ -1457,7 +1452,6 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseWhenActivationOut
 TEST_F(TestMiopenBatchnormPlanBuilder,
        IsApplicableReturnsFalseForTwoNodeFusionWhenInfOutputNotMatchingActInput)
 {
-    // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
@@ -1511,11 +1505,10 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
 TEST_F(TestMiopenBatchnormPlanBuilder,
        IsApplicableReturnsFalseForTwoNodeFusionWhenInfOutputIsNonVirtual)
 {
-    // Fusion graph with unsupported activation (e.g., SIGMOID_BWD instead of RELU_BWD)
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {});
+    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {}); //node 6 not virtual
 
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
 
