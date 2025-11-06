@@ -988,6 +988,9 @@ public:
    *  For device arrays, accessing an element from host code triggers a copy
    *  from device to host memory.
    *
+   *  \warning Using this operator when iterating over the array is STRONGLY discouraged
+   *  as the excessive number of single-element copies usually results in poor performance.
+   *
    *  \param i The index of the element to access.
    *  \return A reference to (or copy of) the element at index \p i.
    */
@@ -1346,7 +1349,7 @@ template <class T, class D>
 //==============================================================================
 /*! \brief Constructs an object of type \p T in device memory and wraps it in a \p unique_ptr.
  *
- *  Allocates device memory for a single object of type \p T, constructs the object
+ *  Allocates device memory for a single object of type \p T, direct-initializes the object
  *  by forwarding the provided arguments, and returns a \p unique_ptr managing the
  *  allocated object.
  *
@@ -1367,7 +1370,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&
 /*! \brief Constructs an array of objects of type \p T in device memory and wraps it in a \p unique_ptr.
  *
  *  Allocates device memory for an array of \p n objects of type \p U (where \p T is \p U[]),
- *  and returns a \p unique_ptr managing the allocated array.
+ *  default-initializes each element, and returns a \p unique_ptr managing the allocated array.
  *
  *  This overload participates in overload resolution only if \p T is an array of unknown
  *  bound (e.g., \p T[]).
