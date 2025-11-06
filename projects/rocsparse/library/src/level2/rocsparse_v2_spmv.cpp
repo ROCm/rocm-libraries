@@ -1071,6 +1071,43 @@ try
     ROCSPARSE_CHECKARG_POINTER(3, gamma_vec);
     ROCSPARSE_CHECKARG_ARRAY(4, num_extras, z_vecs);
 
+    // Validate that scalar and compute datatypes are set
+    ROCSPARSE_CHECKARG(1,
+                       descr,
+                       rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
+                       rocsparse_status_invalid_value);
+
+    ROCSPARSE_CHECKARG(1,
+                       descr,
+                       rocsparse::enum_utils::is_invalid(descr->get_compute_datatype()),
+                       rocsparse_status_invalid_value);
+
+    // Validate gamma_vec datatype matches scalar datatype
+    const rocsparse_datatype scalar_datatype  = descr->get_scalar_datatype();
+    const rocsparse_datatype compute_datatype = descr->get_compute_datatype();
+
+    ROCSPARSE_CHECKARG(
+        3, gamma_vec, gamma_vec->data_type != scalar_datatype, rocsparse_status_invalid_value);
+
+    // Validate gamma_vec size matches num_extras
+    ROCSPARSE_CHECKARG(3, gamma_vec, gamma_vec->size != num_extras, rocsparse_status_invalid_size);
+
+    // Validate all z_vecs have the same datatype as compute_datatype and same size
+    for(int64_t i = 0; i < num_extras; ++i)
+    {
+        ROCSPARSE_CHECKARG_POINTER(4, z_vecs[i]);
+
+        ROCSPARSE_CHECKARG(
+            4, z_vecs[i], z_vecs[i]->data_type != compute_datatype, rocsparse_status_invalid_value);
+
+        // All z vectors should have the same size
+        if(i > 0)
+        {
+            ROCSPARSE_CHECKARG(
+                4, z_vecs[i], z_vecs[i]->size != z_vecs[0]->size, rocsparse_status_invalid_size);
+        }
+    }
+
     return descr->extras.set(num_extras, gamma_vec, z_vecs);
     // LCOV_EXCL_START
 }
