@@ -21,26 +21,40 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
 
-#level2
-include: test_bsrmv.yaml
-include: test_bsrsv2.yaml
-include: test_csrmv.yaml
-include: test_csrsv2.yaml
-include: test_gemvi.yaml
-include: test_hybmv.yaml
 
-# level3
-include: test_bsrmm.yaml
-include: test_bsrsm2.yaml
-include: test_csrmm.yaml
-include: test_csrsm2.yaml
-include: test_gemmi.yaml
+Tests:
+- name: gemmi_bad_arg
+  category: pre_checkin
+  function: gemmi_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gemmi
+  category: quick
+  function: gemmi
+  precision: *single_double_precisions_complex_real
+  M: [0, 19, 78, 482]
+  N: [0, 42, 275, 759]
+  K: [0, 50, 173, 1375]
+  alpha: [-0.5]
+  alphai: [-0.5]
+  beta: [0.5]
+  betai: [-0.5]
+
+- name: gemmi
+  category: pre_checkin
+  function: gemmi
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: 1
+  alpha: [-0.5]
+  alphai: [-0.5]
+  beta: [0.5]
+  betai: [-0.5]
+  filename: [nos1,
+             nos3,
+             nos5,
+             nos7]

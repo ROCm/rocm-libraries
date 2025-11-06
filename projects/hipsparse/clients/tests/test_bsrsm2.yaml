@@ -21,26 +21,41 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
 
-#level2
-include: test_bsrmv.yaml
-include: test_bsrsv2.yaml
-include: test_csrmv.yaml
-include: test_csrsv2.yaml
-include: test_gemvi.yaml
-include: test_hybmv.yaml
 
-# level3
-include: test_bsrmm.yaml
-include: test_bsrsm2.yaml
-include: test_csrmm.yaml
-include: test_csrsm2.yaml
-include: test_gemmi.yaml
+Tests:
+- name: bsrsm2_bad_arg
+  category: pre_checkin
+  function: bsrsm2_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: bsrsm2
+  category: quick
+  function: bsrsm2
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [15]
+  block_dim: [2, 3]
+  alpha: [2.0]
+  alphai: [0.5]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: bsrsm2
+  category: pre_checkin
+  function: bsrsm2
+  precision: *single_double_precisions
+  M: 1
+  N: [15]
+  block_dim: [5]
+  alpha: [2.0]
+  alphai: [0.5]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos3]
