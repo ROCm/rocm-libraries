@@ -121,12 +121,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                     static_cast<IntermediateType>(0.1f));
     savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-0.1f),
                                          static_cast<IntermediateType>(0.1f));
-
-    // Generate random variance values (must be positive)
-    // Note: Due to a bug in handling variance vrs inv_variance (https://github.com/ROCm/rocm-libraries/issues/2459)
-    //       this is being set as 1 for now.
-    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(1.0f),
-                                           static_cast<IntermediateType>(1.0f));
+    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                           static_cast<IntermediateType>(2.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -179,8 +175,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         test_utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        // Tolerance range is very high due to data-type mismatch & variance issues (https://github.com/ROCm/rocm-libraries/issues/2459).
-        const auto inputTol = 4e-1f;
+        // Tolerance range is high due to data-type mismatch between plugin and reference impl.
+        // This will be fixed in a follow-up.
+        // Issue is due to the reference not splitting the input / output datatypes.
+        const auto inputTol = 4e-2f;
 
         auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));

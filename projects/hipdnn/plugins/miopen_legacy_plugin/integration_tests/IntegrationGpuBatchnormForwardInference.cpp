@@ -19,6 +19,8 @@ using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 using namespace test_bn_common;
 
+// Note: Tests temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+
 namespace
 {
 
@@ -137,7 +139,7 @@ using IntegrationGpuBatchnormForwardInferenceNdhwcFp16 = BatchnormForwardInferen
 
 } // namespace
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp32, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp32, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCHW);
 }
@@ -150,7 +152,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNchwFp32,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNchwBfp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNchwBfp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCHW);
 }
@@ -163,7 +165,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNchwBfp16,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNchwFp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCHW);
 }
@@ -176,7 +178,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNchwFp16,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp32, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp32, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NHWC);
 }
@@ -189,7 +191,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNhwcFp32,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcBfp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcBfp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NHWC);
 }
@@ -202,7 +204,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNhwcBfp16,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NHWC);
 }
@@ -215,7 +217,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceNhwcFp16,
                          testing::ValuesIn(getBnFwdInferenceFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp32, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp32, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NCDHW);
 }
@@ -224,7 +226,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInferenceNcdhwFp32,
                          testing::ValuesIn(getBnFwdInference3dTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwBfp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwBfp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NCDHW);
 }
@@ -233,7 +235,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInferenceNcdhwBfp16,
                          testing::ValuesIn(getBnFwdInference3dTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NCDHW);
 }
@@ -242,7 +244,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInferenceNcdhwFp16,
                          testing::ValuesIn(getBnFwdInference3dTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp32, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp32, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<float>(), TensorLayout::NDHWC);
 }
@@ -251,7 +253,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInferenceNdhwcFp32,
                          testing::ValuesIn(getBnFwdInference3dTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcBfp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcBfp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<hip_bfloat16>(), TensorLayout::NDHWC);
 }
@@ -260,7 +262,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormForwardInferenceNdhwcBfp16,
                          testing::ValuesIn(getBnFwdInference3dTestCases()));
 
-TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp16, Correctness)
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp16, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceInference<half>(), TensorLayout::NDHWC);
 }

@@ -21,26 +21,46 @@
 #
 # ########################################################################
 
-# level1
-include: test_axpyi.yaml
-include: test_doti.yaml
-include: test_dotci.yaml
-include: test_roti.yaml
-include: test_sctr.yaml
-include: test_gthr.yaml
-include: test_gthrz.yaml
+---
+include: hipsparse_common.yaml
 
-#level2
-include: test_bsrmv.yaml
-include: test_bsrsv2.yaml
-include: test_csrmv.yaml
-include: test_csrsv2.yaml
-include: test_gemvi.yaml
-include: test_hybmv.yaml
 
-# level3
-include: test_bsrmm.yaml
-include: test_bsrsm2.yaml
-include: test_csrmm.yaml
-include: test_csrsm2.yaml
-include: test_gemmi.yaml
+Tests:
+- name: csrmm_bad_arg
+  category: pre_checkin
+  function: csrmm_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csrmm
+  category: quick
+  function: csrmm
+  precision: *single_double_precisions_complex_real
+  M: [0, 275, 1059]
+  N: [0, 78]
+  K: [0, 173, 1375]
+  alpha: [-0.5]
+  alphai: [0.2]
+  beta: [0.5]
+  betai: [0.9]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: csrmm
+  category: pre_checkin
+  function: csrmm
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: [0, 78]
+  K: 1
+  alpha: [0.75]
+  alphai: [0.4]
+  beta: [-0.5]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [rma10,
+             nos3, 
+             nos5, 
+             nos7]
