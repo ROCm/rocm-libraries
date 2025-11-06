@@ -17,6 +17,8 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk;
 
+// Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -71,14 +73,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
     utilities::Tensor<InputType> yTensor(y->get_dim(), layout);
 
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-
-    scaleTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
-
-    biasTensor.fillWithValue(static_cast<IntermediateType>(0.0f));
-
-    meanTensor.fillWithValue(static_cast<IntermediateType>(0.5f));
-
-    invVarianceTensor.fillWithValue(static_cast<IntermediateType>(1.0f));
+    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                     static_cast<IntermediateType>(1.0f));
+    biasTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                    static_cast<IntermediateType>(1.0f));
+    meanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                    static_cast<IntermediateType>(1.0f));
+    invVarianceTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                           static_cast<IntermediateType>(1.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
 
@@ -100,23 +102,17 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
-        // Convert inverse variance to variance for CPU reference
-        utilities::Tensor<IntermediateType> varianceTensor(invVariance->get_dim());
-        auto invVarianceHostPtr = invVarianceTensor.memory().hostData();
-        auto varianceHostPtr = varianceTensor.memory().hostData();
-
-        for(size_t i = 0; i < invVarianceTensor.memory().count(); ++i)
-        {
-            varianceHostPtr[i] = static_cast<IntermediateType>(1.0f)
-                                 / (invVarianceHostPtr[i] * invVarianceHostPtr[i]);
-        }
-
         auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
         double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
-            batchnormFwdInference(
-                xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, yRefTensor, epsilon);
+            batchnormFwdInference(xTensor,
+                                  scaleTensor,
+                                  biasTensor,
+                                  meanTensor,
+                                  invVarianceTensor,
+                                  yRefTensor,
+                                  epsilon);
 
         auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 

@@ -37,15 +37,6 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 
 The current samples include:
 
-### [**`BnInference`**](./batchnorm/BnInference.cpp)
-
-Executes a single-node batch normalization inference graph on a 4D input tensor.
-
-- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)` to enable broadcasting over the batch (N) and spatial (H, W) dimensions. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions:
-    ```python
-    y = scale * ((x - mean) * inv_variance) + bias
-    ```
-
 ### [**`BnTraining`**](./batchnorm/BnTraining.cpp)
 
 Executes the forward pass of a batch normalization training graph on a 4D input tensor.
@@ -68,6 +59,49 @@ Executes the backward pass of a batch normalization graph to compute gradients o
     dx = (scale * inv_variance) * (dy - (dbias + x_hat * dscale) / nhw)
     ```
     where `nhw = N * H * W` is the number of elements averaged per channel.
+
+### [**`FusedBnInfDReluBnBwd`**](./batchnorm/FusedBnInfDReluBnBwd.cpp)
+
+Executes a fused 3-operation graph demonstrating batchnorm inference followed by activation backward and batchnorm backward passes.
+
+The fused graph consists of three operations:
+
+1. **Batchnorm Inference (Forward)**: Normalizes input `x` using saved statistics
+   ```python
+   bn_y = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation Backward (ReLU)**: Computes gradient through ReLU activation
+   ```python
+   # ReLU backward: gradient flows through only where forward output was positive
+   dx_drelu[i] = dy[i] if bn_y[i] > 0 else 0
+   ```
+
+3. **Batchnorm Backward**: Computes gradients with respect to inputs and parameters
+   ```python
+   dbias = sum(dx_drelu)
+   x_hat = (x - mean) * inv_variance  
+   dscale = sum(dx_drelu * x_hat)
+   dx = (scale * inv_variance) * (dx_drelu - (dbias + x_hat * dscale) / nhw)
+   ```
+
+**Key Features:**
+- Demonstrates multi-operation graph fusion with virtual intermediate tensors
+- The intermediate outputs (`bn_y` and `dx_drelu`) are marked as virtual, allowing the backend to optimize memory usage
+- Uses `CpuReferenceGraphExecutor` for validation, which executes the entire fused graph on CPU
+
+**Graph Flow:**
+```
+Inputs: x, dy, scale, bias, mean, inv_variance
+        ↓
+    bn_y = batchnorm_inference(x, mean, inv_variance, scale, bias)
+        ↓ (virtual tensor)
+    dx_drelu = activation_backward(bn_y, dy)  
+        ↓ (virtual tensor)
+    [dx, dscale, dbias] = batchnorm_backward(dx_drelu, x, scale, mean, inv_variance)
+        ↓
+Outputs: dx, dscale, dbias
+```
 
 ### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
 
