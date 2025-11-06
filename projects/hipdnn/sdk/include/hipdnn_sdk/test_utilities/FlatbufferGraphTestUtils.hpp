@@ -316,55 +316,88 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     return builder;
 }
 
-// TODO: Replace with a createValidBatchnormGraph function once one is made and tested
-// This may be useful to keep in general though, as it has distinct and non-null values for all fields
-inline flatbuffers::FlatBufferBuilder createBatchnormGraph()
+inline flatbuffers::FlatBufferBuilder
+    createValidBatchnormFwdTrainingGraph(const std::vector<int64_t>& strides = {1, 3, 14, 14},
+                                         const std::vector<int64_t>& dims = {1, 3, 14, 14},
+                                         bool withMeanVariance = true)
 {
     flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    std::vector<int64_t> peerStats = {-1, -2, -3, -4};
-    auto batchnormNode = CreateBatchnormAttributesDirect(
-        builder, 0, 1, 2, 3, &peerStats, 4, 5, 6, 7, 8, 9, 10, 11);
-    nodes.push_back(CreateNodeDirect(builder,
-                                     "Node",
+    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+
+    // Required tensors
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 2, "y", DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, 3, "scale", DataType::FLOAT, &derivedStrides, &derivedDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, 4, "bias", DataType::FLOAT, &derivedStrides, &derivedDims));
+
+    // Epsilon (pass-by-value)
+    std::vector<int64_t> passByValueDims = {1};
+    Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder,
+                                     5,
+                                     "epsilon",
                                      DataType::FLOAT,
-                                     NodeAttributes::BatchnormAttributes,
-                                     batchnormNode.Union()));
+                                     &passByValueDims,
+                                     &passByValueDims,
+                                     false,
+                                     TensorValue::Float32Value,
+                                     builder.CreateStruct(epsilonVal).Union()));
 
-    std::array tensorNames = {"x",
-                              "scale",
-                              "bias",
-                              "epsilon",
-                              "peer_stats",
-                              "prev_running_mean",
-                              "momentum",
-                              "y",
-                              "mean",
-                              "inv_variance",
-                              "next_running_mean",
-                              "next_running_variance"};
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.reserve(tensorNames.size());
-    int64_t tensorUid = 0;
-    std::vector<int64_t> dims = {1, 2, 3, 4};
-    std::vector<int64_t> strides = {5, 6, 7, 8};
-    for(auto name : tensorNames)
+    flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
+
+    if(withMeanVariance)
     {
-        tensors.push_back(CreateTensorAttributesDirect(
-            builder, tensorUid++, name, DataType::UINT8, &strides, &dims, false));
+        // Optional mean/variance output tensors
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 6, "mean", DataType::FLOAT, &derivedStrides, &derivedDims));
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, 7, "inv_variance", DataType::FLOAT, &derivedStrides, &derivedDims));
+        meanUid = flatbuffers::Optional<int64_t>(6);
+        invVarUid = flatbuffers::Optional<int64_t>(7);
     }
 
-    auto graph = CreateGraphDirect(builder,
-                                   "BatchnormGraph",
-                                   DataType::FLOAT,
-                                   DataType::HALF,
-                                   DataType::BFLOAT16,
-                                   &tensors,
-                                   &nodes);
+    auto bnormAttributes
+        = CreateBatchnormAttributes(builder,
+                                    1, // x_tensor_uid
+                                    3, // scale_tensor_uid
+                                    4, // bias_tensor_uid
+                                    5, // epsilon_tensor_uid
+                                    0, // peer_stats_tensor_uid
+                                    flatbuffers::nullopt, // prev_running_mean_tensor_uid
+                                    flatbuffers::nullopt, // prev_running_variance_tensor_uid
+                                    flatbuffers::nullopt, // momentum_tensor_uid
+                                    2, // y_tensor_uid
+                                    meanUid, // mean_tensor_uid
+                                    invVarUid, // inv_variance_tensor_uid
+                                    flatbuffers::nullopt, // next_running_mean_tensor_uid
+                                    flatbuffers::nullopt // next_running_variance_tensor_uid
+        );
 
-    builder.Finish(graph);
+    std::vector<::flatbuffers::Offset<Node>> nodes;
+    auto node = CreateNodeDirect(builder,
+                                 "batchnorm_training",
+                                 DataType::FLOAT,
+                                 NodeAttributes::BatchnormAttributes,
+                                 bnormAttributes.Union());
+    nodes.push_back(node);
 
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
     return builder;
 }
 

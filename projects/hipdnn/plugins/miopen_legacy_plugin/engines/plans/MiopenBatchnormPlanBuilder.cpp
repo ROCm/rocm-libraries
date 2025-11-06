@@ -12,6 +12,7 @@
 #include "MiopenUtils.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include "engines/plans/MiopenBatchnormFwdInferencePlan.hpp"
+#include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -221,12 +222,35 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     case 1:
     {
         if(!opGraph.hasOnlySupportedAttributes(std::set<hipdnn_sdk::data_objects::NodeAttributes>{
+               hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
                hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
                hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes}))
         {
             HIPDNN_LOG_INFO("Batchnorm plan builder is not applicable for this graph");
             return false;
         }
+
+        // Check if batchnorm training node has running statistics
+        // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
+        // but MIOpen requires single IN/OUT buffers. This cannot be correctly bridged without
+        // either updating MIOpen API or implementing buffer copy operations.
+        const auto& node = opGraph.getNode(0);
+
+        // Only batchnorm training (BatchnormAttributes) has running statistics
+        if(node.attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes)
+        {
+            const auto* attr = node.attributes_as_BatchnormAttributes();
+            if(attr != nullptr && attr->prev_running_mean_tensor_uid().has_value()
+               && attr->prev_running_variance_tensor_uid().has_value()
+               && attr->momentum_tensor_uid().has_value()
+               && attr->next_running_mean_tensor_uid().has_value()
+               && attr->next_running_variance_tensor_uid().has_value())
+            {
+                HIPDNN_LOG_INFO("Batchnorm plan builder does not support running statistics");
+                return false;
+            }
+        }
+
         return true;
     }
     case 3:
@@ -284,6 +308,18 @@ void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandl
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                    const hipdnn_plugin::IGraph& opGraph,
+                                    const hipdnn_plugin::INodeWrapper& nodeWrapper,
+                                    HipdnnEnginePluginExecutionContext& executionContext)
+{
+    const auto& attr = nodeWrapper.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+
+    BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
 void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
                             const hipdnn_plugin::IGraph& opGraph,
                             const hipdnn_plugin::INodeWrapper& nodeWrapper,
@@ -332,6 +368,10 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
         HIPDNN_LOG_INFO("Building batchnorm fwd inference plan for node: {}", nodeName);
         buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
+        break;
+    case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+        HIPDNN_LOG_INFO("Building batchnorm fwd training plan for node: {}", nodeName);
+        buildPlanFwdTrainingSingleNode(handle, opGraph, nodeWrapper, executionContext);
         break;
     case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
         HIPDNN_LOG_INFO("Building batchnorm backward plan for node: {}", nodeName);

@@ -514,13 +514,13 @@ namespace origami
                {hardware_t::architecture_t::gfx1100,
                 {
                     // F16
-                    {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
                     // BF16
-                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
                     // I8
-                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
                     // I4
-                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
                 }}};
 
         architecture_t                      arch;
