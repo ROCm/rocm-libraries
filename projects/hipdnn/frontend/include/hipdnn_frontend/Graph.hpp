@@ -45,6 +45,7 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
+    std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
@@ -108,7 +109,9 @@ private:
                     "No engine configurations available for the graph."};
         }
 
-        int requiredCount = 1;
+        // Get only top hit if preferred engine id isn't set.
+        // Otherwise get all available engine configs to search for preferred id.
+        int64_t requiredCount = _preferredEngineId.has_value() ? availableEngineCount : 1;
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
         for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
@@ -142,9 +145,48 @@ private:
         }
 
         //TODO
-        // Add filtering and logic to select the best engine configuration that meets the requirements.
-        _engineConfigDesc = std::move(engineConfigs[0]);
-        engineConfigs.erase(engineConfigs.begin(), engineConfigs.begin() + 1);
+        // Add additional filtering based on user criteria.
+        bool engineConfigSelected = false;
+        if(_preferredEngineId.has_value())
+        {
+            for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+            {
+                hipdnnBackendDescriptor_t engineDesc = nullptr;
+                RETURN_ON_BACKEND_FAILURE(
+                    hipdnnBackend()->backendGetAttribute(engineConfigsShallow[i],
+                                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                         1,
+                                                         nullptr,
+                                                         &engineDesc),
+                    "Failed to get engine from engine configuration descriptor.");
+
+                int64_t engineId = -1;
+                RETURN_ON_BACKEND_FAILURE(
+                    hipdnnBackend()->backendGetAttribute(engineDesc,
+                                                         HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                         HIPDNN_TYPE_INT64,
+                                                         1,
+                                                         nullptr,
+                                                         &engineId),
+                    "Failed to get engine id from engine descriptor.");
+                if(engineId == _preferredEngineId.value())
+                {
+                    _engineConfigDesc = std::move(engineConfigs[i]);
+                    engineConfigs.erase(engineConfigs.begin() + static_cast<std::ptrdiff_t>(i),
+                                        engineConfigs.begin() + static_cast<std::ptrdiff_t>(i + 1));
+                    engineConfigSelected = true;
+                    break;
+                }
+            }
+        }
+
+        // If engine config not selected yet, pick the first one.
+        if(!engineConfigSelected)
+        {
+            _engineConfigDesc = std::move(engineConfigs[0]);
+            engineConfigs.erase(engineConfigs.begin(), engineConfigs.begin() + 1);
+        }
 
         return {ErrorCode::OK, ""};
     }
@@ -434,7 +476,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(std::vector<HeuristicMode> const& modes
+    Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
@@ -911,6 +953,13 @@ public:
             std::make_shared<ConvolutionWgradNode>(std::move(attributes), graph_attributes));
 
         return dw;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    void set_preferred_engine_id(std::optional<int64_t> engineId)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        _preferredEngineId = engineId;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
