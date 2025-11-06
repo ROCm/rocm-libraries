@@ -968,6 +968,11 @@ namespace GEMMDriverTest
     {
     };
 
+    // Params are: K dimension size
+    class GEMMUnrollKTailLoopTestGPU : public BaseGEMMContextFixture<std::tuple<int>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -1239,12 +1244,16 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKTailLoop)
+    TEST_P(GEMMUnrollKTailLoopTestGPU, GPU_BasicGEMMUnrollKTailLoop)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto [k] = std::get<1>(GetParam());
+
         GEMMProblem gemm;
         gemm.m         = 64;
         gemm.n         = 128;
+        gemm.k         = k;
         gemm.transA    = "T";
         gemm.transB    = "N";
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
@@ -1255,12 +1264,7 @@ namespace GEMMDriverTest
         gemm.unrollK   = 4;
         gemm.macK      = 8;
 
-        int largeK = 18 * gemm.unrollK * gemm.macK + gemm.macK * 2;
-        for(auto k : {8, 16, 24, 32, 40, 48, 56, 64, largeK})
-        {
-            gemm.k = k;
-            basicGEMM<float>(gemm);
-        }
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
@@ -4056,5 +4060,12 @@ namespace GEMMDriverTest
                                ::testing::Values(StreamKMode::Standard,
                                                  StreamKMode::TwoTile,
                                                  StreamKMode::TwoTileDPFirst))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMUnrollKTailLoopTest,
+        GEMMUnrollKTailLoopTestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Values(8, 16, 24, 32, 40, 48, 56, 64, 592))); // 592 = 18 * 4 * 8 + 8 * 2
 
 }
