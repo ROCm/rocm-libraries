@@ -4404,20 +4404,18 @@ private:
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
-struct XdlopsBackend
+enum class Backend
 {
-};
-struct WmmaBackend
-{
+    Xdlops,
+    Wmma
 };
 
-template <typename BackendType>
+template <Backend backend>
 struct PerformanceConfigHipImplicitGemmGroupFwd
-    : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupFwd<BackendType>>
+    : PerfConfigBaseCK<PerformanceConfigHipImplicitGemmGroupFwd<backend>>
 {
-    static_assert(std::is_same_v<BackendType, XdlopsBackend> ||
-                      std::is_same_v<BackendType, WmmaBackend>,
-                  "BackendType must be either XdlopsBackend or WmmaBackend");
+    static_assert(backend == Backend::Xdlops || backend == Backend::Wmma,
+                  "Backend must be either Backend::Xdlops or Backend::Wmma");
 
     int index             = 0;
     std::string kernel_id = "";
@@ -4465,44 +4463,43 @@ protected:
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
 };
 
-extern template struct PerformanceConfigHipImplicitGemmGroupFwd<XdlopsBackend>;
-extern template struct PerformanceConfigHipImplicitGemmGroupFwd<WmmaBackend>;
+extern template struct PerformanceConfigHipImplicitGemmGroupFwd<Backend::Xdlops>;
+extern template struct PerformanceConfigHipImplicitGemmGroupFwd<Backend::Wmma>;
 
 struct PerformanceConfigHipImplicitGemmGroupFwdXdlops final
-    : PerformanceConfigHipImplicitGemmGroupFwd<XdlopsBackend>
+    : PerformanceConfigHipImplicitGemmGroupFwd<Backend::Xdlops>
 {
     using PerformanceConfigHipImplicitGemmGroupFwd::PerformanceConfigHipImplicitGemmGroupFwd;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupFwdWmma final
-    : PerformanceConfigHipImplicitGemmGroupFwd<WmmaBackend>
+    : PerformanceConfigHipImplicitGemmGroupFwd<Backend::Wmma>
 {
     using PerformanceConfigHipImplicitGemmGroupFwd::PerformanceConfigHipImplicitGemmGroupFwd;
 };
 
-template <typename BackendType>
+template <Backend backend>
 struct ConvHipImplicitGemmGroupFwd
-    : ConvTunableSolver<PerformanceConfigHipImplicitGemmGroupFwd<BackendType>>
+    : ConvTunableSolver<PerformanceConfigHipImplicitGemmGroupFwd<backend>>
 {
-    static_assert(std::is_same_v<BackendType, XdlopsBackend> ||
-                      std::is_same_v<BackendType, WmmaBackend>,
-                  "BackendType must be either XdlopsBackend or WmmaBackend");
+    static_assert(backend == Backend::Xdlops || backend == Backend::Wmma,
+                  "Backend must be either Backend::Xdlops or Backend::Wmma");
 
     const std::string& SolverDbId() const override
     {
         throw std::runtime_error("SolverDbId() not implemented for "
-                                 "ConvHipImplicitGemmGroupFwd<BackendType> base template.");
+                                 "ConvHipImplicitGemmGroupFwd<Backend> base template.");
     }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<BackendType>
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<backend>
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::conv::ProblemDescription&) const override;
     MIOPEN_INTERNALS_EXPORT bool IsValidPerformanceConfig(
         const ExecutionContext&,
         const miopen::conv::ProblemDescription&,
-        const PerformanceConfigHipImplicitGemmGroupFwd<BackendType>&) const override;
+        const PerformanceConfigHipImplicitGemmGroupFwd<backend>&) const override;
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<BackendType>
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<backend>
     Search(const ExecutionContext&,
            const miopen::conv::ProblemDescription&,
            const AnyInvokeParams& invoke_ctx) const override;
@@ -4512,7 +4509,7 @@ struct ConvHipImplicitGemmGroupFwd
     MIOPEN_INTERNALS_EXPORT ConvSolution
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
-                const PerformanceConfigHipImplicitGemmGroupFwd<BackendType>&) const override;
+                const PerformanceConfigHipImplicitGemmGroupFwd<backend>&) const override;
     /// \ref igemm_get_wti_magic_number
     float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
     {
@@ -4527,10 +4524,10 @@ protected:
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
-extern template struct ConvHipImplicitGemmGroupFwd<XdlopsBackend>;
-extern template struct ConvHipImplicitGemmGroupFwd<WmmaBackend>;
+extern template struct ConvHipImplicitGemmGroupFwd<Backend::Xdlops>;
+extern template struct ConvHipImplicitGemmGroupFwd<Backend::Wmma>;
 
-struct ConvHipImplicitGemmGroupFwdXdlops final : ConvHipImplicitGemmGroupFwd<XdlopsBackend>
+struct ConvHipImplicitGemmGroupFwdXdlops final : ConvHipImplicitGemmGroupFwd<Backend::Xdlops>
 {
     using ConvHipImplicitGemmGroupFwd::ConvHipImplicitGemmGroupFwd;
 
@@ -4540,7 +4537,7 @@ struct ConvHipImplicitGemmGroupFwdXdlops final : ConvHipImplicitGemmGroupFwd<Xdl
     }
 };
 
-struct ConvHipImplicitGemmGroupFwdWmma final : ConvHipImplicitGemmGroupFwd<WmmaBackend>
+struct ConvHipImplicitGemmGroupFwdWmma final : ConvHipImplicitGemmGroupFwd<Backend::Wmma>
 {
     using ConvHipImplicitGemmGroupFwd::ConvHipImplicitGemmGroupFwd;
 
