@@ -36,10 +36,6 @@
 #include <boost/date_time/time.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 
-#if defined(_WIN32)
-#include <winsock.h>
-#endif
-
 #include <chrono>
 #include <fstream>
 #include <functional>
@@ -60,10 +56,8 @@ public:
     {
         lock_held     = false;
         lockfile_path = path.string() + ".fslock";
-        char hostname[256];
-        gethostname(hostname, 256);
-        unique_handle =
-            lockfile_path.string() + "." + std::string(hostname) + "." + std::to_string(getpid());
+        unique_handle = lockfile_path.string() + "." + sysinfo::GetSystemHostname() + "." +
+                        std::to_string(getpid());
     }
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)
