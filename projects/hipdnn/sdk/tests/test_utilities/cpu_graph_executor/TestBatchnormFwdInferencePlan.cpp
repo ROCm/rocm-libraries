@@ -41,7 +41,6 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = BATCHNORM_DEFAULT_EPSILON;
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
@@ -64,8 +63,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.scale_tensor_uid()),
                                        *tensorMap.at(attributes.bias_tensor_uid()),
                                        *tensorMap.at(attributes.mean_tensor_uid()),
-                                       *tensorMap.at(attributes.inv_variance_tensor_uid()),
-                                       epsilon);
+                                       *tensorMap.at(attributes.inv_variance_tensor_uid()));
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -89,8 +87,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                                      *shallowBiasTensor,
                                                                      *shallowMeanTensor,
                                                                      *shallowInvVarTensor,
-                                                                     *shallowYTensor,
-                                                                     epsilon);
+                                                                     *shallowYTensor);
 
     BatchnormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
