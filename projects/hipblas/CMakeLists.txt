@@ -44,8 +44,10 @@ endif()
 
 project( hipblas LANGUAGES CXX )
 
-if (NOT python)
-    set(python "python3") # default for linux
+if(WIN32)
+  set(python "python") # default for windows
+else()
+  set(python "python3") # default for linux
 endif()
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
