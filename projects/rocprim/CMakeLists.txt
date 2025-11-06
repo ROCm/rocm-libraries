@@ -303,13 +303,14 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
+  get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
   add_custom_target(
     coverage
     DEPENDS coverage_analysis
-    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocSOLVER-coverage_*.profraw -o ./coverage-report/rocSOLVER.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/librocprim.so -instr-profile=./coverage-report/rocSOLVER.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/librocprim.so -instr-profile=./coverage-report/rocSOLVER.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/librocprim.so -instr-profile=./coverage-report/rocSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocprim-coverage_*.profraw -o ./coverage-report/rocprim.profdata
+    COMMAND ${LLVM_COV} report  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata
+    COMMAND ${LLVM_COV} show  ${LLVM_COV_OBJECT_ARGS}  --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
