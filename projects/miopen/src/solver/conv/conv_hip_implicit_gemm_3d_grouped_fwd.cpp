@@ -540,15 +540,14 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwd<backend>::IsValid(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
+    case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
+    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
     case miopenInt8:
         if constexpr(backend == Backend::Xdlops)
-            Init<int8_t>(problem);
+            return CheckIsSupportCKArgs<int8_t>(problem);
         else if constexpr(backend == Backend::Wmma)
-            ; // no Int8 support for WmmaBackend
-        break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+            break; // no Int8 support for WmmaBackend
+    case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
@@ -645,15 +644,14 @@ bool ConvHipImplicitGemm3DGroupFwd<backend>::IsApplicable(
     }
     switch(problem.GetInDataType())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
+    case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
+    case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8:
         if constexpr(backend == Backend::Xdlops)
-            Init<int8_t>(problem);
+            return CheckCKApplicability<int8_t>(problem);
         else if constexpr(backend == Backend::Wmma)
-            ; // no Int8 support for WmmaBackend
-        break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+            break; // no Int8 support for WmmaBackend
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:

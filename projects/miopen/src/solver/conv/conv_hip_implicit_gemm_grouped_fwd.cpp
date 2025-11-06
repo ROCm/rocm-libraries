@@ -57,7 +57,7 @@ template <typename DataType>
 using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
     2,
     ck::tensor_layout::convolution::NHWGC,
-    1 ck::tensor_layout::convolution::GKYXC,
+    ck::tensor_layout::convolution::GKYXC,
     ck::Tuple<>,
     ck::tensor_layout::convolution::NHWGK,
     DataType,
@@ -370,7 +370,7 @@ bool PerformanceConfigHipImplicitGemmGroupFwd<backend>::RunParameterPredictionMo
         {
             index     = heuristic_indexes[0];
             kernel_id = valid_kernels[index];
-            MIOPEN_LOG_I("Params set by AI: " << ToString());
+            MIOPEN_LOG_I("Params set by AI: " << this->ToString());
             return true;
         }
         return false;
@@ -502,15 +502,14 @@ bool PerformanceConfigHipImplicitGemmGroupFwd<backend>::IsValid(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
+    case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
+    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
     case miopenInt8:
         if constexpr(backend == Backend::Xdlops)
-            Init<int8_t>(problem);
+            return CheckIsSupportCKArgs<int8_t>(problem);
         else if constexpr(backend == Backend::Wmma)
-            ; // no Int8 support for WmmaBackend
-        break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+            break; // no Int8 support for WmmaBackend
+    case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
@@ -611,15 +610,14 @@ bool ConvHipImplicitGemmGroupFwd<backend>::IsApplicable(
     }
     switch(problem.GetInDataType())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
+    case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
+    case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8:
         if constexpr(backend == Backend::Xdlops)
-            Init<int8_t>(problem);
+            return CheckCKApplicability<int8_t>(problem);
         else if constexpr(backend == Backend::Wmma)
-            ; // no Int8 support for WmmaBackend
-        break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+            break; // no Int8 support for WmmaBackend
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:
