@@ -278,15 +278,12 @@ endif()
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
 if(BUILD_CODE_COVERAGE)
-  set(coverage_test ./clients/staging/rocprim-test)
-
   add_custom_target(
     coverage_analysis
-    DEPENDS rocprim-test
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocSOLVER-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
