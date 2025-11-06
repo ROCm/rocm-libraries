@@ -379,7 +379,7 @@ rocWMMA transforms API functions
 Sample programs
 ----------------
 
-A sample demonstrating the use of rocWMMA functions ``load_matrix_sync``, ``store_matrix_sync``, ``fill_fragment``, and ``mma_sync`` is available `here <https://github.com/ROCm/rocWMMA/blob/develop/samples/simple_hgemm.cpp>`_.
+A sample demonstrating the use of rocWMMA functions ``load_matrix_sync``, ``store_matrix_sync``, ``fill_fragment``, and ``mma_sync`` is available `here <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/samples/simple_hgemm.cpp>`_.
 For more sample programs, refer to the `samples directory <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocwmma/samples>`_.
 
 Emulation tests
