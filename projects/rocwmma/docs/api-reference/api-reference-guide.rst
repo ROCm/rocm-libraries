@@ -294,31 +294,31 @@ col_major
 
 
 default_schedule
-^^^^^^^^^
+^^^^^^^^^^^^^^^^
 
 .. doxygentypedef:: rocwmma::fragment_scheduler::default_schedule
 
 
 coop_row_major_2d
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. doxygentypedef:: rocwmma::fragment_scheduler::coop_row_major_2d
 
 
 coop_col_major_2d
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. doxygentypedef:: rocwmma::fragment_scheduler::coop_col_major_2d
 
 
 coop_row_slice_2d
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. doxygentypedef:: rocwmma::fragment_scheduler::coop_row_slice_2d
 
 
 coop_col_slice_2d
-^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 .. doxygentypedef:: rocwmma::fragment_scheduler::coop_col_slice_2d
 
