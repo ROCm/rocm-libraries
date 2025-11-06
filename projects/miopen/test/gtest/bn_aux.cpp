@@ -32,9 +32,24 @@
 
 namespace {
 
-class DeriveSpatialTensorTest : public ::testing::Test
+enum class BNDeriveMode
 {
-protected:
+    Spatial,
+    PerActivation
+};
+
+struct BNDeriveTestCase
+{
+    BNDeriveMode mode;
+};
+
+std::vector<BNDeriveTestCase> GetBNDeriveTestCases()
+{
+    return {{BNDeriveMode::Spatial}, {BNDeriveMode::PerActivation}};
+}
+
+struct GPU_BnDerive_FP32 : public ::testing::TestWithParam<BNDeriveTestCase>
+{
     void SetUp() override
     {
         miopenCreateTensorDescriptor(&ctensor);
@@ -52,56 +67,35 @@ protected:
     miopenTensorDescriptor_t derivedTensor{};
 };
 
-TEST_F(DeriveSpatialTensorTest, TestDerive)
+TEST_P(GPU_BnDerive_FP32, Test)
 {
+    const auto& test_case = this->GetParam();
     std::array<int, 4> lens{};
     miopenDataType_t dt;
 
-    miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, miopenBNSpatial);
+    miopenBatchNormMode_t bn_mode = (test_case.mode == BNDeriveMode::Spatial) ? miopenBNSpatial
+                                                                              : miopenBNPerActivation;
+
+    miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, bn_mode);
     miopenGetTensorDescriptor(derivedTensor, &dt, lens.data(), nullptr);
 
     EXPECT_EQ(dt, miopenFloat);
     EXPECT_EQ(lens.size(), 4);
     EXPECT_EQ(lens[0], 1);
     EXPECT_EQ(lens[1], 32);
-    EXPECT_EQ(lens[2], 1);
-    EXPECT_EQ(lens[3], 1);
+
+    if(test_case.mode == BNDeriveMode::Spatial)
+    {
+        EXPECT_EQ(lens[2], 1);
+        EXPECT_EQ(lens[3], 1);
+    }
+    else
+    {
+        EXPECT_EQ(lens[2], 8);
+        EXPECT_EQ(lens[3], 16);
+    }
 }
 
-class DerivePerActTensorTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        miopenCreateTensorDescriptor(&ctensor);
-        miopenCreateTensorDescriptor(&derivedTensor);
-        miopenSet4dTensorDescriptor(ctensor, miopenFloat, 100, 32, 8, 16);
-    }
-
-    void TearDown() override
-    {
-        miopenDestroyTensorDescriptor(ctensor);
-        miopenDestroyTensorDescriptor(derivedTensor);
-    }
-
-    miopenTensorDescriptor_t ctensor{};
-    miopenTensorDescriptor_t derivedTensor{};
-};
-
-TEST_F(DerivePerActTensorTest, TestDerive)
-{
-    std::array<int, 4> lens{};
-    miopenDataType_t dt;
-
-    miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, miopenBNPerActivation);
-    miopenGetTensorDescriptor(derivedTensor, &dt, lens.data(), nullptr);
-
-    EXPECT_EQ(dt, miopenFloat);
-    EXPECT_EQ(lens.size(), 4);
-    EXPECT_EQ(lens[0], 1);
-    EXPECT_EQ(lens[1], 32);
-    EXPECT_EQ(lens[2], 8);
-    EXPECT_EQ(lens[3], 16);
-}
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnDerive_FP32, testing::ValuesIn(GetBNDeriveTestCases()));
 
 } // namespace
