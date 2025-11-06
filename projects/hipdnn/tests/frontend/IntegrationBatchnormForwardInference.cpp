@@ -155,19 +155,22 @@ protected:
         bool useManualUids)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
-        graph->set_name(graphName);
+        graph->set_name(graphName)
+            .set_io_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
 
         int64_t uid = 1;
         BatchnormTestTensors tensors;
 
-        auto xAttr = makeTensorAttributes("X", DataType_t::FLOAT, tensorBundle.xTensor);
+        auto xAttr = makeTensorAttributes("X", DataType::FLOAT, tensorBundle.xTensor);
         if(useManualUids)
         {
             xAttr.set_uid(uid++);
         }
         tensors.x = std::make_shared<TensorAttributes>(std::move(xAttr));
 
-        auto meanAttr = makeTensorAttributes("mean", DataType_t::FLOAT, tensorBundle.meanTensor);
+        auto meanAttr = makeTensorAttributes("mean", DataType::FLOAT, tensorBundle.meanTensor);
         if(useManualUids)
         {
             meanAttr.set_uid(uid++);
@@ -175,21 +178,21 @@ protected:
         tensors.mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
 
         auto invVarianceAttr
-            = makeTensorAttributes("inv_variance", DataType_t::FLOAT, tensorBundle.varianceTensor);
+            = makeTensorAttributes("inv_variance", DataType::FLOAT, tensorBundle.varianceTensor);
         if(useManualUids)
         {
             invVarianceAttr.set_uid(uid++);
         }
         tensors.invVariance = std::make_shared<TensorAttributes>(std::move(invVarianceAttr));
 
-        auto scaleAttr = makeTensorAttributes("scale", DataType_t::FLOAT, tensorBundle.scaleTensor);
+        auto scaleAttr = makeTensorAttributes("scale", DataType::FLOAT, tensorBundle.scaleTensor);
         if(useManualUids)
         {
             scaleAttr.set_uid(uid++);
         }
         tensors.scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr = makeTensorAttributes("bias", DataType_t::FLOAT, tensorBundle.biasTensor);
+        auto biasAttr = makeTensorAttributes("bias", DataType::FLOAT, tensorBundle.biasTensor);
         if(useManualUids)
         {
             biasAttr.set_uid(uid++);
@@ -206,7 +209,7 @@ protected:
         {
             tensors.y->set_uid(uid++);
         }
-        tensors.y->set_data_type(DataType_t::FLOAT);
+        tensors.y->set_data_type(DataType::FLOAT);
 
         return {graph, tensors};
     }

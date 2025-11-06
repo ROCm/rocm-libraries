@@ -67,13 +67,18 @@ class BatchnormInference:
         inputs.bias.tensor.resize_(new_dims)
         inputs.inv_variance.tensor.resize_(new_dims)
 
+        inv_variance = inputs.inv_variance.tensor
+
+        variance = (1.0/inv_variance.square()) - 1e-5
+
+        variance = variance.detach()
+
         if using_gpu:
             inputs.x.to_gpu()
             inputs.mean.to_gpu()
-            inputs.inv_variance.to_gpu()
+            variance = variance.cuda()
             inputs.scale.to_gpu()
             inputs.bias.to_gpu()
-
 
         saved_exception = None
         
@@ -81,7 +86,7 @@ class BatchnormInference:
             self.outputs.y.tensor = functional.batch_norm(
                 inputs.x.tensor,
                 inputs.mean.tensor,
-                inputs.inv_variance.tensor,
+                variance,
                 inputs.scale.tensor,
                 inputs.bias.tensor,
                 training=False
@@ -98,7 +103,6 @@ class BatchnormInference:
             if using_gpu:
                 inputs.x.to_cpu()
                 inputs.mean.to_cpu()
-                inputs.inv_variance.to_cpu()
                 inputs.scale.to_cpu()
                 inputs.bias.to_cpu()
 
