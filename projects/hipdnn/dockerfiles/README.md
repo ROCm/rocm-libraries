@@ -45,9 +45,6 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 🏗️ Fullbuild-Only Arguments
 
-> [!WARNING]
-> Fullbuild mode is prone to stalls during profiling for certain HIP API calls. For any use-cases involving ROCm profiling tools, it is recommended to use the prebuilt mode.
-
 > [!NOTE]
 > Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
 
