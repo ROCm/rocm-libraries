@@ -398,9 +398,10 @@ namespace rocRoller
             };
 
             auto nextTileNumTag
-                = *graph.coordinates.findNodes(globalScratchTag, danglingMacroTileNumber)
-                       .take(1)
-                       .only();
+                = graph.coordinates.findNodes(globalScratchTag, danglingMacroTileNumber)
+                      .take(1)
+                      .only()
+                      .value();
 
             auto one           = Expression::literal(1u);
             auto plusOneTag    = graph.coordinates.addElement(Linear(one, one));
@@ -929,7 +930,7 @@ namespace rocRoller
                 if(maybeSequence)
                 {
                     epilogueOperations.push_back(
-                        *only(graph.control.getNeighbours<GD::Downstream>(tag)));
+                        only(graph.control.getNeighbours<GD::Downstream>(tag)).value());
                     graph.control.deleteElement(tag);
                 }
             }
@@ -982,9 +983,11 @@ namespace rocRoller
                 // We disable duplication here so that the fix-up pass
                 // uses the correct registers.
                 auto reindexer = std::make_shared<GraphReindexer>();
-                dpTopLoop      = *only(duplicateControlNodes(
-                    graph, reindexer, {loopInfo.topLoopOp}, [](int x) { return true; }));
-                dpAccumLoop    = reindexer->control[loopInfo.accumulatorLoopOp];
+                dpTopLoop
+                    = only(duplicateControlNodes(graph, reindexer, {loopInfo.topLoopOp}, [](int x) {
+                          return true;
+                      })).value();
+                dpAccumLoop = reindexer->control[loopInfo.accumulatorLoopOp];
 
                 // Duplicate the epilogue.  We enable duplication here
                 // to help the deallocation pass reduce register
@@ -1019,8 +1022,9 @@ namespace rocRoller
             Log::debug(
                 "  reverse ForLoops: tile {} accum {}", reverseForTileIdx, reverseForAccumIdx);
 
-            auto forAccumIncr = *only(graph.coordinates.getInputNodeIndices(
-                accumInfo.accumulatorCoord, CG::isEdge<CG::DataFlow>));
+            auto forAccumIncr = only(graph.coordinates.getInputNodeIndices(
+                                         accumInfo.accumulatorCoord, CG::isEdge<CG::DataFlow>))
+                                    .value();
 
             graph.coordinates.addElement(
                 Split(), {forwardInfo.localTileSpaceSK}, {forwardForTileIdx, forwardForAccumIdx});
@@ -1095,7 +1099,7 @@ namespace rocRoller
             //
             {
                 auto dataflow
-                    = *only(graph.coordinates.getNeighbours<GD::Downstream>(forAccumIncr));
+                    = only(graph.coordinates.getNeighbours<GD::Downstream>(forAccumIncr)).value();
                 graph.coordinates.deleteElement(dataflow);
                 graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {forwardForAccumIdx});
                 graph.coordinates.addElement(DataFlow(), {forAccumIncr}, {reverseForAccumIdx});
