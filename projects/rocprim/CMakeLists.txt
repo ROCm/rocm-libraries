@@ -183,18 +183,6 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${ROCM_ROOT}/llvm ${ROCM_ROOT} ${ROCM_ROOT}/hip)
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(rocprim PRIVATE
-    -g
-    -O0
-    -fprofile-instr-generate
-    -fcoverage-mapping
-  )
-  target_link_options(rocprim PUBLIC
-    -fprofile-instr-generate
-  )
-endif()
-
 # Setup VERSION
 set(VERSION_STRING "4.1.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
@@ -271,6 +259,18 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY
+  )
+endif()
+
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(rocprim INTERFACE
+    -g
+    -O0
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  target_link_options(rocprim INTERFACE
+    -fprofile-instr-generate
   )
 endif()
 
