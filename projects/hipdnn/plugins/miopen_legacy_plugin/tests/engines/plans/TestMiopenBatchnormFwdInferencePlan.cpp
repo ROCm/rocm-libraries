@@ -53,7 +53,7 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAl
     EXPECT_NO_THROW(params.scale());
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
-    EXPECT_NO_THROW(params.estVariance());
+    EXPECT_NO_THROW(params.invVariance());
 
     // Optional fusion-specific tensors should be present
     EXPECT_TRUE(params.optActivation().has_value());

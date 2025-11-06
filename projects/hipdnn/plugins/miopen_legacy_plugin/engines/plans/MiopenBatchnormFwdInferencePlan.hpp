@@ -39,7 +39,7 @@ public:
     const MiopenTensor& scale() const;
     const MiopenTensor& bias() const;
     const MiopenTensor& estMean() const;
-    const MiopenTensor& estVariance() const;
+    const MiopenTensor& invVariance() const;
 
     const std::optional<MiopenActivationDescriptor>& optActivation() const;
     const std::optional<MiopenTensor>& activationOut() const;
@@ -50,7 +50,7 @@ private:
     MiopenTensor _scale;
     MiopenTensor _bias;
     MiopenTensor _estMean;
-    MiopenTensor _estVariance;
+    MiopenTensor _invVariance;
 
     std::optional<MiopenActivationDescriptor> _optActivation;
     std::optional<MiopenTensor> _activationOut;

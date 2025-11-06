@@ -11,7 +11,9 @@ namespace miopen_legacy_plugin
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
 // rather than making it configurable and adding extra complexity.
-const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
+
+// NOTE: BN inference temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+// const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& attributes,
@@ -21,7 +23,7 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
     , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
     , _estMean(miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid()))
-    , _estVariance(miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid()))
+    , _invVariance(miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid()))
 {
 }
 
@@ -34,7 +36,7 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _scale(miopen_utils::createTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
     , _bias(miopen_utils::createTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
     , _estMean(miopen_utils::createTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
-    , _estVariance(
+    , _invVariance(
           miopen_utils::createTensor(tensorMap, inferenceAttributes.inv_variance_tensor_uid()))
     , _optActivation(pointwiseAttributes)
     , _activationOut(miopen_utils::createTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
@@ -66,9 +68,9 @@ const MiopenTensor& BatchnormFwdInferenceParams::estMean() const
     return _estMean;
 }
 
-const MiopenTensor& BatchnormFwdInferenceParams::estVariance() const
+const MiopenTensor& BatchnormFwdInferenceParams::invVariance() const
 {
-    return _estVariance;
+    return _invVariance;
 }
 
 const std::optional<MiopenActivationDescriptor>& BatchnormFwdInferenceParams::optActivation() const
@@ -93,10 +95,11 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize(
     return 0;
 }
 
-void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
-                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                        uint32_t numDeviceBuffers,
-                                        [[maybe_unused]] void* workspace) const
+void BatchnormFwdInferencePlan::execute(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+    [[maybe_unused]] uint32_t numDeviceBuffers,
+    [[maybe_unused]] void* workspace) const
 {
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
@@ -111,8 +114,8 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
         _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
     auto estMeanBuffer = miopen_utils::findDeviceBuffer(
         _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
-    auto estVarianceBuffer = miopen_utils::findDeviceBuffer(
-        _inferenceParams.estVariance().uid(), deviceBuffers, numDeviceBuffers);
+    auto invVarianceBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
     {
@@ -131,11 +134,11 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
             _inferenceParams.scale().tensorDescriptor(),
             _inferenceParams.bias().tensorDescriptor(),
             _inferenceParams.estMean().tensorDescriptor(),
-            _inferenceParams.estVariance().tensorDescriptor(),
+            _inferenceParams.invVariance().tensorDescriptor(),
             scaleBuffer.ptr,
             biasBuffer.ptr,
             estMeanBuffer.ptr,
-            estVarianceBuffer.ptr,
+            invVarianceBuffer.ptr,
             epsilon,
             _inferenceParams.optActivation().value().activationDescriptor()));
     }
@@ -155,13 +158,17 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
             _inferenceParams.scale().tensorDescriptor(),
             _inferenceParams.bias().tensorDescriptor(),
             _inferenceParams.estMean().tensorDescriptor(),
-            _inferenceParams.estVariance().tensorDescriptor(),
+            _inferenceParams.invVariance().tensorDescriptor(),
             scaleBuffer.ptr,
             biasBuffer.ptr,
             estMeanBuffer.ptr,
-            estVarianceBuffer.ptr,
+            invVarianceBuffer.ptr,
             epsilon));
     }
+    throw hipdnn_plugin::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "BatchnormFwdInferencePlan execution is currently disabled due to implementation issues "
+        "with the BatchnormInference op.");
 }
 
 }
