@@ -127,7 +127,7 @@ struct default_delete<T[], std::enable_if_t<!std::is_trivially_destructible_v<T>
   THRUST_HOST constexpr default_delete(size_t n = 0) noexcept
       : m_size(n){};
 
-  /*! \brief Converting constructor from compatible array deleter.
+  /*! \brief Copy and converting constructor from compatible array deleter.
    *
    *  Copies the size from another deleter for a convertible array type.
    *
@@ -205,7 +205,7 @@ struct default_delete<T[], std::enable_if_t<std::is_trivially_destructible_v<T>>
    */
   THRUST_HOST constexpr default_delete(size_t = 0) noexcept {};
 
-  /*! \brief Converting constructor from compatible deleter.
+  /*! \brief Copy and converting constructor from compatible deleter.
    *
    *  Allows construction from a deleter for a convertible type.
    *
