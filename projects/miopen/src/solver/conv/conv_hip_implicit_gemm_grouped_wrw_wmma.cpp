@@ -184,6 +184,13 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
+    template <typename ConvPtr>
+    std::size_t GetCKSplitkWorkspaceSize(const ConvPtr& conv_ptr, int split_k) const
+    {
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+    }
+
     int G;
     int N;
     int K;
