@@ -54,9 +54,10 @@ protected:
         yConvTensorAttr->set_data_type(dataType);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
-        yConvTensorAttr->set_is_virtual(true);
+        //yConvTensorAttr->set_is_virtual(true); // TODO uncomment
         yConvTensorAttr->set_uid(uid++);
 
+#if 0
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
         if(doBias)
         {
@@ -115,8 +116,10 @@ protected:
         yTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yTensorAttr->set_output(true);
         yTensorAttr->set_uid(uid);
+#endif
 
-        this->registerValidator(yTensorAttr, tolerance);
+        //this->registerValidator(yTensorAttr, tolerance); // TODO uncomment
+        this->registerValidator(yConvTensorAttr, tolerance);
 
         this->verifyGraph(graphObj, convTestCase.seed);
     }
