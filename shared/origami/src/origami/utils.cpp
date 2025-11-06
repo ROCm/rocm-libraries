@@ -11,14 +11,14 @@
 
 namespace origami {
 
-static int read_heuristics_variance_env_var()
+static double read_heuristics_variance_env_var()
 {
     const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
-    if (!env) return 1; // Set default variance to 1%
+    if (!env) return .01; // Set default variance to 1%
 
     try {
-        int val = std::stoi(env);
-        return (val > 0) ? val : 0;
+        double val = std::stod(env);
+        return (val > 0.) ? val : 0.;
     } catch (...) {
         return 0;
     }
@@ -218,19 +218,19 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
     // Count the number of similar latencies
     constexpr double epsilon = 1e-9;
     //variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
-    static const int top_N_heuristic = read_heuristics_variance_env_var();
+    static const double variance_threshold = read_heuristics_variance_env_var();
     for (const auto& res : valid_results) {
         bool within_top;
         const double diff = std::abs(std::get<0>(res) - best_latency);
 
-        if (top_N_heuristic == 0) {
+        if (variance_threshold <= epsilon) {
             // Absolute tolerance path
             within_top = diff < epsilon;
         } else {
             // Relative tolerance path (guard denom)
             const double denom = std::max(std::abs(best_latency), epsilon);
             // If it's within top_N_heuristic%, include it.
-            within_top = (diff / denom) < (static_cast<float>(top_N_heuristic) / 100.0f);
+            within_top = (diff / denom) < variance_threshold;
         }
 
         if (within_top) ++num_the_same;
