@@ -379,9 +379,11 @@ namespace rocRoller
                 = only(graph.coordinates.getOutputNodeIndices(forLoopDimension, isEdge<Identify>));
             if(otherForLoopDim)
             {
-                Log::debug(
-                    "Adding Unroll Identify from {} to {}", unrollDimension, *otherForLoopDim);
-                graph.coordinates.addElement(Identify(), {unrollDimension}, {*otherForLoopDim});
+                Log::debug("Adding Unroll Identify from {} to {}",
+                           unrollDimension,
+                           otherForLoopDim.value());
+                graph.coordinates.addElement(
+                    Identify(), {unrollDimension}, {otherForLoopDim.value()});
             }
 
             return unrollDimension;
