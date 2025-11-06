@@ -338,16 +338,18 @@ inline flatbuffers::FlatBufferBuilder
         builder, 4, "bias", DataType::FLOAT, &derivedStrides, &derivedDims));
 
     // Epsilon (pass-by-value)
+    std::vector<int64_t> passByValueDims = {1};
     Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(CreateTensorAttributes(builder,
-                                                      5,
-                                                      builder.CreateString("epsilon"),
-                                                      DataType::FLOAT,
-                                                      0,
-                                                      0,
-                                                      false,
-                                                      TensorValue::Float32Value,
-                                                      builder.CreateStruct(epsilonVal).Union()));
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder,
+                                     5,
+                                     "epsilon",
+                                     DataType::FLOAT,
+                                     &passByValueDims,
+                                     &passByValueDims,
+                                     false,
+                                     TensorValue::Float32Value,
+                                     builder.CreateStruct(epsilonVal).Union()));
 
     flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;

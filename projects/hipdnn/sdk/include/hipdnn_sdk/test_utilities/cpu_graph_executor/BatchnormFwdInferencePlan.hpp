@@ -28,15 +28,13 @@ struct BatchnormFwdInferenceParams
         const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& biasAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes,
-        double eps)
+        const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
         , meanTensor(unpackTensorAttributes(meanAttributes))
         , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
-        , epsilon(eps)
     {
     }
 
@@ -46,7 +44,6 @@ struct BatchnormFwdInferenceParams
     hipdnn_sdk::data_objects::TensorAttributesT biasTensor;
     hipdnn_sdk::data_objects::TensorAttributesT meanTensor;
     hipdnn_sdk::data_objects::TensorAttributesT invVarianceTensor;
-    double epsilon; //todo, fix this.
 };
 
 template <typename InputDataType,
@@ -90,8 +87,7 @@ public:
                                                     *shallowBiasTensor,
                                                     *shallowMeanTensor,
                                                     *shallowInvVarianceTensor,
-                                                    *shallowYTensor,
-                                                    _params.epsilon);
+                                                    *shallowYTensor);
     }
 
 private:
@@ -156,13 +152,13 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        BatchnormFwdInferenceParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->y_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->bias_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->mean_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()),
-                                           utilities::BATCHNORM_DEFAULT_EPSILON);
+        BatchnormFwdInferenceParams params(
+            *tensorMap.at(nodeAttributes->x_tensor_uid()),
+            *tensorMap.at(nodeAttributes->y_tensor_uid()),
+            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+            *tensorMap.at(nodeAttributes->bias_tensor_uid()),
+            *tensorMap.at(nodeAttributes->mean_tensor_uid()),
+            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()));
 
         return std::make_unique<BatchnormFwdPlan<InputDataType,
                                                  ScaleBiasDataType,

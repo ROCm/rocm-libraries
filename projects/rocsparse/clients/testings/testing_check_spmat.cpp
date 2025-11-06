@@ -108,6 +108,7 @@ void testing_check_spmat(const Arguments& arg)
 
     case rocsparse_format_coo_aos:
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         CHECK_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         return;

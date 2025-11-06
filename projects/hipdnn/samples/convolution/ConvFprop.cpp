@@ -58,6 +58,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
 
+    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
+    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
+    utilities::Tensor<InputType> yTensor(yAttr->get_dim(), layout);
+
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    yTensor.fillWithValue(static_cast<InputType>(0.0f));
+
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
 
@@ -72,14 +80,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
-
-    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
-    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    utilities::Tensor<InputType> yTensor(yAttr->get_dim(), layout);
-
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    yTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[xAttr->get_uid()] = xTensor.memory().deviceData();
@@ -131,12 +131,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All convolution fprop runs completed.\n";
     return 0;
 }
