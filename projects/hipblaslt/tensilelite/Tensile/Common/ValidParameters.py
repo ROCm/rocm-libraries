@@ -559,6 +559,12 @@ validParameters = { # we need to make sure this matches develop
     #  - Level1 grid dim 32x8
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
+    #
+    # CTChunkSize: Statically specify the chunk size used in chiplet_transform_chunked
+    # -1: Uses wgmxcc mapping when using classic wgm algo, uses chiplet_transform when using SFC algos
+    #  0: Sets chunksize = wgm * wgm
+    #  N: Sets chunksize = N
+    "CTChunkSize" : range(-1, 1024),
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy

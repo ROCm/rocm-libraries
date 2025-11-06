@@ -78,6 +78,7 @@ BenchmarkProblems:
         - UseCustomMainLoopSchedule: [1]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
+        - CTChunkSize: [-1,0,1,32,64]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

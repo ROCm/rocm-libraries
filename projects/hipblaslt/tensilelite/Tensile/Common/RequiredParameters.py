@@ -40,6 +40,7 @@ def getRequiredParametersMin() -> set:
         'AssertSummationElementMultiple',
         'ClusterLocalRead',
         'ConvertAfterDS',
+        'CTChunkSize',
         'DirectToVgprA',
         'DirectToVgprB',
         'DirectToLdsA',
