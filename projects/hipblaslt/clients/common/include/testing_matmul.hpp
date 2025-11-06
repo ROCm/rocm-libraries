@@ -3655,28 +3655,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 for(int i = 0; i < flush_iter; i++)
                     hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-
-                if(arg.use_gpu_timer)
-                    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-                else
-                {
-                    flush_time_used = get_time_us_sync(stream);
-                }
+                pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, flush_time_used, stream);
                 for(int i = 0; i < flush_iter; i++)
                     hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                if(arg.use_gpu_timer)
-                {
-                    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-                    CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
-                    float gpu_time_ms;
-                    CHECK_HIP_ERROR(
-                        hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-                    flush_time_used = gpu_time_ms * 1000; // ms to us
-                }
-                else
-                {
-                    flush_time_used = get_time_us_sync(stream) - flush_time_used;
-                }
+                post_gpu_time(arg.use_gpu_timer, event_gpu_time_start, event_gpu_time_end, flush_time_used, stream);
                 flush_time_used /= flush_iter;
                 flush_times_cache[device_uuid] = flush_time_used;
             }
