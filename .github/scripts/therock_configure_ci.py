@@ -99,7 +99,7 @@ def retrieve_projects(args):
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
     subtrees = get_changed_path_projects(modified_paths)
-    
+
     # by default, we select full tests
     test_type = "full"
 
@@ -115,7 +115,7 @@ def retrieve_projects(args):
         if related_to_therock_ci:
             subtrees = list(subtree_to_project_map.keys())
             test_type = "smoke"
-            
+
     # for nightly runs, run everything with full tests
     if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
