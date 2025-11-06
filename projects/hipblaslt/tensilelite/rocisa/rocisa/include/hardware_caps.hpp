@@ -404,6 +404,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}});
+    rv["HasM0LDSClamp"]      = isaVersion[0] < 9;
     return rv;
 }
 

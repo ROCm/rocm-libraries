@@ -539,7 +539,8 @@ class Solution(collections.abc.Mapping):
     MT = state["MacroTile%s"%tc]
     numWaves = state["NumThreads"] // state["WavefrontSize"]
     if state["UseGeneralizedNLCOne%s"%tc]:
-      assert (totalLoadsNeeded % numWaves) == 0
+      if (totalLoadsNeeded % numWaves) != 0:
+        reject(state, printRejectionReason, "GNLC%s: totalLoadsNeeded (%u) %% numWaves (%u) != 0"%(tc, totalLoadsNeeded, numWaves))
       state["NumTotalPackedLoads%s"%tc] = totalLoadsNeeded // numWaves
       state["NumLoadsPerpendicular%s"%tc] = state["NumTotalPackedLoads%s"%tc]
       state["NumLoadsCoalesced%s"%tc] = 1

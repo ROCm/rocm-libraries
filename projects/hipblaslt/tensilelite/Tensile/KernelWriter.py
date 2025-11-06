@@ -4385,6 +4385,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
           usePerpPerm = (ntpl & (ntpl-1)) == 0
         else:
+          # Currently only VW=1,2 is supported due to how the local read offset
+          # is currently computed. Supporting VW=1,2 only required small modifications
+          # to the offset calc.
+          # TODO: Add support for VW=4,8, this will require more changes in LR offset
+          # calculations
           usePerpPerm = False if kernel["VectorWidth%s"%tc] in [4, 8] else True
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \

@@ -76,7 +76,7 @@ from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, IsaVersion
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
@@ -5372,7 +5372,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if ((doA and kernel["DirectToLds%s"%tPA["tensorChar"]]) or \
        (doB and kernel["DirectToLds%s"%tPB["tensorChar"]])) and \
-       (IsaVersion(9,5,0) != kernel["ISA"]):
+       (self.states.archCaps["HasM0LDSClamp"]):
       imod.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
             comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
 
@@ -8330,7 +8330,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SBarrier(comment="debug"))
 
       # TODO - can remove one of these m0 restores if A and B both TLU
-      if kernel["DirectToLds%s"%tP["tensorChar"]] and (IsaVersion(9,5,0) != kernel["ISA"]):
+      if kernel["DirectToLds%s"%tP["tensorChar"]] and (self.states.archCaps["HasM0LDSClamp"]):
         module.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
             comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
 
@@ -8672,7 +8672,7 @@ class KernelWriterAssembly(KernelWriter):
                   elif directToLdsLoads != 0:
                     # m0 offset conversion (only for UseInstOffsetForGRO == 0)
                     # in tP["glvw"] == 1 and tP["nrc"] > 1 case, only m0 offset conversion is necessary. row and column index conversion is not necessary.
-                    if tP["nrc"] > 1 and not kernel["UseGeneralizedNLCOne%s"%tc]:
+                    if tP["nrc"] > 1:
                       # another address conversion for DirectToLds + NumLoadsCoalesced > 1
                       divisorName = tP["lvc"]
                       divisor = kernel[divisorName]
@@ -8775,7 +8775,7 @@ class KernelWriterAssembly(KernelWriter):
         #module.add(self.getCmpAssert(self.asmAssert.lt, vgpr("Serial"), 64)) # examine second wavefront
 
     # TODO - can remove one of these m0 restores if A and B both TLU
-    if kernel["DirectToLds%s"%tP["tensorChar"]] and not (mode == 1 and kernel["PrefetchGlobalRead"]==2) and (IsaVersion(9,5,0) != kernel["ISA"]):
+    if kernel["DirectToLds%s"%tP["tensorChar"]] and not (mode == 1 and kernel["PrefetchGlobalRead"]==2) and (self.states.archCaps["HasM0LDSClamp"]):
       dst = mgpr(0)
       src = hex(kernel["LdsNumBytes"])
       comment = "Restore LDS clamp at %u bytes"%(kernel["LdsNumBytes"])
