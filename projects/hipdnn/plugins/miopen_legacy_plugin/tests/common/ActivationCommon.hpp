@@ -113,4 +113,62 @@ inline std::vector<ActivTestCase> createBwdActivationTestCases()
     return cases;
 }
 
+inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
+{
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+
+    std::vector<ActivTestCase> cases;
+
+    // RELU_FWD (standard ReLU) - Only activation supported by MIOpen fusion
+    cases.emplace_back(PM::RELU_FWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    return cases;
+}
+
+inline std::vector<ActivTestCase> createFwdActivationFullCases()
+{
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+
+    std::vector<ActivTestCase> cases;
+
+    // RELU_FWD (standard ReLU)
+    cases.emplace_back(PM::RELU_FWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // ReLU6: upper clip at 6.0
+    cases.emplace_back(PM::RELU_FWD,
+                       std::nullopt, // reluLowerClip
+                       6.0f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // Leaky ReLU: lower clip slope
+    cases.emplace_back(PM::RELU_FWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       0.01f, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    return cases;
+}
+
 } // namespace test_activation_common
