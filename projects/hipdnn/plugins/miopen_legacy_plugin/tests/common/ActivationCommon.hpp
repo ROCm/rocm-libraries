@@ -148,9 +148,19 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt // softplusBeta
     );
 
-    // ReLU6: upper clip at 6.0
+    // ReLU6: upper clip at 6.0 (Clipped ReLU)
     cases.emplace_back(PM::RELU_FWD,
                        std::nullopt, // reluLowerClip
+                       6.0f, // reluUpperClip
+                       std::nullopt, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+
+    // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 6.0])
+    cases.emplace_back(PM::RELU_FWD,
+                       0.0f, // reluLowerClip
                        6.0f, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
