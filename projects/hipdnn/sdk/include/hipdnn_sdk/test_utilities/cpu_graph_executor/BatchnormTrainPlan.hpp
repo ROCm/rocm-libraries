@@ -88,7 +88,8 @@ struct BatchnormTrainParams
 template <typename InputDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
-          typename ComputeDataType>
+          typename ComputeDataType,
+          typename OutputDataType>
 class BatchnormTrainPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -105,7 +106,7 @@ public:
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
         auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
-        auto shallowYTensor = createShallowTensor<InputDataType>(
+        auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
@@ -183,18 +184,19 @@ public:
         CpuFpReferenceBatchnormImpl<InputDataType,
                                     ScaleBiasDataType,
                                     MeanVarianceDataType,
-                                    ComputeDataType>::batchnormFwdTraining(*shallowXTensor,
-                                                                           *shallowScaleTensor,
-                                                                           *shallowBiasTensor,
-                                                                           *shallowYTensor,
-                                                                           epsilon,
-                                                                           momentumValue,
-                                                                           meanPtr,
-                                                                           invVariancePtr,
-                                                                           prevRunningMeanPtr,
-                                                                           prevRunningVariancePtr,
-                                                                           nextRunningMeanPtr,
-                                                                           nextRunningVariancePtr);
+                                    ComputeDataType,
+                                    OutputDataType>::batchnormFwdTraining(*shallowXTensor,
+                                                                          *shallowScaleTensor,
+                                                                          *shallowBiasTensor,
+                                                                          *shallowYTensor,
+                                                                          epsilon,
+                                                                          momentumValue,
+                                                                          meanPtr,
+                                                                          invVariancePtr,
+                                                                          prevRunningMeanPtr,
+                                                                          prevRunningVariancePtr,
+                                                                          nextRunningMeanPtr,
+                                                                          nextRunningVariancePtr);
     }
 
 private:
@@ -204,7 +206,8 @@ private:
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class BatchnormTrainPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -212,6 +215,7 @@ public:
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -239,7 +243,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
         // Optional batch statistics tensors
         if(nodeAttributes->mean_tensor_uid().has_value())
@@ -366,7 +370,8 @@ public:
         return std::make_unique<BatchnormTrainPlan<InputDataType,
                                                    ScaleBiasDataType,
                                                    MeanVarianceDataType,
-                                                   ComputeDataType>>(std::move(params));
+                                                   ComputeDataType,
+                                                   OutputDataType>>(std::move(params));
     }
 };
 

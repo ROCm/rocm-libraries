@@ -130,7 +130,8 @@ struct BatchnormTrainSignatureKey
             = std::make_unique<BatchnormTrainPlanBuilder<InputDataTypeEnum,
                                                          ScaleBiasDataTypeEnum,
                                                          MeanVarianceDataTypeEnum,
-                                                         ComputeDataTypeEnum>>();
+                                                         ComputeDataTypeEnum,
+                                                         InputDataTypeEnum>>();
     }
 };
 }

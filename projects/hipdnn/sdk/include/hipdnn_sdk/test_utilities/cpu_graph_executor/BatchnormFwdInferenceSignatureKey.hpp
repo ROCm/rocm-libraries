@@ -131,7 +131,8 @@ struct BatchnormFwdInferenceSignatureKey
             = std::make_unique<BatchnormFwdInferencePlanBuilder<InputDataTypeEnum,
                                                                 ScaleBiasDataTypeEnum,
                                                                 MeanVarianceDataTypeEnum,
-                                                                ComputeDataTypeEnum>>();
+                                                                ComputeDataTypeEnum,
+                                                                InputDataTypeEnum>>();
     }
 };
 

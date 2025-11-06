@@ -131,7 +131,8 @@ struct BatchnormBwdSignatureKey
             = std::make_unique<BatchnormBwdPlanBuilder<InputDataTypeEnum,
                                                        ScaleBiasDataTypeEnum,
                                                        MeanVarianceDataTypeEnum,
-                                                       ComputeDataTypeEnum>>();
+                                                       ComputeDataTypeEnum,
+                                                       InputDataTypeEnum>>();
     }
 };
 

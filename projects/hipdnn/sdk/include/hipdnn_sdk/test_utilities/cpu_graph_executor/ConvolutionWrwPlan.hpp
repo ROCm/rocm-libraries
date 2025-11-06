@@ -50,7 +50,7 @@ struct ConvolutionWrwParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename InputDataType, typename AccumulatorType>
+template <typename InputDataType, typename AccumulatorType, typename OutputDataType>
 class ConvolutionWrwPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -64,20 +64,20 @@ public:
         auto shallowXTensor = createShallowTensor<InputDataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowDWTensor = createShallowTensor<InputDataType>(
+        auto shallowDWTensor = createShallowTensor<OutputDataType>(
             _params.dwTensor, variantPack.at(_params.dwTensor.uid));
 
         auto shallowDYTensor = createShallowTensor<InputDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convBwdWeight(
-            *shallowXTensor,
-            *shallowDWTensor,
-            *shallowDYTensor,
-            _params.stride,
-            _params.dilation,
-            _params.prePadding,
-            _params.postPadding);
+        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType, OutputDataType>::
+            convBwdWeight(*shallowXTensor,
+                          *shallowDWTensor,
+                          *shallowDYTensor,
+                          _params.stride,
+                          _params.dilation,
+                          _params.prePadding,
+                          _params.postPadding);
     }
 
 private:
@@ -85,12 +85,14 @@ private:
 };
 
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using AccumulatorDataType = DataTypeToNative<AccumulatorDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -108,7 +110,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), InputDataTypeEnum);
 
         return true;
@@ -135,7 +137,8 @@ public:
             convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
             nodeAttributes->conv_mode());
 
-        return std::make_unique<ConvolutionWrwPlan<InputDataType, AccumulatorDataType>>(
+        return std::make_unique<
+            ConvolutionWrwPlan<InputDataType, AccumulatorDataType, OutputDataType>>(
             std::move(params));
     }
 };

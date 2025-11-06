@@ -50,7 +50,7 @@ struct ConvolutionBwdParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename InputDataType, typename AccumulatorType>
+template <typename InputDataType, typename AccumulatorType, typename OutputDataType>
 class ConvolutionBwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -61,7 +61,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDXTensor = createShallowTensor<InputDataType>(
+        auto shallowDXTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
         auto shallowWTensor = createShallowTensor<InputDataType>(
@@ -70,7 +70,7 @@ public:
         auto shallowDYTensor = createShallowTensor<InputDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convBwdData(
+        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType, OutputDataType>::convBwdData(
             *shallowDXTensor,
             *shallowWTensor,
             *shallowDYTensor,
@@ -85,12 +85,14 @@ private:
 };
 
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using AccumulatorDataType = DataTypeToNative<AccumulatorDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -107,7 +109,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->w_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), InputDataTypeEnum);
 
@@ -135,7 +137,8 @@ public:
             convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
             nodeAttributes->conv_mode());
 
-        return std::make_unique<ConvolutionBwdPlan<InputDataType, AccumulatorDataType>>(
+        return std::make_unique<
+            ConvolutionBwdPlan<InputDataType, AccumulatorDataType, OutputDataType>>(
             std::move(params));
     }
 };

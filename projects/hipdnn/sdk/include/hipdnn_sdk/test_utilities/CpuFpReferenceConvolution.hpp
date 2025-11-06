@@ -18,7 +18,7 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class InputDataType, class ComputeDataType>
+template <class InputDataType, class ComputeDataType, class OutputDataType = InputDataType>
 class CpuFpReferenceConvolutionImpl
 {
 public:
@@ -48,7 +48,7 @@ public:
     // Overload for uniform padding
     static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
-                                 TensorBase<InputDataType>& output,
+                                 TensorBase<OutputDataType>& output,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& padding)
@@ -58,7 +58,7 @@ public:
 
     static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
-                                 TensorBase<InputDataType>& output,
+                                 TensorBase<OutputDataType>& output,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& prePadding,
@@ -157,7 +157,7 @@ public:
             int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
             auto outputFullIndices = buildTensorIndices(nIdx, outputChannel, outputSpatialIndices);
 
-            output.setHostValue(static_cast<InputDataType>(accumulator), outputFullIndices);
+            output.setHostValue(static_cast<OutputDataType>(accumulator), outputFullIndices);
         };
 
         // Build dimensions for parallel iteration
@@ -172,7 +172,7 @@ public:
     }
 
     // Overload for uniform padding
-    static void convBwdData(TensorBase<InputDataType>& gradInput,
+    static void convBwdData(TensorBase<OutputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
                             const TensorBase<InputDataType>& gradOutput,
                             const std::vector<int64_t>& strides,
@@ -182,7 +182,7 @@ public:
         convBwdData(gradInput, weight, gradOutput, strides, dilations, padding, padding);
     }
 
-    static void convBwdData(TensorBase<InputDataType>& gradInput,
+    static void convBwdData(TensorBase<OutputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
                             const TensorBase<InputDataType>& gradOutput,
                             const std::vector<int64_t>& strides,
@@ -288,7 +288,7 @@ public:
             auto gradInputFullIndices
                 = buildTensorIndices(nIdx, inputChannelIdx, inputSpatialIndices);
 
-            gradInput.setHostValue(static_cast<InputDataType>(vAcc), gradInputFullIndices);
+            gradInput.setHostValue(static_cast<OutputDataType>(vAcc), gradInputFullIndices);
         };
 
         // Build dimensions for parallel iteration
@@ -303,7 +303,7 @@ public:
     }
 
     static void convBwdWeight(const TensorBase<InputDataType>& input,
-                              TensorBase<InputDataType>& gradWeight,
+                              TensorBase<OutputDataType>& gradWeight,
                               const TensorBase<InputDataType>& gradOutput,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
@@ -313,7 +313,7 @@ public:
     }
 
     static void convBwdWeight(const TensorBase<InputDataType>& input,
-                              TensorBase<InputDataType>& gradWeight,
+                              TensorBase<OutputDataType>& gradWeight,
                               const TensorBase<InputDataType>& gradOutput,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
@@ -406,7 +406,7 @@ public:
             auto weightN = (gIdx * outputChannelsPerGroup) + kIdx;
             auto weightFullIndices = buildTensorIndices(weightN, cIdx, kernelSpatialIndices);
 
-            gradWeight.setHostValue(static_cast<InputDataType>(vAcc), weightFullIndices);
+            gradWeight.setHostValue(static_cast<OutputDataType>(vAcc), weightFullIndices);
         };
 
         // Build dimensions for parallel iteration
@@ -421,9 +421,10 @@ public:
     }
 
 private:
-    static void validateInput(const TensorBase<InputDataType>& input,
-                              const TensorBase<InputDataType>& weight,
-                              const TensorBase<InputDataType>& output,
+    template <typename T1, typename T2, typename T3>
+    static void validateInput(const TensorBase<T1>& input,
+                              const TensorBase<T2>& weight,
+                              const TensorBase<T3>& output,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,

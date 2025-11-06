@@ -22,7 +22,8 @@ using namespace hipdnn_sdk::test_utilities;
 template <class InputDataType,
           class ScaleBiasDataType,
           class MeanVarianceDataType = ScaleBiasDataType,
-          class ComputeDataType = MeanVarianceDataType>
+          class ComputeDataType = MeanVarianceDataType,
+          class OutputDataType = InputDataType>
 class CpuFpReferenceBatchnormImpl
 {
 public:
@@ -31,7 +32,7 @@ public:
                                       const TensorBase<ScaleBiasDataType>& bias,
                                       const TensorBase<MeanVarianceDataType>& estimatedMean,
                                       const TensorBase<MeanVarianceDataType>& invVariance,
-                                      TensorBase<InputDataType>& output)
+                                      TensorBase<OutputDataType>& output)
     {
         if(input.dims().size() < 2)
         {
@@ -50,7 +51,7 @@ public:
             ComputeDataType inhat = elemStd * invVarianceValue;
 
             output.setHostValue(
-                staticCast<InputDataType>(
+                staticCast<OutputDataType>(
                     (staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * inhat)
                     + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
                 indices);
@@ -68,7 +69,7 @@ public:
         batchnormFwdTraining(const TensorBase<InputDataType>& x,
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
-                             TensorBase<InputDataType>& y,
+                             TensorBase<OutputDataType>& y,
                              double epsilon,
                              double momentum,
                              TensorBase<MeanVarianceDataType>* mean = nullptr,
@@ -126,7 +127,7 @@ public:
                     auto xHat = (xVal - channelMean) * invVar;
 
                     y.setHostValue(
-                        staticCast<InputDataType>(
+                        staticCast<OutputDataType>(
                             staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * xHat
                             + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
                         fullIndices);
@@ -204,7 +205,7 @@ public:
                              const TensorBase<MeanVarianceDataType>& mean,
                              const TensorBase<MeanVarianceDataType>& invVariance,
                              const TensorBase<ScaleBiasDataType>& scale,
-                             TensorBase<InputDataType>& dx,
+                             TensorBase<OutputDataType>& dx,
                              TensorBase<ScaleBiasDataType>& dscale,
                              TensorBase<ScaleBiasDataType>& dbias)
     {
@@ -269,7 +270,7 @@ public:
                     auto xHat = (xVal - channelMean) * channelInvVariance;
                     auto dxVal = (dyVal - meanDy - xHat * meanDyXhat) * scalarCoef;
 
-                    dx.setHostValue(staticCast<InputDataType>(dxVal), fullIndices);
+                    dx.setHostValue(staticCast<OutputDataType>(dxVal), fullIndices);
                 });
         };
 

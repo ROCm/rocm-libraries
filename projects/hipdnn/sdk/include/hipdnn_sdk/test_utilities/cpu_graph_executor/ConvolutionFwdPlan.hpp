@@ -50,7 +50,7 @@ struct ConvolutionFwdParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename InputDataType, typename AccumulatorType>
+template <typename InputDataType, typename AccumulatorType, typename OutputDataType>
 class ConvolutionFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -67,17 +67,17 @@ public:
         auto shallowWTensor = createShallowTensor<InputDataType>(
             _params.wTensor, variantPack.at(_params.wTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<InputDataType>(
+        auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convFwdInference(
-            *shallowXTensor,
-            *shallowWTensor,
-            *shallowYTensor,
-            _params.stride,
-            _params.dilation,
-            _params.prePadding,
-            _params.postPadding);
+        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType, OutputDataType>::
+            convFwdInference(*shallowXTensor,
+                             *shallowWTensor,
+                             *shallowYTensor,
+                             _params.stride,
+                             _params.dilation,
+                             _params.prePadding,
+                             _params.postPadding);
     }
 
 private:
@@ -85,12 +85,14 @@ private:
 };
 
 template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using AccumulatorDataType = DataTypeToNative<AccumulatorDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -109,7 +111,7 @@ public:
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
         return true;
     }
@@ -135,7 +137,8 @@ public:
             convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
             nodeAttributes->conv_mode());
 
-        return std::make_unique<ConvolutionFwdPlan<InputDataType, AccumulatorDataType>>(
+        return std::make_unique<
+            ConvolutionFwdPlan<InputDataType, AccumulatorDataType, OutputDataType>>(
             std::move(params));
     }
 };

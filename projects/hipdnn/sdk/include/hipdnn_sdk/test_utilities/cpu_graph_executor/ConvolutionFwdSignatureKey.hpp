@@ -95,8 +95,9 @@ struct ConvolutionFwdSignatureKey
                                                   ConvolutionFwdSignatureKey>& map)
     {
         map[ConvolutionFwdSignatureKey(InputDataTypeEnum, AccumulatorDataTypeEnum)]
-            = std::make_unique<
-                ConvolutionFwdPlanBuilder<InputDataTypeEnum, AccumulatorDataTypeEnum>>();
+            = std::make_unique<ConvolutionFwdPlanBuilder<InputDataTypeEnum,
+                                                         AccumulatorDataTypeEnum,
+                                                         InputDataTypeEnum>>();
     }
 };
 
