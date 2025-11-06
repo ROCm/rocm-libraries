@@ -366,17 +366,17 @@ public:
 
     static void testing_v2_spmv_extra_bad_arg(const Arguments& arg)
     {
-        //rocsparse_spmv_descr descr = (rocsparse_spmv_descr)0x4;
-        //
-        //// Test bad arguments for rocsparse_spmv_clear_extra
-        //static constexpr int nex_clear           = 2;
-        //static const int     ex_clear[nex_clear] = {0, 1}; // handle, descr
-        //select_bad_arg_analysis(rocsparse_spmv_clear_extra,
-        //                        nex_clear,
-        //                        ex_clear,
-        //                        (rocsparse_handle)0x4,
-        //                        descr,
-        //                        (rocsparse_error*)0x4);
+        rocsparse_spmv_descr descr = (rocsparse_spmv_descr)0x4;
+
+        // Test bad arguments for rocsparse_spmv_clear_extra
+        static constexpr int nex_clear           = 3;
+        static const int     ex_clear[nex_clear] = {0, 1, 2}; // handle, descr, p_error
+        select_bad_arg_analysis(rocsparse_spmv_clear_extra,
+                                nex_clear,
+                                ex_clear,
+                                (rocsparse_handle)0x4,
+                                descr,
+                                (rocsparse_error*)0x4);
     }
 
     static void testing_v2_spmv_extra(const Arguments& arg)
