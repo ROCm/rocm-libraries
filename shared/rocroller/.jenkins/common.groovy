@@ -256,8 +256,12 @@ def runPerformanceCommand (platform, project)
                     cat ./performance_build_${platform.gpu}/performance_${platform.gpu}/**/*.log >> performance_${platform.gpu}_logs.txt
 
                     #Get Master Results
-                    wget ${masterURL}/lastSuccessfulBuild/artifact/*zip*/archive.zip
-                    unzip archive.zip
+                    ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
+                    if wget ${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                      unzip archive.zip
+                    else
+                      echo "WARNING: No lastSuccessfulBuild found at ${ARTIFACT_URL_PREFIX}"
+                    fi
 
                     if [ -f archive/*/*/performance_${platform.gpu}_last.zip ]; then
 
