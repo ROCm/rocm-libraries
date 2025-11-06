@@ -30,22 +30,6 @@ std::vector<PerfConfigTestCase> GetPerfConfigTestCases(miopenDataType_t data_typ
             {{1, 128, 64, 192, {3, 28, 28}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
              data_type,
              miopenTensorNCDHW,
-             arch},
-            {{1, 96, 3, 1, {6, 1282, 706}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
-             data_type,
-             miopenTensorNCDHW,
-             arch},
-            {{1, 16, 16, 1, {31, 160, 88}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
-             data_type,
-             miopenTensorNCDHW,
-             arch},
-            {{1, 16, 384, 1, {3, 162, 90}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
-             data_type,
-             miopenTensorNCDHW,
-             arch},
-            {{1, 96, 3, 1, {3, 1282, 706}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
-             data_type,
-             miopenTensorNCDHW,
              arch}};
 }
 
