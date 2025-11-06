@@ -339,7 +339,7 @@ def runPerformanceCommand (platform, project)
             perfCommentString += "<details><summary>Links</summary>\n\n"
             perfCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
             perfCommentString += "* [Job Link](${env.BUILD_URL}) \n"
-            perfCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
+            perfCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
             perfCommentString += "</details>\n\n"
 
             boolean perfCommentExists = false
@@ -371,7 +371,7 @@ def runPerformanceCommand (platform, project)
             resCommentString += "<details><summary>Links</summary>\n\n"
             resCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
             resCommentString += "* [Job Link](${env.BUILD_URL}) \n"
-            resCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
+            resCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
             resCommentString += "</details>\n\n"
 
             boolean resCommentExists = false
