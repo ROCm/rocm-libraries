@@ -47,23 +47,23 @@ struct Multiply
 // Backward activation operations: dx = dy * local_gradient
 // Takes input x and upstream gradient dy, returns downstream gradient dx
 
-template <typename ComputeType = float>
+template <typename OutputType, typename ComputeType = float>
 struct ReluBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> OutputType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
         auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
         ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return safeConvert<OutputType>(result);
     }
 };
 
 // The Two bwd relus are split because this one is inclusive of your lower clip, whereas default
 // bwd relu is exclusive of 0.
-template <typename ComputeType = float>
+template <typename OutputType, typename ComputeType = float>
 struct ParameterizedReluBackward
 {
     ComputeType lowerClip;
@@ -78,7 +78,7 @@ struct ParameterizedReluBackward
     }
 
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> OutputType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
@@ -98,15 +98,15 @@ struct ParameterizedReluBackward
         }
 
         ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return safeConvert<OutputType>(result);
     }
 };
 
-template <typename ComputeType = float>
+template <typename OutputType, typename ComputeType = float>
 struct SigmoidBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> OutputType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
@@ -114,15 +114,15 @@ struct SigmoidBackward
         ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
         auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
         ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return safeConvert<OutputType>(result);
     }
 };
 
-template <typename ComputeType = float>
+template <typename OutputType, typename ComputeType = float>
 struct TanhBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> OutputType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
@@ -130,7 +130,7 @@ struct TanhBackward
         ComputeType tanhVal = std::tanh(xCompute);
         auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
         ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return safeConvert<OutputType>(result);
     }
 };
 

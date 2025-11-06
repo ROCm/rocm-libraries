@@ -109,13 +109,13 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            policy.executeUnary(input, output, pointwise::ReluForward<ComputeType>{});
+            policy.executeUnary(input, output, pointwise::ReluForward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-            policy.executeUnary(input, output, pointwise::SigmoidForward<ComputeType>{});
+            policy.executeUnary(input, output, pointwise::SigmoidForward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
-            policy.executeUnary(input, output, pointwise::TanhForward<ComputeType>{});
+            policy.executeUnary(input, output, pointwise::TanhForward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::ABS:
             policy.executeUnary(input, output, pointwise::AbsoluteValue{});
@@ -148,9 +148,9 @@ private:
             policy.executeUnary(
                 input,
                 output,
-                pointwise::ReluForward<ComputeType>{static_cast<ComputeType>(lowerClip),
-                                                    static_cast<ComputeType>(upperClip),
-                                                    static_cast<ComputeType>(lowerSlope)});
+                pointwise::ReluForward<OutputType, ComputeType>{static_cast<ComputeType>(lowerClip),
+                                                                static_cast<ComputeType>(upperClip),
+                                                                static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
@@ -181,15 +181,15 @@ private:
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::ReluBackward<ComputeType>{});
+                input1, input2, output, pointwise::ReluBackward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::SigmoidBackward<ComputeType>{});
+                input1, input2, output, pointwise::SigmoidBackward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::TanhBackward<ComputeType>{});
+                input1, input2, output, pointwise::TanhBackward<OutputType, ComputeType>{});
             break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
@@ -217,7 +217,7 @@ private:
             policy.executeBinaryBroadcast(input1,
                                           input2,
                                           output,
-                                          pointwise::ParameterizedReluBackward<ComputeType>{
+                                          pointwise::ParameterizedReluBackward<OutputType, ComputeType>{
                                               static_cast<ComputeType>(lowerClip),
                                               static_cast<ComputeType>(upperClip),
                                               static_cast<ComputeType>(lowerSlope)});
