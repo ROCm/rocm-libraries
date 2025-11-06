@@ -1565,7 +1565,7 @@ struct rnn_seq_api_test_driver : test_driver
             {
 
                 int padding_val = 0;
-                printf("sampl_lens size == %zu is shmaller than time batch_size == %d, padding the "
+                printf("sampl_lens size == %zu is smaller than time batch_size == %d, padding the "
                        "rest "
                        "of data with %d\n",
                        seqLenArray.size(),
