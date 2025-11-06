@@ -203,11 +203,13 @@ hipError_t radix_sort_merge_impl(
     // In the case that the user provides no custom config for merge sort block sort,
     // instead of using the autotuned merge_sort_block_sort_config, use a hard-coded config that
     // a power-of-two items sorted per block.
-    using default_block_sort_config =
-        typename radix_sort_block_sort_config_base<key_type, value_type>::type;
+    constexpr auto default_block_sort_config
+        = radix_sort_block_sort_config_params_base<key_type, value_type>();
+
     using radix_sort_block_sort_config =
         typename std::conditional<is_default_config,
-                                  default_block_sort_config,
+                                  kernel_config<default_block_sort_config.block_size,
+                                                default_block_sort_config.items_per_thread>,
                                   // extract the relevant config from merge_sort_block_sort_config
                                   typename Config::block_sort_config::sort_config>::type;
     static_assert(

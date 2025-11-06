@@ -477,13 +477,6 @@ struct merge_mergepath_config_selector
         = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
 };
 
-template<typename Config, target_arch Arch>
-struct radix_sort_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.block_size;
-};
-
 template<class Config, target_arch Arch>
 struct target_config
 {

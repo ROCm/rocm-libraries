@@ -610,11 +610,11 @@ hipError_t
     constexpr bool use_default_small_block_sort
         = is_default_config
           || std::is_same<typename Config::single_sort_config, default_config>::value;
-    using default_radix_sort_block_sort_config =
-        typename radix_sort_block_sort_config_base<key_type, value_type>::type;
+    constexpr auto default_radix_sort_block_sort_config
+        = radix_sort_block_sort_config_params_base<key_type, value_type>();
     using default_block_sort_config
-        = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config::block_size),
-                        rocprim::min(4u, default_radix_sort_block_sort_config::items_per_thread)>;
+        = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config.block_size),
+                        rocprim::min(4u, default_radix_sort_block_sort_config.items_per_thread)>;
     using block_sort_config = typename std::conditional<use_default_small_block_sort,
                                                         default_block_sort_config,
                                                         typename Config::single_sort_config>::type;

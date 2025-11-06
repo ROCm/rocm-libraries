@@ -116,20 +116,21 @@ struct merge_sort_block_sort_config_base
 // No radix_sort_block_sort_params and radix_sort_block_sort_config exist since the only
 // configuration member is a kernel_config.
 template<class Key, class Value>
-struct radix_sort_block_sort_config_base
+constexpr kernel_config_params radix_sort_block_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
 
     // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
-    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 2;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 2;
+    constexpr unsigned int items_per_thread
         = rocprim::min(4u, merge_sort_items_per_thread(item_scale));
-    using type = kernel_config<block_size, items_per_thread>;
 
     // The items per block should be a power of two, as this is a requirement for the
     // radix sort merge sort.
     static_assert(is_power_of_two(block_size * items_per_thread),
                   "Sorted items per block should be a power of two.");
+
+    return kernel_config_params{block_size, items_per_thread};
 };
 
 /// \brief Default values are provided by \p merge_sort_block_merge_config_base.
@@ -275,14 +276,16 @@ namespace detail
 {
 
 template<class Value>
-struct default_reduce_config_base
+constexpr reduce_config_params reduce_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = reduce_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                               ::rocprim::max(1u, 16u / item_scale),
-                               ::rocprim::block_reduce_algorithm::using_warp_reduce>;
+    return reduce_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::block_reduce_algorithm::using_warp_reduce
+    };
 };
 
 struct scan_config_tag
@@ -1130,10 +1133,10 @@ struct default_partition_config_base
 struct reduce_by_key_config_params
 {
     kernel_config_params kernel_config;
-    unsigned int         tiles_per_block;
     block_load_method    load_keys_method;
     block_load_method    load_values_method;
     block_scan_algorithm scan_algorithm;
+    unsigned int         tiles_per_block = 1;
 };
 
 } // namespace detail
@@ -1182,10 +1185,10 @@ struct reduce_by_key_config : public detail::reduce_by_key_config_params
     constexpr reduce_by_key_config()
         : detail::reduce_by_key_config_params{
             {BlockSize, ItemsPerThread, SizeLimit},
-            TilesPerBlock,
             LoadKeysMethod,
             LoadValuesMethod,
-            ScanAlgorithm
+            ScanAlgorithm,
+            TilesPerBlock
     } {};
 #endif
 };
@@ -1194,32 +1197,36 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_reduce_by_key_config_base
+constexpr reduce_by_key_config_params reduce_by_key_config_params_base()
 {
-    using small_config = reduce_by_key_config<256,
-                                              15,
-                                              block_load_method::block_load_transpose,
-                                              block_load_method::block_load_transpose,
-                                              block_scan_algorithm::using_warp_scan,
-                                              sizeof(Value) < 16 ? 1 : 2>;
+    constexpr auto small_config = reduce_by_key_config_params{
+        {256, 15},
+        block_load_method::block_load_transpose,
+        block_load_method::block_load_transpose,
+        block_scan_algorithm::using_warp_scan,
+        sizeof(Value) < 16 ? 1 : 2,
+    };
 
-    static constexpr unsigned int size_memory_per_item = std::max(sizeof(Key), sizeof(Value));
-    static constexpr unsigned int item_scale
+    if constexpr(std::max(sizeof(Key), sizeof(Value)) <= 16)
+    {
+        return small_config;
+    }
+
+    constexpr unsigned int size_memory_per_item = std::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale
         = static_cast<unsigned int>(ceiling_div(size_memory_per_item, 2 * sizeof(int)));
-    static constexpr unsigned int items_per_thread = std::max(1u, 15u / item_scale);
+    constexpr unsigned int items_per_thread = std::max(1u, 15u / item_scale);
 
-    using large_config
-        = reduce_by_key_config<limit_block_size<256U,
-                                                items_per_thread * size_memory_per_item,
-                                                ROCPRIM_WARP_SIZE_64>::value,
-                               items_per_thread,
-                               block_load_method::block_load_transpose,
-                               block_load_method::block_load_transpose,
-                               block_scan_algorithm::using_warp_scan,
-                               2>;
+    constexpr auto large_config = reduce_by_key_config_params{
+        {limit_block_size<256U, items_per_thread * size_memory_per_item, ROCPRIM_WARP_SIZE_64>::
+ value, items_per_thread},
+        block_load_method::block_load_transpose,
+        block_load_method::block_load_transpose,
+        block_scan_algorithm::using_warp_scan,
+        2
+    };
 
-    using type = std::
-        conditional_t<std::max(sizeof(Key), sizeof(Value)) <= 16, small_config, large_config>;
+    return large_config;
 };
 
 } // namespace detail
@@ -1315,35 +1322,41 @@ namespace detail
 {
 
 template<typename InputT, int ItemScaleBase = 32>
-struct default_non_trivial_runs_config_base
+constexpr non_trivial_runs_config_params non_trivial_runs_config_params_base()
 {
-    static constexpr unsigned int items_per_thread = 16;
-    using small_config                             = non_trivial_runs_config<256U,
-                                                 items_per_thread,
-                                                 block_load_method::block_load_vectorize,
-                                                 block_scan_algorithm::reduce_then_scan>;
+    constexpr unsigned int items_per_thread = 16;
+    constexpr auto         small_config     = non_trivial_runs_config_params{
+                    {256U, items_per_thread},
+        block_load_method::block_load_vectorize,
+        block_scan_algorithm::reduce_then_scan
+    };
+
+    if constexpr(sizeof(InputT) < 8)
+    {
+        return small_config;
+    }
 
     using OffsetCountPairT = ::rocprim::tuple<unsigned int, unsigned int>;
 
-    static constexpr unsigned int size_memory_per_item
+    constexpr unsigned int size_memory_per_item
         = std::max(sizeof(InputT), sizeof(OffsetCountPairT));
 
     // Additional shared memory is required by the lookback scan state.
-    static constexpr unsigned int shared_mem_offset
+    constexpr unsigned int shared_mem_offset
         = sizeof(typename offset_lookback_scan_prefix_op<
                  OffsetCountPairT,
                  lookback_scan_state<OffsetCountPairT>>::storage_type);
 
-    using big_config
-        = non_trivial_runs_config<detail::limit_block_size<64U,
-                                                           items_per_thread * size_memory_per_item,
-                                                           ROCPRIM_WARP_SIZE_64,
-                                                           shared_mem_offset>::value,
-                                  items_per_thread,
-                                  block_load_method::block_load_warp_transpose,
-                                  block_scan_algorithm::reduce_then_scan>;
+    constexpr auto big_config = non_trivial_runs_config_params{
+        {detail::limit_block_size<64U,
+         items_per_thread * size_memory_per_item,
+         ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
+         items_per_thread},
+        block_load_method::block_load_warp_transpose,
+        block_scan_algorithm::reduce_then_scan
+    };
 
-    using type = std::conditional_t<sizeof(InputT) < 8, small_config, big_config>;
+    return big_config;
 };
 
 struct find_first_of_config_params
