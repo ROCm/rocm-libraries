@@ -90,6 +90,12 @@ _hipdnn_sdk_process_dependency(nlohmann_json nlohmann_json::nlohmann_json
     INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
 )
 
+if(WIN32)
+    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that
+    # cause issues when consuming the hipdnn_sdk.  We need to clear these options
+    set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+endif()
+
 add_library(hipdnn_sdk INTERFACE)
 target_link_libraries(hipdnn_sdk INTERFACE flatbuffers::flatbuffers spdlog::spdlog_header_only nlohmann_json::nlohmann_json)
 
