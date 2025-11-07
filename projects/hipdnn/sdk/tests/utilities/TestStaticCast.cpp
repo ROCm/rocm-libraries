@@ -30,8 +30,8 @@ TEST(TestStaticCast, Correctness)
     testCastTo<hip_bfloat16>(hip_bfloat16());
     testCastToWithFloatIntermediate<hip_bfloat16>(int());
     testCastToWithFloatIntermediate<hip_bfloat16>(0U);
-    testCastToWithFloatIntermediate<hip_bfloat16>(0ULL);
-    testCastToWithFloatIntermediate<hip_bfloat16>(0LL);
+    testCastToWithFloatIntermediate<hip_bfloat16>(uint64_t{0});
+    testCastToWithFloatIntermediate<hip_bfloat16>(int64_t{0});
 
     testCastTo<half>(float());
     testCastToWithFloatIntermediate<half>(double());
@@ -39,8 +39,8 @@ TEST(TestStaticCast, Correctness)
     testCastTo<half>(hip_bfloat16());
     testCastToWithFloatIntermediate<half>(int());
     testCastToWithFloatIntermediate<half>(0U);
-    testCastToWithFloatIntermediate<half>(0ULL);
-    testCastToWithFloatIntermediate<half>(0LL);
+    testCastToWithFloatIntermediate<half>(uint64_t{0});
+    testCastToWithFloatIntermediate<half>(int64_t{0});
 }
 
 }
