@@ -85,20 +85,8 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
-        // Use CPU reference for verification
-        p.UseCpuRef();
-        // Increase tolerance for FP32 due to large tensor accumulation errors
-        p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
-        return p;
-    }();
-    return params;
-}
-
-const auto& GetTestParamsNoCpuRef()
-{
-    static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
-        // Skip CPU reference for faster Smoke tests
+        // Verify on GPU
+        p.UseGpuRef();
         // Increase tolerance for FP32 due to large tensor accumulation errors
         p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
         return p;
@@ -124,27 +112,13 @@ TEST_P(GPU_GemmFwdRest_LargeMemory_FP16, GemmFwdRest)
     this->RunTest(miopen::solver::conv::GemmFwdRest{});
 };
 
-// Smoke tests - same config but no CPU verification (fast)
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GemmFwdRest_LargeMemory_FP32,
-                         testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetGemmFwdRestTestCases(miopenFloat))));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GemmFwdRest_LargeMemory_FP16,
-                         testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetGemmFwdRestTestCases(miopenHalf))));
-
-// Full tests - workspace > 8 GB for FP32, with CPU verification
-INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GemmFwdRest_LargeMemory_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetGemmFwdRestTestCases(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_GemmFwdRest_LargeMemory_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
@@ -166,27 +140,13 @@ TEST_P(GPU_GemmBwdRest_LargeMemory_FP16, GemmBwdRest)
     this->RunTest(miopen::solver::conv::GemmBwdRest{});
 };
 
-// Smoke tests - same config but no CPU verification (fast)
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GemmBwdRest_LargeMemory_FP32,
-                         testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetGemmBwdRestTestCases(miopenFloat))));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_GemmBwdRest_LargeMemory_FP16,
-                         testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                                          testing::Values(miopenConvolutionAlgoGEMM),
-                                          testing::ValuesIn(GetGemmBwdRestTestCases(miopenHalf))));
-
-// Full tests - workspace > 8 GB for FP32, with CPU verification
-INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GemmBwdRest_LargeMemory_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetGemmBwdRestTestCases(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_GemmBwdRest_LargeMemory_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
@@ -208,31 +168,15 @@ TEST_P(GPU_GemmWrwUniversal_LargeMemory_FP16, GemmWrwUniversal)
     this->RunTest(miopen::solver::conv::GemmWrwUniversal{});
 };
 
-// Smoke tests - same config but no CPU verification (fast)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_GemmWrwUniversal_LargeMemory_FP32,
-    testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                     testing::Values(miopenConvolutionAlgoGEMM),
-                     testing::ValuesIn(GetGemmWrwUniversalTestCases(miopenFloat))));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_GemmWrwUniversal_LargeMemory_FP16,
-    testing::Combine(testing::Values(GetTestParamsNoCpuRef()),
-                     testing::Values(miopenConvolutionAlgoGEMM),
-                     testing::ValuesIn(GetGemmWrwUniversalTestCases(miopenHalf))));
-
-// Full tests - workspace > 8 GB for FP32, with CPU verification
-INSTANTIATE_TEST_SUITE_P(
-    Full,
     GPU_GemmWrwUniversal_LargeMemory_FP32,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoGEMM),
                      testing::ValuesIn(GetGemmWrwUniversalTestCases(miopenFloat))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Smoke,
     GPU_GemmWrwUniversal_LargeMemory_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoGEMM),
