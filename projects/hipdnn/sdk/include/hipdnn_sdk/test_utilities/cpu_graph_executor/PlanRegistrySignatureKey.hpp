@@ -58,6 +58,7 @@ struct PlanRegistrySignatureKeyEqual
         return a == b;
     }
 
+    // NOLINTNEXTLINE(readability-redundant-casting)
     bool operator()(const PlanRegistrySignatureKey& a,
                     const PlanRegistrySignatureKey& b) const noexcept
     {
