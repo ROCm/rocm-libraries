@@ -71,12 +71,14 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
     size_t workgroup_size     = (global_size + items_per_group - 1) / items_per_group;
     global_size               = workgroup_size * items_per_group;
 
+    bool use_cx = cx != nullptr;
+
     std::string network_config =
         "lstmfwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
         std::to_string(static_cast<int>(is_inference)) + "x" + std::to_string(read_block) + "x" +
-        std::to_string(items_per_group) + "x" + std::to_string(workgroup_size);
-
-    bool use_cx = cx != nullptr;
+        std::to_string(items_per_group) + "x" + std::to_string(workgroup_size) + "x" +
+        std::to_string(static_cast<int>(use_cx)) + "x" +
+        std::to_string(static_cast<int>(is_seq_begin)) + "x" + std::to_string(direction);
 
     auto&& kernels = handle.GetKernels(kernel_name, network_config);
 
@@ -96,9 +98,6 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
                static_cast<long long>(cell_offset_pre),
                static_cast<long long>(activ_cell_offset),
                static_cast<long long>(hidden_offset),
-               static_cast<bool>(use_cx),
-               static_cast<bool>(is_seq_begin),
-               direction,
                cur_batch,
                use_batch);
     }
@@ -110,7 +109,12 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
             {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
             {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
             {"INFERENCE_MODE", static_cast<int>(is_inference)},
-            {"LOCAL_SIZE", items_per_group}};
+            {"LOCAL_SIZE", items_per_group},
+            {"USE_CX", static_cast<int>(use_cx)},
+            {"USE_DCY", 0},
+            {"IS_SEQ_BEGIN", static_cast<int>(is_seq_begin)},
+            {"IS_SEQ_END", 0},
+            {"DIRECTION", direction}};
         const std::string params = build_params.GenerateFor(kbp::HIP{});
         const std::vector<size_t> vld{items_per_group, 1, 1};
         const std::vector<size_t> vgd{global_size, 1, 1};
@@ -129,9 +133,6 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
             static_cast<long long>(cell_offset_pre),
             static_cast<long long>(activ_cell_offset),
             static_cast<long long>(hidden_offset),
-            static_cast<bool>(use_cx),
-            static_cast<bool>(is_seq_begin),
-            direction,
             cur_batch,
             use_batch);
     }
@@ -183,13 +184,16 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
     size_t workgroup_size     = (global_size + items_per_group - 1) / items_per_group;
     global_size               = workgroup_size * items_per_group;
 
+    bool use_cx  = cx != nullptr;
+    bool use_dcy = dcy != nullptr;
+
     std::string network_config =
         "lstmbwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
         std::to_string(read_block) + "x" + std::to_string(items_per_group) + "x" +
-        std::to_string(workgroup_size);
-
-    bool use_cx  = cx != nullptr;
-    bool use_dcy = dcy != nullptr;
+        std::to_string(workgroup_size) + "x" + std::to_string(static_cast<int>(use_cx)) + "x" +
+        std::to_string(static_cast<int>(use_dcy)) + "x" +
+        std::to_string(static_cast<int>(is_seq_begin)) + "x" +
+        std::to_string(static_cast<int>(is_seq_end)) + "x" + std::to_string(direction);
 
     auto&& kernels = handle.GetKernels(kernel_name, network_config);
 
@@ -218,11 +222,6 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
                static_cast<long long>(dcell_offset_pre),
                static_cast<long long>(dhidden_offset),
                static_cast<long long>(f_offset_pre),
-               static_cast<bool>(use_cx),
-               static_cast<bool>(use_dcy),
-               static_cast<bool>(is_seq_begin),
-               static_cast<bool>(is_seq_end),
-               direction,
                cur_batch,
                use_batch,
                use_batch2);
@@ -235,7 +234,12 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
             {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
             {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
             {"INFERENCE_MODE", 0},
-            {"LOCAL_SIZE", items_per_group}};
+            {"LOCAL_SIZE", items_per_group},
+            {"USE_CX", static_cast<int>(use_cx)},
+            {"USE_DCY", static_cast<int>(use_dcy)},
+            {"IS_SEQ_BEGIN", static_cast<int>(is_seq_begin)},
+            {"IS_SEQ_END", static_cast<int>(is_seq_end)},
+            {"DIRECTION", direction}};
         const std::string params = build_params.GenerateFor(kbp::HIP{});
         const std::vector<size_t> vld{items_per_group, 1, 1};
         const std::vector<size_t> vgd{global_size, 1, 1};
@@ -263,11 +267,6 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
             static_cast<long long>(dcell_offset_pre),
             static_cast<long long>(dhidden_offset),
             static_cast<long long>(f_offset_pre),
-            static_cast<bool>(use_cx),
-            static_cast<bool>(use_dcy),
-            static_cast<bool>(is_seq_begin),
-            static_cast<bool>(is_seq_end),
-            direction,
             cur_batch,
             use_batch,
             use_batch2);

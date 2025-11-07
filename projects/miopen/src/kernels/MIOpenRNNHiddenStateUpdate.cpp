@@ -56,9 +56,6 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                                                     const long cell_offset_pre,
                                                     const long activ_cell_offset,
                                                     const long hidden_offset,
-                                                    const bool use_cx,
-                                                    const bool is_seq_begin,
-                                                    const int direction,
                                                     const int cur_batch,
                                                     const int use_batch)
 {
@@ -100,9 +97,9 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
         tvec_to_accumvec<T>(s_dat);
         ActivationFunction_TanH(c_dat, s_dat, activ_param, activ_param, activ_param);
 
-        if(is_seq_begin)
+        if constexpr(IS_SEQ_BEGIN)
         {
-            if(use_cx)
+            if constexpr(USE_CX)
             {
                 *reinterpret_cast<T_VEC*>(cx_dat) =
                     *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
@@ -122,7 +119,7 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                 *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + cell_offset_pre]);
             tvec_to_accumvec<T>(cx_dat);
         }
-        else if(direction == 1 && use_cx)
+        else if constexpr(DIRECTION == 1 && USE_CX)
         {
             *reinterpret_cast<T_VEC*>(cx_dat) =
                 *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
@@ -204,11 +201,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                                                     const long dcell_offset_pre,
                                                     const long dhidden_offset,
                                                     const long f_offset_pre,
-                                                    const bool use_cx,
-                                                    const bool use_dcy,
-                                                    const bool is_seq_begin,
-                                                    const bool is_seq_end,
-                                                    const int direction,
                                                     const int cur_batch,
                                                     const int use_batch,
                                                     const int use_batch2)
@@ -271,9 +263,9 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dhidden_offset]) =
             *reinterpret_cast<T_VEC*>(o_dat);
 
-        if(is_seq_end)
+        if constexpr(IS_SEQ_END)
         {
-            if(use_dcy)
+            if constexpr(USE_DCY)
             {
                 *reinterpret_cast<T_VEC*>(s_dat) =
                     *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
@@ -299,7 +291,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                 dcx_dat[i] += s_dat[i] * f_dat[i];
             }
         }
-        else if(direction == 0 && use_dcy)
+        else if constexpr(DIRECTION == 0 && USE_DCY)
         {
             *reinterpret_cast<T_VEC*>(s_dat) =
                 *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
@@ -311,9 +303,9 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             }
         }
 
-        if(is_seq_begin)
+        if constexpr(IS_SEQ_BEGIN)
         {
-            if(use_cx)
+            if constexpr(USE_CX)
             {
                 *reinterpret_cast<T_VEC*>(df_dat) =
                     *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
@@ -343,7 +335,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                 df_dat[i] *= dcx_dat[i];
             }
         }
-        else if(direction == 1 && use_cx)
+        else if constexpr(DIRECTION == 1 && USE_CX)
         {
             *reinterpret_cast<T_VEC*>(df_dat) =
                 *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
@@ -420,9 +412,6 @@ extern "C" __global__ void LSTMFwdHiddenUpdate(const DATA_TYPE* __restrict__ cx,
                                                const long cell_offset_pre,
                                                const long activ_cell_offset,
                                                const long hidden_offset,
-                                               const bool use_cx,
-                                               const bool is_seq_begin,
-                                               const int direction,
                                                const int cur_batch,
                                                const int use_batch)
 {
@@ -439,9 +428,6 @@ extern "C" __global__ void LSTMFwdHiddenUpdate(const DATA_TYPE* __restrict__ cx,
                                    cell_offset_pre,
                                    activ_cell_offset,
                                    hidden_offset,
-                                   use_cx,
-                                   is_seq_begin,
-                                   direction,
                                    cur_batch,
                                    use_batch);
 }
@@ -468,11 +454,6 @@ extern "C" __global__ void LSTMBwdHiddenUpdate(const DATA_TYPE* __restrict__ cx,
                                                const long dcell_offset_pre,
                                                const long dhidden_offset,
                                                const long f_offset_pre,
-                                               const bool use_cx,
-                                               const bool use_dcy,
-                                               const bool is_seq_begin,
-                                               const bool is_seq_end,
-                                               const int direction,
                                                const int cur_batch,
                                                const int use_batch,
                                                const int use_batch2)
@@ -499,11 +480,6 @@ extern "C" __global__ void LSTMBwdHiddenUpdate(const DATA_TYPE* __restrict__ cx,
                                    dcell_offset_pre,
                                    dhidden_offset,
                                    f_offset_pre,
-                                   use_cx,
-                                   use_dcy,
-                                   is_seq_begin,
-                                   is_seq_end,
-                                   direction,
                                    cur_batch,
                                    use_batch,
                                    use_batch2);
