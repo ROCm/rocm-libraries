@@ -260,21 +260,27 @@ bool MiopenBatchnormFwdTrainingActivPlanBuilder::isApplicable(
 
     const auto& bnAttr = std::get<0>(nodeAttrs.value());
 
-    // NOTE: Running statistics are not supported due to API mismatch between hipDNN and MIOpen.
+    // NOTE: Running statistics support is disabled pending MIOpen API update.
+    // Remove this block when MIOpen supports separate input/output buffers for running statistics.
     // hipDNN's graph API uses separate prev_running_mean/variance (input) and next_running_mean/variance (output)
     // buffers, but MIOpen's API requires single IN/OUT buffers for running statistics.
     // This cannot be correctly bridged without either:
     // 1. Updating MIOpen API to support separate input/output buffers, or
     // 2. Implementing buffer copy operations (with performance overhead)
-    // Until MIOpen is updated, batchnorm training with running statistics is not supported.
+#if 0 // TODO: Change to 1 when MIOpen API is updated to support separate input/output buffers
+    // Running statistics will be supported - no rejection needed
+#else
+    // Until MIOpen is updated, reject graphs with running statistics
     if(bnAttr.prev_running_mean_tensor_uid().has_value()
        || bnAttr.prev_running_variance_tensor_uid().has_value()
        || bnAttr.momentum_tensor_uid().has_value()
        || bnAttr.next_running_mean_tensor_uid().has_value()
        || bnAttr.next_running_variance_tensor_uid().has_value())
     {
+        HIPDNN_LOG_INFO("Running statistics not yet supported - MIOpen API update required");
         return false;
     }
+#endif
 
     if(!nodeAttrsCheckTensorsLogErrors(
            bnAttr, std::get<1>(nodeAttrs.value()), opGraph.getTensorMap()))

@@ -59,6 +59,33 @@ BatchnormFwdTrainingActivParams::BatchnormFwdTrainingActivParams(
             = miopen_utils::createTensor(tensorMap, bnAttr.inv_variance_tensor_uid().value());
     }
 
+    // TODO: Enable running statistics when MIOpen API supports separate input/output buffers
+    // Currently commented out due to API mismatch - plan builder will reject graphs with running stats
+    /*
+    // Handle optional running statistics
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       && bnAttr.prev_running_variance_tensor_uid().has_value()
+       && bnAttr.momentum_tensor_uid().has_value()
+       && bnAttr.next_running_mean_tensor_uid().has_value()
+       && bnAttr.next_running_variance_tensor_uid().has_value())
+    {
+        _prevRunningMean = miopen_utils::createTensor(
+            tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
+        _prevRunningVariance = miopen_utils::createTensor(
+            tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
+        
+        auto momentumTensorAttr = tensorMap.at(bnAttr.momentum_tensor_uid().value());
+        _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
+        
+        _nextRunningMean = miopen_utils::createTensor(
+            tensorMap, bnAttr.next_running_mean_tensor_uid().value());
+        _nextRunningVariance = miopen_utils::createTensor(
+            tensorMap, bnAttr.next_running_variance_tensor_uid().value());
+        
+        _hasRunningStats = true;
+    }
+    */
+
     // Running statistics not supported - API mismatch between hipDNN and MIOpen
     // Defensive check: should have been rejected by plan builder
     if(bnAttr.prev_running_mean_tensor_uid().has_value()
@@ -198,6 +225,35 @@ void BatchnormFwdTrainingActivPlan::execute(const HipdnnEnginePluginHandle& hand
         savedMeanDesc = _params.mean().tensorDescriptor();
         savedVarDesc = _params.invVariance().tensorDescriptor();
     }
+
+    // TODO: Enable running statistics when MIOpen API supports separate input/output buffers
+    // Currently commented out due to API mismatch - plan builder will reject graphs with running stats
+    /*
+    void* runningMeanPtr = nullptr;
+    void* runningVariancePtr = nullptr;
+    double expAvgFactor = 0.0;
+
+    if(_params.hasRunningStats())
+    {
+        auto prevMeanBuffer = miopen_utils::findDeviceBuffer(
+            _params.prevRunningMean().uid(), deviceBuffers, numDeviceBuffers);
+        auto prevVarBuffer = miopen_utils::findDeviceBuffer(
+            _params.prevRunningVariance().uid(), deviceBuffers, numDeviceBuffers);
+        auto nextMeanBuffer = miopen_utils::findDeviceBuffer(
+            _params.nextRunningMean().uid(), deviceBuffers, numDeviceBuffers);
+        auto nextVarBuffer = miopen_utils::findDeviceBuffer(
+            _params.nextRunningVariance().uid(), deviceBuffers, numDeviceBuffers);
+
+        // TODO: Copy prev to next buffers before calling MIOpen
+        // This workaround is needed until MIOpen supports separate input/output buffers
+        // hipMemcpy(nextMeanBuffer.ptr, prevMeanBuffer.ptr, size, hipMemcpyDeviceToDevice);
+        // hipMemcpy(nextVarBuffer.ptr, prevVarBuffer.ptr, size, hipMemcpyDeviceToDevice);
+
+        runningMeanPtr = nextMeanBuffer.ptr;
+        runningVariancePtr = nextVarBuffer.ptr;
+        expAvgFactor = _params.momentumValue();
+    }
+    */
 
     // Running statistics should have been rejected by plan builder
     if(_params.hasRunningStats())
