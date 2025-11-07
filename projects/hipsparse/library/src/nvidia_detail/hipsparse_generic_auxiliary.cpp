@@ -430,19 +430,6 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
 }
 #endif
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 #if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
                                            int64_t                rows,
@@ -506,32 +493,6 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                       hipsparse::hipDataTypeToCudaDataType(valueType)));
 }
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseDestroySpMat(hipsparseConstSpMatDescr_t spMatDescr)
