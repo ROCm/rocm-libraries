@@ -48,6 +48,11 @@ extern "C" {
  *  \note \p hipsparseXbsric02_zeroPivot is a blocking function. It might influence
  *  performance negatively.
  *
+ *  \deprecated
+ *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+ *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend. 
+ *  For portable code across backends, consider using the generic sparse APIs instead.
+ *
  *  @param[in]
  *  handle      handle to the hipsparse library context queue.
  *  @param[in]
@@ -55,11 +60,11 @@ extern "C" {
  *  @param[inout]
  *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
  *
- *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position pointer is
- *              invalid.
- *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
- *  \retval     HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ *  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
@@ -81,9 +86,9 @@ hipsparseStatus_t
  *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
  *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
- *  mb                 number of block rows in the sparse BSR matrix.
+ *  mb                 number of block rows in the sparse BSR matrix. Must be non-negative.
  *  @param[in]
- *  nnzb               number of non-zero block entries of the sparse BSR matrix.
+ *  nnzb               number of non-zero block entries of the sparse BSR matrix. Must be non-negative.
  *  @param[in]
  *  descrA             descriptor of the sparse BSR matrix.
  *  @param[in]
@@ -94,7 +99,7 @@ hipsparseStatus_t
  *  @param[in]
  *  bsrColIndA         array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  blockDim           the block dimension of the BSR matrix. Between 1 and m where \p m=mb*blockDim.
+ *  blockDim           the block dimension of the BSR matrix. Must be positive. Between 1 and m where \p m=mb*blockDim.
  *  @param[out]
  *  info               structure that holds the information collected during the analysis step.
  *  @param[out]
@@ -104,13 +109,14 @@ hipsparseStatus_t
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02()
  *                     and hipsparseZbsric02().
  *
- *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info or \p pBufferSizeInBytes pointer
- *              is invalid.
- *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
- *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
- *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
+ *          \p bsrColIndA, \p info or \p pBufferSizeInBytes is nullptr.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb or \p nnzb is negative.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is invalid.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
