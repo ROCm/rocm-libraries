@@ -1052,11 +1052,11 @@ namespace detail
 
 struct partition_config_params
 {
-    kernel_config_params kernel_config;
-    block_load_method    key_block_load_method;
-    block_load_method    value_block_load_method;
-    block_load_method    flag_block_load_method;
-    block_scan_algorithm block_scan_method;
+    kernel_config_params kernel_config         = {0, 0};
+    block_load_method    key_block_load_method = ::rocprim::block_load_method::block_load_transpose;
+    block_load_method value_block_load_method  = ::rocprim::block_load_method::block_load_transpose;
+    block_load_method flag_block_load_method   = ::rocprim::block_load_method::block_load_transpose;
+    block_scan_algorithm block_scan_method     = ::rocprim::block_scan_algorithm::using_warp_scan;
 };
 
 } // namespace detail
@@ -1113,26 +1113,24 @@ struct select_config : public detail::partition_config_params
 namespace detail
 {
 
-template<typename Key, bool IsThreeway, int ItemScaleBase = 13>
-struct default_partition_config_base
+template<typename Key, bool IsThreeway = false>
+constexpr partition_config_params partition_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr int          ItemScaleBase = 13;
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
     using offset_t = std::conditional_t<IsThreeway, uint2, unsigned int>;
 
     // Additional shared memory is required by the lookback scan state.
-    static constexpr unsigned int shared_mem_offset = sizeof(
+    constexpr unsigned int shared_mem_offset = sizeof(
         typename offset_lookback_scan_prefix_op<offset_t,
                                                 lookback_scan_state<offset_t>>::storage_type);
 
-    using type = select_config<
-        fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
-        ::rocprim::max(1u, ItemScaleBase / item_scale),
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_scan_algorithm::using_warp_scan>;
+    return partition_config_params{
+        {fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
+         ::rocprim::max(1u, ItemScaleBase / item_scale)}
+    };
 };
 
 struct reduce_by_key_config_params

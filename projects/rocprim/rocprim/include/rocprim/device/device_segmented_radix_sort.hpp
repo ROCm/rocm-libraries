@@ -80,7 +80,9 @@ struct Partitioner
         using input_type = typename std::iterator_traits<InputIterator>::value_type;
         if(three_way_partitioning)
         {
-            using config = typename default_partition_config_base<input_type, true>::type;
+            constexpr auto params = partition_config_params_base<input_type, true>();
+            using config          = select_config<params.kernel_config.block_size,
+                                         params.kernel_config.items_per_thread>;
             return partition_three_way<config>(temporary_storage,
                                                storage_size,
                                                input,
@@ -96,7 +98,9 @@ struct Partitioner
         }
         else
         {
-            using config = typename default_partition_config_base<input_type, false>::type;
+            constexpr auto params = partition_config_params_base<input_type, false>();
+            using config          = select_config<params.kernel_config.block_size,
+                                         params.kernel_config.items_per_thread>;
             return partition<config>(temporary_storage,
                                      storage_size,
                                      input,

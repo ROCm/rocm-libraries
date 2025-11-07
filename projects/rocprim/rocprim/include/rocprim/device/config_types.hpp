@@ -647,7 +647,10 @@ void trampoline_kernel(Kernel kernel)
     using ArchConfig = target_config2<Config, Selector, Target>;
 
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    if constexpr(Target::i == device_target_arch())
+    using Targets = typename Selector::targets;
+    // If the arch does not exist in the Targets it should run the arch for the most_common_config.
+    constexpr target device_arch_target = most_common_config<Targets>(target(device_target_arch()));
+    if constexpr(Target::i == device_arch_target.i)
 #endif
     {
         kernel(ArchConfig{});
