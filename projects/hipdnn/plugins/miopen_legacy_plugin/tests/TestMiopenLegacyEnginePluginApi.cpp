@@ -283,7 +283,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetApplicableEngineIdsValid)
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreatePvt(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
         = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
@@ -315,7 +315,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetEngineDetailsValid)
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreatePvt(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
         = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
@@ -341,7 +341,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeValid)
     ASSERT_EQ(hipdnnEnginePluginCreatePvt(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
     // Create a valid flatbuffer graph and engine config
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
         = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
@@ -367,7 +367,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateExecutionContextValid)
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreatePvt(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
         = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
@@ -395,7 +395,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextVal
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreatePvt(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
         = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);

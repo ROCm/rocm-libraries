@@ -193,12 +193,14 @@ def run_sh_bench(arguments):
     for singleCMD in generator.iterate_cmd():
         # print("singleCMD: " + singleCMD)
         csvKeys, benchResults, success = bench.run_sh_cmd(singleCMD, True)
-        content = extractProblemDescStr(benchResults, csvKeys) + '\n'
-        if writeHeader:
-            header = ','.join([str(key) for key in csvKeys]) + '\n'
-            csv_file.write(header)
-            writeHeader = False
-        csv_file.write(content)
+        for eachResult in benchResults:
+            # data in problem description
+            content = extractProblemDescStr(eachResult, csvKeys) + '\n'
+            if writeHeader:
+                header = ','.join([str(key) for key in csvKeys]) + '\n'
+                csv_file.write(header)
+                writeHeader = False
+            csv_file.write(content)
 
     print(f'\nResults written to {csv_file.name}')
     csv_file.close()

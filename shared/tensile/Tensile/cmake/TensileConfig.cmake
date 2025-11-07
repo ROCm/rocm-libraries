@@ -215,8 +215,9 @@ function(TensileCreateLibraryFiles
     set(Options ${Options} "--architecture=${archString}")
   endif()
 
-  # We do not need to do device enumeration at library build time.
-  set(Options ${Options} "--no-enumerate")
+  if(Tensile_NO_ENUMERATE)
+    set(Options ${Options} "--no-enumerate")
+  endif()
 
   set(CommandLine ${Script} ${Options} ${Tensile_LOGIC_PATH} ${Tensile_OUTPUT_PATH} HIP)
   if (WIN32 OR (VIRTUALENV_BIN_DIR AND VIRTUALENV_PYTHON_EXENAME))

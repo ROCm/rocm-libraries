@@ -349,6 +349,17 @@ if(OPTIMAL)
   )
 endif()
 
+# Asynchronous logger option
+# Note: this does not mean abolsutely asynchronous, just less synchronous
+option(ROCSOLVER_USE_ASYNC_LOGGER "Enable asynchronous HIP event-based logger (reduces GPU synchronizations)" ON)
+
+# Configure asynchronous logger compile definition
+if(ROCSOLVER_USE_ASYNC_LOGGER)
+  set(ROCSOLVER_ASYNC_LOGGER_DEFINITION "ROCSOLVER_USE_ASYNC_LOGGER=1")
+else()
+  set(ROCSOLVER_ASYNC_LOGGER_DEFINITION "ROCSOLVER_USE_ASYNC_LOGGER=0")
+endif()
+
 set(auxiliaries
   common/buildinfo.cpp
   common/rocsolver_handle.cpp
@@ -492,6 +503,7 @@ target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API
   ROCSOLVER_LIBRARY
+  ${ROCSOLVER_ASYNC_LOGGER_DEFINITION}
 )
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")
@@ -541,4 +553,3 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
-
