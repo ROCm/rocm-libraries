@@ -468,7 +468,7 @@ namespace HazardObserverTest
                 if(!context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes16)
                    && !context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes32))
                 {
-                    SKIP("permlanes not supported");
+                    SKIP("Architecture " + arch.toString() + " does not support permlanes.");
                 }
 
                 SECTION("Hazard with 2nd op accessing the same register")
@@ -598,13 +598,13 @@ namespace HazardObserverTest
 
             SECTION("Test v_permlane, only on GFX950 ")
             {
-                // Tests for v_permlane*, only on GFX950
-                if(not arch.isCDNA35GPU())
+                auto context = TestContext::ForTarget(arch);
+                if(!context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes16)
+                   && !context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes32))
                 {
-                    SKIP("v_permlane only available on GFX950");
+                    SKIP("Architecture " + arch.toString() + " does not support permlanes.");
                 }
 
-                auto context = TestContext::ForTarget(arch);
                 auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 3);
                 auto s = createRegisters(context, Register::Type::Scalar, DataType::UInt32, 2);
 
@@ -695,6 +695,13 @@ namespace HazardObserverTest
 
             SECTION("NOPs added for buffer_store_dwordx4 followed by VALU")
             {
+                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                       GPUCapability::HasAccCD))
+                {
+                    SKIP("Architecture " + arch.toString()
+                         + " does not use Accumulator registers.");
+                }
+
                 auto context = TestContext::ForTarget(arch);
                 auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
                 auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
@@ -727,6 +734,13 @@ namespace HazardObserverTest
 
             SECTION("No NOPs when soffset is an SGPR")
             {
+                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                       GPUCapability::HasAccCD))
+                {
+                    SKIP("Architecture " + arch.toString()
+                         + " does not use Accumulator registers.");
+                }
+
                 auto context = TestContext::ForTarget(arch);
                 auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
                 auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
@@ -756,6 +770,13 @@ namespace HazardObserverTest
 
             SECTION("No NOPs after buffer_store_dwordx4")
             {
+                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                       GPUCapability::HasAccCD))
+                {
+                    SKIP("Architecture " + arch.toString()
+                         + " does not use Accumulator registers.");
+                }
+
                 auto context = TestContext::ForTarget(arch);
                 auto v1
                     = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
