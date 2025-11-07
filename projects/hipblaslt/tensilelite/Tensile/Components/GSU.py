@@ -1940,9 +1940,6 @@ class GSUOn(GSU):
 
         reductionSkipLabel = Label(writer.labels.getNameInc("reduction_skip"), comment="")
         reductionAllGsuWgLabel = Label(writer.labels.getNameInc("reduction_all_gsu_wg"), comment="")
-        reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
-        reductionOffsetLow32 = reductionOffset & 0xFFFFFFFF
-        reductionOffsetHigh32 = (reductionOffset >> 32) & 0xFFFFFFFF
 
         tmpS01 = writer.sgprPool.checkOut(1, preventOverflow=False)
         tmpS02 = writer.sgprPool.checkOut(1, preventOverflow=False)
@@ -2060,8 +2057,7 @@ class GSUOn(GSU):
                     module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1, comment="%u" % i))
 
                     module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
-                    if reductionOffsetHigh32 != 0:
-                        module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
+                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
                     module.add(SCmpEQI32(src0=sgpr("GSUSync"), src1=0, comment=""))#GSUSync+GSUP1==GSU
                     module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[i].getLabelName(), comment="SyncAddbranchhere"))
@@ -2106,8 +2102,7 @@ class GSUOn(GSU):
                     module.add(SCBranchSCC1(labelName=SynchronizerAddSkiplabel.getLabelName(), comment="SyncAddbranch"))
 
                     module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment=""))
-                    if reductionOffsetHigh32 != 0:
-                        module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
+                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
 
                     module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
                     module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
@@ -2184,8 +2179,7 @@ class GSUOn(GSU):
 
             # set buffer load address for WG1
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpWSD+0), src1="MTOffset", comment="" ))
-            if reductionOffsetHigh32 != 0:
-                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpWSD+1), src1="MTOffsetH32", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpWSD+1), src1="MTOffsetH32", comment="" ))
             module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
 
             accumulationStartlabel = Label(writer.labels.getNameInc("Accumulation_Start"), "Accumulation Start")
@@ -2222,8 +2216,7 @@ class GSUOn(GSU):
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
             module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[1].getLabelName(), comment=""))
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
-            if reductionOffsetHigh32 != 0:
-                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
             # other WGs: read all elements together
             for uidx in range(2, unrolledWGs+1):
@@ -2245,8 +2238,7 @@ class GSUOn(GSU):
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
                 module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[uidx].getLabelName(), comment=""))
                 module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
-                if reductionOffsetHigh32 != 0:
-                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
+                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
             module.addComment("buffer load end\n")
 
@@ -2292,8 +2284,7 @@ class GSUOn(GSU):
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
             module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
-            if reductionOffsetHigh32 != 0:
-                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
             module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
             module.add(accumulationStartlabel)
@@ -2335,8 +2326,7 @@ class GSUOn(GSU):
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
                 module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
                 module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
-                if reductionOffsetHigh32 != 0:
-                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
+                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
                 module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
 
