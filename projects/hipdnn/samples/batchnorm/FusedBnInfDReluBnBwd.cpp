@@ -85,21 +85,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
-
     // Create tensors for execution
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
@@ -121,12 +106,23 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                     static_cast<IntermediateType>(0.1f));
     savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-0.1f),
                                          static_cast<IntermediateType>(0.1f));
+    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                           static_cast<IntermediateType>(2.0f));
 
-    // Generate random variance values (must be positive)
-    // Note: Due to a bug in handling variance vrs inv_variance (https://github.com/ROCm/rocm-libraries/issues/2459)
-    //       this is being set as 1 for now.
-    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(1.0f),
-                                           static_cast<IntermediateType>(1.0f));
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -179,8 +175,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         test_utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        // Tolerance range is very high due to data-type mismatch & variance issues (https://github.com/ROCm/rocm-libraries/issues/2459).
-        const auto inputTol = 4e-1f;
+        // Tolerance range is high due to data-type mismatch between plugin and reference impl.
+        // This will be fixed in a follow-up.
+        // Issue is due to the reference not splitting the input / output datatypes.
+        const auto inputTol = 4e-2f;
 
         auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));
@@ -223,12 +221,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed.\n";
     return 0;
 }
