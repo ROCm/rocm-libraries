@@ -11,13 +11,13 @@
 
 namespace origami {
 
-static int read_heuristics_variance_env_var() {
+static double read_heuristics_variance_env_var() {
     const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
     if (!env) return 0;  // Set default variance to 0
 
     try {
-        int val = std::stoi(env);
-        return (val > 0) ? val : 0;
+        double val = std::stod(env);
+        return (val > 0.) ? val : 0.;
     } catch (...) {
         return 0;
     }
@@ -217,19 +217,19 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
     // Count the number of similar latencies
     constexpr double epsilon = 1e-9;
     // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
-    static const int top_N_heuristic = read_heuristics_variance_env_var();
+    static const double top_N_heuristic = read_heuristics_variance_env_var();
     for (const auto& res : valid_results) {
         bool within_top;
         const double diff = std::abs(std::get<0>(res) - best_latency);
 
-        if (top_N_heuristic == 0) {
+        if (top_N_heuristic <= epsilon) {
             // Absolute tolerance path
             within_top = diff < epsilon;
         } else {
             // Relative tolerance path (guard denom)
             const double denom = std::max(std::abs(best_latency), epsilon);
             // If it's within top_N_heuristic%, include it.
-            within_top = (diff / denom) < (static_cast<float>(top_N_heuristic) / 100.0f);
+            within_top = (diff / denom) < top_N_heuristic;
         }
 
         if (within_top)
@@ -477,8 +477,7 @@ std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware, size_t M
         std::vector<int> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
         int bestWGM = 1;
         int bestL2 = std::numeric_limits<int>::max();
-        for (auto wgm : wgmList)
-        {
+        for (auto wgm : wgmList) {
             auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
             auto slabCount = safe_ceil_div(numMT_N, wgm);
             auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
