@@ -9914,12 +9914,23 @@ class KernelWriterAssembly(KernelWriter):
           elif tc == "Metadata":
             inc //= 8
 
+      padd = 0
+      # Apply additional padding if needed when cumulative incs add upt to ldsblocksize
       if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-        inc = inc + (inc // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+        ldsBSPad = kernel["LdsBlockSizePerPad%s"%tc]
+        if ( (iui+1) * inc) % kernel["LdsBlockSizePerPad%s"%tc] == 0:
+          totalIncForNextLR = (iui+1) * inc
+          totalIncForCurrLR = iui * inc
+          # Calculate number padding needed for inc used in next LR, and subtract
+          # any padding added previously to avoid double counting.
+          padd = (totalIncForNextLR // ldsBSPad - totalIncForCurrLR // ldsBSPad ) \
+            * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+          module.addComment0("Adding additional %u pad since cumulative inc has reached %u"\
+                             %(padd, kernel["LdsBlockSizePerPad%s"%tc]))
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
-        module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(inc), comment="inc"))
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=(inc + padd), comment="inc"))
         numLra = 0
         if tP["isA"]:
           numLra = self.states.a.numVgprLocalReadAddr
