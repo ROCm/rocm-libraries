@@ -139,10 +139,10 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> et;
 };
 
-class RNNCombTimeLoger
+class RNNCombTimeLogger
 {
 public:
-    RNNCombTimeLoger(hipStream_t main_stream, size_t size, int mode)
+    RNNCombTimeLogger(hipStream_t main_stream, size_t size, int mode)
         : stream(main_stream), clockMode(static_cast<ClockMode>(mode))
     {
         if(clockMode != ClockMode::Disabled)
