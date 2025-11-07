@@ -24,6 +24,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define HIP_CHECK(stat)                                                 \
     {                                                                   \
@@ -46,93 +47,98 @@
 /*! [doc example start] */
 int main(int argc, char* argv[])
 {
-    // // hipSPARSE handle
-    // hipsparseHandle_t handle;
-    // HIPSPARSE_CHECK(hipsparseCreate(&handle));
+    hipsparseOperation_t opA     = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
 
-    // // Define a sparse matrix A (CSR format) and vectors x and y
-    // // For sgemvi: y = alpha * A * x + beta * y
-    // // M x N matrix, where M is number of rows, N is number of columns.
-    // // In this example, we'll assume a square matrix for simplicity, M = N = 4.
-    // // However, hipsparseSgemvi supports M != N.
+    // Scalar alpha and beta
+    float alpha = 1.0f;
+    float beta  = 1.0f;
 
-    // const int m   = 4; // Number of rows of A
-    // const int n   = 4; // Number of columns of A
-    // const int nnz = 13; // Number of non-zero elements in A
+    const int m   = 4; // Number of rows of A
+    const int n   = 4; // Number of columns of A
+    const int lda = m; // leading dimension of A
 
-    // hipsparseOperation_t op = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    // A = 1 2 3 4
+    //     5 6 7 8
+    //     2 4 6 8
+    //     4 3 2 1
+    float hA[16] = {1.0f,
+                    5.0f,
+                    2.0f,
+                    4.0f,
+                    2.0f,
+                    6.0f,
+                    4.0f,
+                    3.0f,
+                    3.0f,
+                    7.0f,
+                    6.0f,
+                    2.0f,
+                    4.0f,
+                    8.0f,
+                    8.0f,
+                    1.0f};
 
-    // // CSR row pointers
-    // int hcsrRowPtr[] = {0, 2, 6, 10, 13};
+    // Sparse vector x
+    int   nnz      = 2;
+    int   hxInd[2] = {0, 2};
+    float hx[2]    = {10.0f, 11.0f};
 
-    // // CSR column indices
-    // int hcsrColInd[] = {0, 2, 0, 1, 2, 3, 0, 1, 2, 3, 0, 2, 3};
+    // Dense vector y
+    float hy[4] = {1.0f, 2.0f, 3.0f, 4.0f};
 
-    // // CSR values (single precision float for 'S'gemvi)
-    // float hcsrVal[nnz]
-    //     = {1.0, 2.0, 3.0, 2.0, 4.0, 1.0, 5.0, 6.0, 1.0, 3.0, 7.0, 8.0, 0.6};
+    // Device data
+    float* dA = NULL;
+    HIP_CHECK(hipMalloc((void**)&dA, sizeof(float) * m * n));
 
-    // // Scalar alpha and beta
-    // float alpha = 1.0;
-    // float beta  = 0.0; // For y = A * x (effectively)
+    int*   dxInd = NULL;
+    float* dx    = NULL;
+    HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
+    HIP_CHECK(hipMalloc((void**)&dx, sizeof(float) * nnz));
 
-    // // Input vector x and initial y (output vector)
-    // float hx[] = {1.0, 2.0, 3.0, 4.0}; // Example input x
-    // float hy[] = {0.0, 0.0, 0.0, 0.0}; // Initialize y to zeros for y = A * x
+    float* dy = NULL;
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * m));
 
-    // // Matrix descriptor
-    // hipsparseMatDescr_t descr;
-    // HIPSPARSE_CHECK(hipsparseCreateMatDescr(&descr));
+    // Copy data from host to device
+    HIP_CHECK(hipMemcpy(dA, hA, sizeof(float) * m * n, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dx, hx, sizeof(float) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * m, hipMemcpyHostToDevice));
 
-    // // Set index base on descriptor
-    // HIPSPARSE_CHECK(hipsparseSetMatIndexBase(descr, HIPSPARSE_INDEX_BASE_ZERO));
+    // hipSPARSE handle
+    hipsparseHandle_t handle;
+    HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // // Offload data to device
-    // int*   dcsrRowPtr;
-    // int*   dcsrColInd;
-    // float* dcsrVal;
-    // float* dx;
-    // float* dy;
+    // Call hipsparseSgemvi to perform y = alpha * A * x + beta * y
+    int bufferSize = 0;
+    HIPSPARSE_CHECK(hipsparseSgemvi_bufferSize(handle, opA, m, n, nnz, &bufferSize));
 
-    // HIP_CHECK(hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1)));
-    // HIP_CHECK(hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz));
-    // HIP_CHECK(hipMalloc((void**)&dcsrVal, sizeof(float) * nnz));
-    // HIP_CHECK(hipMalloc((void**)&dx, sizeof(float) * n)); // x has 'n' elements
-    // HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * m)); // y has 'm' elements
+    void* dbuffer = NULL;
+    HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
 
-    // HIP_CHECK(hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice));
-    // HIP_CHECK(hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
-    // HIP_CHECK(hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice));
-    // HIP_CHECK(hipMemcpy(dx, hx, sizeof(float) * n, hipMemcpyHostToDevice));
-    // HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * m, hipMemcpyHostToDevice));
+    HIPSPARSE_CHECK(hipsparseSgemvi(
+        handle, opA, m, n, &alpha, dA, lda, nnz, dx, dxInd, &beta, dy, idxBase, dbuffer));
 
-    // // Call hipsparseSgemvi to perform y = alpha * A * x + beta * y
-    // // hipsparseSgemvi does not require a bufferSize or analysis phase.
+    // Copy result back to host
+    HIP_CHECK(hipMemcpy(hy, dy, sizeof(float) * m, hipMemcpyDeviceToHost));
 
-    // HIPSPARSE_CHECK(hipsparseSgemvi(
-    //     handle, op, m, n, &alpha, A, lda, nnz, dx, dxInd, &beta, dy, indBase, buffer));
+    // Print the result (optional)
+    printf("hy\n");
+    for(int i = 0; i < m; i++)
+    {
+        printf("%f ", hy[i]);
+    }
+    printf("\n");
 
-    // // Copy result back to host
-    // HIP_CHECK(hipMemcpy(hy, dy, sizeof(float) * m, hipMemcpyDeviceToHost));
+    // Clear hipSPARSE
+    HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
-    // // Print the result (optional)
-    // printf("hy\n");
-    // for(int i = 0; i < m; i++)
-    // {
-    //     printf("%f ", hy[i]);
-    // }
-    // printf("\n");
-
-    // // Clear hipSPARSE
-    // HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr));
-    // HIPSPARSE_CHECK(hipsparseDestroy(handle));
-
-    // // Clear device memory
-    // HIP_CHECK(hipFree(dcsrRowPtr));
-    // HIP_CHECK(hipFree(dcsrColInd));
-    // HIP_CHECK(hipFree(dcsrVal));
-    // HIP_CHECK(hipFree(dx));
-    // HIP_CHECK(hipFree(dy));
+    // Clear device memory
+    HIP_CHECK(hipFree(dA));
+    HIP_CHECK(hipFree(dxInd));
+    HIP_CHECK(hipFree(dx));
+    HIP_CHECK(hipFree(dy));
+    HIP_CHECK(hipFree(dbuffer));
 
     return 0;
 }
