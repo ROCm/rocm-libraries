@@ -452,8 +452,8 @@ struct transform_config_tag
 
 struct transform_config_params
 {
-    kernel_config_params kernel_config{};
-    cache_load_modifier  load_type;
+    kernel_config_params kernel_config = {0, 0};
+    cache_load_modifier  load_type     = load_default;
 };
 
 } // namespace detail
@@ -725,22 +725,26 @@ namespace detail
 {
 
 template<class Value>
-struct default_transform_pointer_config_base
+constexpr transform_config_params transform_pointer_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(uint128_t), sizeof(Value));
 
-    using type = transform_config<256, item_scale>;
-};
+    return transform_config_params{
+        {256, item_scale}
+    };
+}
 
 template<class Value>
-struct default_transform_config_base
+constexpr transform_config_params transform_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
-};
+    return transform_config_params{
+        {256, ::rocprim::max(1u, 16u / item_scale)}
+    };
+}
 
 struct binary_search_config_tag : public transform_config_tag
 {};
@@ -797,11 +801,12 @@ struct histogram_config_tag
 {};
 
 template<class Value, class Output>
-struct default_binary_search_config_base
-    : binary_search_config<
-          limit_block_size<256U, sizeof(Value) + sizeof(Output), ROCPRIM_WARP_SIZE_64>::value,
-          1>
-{};
+constexpr transform_config_params binary_search_config_params_base()
+{
+    return transform_config_params{
+        {limit_block_size<256U, sizeof(Value) + sizeof(Output), ROCPRIM_WARP_SIZE_64>::value, 1}
+    };
+}
 
 /// \brief Provides the kernel parameters for histogram_even, multi_histogram_even,
 ///        histogram_range, and multi_histogram_range based on autotuned configurations or
