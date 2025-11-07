@@ -38,7 +38,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto x = createTensor({n, c, h, w}, inputType);
+    auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
@@ -49,21 +49,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true).set_data_type(inputType);
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
@@ -82,8 +67,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
     invVarianceTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(1.0f));
 
-    std::unordered_map<int64_t, void*> variantPack;
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
 
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
+
+    std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
     variantPack[bias->get_uid()] = biasTensor.memory().deviceData();
@@ -138,12 +137,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All batch normalization inference runs completed.\n";
     return 0;
 }
