@@ -2513,15 +2513,15 @@ class Solution(collections.abc.Mapping):
     # No longer support loadX2/loadx4 .
     if state["DirectToLds"]:
 
-      if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
-        state['tailLoopOptA'] = False
-        state["DirectToLdsA"] = True
-        state["LocalWriteUseSgprA"] = True
-
-      if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B', isaInfoMap, printRejectionReason):
-        state['tailLoopOptB'] = False
-        state["DirectToLdsB"] = True
-        state["LocalWriteUseSgprB"] = True
+      for tc in ['A', 'B']:
+        isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
+        if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
+          state['tailLoopOpt%s'%tc] = False
+          state["DirectToLds%s"%tc] = True
+          state["LocalWriteUseSgpr%s"%tc] = True
+        elif not isDtlDoable:
+          if state["UseGeneralizedNLCOne%s"%tc]:
+            reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
 
       # Update parent variable so kernel display is accurate
       state["DirectToLds"] = state["DirectToLdsA"] or state["DirectToLdsB"]
