@@ -17,9 +17,6 @@ subtrees:
     title: Use multi-level logging
   - file: howto/clients
     title: Run rocSOLVER clients
-  - file: howto/contribute
-    title: Contribute to rocSOLVER
-
 
 - caption: Examples
   entries:
@@ -57,3 +54,5 @@ subtrees:
 - caption: About
   entries:
   - file: license.rst
+  - file: contribute
+    title: Contribute to rocSOLVER
