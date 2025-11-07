@@ -59,12 +59,24 @@ option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+option(BUILD_OFFLOAD_COMPRESS "Build rocThrust with offload compression" ON)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+include(CheckCXXCompilerFlag)
+
+if(BUILD_OFFLOAD_COMPRESS)
+  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+  else()
+    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+  endif()
+endif()
 
 # Allow the user to optionally select offset type dispatch to fixed 32 or 64 bit types
 set(THRUST_DISPATCH_TYPE "Dynamic" CACHE STRING "Select Thrust offset type dispatch." FORCE)
@@ -124,6 +136,13 @@ else()
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  endif()
+endif()
+
+# Compressed offload binaries are currently not working with the SPIR-V target
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_OFFLOAD_COMPRESS)
+    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
   endif()
 endif()
 
