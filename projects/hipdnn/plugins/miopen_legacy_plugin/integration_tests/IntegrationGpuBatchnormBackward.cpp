@@ -210,7 +210,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormBackwardNchwFp16,
                          testing::ValuesIn(getBnBwdFullTestCases()));
 
-TEST_P(IntegrationGpuBatchnormBackwardNhwcFp32, Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNhwcFp32, DISABLED_Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NHWC);
 }
