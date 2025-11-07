@@ -63,7 +63,8 @@ file(WRITE "${INSTALL_TEST_FILE}"
 # Target that will trigger build of all tests
 add_custom_target(hiptensor_tests)
 
-set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
+set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/common.cpp
+                                  ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
 
 # Prevent CMake to add building path to RUNPATH

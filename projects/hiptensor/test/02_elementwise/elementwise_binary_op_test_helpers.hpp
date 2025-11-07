@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include "common.hpp"
 #include "hiptensor_length_generation.hpp"
 #include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
@@ -71,6 +72,11 @@ auto inline load_config_params()
 auto inline load_config_helper()
 {
     auto testParams = load_config_params();
+
+    if(testParams.memoryLayouts().empty())
+    {
+        testParams.memoryLayouts().push_back(HIPTENSOR_MEMORY_LAYOUT_DEFAULT);
+    }
 
     // Append sizes generated from lower/upper/step parameters to problemLengths
     if(!testParams.problemRanges().empty())
@@ -128,6 +134,6 @@ auto inline load_config_helper()
                               ::testing::ValuesIn(testParams.permutedDims()),
                               ::testing::ValuesIn(testParams.alphas()),
                               ::testing::ValuesIn(testParams.gammas()),
-                              ::testing::ValuesIn(testParams.operators()));
+                              ::testing::ValuesIn(testParams.operators()),
+                              ::testing::ValuesIn(testParams.memoryLayouts()));
 }
-

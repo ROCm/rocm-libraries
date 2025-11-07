@@ -41,4 +41,8 @@ Permuted Dims:
   - [3, 2, 0, 1]
   - [3, 0, 2, 1]
   - [3, 0, 1, 2]
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_DEFAULT
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
+  - HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR
 ...

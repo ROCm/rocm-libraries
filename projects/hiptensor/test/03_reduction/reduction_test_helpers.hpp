@@ -28,8 +28,9 @@
 
 #include <gtest/gtest.h>
 
-#include "hiptensor_options.hpp"
+#include "common.hpp"
 #include "hiptensor_length_generation.hpp"
+#include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
 
 #ifdef HIPTENSOR_TEST_YAML_INCLUDE
@@ -71,28 +72,35 @@ auto inline load_config_helper()
 {
     auto testParams = load_config_params();
 
+    if(testParams.memoryLayouts().empty())
+    {
+        testParams.memoryLayouts().push_back(HIPTENSOR_MEMORY_LAYOUT_DEFAULT);
+    }
+
     // Append sizes generated from lower/upper/step parameters to problemLengths
     if(!testParams.problemRanges().empty())
     {
         uint32_t rank = testParams.outputDims()[0].size() + 1;
 
-        for (int i = 0; i < testParams.problemRanges().size(); i++)
+        for(int i = 0; i < testParams.problemRanges().size(); i++)
         {
-            auto ranges = testParams.problemRanges()[i];
-            std::size_t lower = ranges[0];
-            std::size_t upper = ranges[1];
-            std::size_t step  = ranges[2];
+            auto        ranges      = testParams.problemRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t step        = ranges[2];
             std::size_t maxElements = 16777216;
 
             std::size_t totalSizes = 0;
-            if (ranges.size() == 4)
+            if(ranges.size() == 4)
             {
                 totalSizes = ranges[3];
             }
             std::vector<std::vector<std::size_t>> generatedLengths;
-            hiptensor::generate2DLengths(generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
+            hiptensor::generate2DLengths(
+                generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
             testParams.problemLengths().insert(testParams.problemLengths().end(),
-                                            generatedLengths.begin(), generatedLengths.end());
+                                               generatedLengths.begin(),
+                                               generatedLengths.end());
         }
     }
     // Append sizes generated randomly from [lower, upper] to problemLengths
@@ -100,18 +108,20 @@ auto inline load_config_helper()
     {
         uint32_t rank = testParams.outputDims()[0].size() + 1;
 
-        for (int i = 0; i < testParams.problemRandRanges().size(); i++)
+        for(int i = 0; i < testParams.problemRandRanges().size(); i++)
         {
-            auto ranges = testParams.problemRandRanges()[i];
-            std::size_t lower = ranges[0];
-            std::size_t upper = ranges[1];
-            std::size_t totalSizes = ranges[2];
+            auto        ranges      = testParams.problemRandRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t totalSizes  = ranges[2];
             std::size_t maxElements = 16777216;
 
             std::vector<std::vector<std::size_t>> generatedRandLengths;
-            hiptensor::generate2DLengths(generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
+            hiptensor::generate2DLengths(
+                generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
             testParams.problemLengths().insert(testParams.problemLengths().end(),
-                                            generatedRandLengths.begin(), generatedRandLengths.end());
+                                               generatedRandLengths.begin(),
+                                               generatedRandLengths.end());
         }
     }
 
@@ -123,6 +133,6 @@ auto inline load_config_helper()
                               ::testing::ValuesIn(testParams.outputDims()),
                               ::testing::ValuesIn(testParams.alphas()),
                               ::testing::ValuesIn(testParams.betas()),
-                              ::testing::ValuesIn(testParams.operators()));
+                              ::testing::ValuesIn(testParams.operators()),
+                              ::testing::ValuesIn(testParams.memoryLayouts()));
 }
-

@@ -33,4 +33,6 @@ Output Dims:
   - [0]
   - [1]
   - []
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
 ...

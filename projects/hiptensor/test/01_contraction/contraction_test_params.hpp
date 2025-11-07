@@ -46,6 +46,7 @@ namespace hiptensor
         using OperatorT     = hiptensorOperator_t;
         using WorkSizePrefT = hiptensorWorksizePreference_t;
         using LogLevelT     = hiptensorLogLevel_t;
+        using MemoryLayoutT = hiptensorMemoryLayout_t;
 
         using LengthsT = std::vector<std::vector<std::size_t>>;
         using StridesT = std::vector<std::vector<std::size_t>>;
@@ -115,6 +116,11 @@ namespace hiptensor
             return mProblemRandRanges;
         }
 
+        std::vector<MemoryLayoutT>& memoryLayouts()
+        {
+            return mMemoryLayouts;
+        }
+
         void printParams()
         {
             std::cout << "DataTypes: " << mDataTypes << std::endl
@@ -127,7 +133,9 @@ namespace hiptensor
                       << "ProblemModes: " << mProblemModes << std::endl
                       << "Alphas: " << mAlphas << std::endl
                       << "Betas: " << mBetas << std::endl
-                      << "ProblemRanges: " << mProblemRanges << std::endl;
+                      << "ProblemRanges: " << mProblemRanges << std::endl
+                      << "ProblemRandRanges: " << mProblemRandRanges << std::endl
+                      << "MemoryLayouts: " << mMemoryLayouts << std::endl;
         }
 
     private:
@@ -144,6 +152,7 @@ namespace hiptensor
         std::vector<BetaT>         mBetas;
         std::vector<RangesT>       mProblemRanges;
         std::vector<RangesT>       mProblemRandRanges;
+        std::vector<MemoryLayoutT> mMemoryLayouts;
     };
 
 } // namespace hiptensor

@@ -106,6 +106,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(std::vector<double>)
 LLVM_YAML_IS_SEQUENCE_VECTOR(AlphaT)
 LLVM_YAML_IS_SEQUENCE_VECTOR(BetaT)
 LLVM_YAML_IS_SEQUENCE_VECTOR(GammaT)
+LLVM_YAML_IS_SEQUENCE_VECTOR(hiptensorMemoryLayout_t)
 
 namespace llvm
 {
@@ -188,6 +189,21 @@ namespace llvm
                 io.enumCase(value, "HIPTENSOR_WORKSPACE_MIN", HIPTENSOR_WORKSPACE_MIN);
                 io.enumCase(value, "HIPTENSOR_WORKSPACE_DEFAULT", HIPTENSOR_WORKSPACE_DEFAULT);
                 io.enumCase(value, "HIPTENSOR_WORKSPACE_MAX", HIPTENSOR_WORKSPACE_MAX);
+            }
+        };
+
+        template <>
+        struct ScalarEnumerationTraits<hiptensorMemoryLayout_t>
+        {
+            static void enumeration(IO& io, hiptensorMemoryLayout_t& value)
+            {
+                io.enumCase(
+                    value, "HIPTENSOR_MEMORY_LAYOUT_DEFAULT", HIPTENSOR_MEMORY_LAYOUT_DEFAULT);
+                io.enumCase(value,
+                            "HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR",
+                            HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
+                io.enumCase(
+                    value, "HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR", HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR);
             }
         };
 
@@ -320,6 +336,7 @@ namespace llvm
                 }
 
                 io.mapOptional("Strides", doc.problemStrides(), defaultStrides);
+                io.mapOptional("Memory Layout", doc.memoryLayouts());
             }
 
             // Additional validation for input / output of the config
@@ -406,6 +423,7 @@ namespace llvm
                 }
                 io.mapRequired("Permuted Dims", doc.permutedDims());
                 io.mapRequired("Operators", (doc.operators()));
+                io.mapOptional("Memory Layout", doc.memoryLayouts());
             }
 
             // Additional validation for input / output of the config
@@ -478,6 +496,7 @@ namespace llvm
                 }
                 io.mapRequired("Output Dims", doc.outputDims());
                 io.mapRequired("Operators", (doc.operators()));
+                io.mapOptional("Memory Layout", doc.memoryLayouts());
             }
 
             // Additional validation for input / output of the config

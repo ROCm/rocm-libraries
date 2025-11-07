@@ -45,7 +45,8 @@ namespace hiptensor
                                                typename PermutationTestParams::LengthsT,
                                                typename PermutationTestParams::PermutedDimsT,
                                                typename PermutationTestParams::AlphaT,
-                                               typename PermutationTestParams::OperatorT>;
+                                               typename PermutationTestParams::OperatorT,
+                                               typename PermutationTestParams::MemoryLayoutT>;
     class PermutationTest : public ::testing::TestWithParam<PermutationTestParams_t>
     {
     protected: // Types
@@ -106,4 +107,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

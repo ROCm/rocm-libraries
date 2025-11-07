@@ -25,4 +25,6 @@ Operators:
   - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_NEG, HIPTENSOR_OP_MAX]
 Output Dims:
   - []
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
 ...

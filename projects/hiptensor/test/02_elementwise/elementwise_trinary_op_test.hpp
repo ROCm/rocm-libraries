@@ -48,7 +48,8 @@ namespace hiptensor
                      typename PermutationTestParams::AlphaT,
                      typename PermutationTestParams::BetaT,
                      typename PermutationTestParams::GammaT,
-                     typename PermutationTestParams::OperatorT>;
+                     typename PermutationTestParams::OperatorT,
+                     typename PermutationTestParams::MemoryLayoutT>;
     class ElementwiseTrinaryOpTest
         : public ::testing::TestWithParam<ElementwiseTrinaryOpTestParams_t>
     {
@@ -110,4 +111,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

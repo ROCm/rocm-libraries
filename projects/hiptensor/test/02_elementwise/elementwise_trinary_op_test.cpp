@@ -25,11 +25,13 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "common.hpp"
 #include "data_types.hpp"
 #include "elementwise/elementwise_cpu_reference.hpp"
 #include "elementwise_trinary_op_test.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
+#include "util.hpp"
 #include "utils.hpp"
 
 namespace hiptensor
@@ -90,16 +92,17 @@ namespace hiptensor
             << "Operators, "            // 3
             << "LogLevel, "             // 4
             << "Lengths, "              // 5
-            << "PermutedOrder, "        // 6
-            << "Alpha, "                // 7
-            << "Beta, "                 // 8
-            << "Gamma, "                // 9
-            << "ElapsedMs, "            // 10
-            << "Problem Size(GFlops), " // 11
-            << "TFlops/s, "             // 12
-            << "TotalGBytes, "          // 13
-            << "GBytes/s, "             // 14
-            << "Result"                 // 15
+            << "memoryLayout, "         // 6
+            << "PermutedOrder, "        // 7
+            << "Alpha, "                // 8
+            << "Beta, "                 // 9
+            << "Gamma, "                // 10
+            << "ElapsedMs, "            // 11
+            << "Problem Size(GFlops), " // 12
+            << "TFlops/s, "             // 13
+            << "TotalGBytes, "          // 14
+            << "GBytes/s, "             // 15
+            << "Result"                 // 16
             << std::endl;
         // clang-format on
     }
@@ -115,6 +118,7 @@ namespace hiptensor
         auto beta         = std::get<5>(param);
         auto gamma        = std::get<6>(param);
         auto operators    = std::get<7>(param);
+        auto memoryLayout = std::get<8>(param);
 
         // clang-format off
         stream << hipTypeToString(testType[0]) << ", "                                              // 1
@@ -122,21 +126,22 @@ namespace hiptensor
             << "[ " << opTypeToString(operators[0]) << " " << opTypeToString(operators[1]) << " " << opTypeToString(operators[2]) << " " << opTypeToString(operators[3]) << " " << opTypeToString(operators[4]) << "], " // 3
             << logLevelToString(logLevel) << ", ";                                                  // 4
         printContainerInCsv(lengths, stream) << ", ";                                               // 5
-        printContainerInCsv(permutedDims, stream) << ", ";                                          // 6
-        stream << alpha << ", ";                                                                    // 7
-        stream << beta << ", ";                                                                     // 8
-        stream << gamma << ", ";                                                                    // 9
+        stream << hipMemoryLayoutToString(memoryLayout) << ", ";                                    // 6
+        printContainerInCsv(permutedDims, stream) << ", ";                                          // 7
+        stream << alpha << ", ";                                                                    // 8
+        stream << beta << ", ";                                                                     // 9
+        stream << gamma << ", ";                                                                    // 10
         // clang-format on
 
         if(!mRunFlag)
         {
             // clang-format off
-            stream << "n/a" << ", " // 10
-                << "n/a" << ", "    // 11
+            stream << "n/a" << ", " // 11
                 << "n/a" << ", "    // 12
                 << "n/a" << ", "    // 13
                 << "n/a" << ", "    // 14
-                << "SKIPPED"        // 15
+                << "n/a" << ", "    // 15
+                << "SKIPPED"        // 16
                 << std::endl;
             // clang-format on
         }
@@ -146,12 +151,12 @@ namespace hiptensor
             auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
             // clang-format off
-            stream << mElapsedTimeMs << ", "     // 10
-                << mTotalGFlops << ", "          // 11
-                << mMeasuredTFlopsPerSec << ", " // 12
-                << mTotalGBytes << ", "          // 13
-                << mGBytesPerSec << ", "         // 14
-                << result                        // 15
+            stream << mElapsedTimeMs << ", "     // 11
+                << mTotalGFlops << ", "          // 12
+                << mMeasuredTFlopsPerSec << ", " // 13
+                << mTotalGBytes << ", "          // 14
+                << mGBytesPerSec << ", "         // 15
+                << result                        // 16
                 << std::endl;
             // clang-format on
         }
@@ -178,6 +183,7 @@ namespace hiptensor
         auto beta         = std::get<5>(param);
         auto gamma        = std::get<6>(param);
         auto operators    = std::get<7>(param);
+        auto memoryLayout = std::get<8>(param);
 
         EXPECT_TRUE((lengths.size() > 1) && (lengths.size() <= 6));
         EXPECT_TRUE((permutedDims.size() > 1) && (permutedDims.size() <= 6));
@@ -332,6 +338,7 @@ namespace hiptensor
         auto beta         = std::get<5>(param);
         auto gamma        = std::get<6>(param);
         auto operators    = std::get<7>(param);
+        auto memoryLayout = std::get<8>(param);
 
         auto dataType        = dataTypes[0];
         auto computeDataType = dataTypes[1];
@@ -385,6 +392,17 @@ namespace hiptensor
             for(auto mode : modeD)
                 extentD.push_back(extent[mode]);
 
+            std::vector<int64_t> stridesIn
+                = memoryLayout == HIPTENSOR_MEMORY_LAYOUT_DEFAULT
+                      ? std::vector<int64_t>{}
+                      : hiptensor::stridesFromLengths(
+                            extentA, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
+            std::vector<int64_t> stridesD
+                = memoryLayout == HIPTENSOR_MEMORY_LAYOUT_DEFAULT
+                      ? std::vector<int64_t>{}
+                      : hiptensor::stridesFromLengths(
+                            extentD, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
+
             hiptensorStatus_t err;
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -392,27 +410,46 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
 
             hiptensorTensorDescriptor_t descA = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descA, nmodeA, extentA.data(), NULL /* stride */, dataType, Aop));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descA,
+                                                nmodeA,
+                                                extentA.data(),
+                                                stridesIn.empty() ? nullptr : stridesIn.data(),
+                                                dataType,
+                                                Aop));
 
             hiptensorTensorDescriptor_t descB = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descB, nmodeB, extentB.data(), NULL /* stride */, dataType, Bop));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descB,
+                                                nmodeB,
+                                                extentB.data(),
+                                                stridesIn.empty() ? nullptr : stridesIn.data(),
+                                                dataType,
+                                                Bop));
 
             hiptensorTensorDescriptor_t descC = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descC, nmodeC, extentC.data(), NULL /* stride */, dataType, Cop));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descC,
+                                                nmodeC,
+                                                extentC.data(),
+                                                stridesIn.empty() ? nullptr : stridesIn.data(),
+                                                dataType,
+                                                Cop));
 
             hiptensorTensorDescriptor_t descD = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                                  &descD,
-                                                                  nmodeD,
-                                                                  extentD.data(),
-                                                                  NULL /* stride */,
-                                                                  dataType,
-                                                                  HIPTENSOR_OP_IDENTITY));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descD,
+                                                nmodeD,
+                                                extentD.data(),
+                                                stridesD.empty() ? nullptr : stridesD.data(),
+                                                dataType,
+                                                HIPTENSOR_OP_IDENTITY));
 
-            hiptensorComputeDescriptor_t const descCompute = convertToComputeType(computeDataType);
+            const hiptensorComputeDescriptor_t descCompute = convertToComputeType(computeDataType);
             hiptensorOperationDescriptor_t     desc;
             CHECK_HIPTENSOR_ERROR(hiptensorCreateElementwiseTrinary(handle,
                                                                     &desc,
@@ -440,12 +477,12 @@ namespace hiptensor
             * Disable Plan Cache for tests
             ***************************/
             const hiptensorCacheMode_t cacheMode = HIPTENSOR_CACHE_MODE_NONE;
-            CHECK_HIPTENSOR_ERROR(hiptensorPlanPreferenceSetAttribute(
-                 handle,
-                 planPref,
-                 HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE,
-                 &cacheMode,
-                 sizeof(hiptensorCacheMode_t)));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorPlanPreferenceSetAttribute(handle,
+                                                    planPref,
+                                                    HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE,
+                                                    &cacheMode,
+                                                    sizeof(hiptensorCacheMode_t)));
 
             hiptensorPlan_t plan;
             CHECK_HIPTENSOR_ERROR(

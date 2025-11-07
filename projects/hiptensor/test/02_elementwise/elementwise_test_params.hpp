@@ -49,6 +49,7 @@ namespace hiptensor
         using PermutedDimsT = std::vector<std::size_t>;
         using OperatorT     = std::vector<hiptensorOperator_t>;
         using RangesT       = std::vector<std::size_t>;
+        using MemoryLayoutT = hiptensorMemoryLayout_t;
 
     public:
         std::vector<DataTypesT>& dataTypes()
@@ -101,17 +102,24 @@ namespace hiptensor
             return mProblemRandRanges;
         }
 
+        std::vector<MemoryLayoutT>& memoryLayouts()
+        {
+            return mMemoryLayouts;
+        }
+
         void printParams()
         {
-            std::cout << "DataTypes: " << mDataTypes << "\n"
-                      << "LogLevelMask: " << mLogLevelMask << "\n"
-                      << "ProblemLengths: " << mProblemLengths << "\n"
-                      << "Operators: " << mOperators << "\n"
-                      << "Alphas: " << mAlphas << "\n"
-                      << "Betas: " << mBetas << "\n"
-                      << "Gammas: " << mGammas << "\n"
-                      << "PermutedDims: " << mPermutedDims << "\n"
-                      << "ProblemRanges: " << mProblemRanges << "\n";
+            std::cout << "DataTypes: " << mDataTypes << std::endl
+                      << "LogLevelMask: " << mLogLevelMask << std::endl
+                      << "ProblemLengths: " << mProblemLengths << std::endl
+                      << "Operators: " << mOperators << std::endl
+                      << "Alphas: " << mAlphas << std::endl
+                      << "Betas: " << mBetas << std::endl
+                      << "Gammas: " << mGammas << std::endl
+                      << "PermutedDims: " << mPermutedDims << std::endl
+                      << "ProblemRanges: " << mProblemRanges << std::endl
+                      << "ProblemRandRanges: " << mProblemRandRanges << std::endl
+                      << "MemoryLayouts: " << mMemoryLayouts << std::endl;
         }
 
     private:
@@ -126,6 +134,7 @@ namespace hiptensor
         std::vector<PermutedDimsT> mPermutedDims;
         std::vector<RangesT>       mProblemRanges;
         std::vector<RangesT>       mProblemRandRanges;
+        std::vector<MemoryLayoutT> mMemoryLayouts;
     };
 
 } // namespace hiptensor

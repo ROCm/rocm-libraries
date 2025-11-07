@@ -46,7 +46,8 @@ namespace hiptensor
                                              typename ReductionTestParams::OutputDimsT,
                                              typename ReductionTestParams::AlphaT,
                                              typename ReductionTestParams::BetaT,
-                                             typename ReductionTestParams::OperatorT>;
+                                             typename ReductionTestParams::OperatorT,
+                                             typename ReductionTestParams::MemoryLayoutT>;
     class ReductionTest : public ::testing::TestWithParam<ReductionTestParams_t>
     {
     protected: // Types
@@ -108,4 +109,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

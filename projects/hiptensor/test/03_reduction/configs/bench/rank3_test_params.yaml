@@ -40,4 +40,6 @@ Output Dims:
   - [2]
   - []
   - [2, 1]
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
 ...

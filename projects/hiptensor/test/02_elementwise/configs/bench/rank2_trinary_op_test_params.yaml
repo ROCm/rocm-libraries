@@ -30,4 +30,6 @@ Operators:
 Permuted Dims:
   - [0, 1]
   - [1, 0]
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
 ...

@@ -37,4 +37,6 @@ Strides:
   - []
 Modes:
   - [[0, 1, 4, 5], [2, 3, 4, 5], [0, 1, 2, 3]]
+Memory Layout:
+  - HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR
 ...

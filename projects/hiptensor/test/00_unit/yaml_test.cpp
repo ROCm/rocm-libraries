@@ -51,6 +51,7 @@ namespace hiptensor
         using OperatorT     = hiptensorOperator_t;
         using WorkSizePrefT = hiptensorWorksizePreference_t;
         using LogLevelT     = hiptensorLogLevel_t;
+        using MemoryLayoutT = hiptensorMemoryLayout_t;
 
         using LengthsT = std::vector<std::vector<std::size_t>>;
         using StridesT = std::vector<std::vector<std::size_t>>;
@@ -72,6 +73,7 @@ namespace hiptensor
         std::vector<BetaT>         mBetas;
         std::vector<RangesT>       mProblemRanges;
         std::vector<RangesT>       mProblemRandRanges;
+        std::vector<MemoryLayoutT> mMemoryLayouts;
     };
 }
 
@@ -82,7 +84,7 @@ int main(int argc, char* argv[])
     auto yee          = hiptensor::ContractionTestParams{};
     yee.mLogLevelMask = (hiptensorLogLevel_t)(HIPTENSOR_LOG_LEVEL_OFF);
     yee.mDataTypes    = {
-           // clang-format off
+        // clang-format off
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, hiptensor::NONE_TYPE, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // scale F32
                 {HIPTENSOR_C_32F, HIPTENSOR_C_32F, hiptensor::NONE_TYPE, HIPTENSOR_C_32F, HIPTENSOR_C_32F}, // scale F32 Complex
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // bilinear F32
@@ -110,6 +112,7 @@ int main(int argc, char* argv[])
     yee.mBetas             = {{2}, {2}, {2}};
     yee.mProblemRanges     = {{2, 1024, 2}, {2, 2048, 2, 16}};
     yee.mProblemRandRanges = {{2, 1024, 16}};
+    yee.mMemoryLayouts     = {HIPTENSOR_MEMORY_LAYOUT_DEFAULT};
 
     struct TmpFileWrapper
     {

@@ -28,8 +28,9 @@
 
 #include <gtest/gtest.h>
 
-#include "hiptensor_options.hpp"
+#include "common.hpp"
 #include "hiptensor_length_generation.hpp"
+#include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
 
 #ifdef HIPTENSOR_TEST_YAML_INCLUDE
@@ -72,28 +73,35 @@ auto inline load_combined_config_params()
 {
     auto testParams = load_config_params();
 
+    if(testParams.memoryLayouts().empty())
+    {
+        testParams.memoryLayouts().push_back(HIPTENSOR_MEMORY_LAYOUT_DEFAULT);
+    }
+
     // Append sizes generated from lower/upper/step parameters to problemLengths
     if(!testParams.problemRanges().empty())
     {
         uint32_t rank = testParams.problemModes()[0][0].size() / 2;
 
-        for (int i = 0; i < testParams.problemRanges().size(); i++)
+        for(int i = 0; i < testParams.problemRanges().size(); i++)
         {
-            auto ranges = testParams.problemRanges()[i];
-            std::size_t lower = ranges[0];
-            std::size_t upper = ranges[1];
-            std::size_t step  = ranges[2];
+            auto        ranges      = testParams.problemRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t step        = ranges[2];
             std::size_t maxElements = 16777216;
 
             std::size_t totalSizes = 0;
-            if (ranges.size() == 4)
+            if(ranges.size() == 4)
             {
                 totalSizes = ranges[3];
             }
             std::vector<std::vector<std::vector<std::size_t>>> generatedLengths;
-            hiptensor::generate3DLengths(generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
+            hiptensor::generate3DLengths(
+                generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
             testParams.problemLengths().insert(testParams.problemLengths().end(),
-                                            generatedLengths.begin(), generatedLengths.end());
+                                               generatedLengths.begin(),
+                                               generatedLengths.end());
         }
     }
     // Append sizes generated randomly from [lower, upper] to problemLengths
@@ -101,18 +109,20 @@ auto inline load_combined_config_params()
     {
         uint32_t rank = testParams.problemModes()[0][0].size() / 2;
 
-        for (int i = 0; i < testParams.problemRandRanges().size(); i++)
+        for(int i = 0; i < testParams.problemRandRanges().size(); i++)
         {
-            auto ranges = testParams.problemRandRanges()[i];
-            std::size_t lower = ranges[0];
-            std::size_t upper = ranges[1];
-            std::size_t totalSizes = ranges[2];
+            auto        ranges      = testParams.problemRandRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t totalSizes  = ranges[2];
             std::size_t maxElements = 16777216;
 
             std::vector<std::vector<std::vector<std::size_t>>> generatedRandLengths;
-            hiptensor::generate3DLengths(generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
+            hiptensor::generate3DLengths(
+                generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
             testParams.problemLengths().insert(testParams.problemLengths().end(),
-                                            generatedRandLengths.begin(), generatedRandLengths.end());
+                                               generatedRandLengths.begin(),
+                                               generatedRandLengths.end());
         }
     }
 
@@ -125,12 +135,18 @@ auto inline load_combined_config_params()
                               ::testing::ValuesIn(testParams.problemStrides()),
                               ::testing::ValuesIn(testParams.problemModes()),
                               ::testing::ValuesIn(testParams.alphas()),
-                              ::testing::ValuesIn(testParams.betas()));
+                              ::testing::ValuesIn(testParams.betas()),
+                              ::testing::ValuesIn(testParams.memoryLayouts()));
 }
 
 auto inline load_sequence_config_params()
 {
     auto testParams = load_config_params();
+
+    if(testParams.memoryLayouts().empty())
+    {
+        testParams.memoryLayouts().push_back(HIPTENSOR_MEMORY_LAYOUT_DEFAULT);
+    }
 
     auto dataTypes          = testParams.dataTypes();
     auto algorithms         = testParams.algorithms();
@@ -143,6 +159,7 @@ auto inline load_sequence_config_params()
     auto problemModes   = testParams.problemModes();
     auto alphas         = testParams.alphas();
     auto betas          = testParams.betas();
+    auto memoryLayouts  = testParams.memoryLayouts();
 
     std::vector<size_t> lengths   = {dataTypes.size(),
                                      algorithms.size(),
@@ -153,7 +170,8 @@ auto inline load_sequence_config_params()
                                      problemStrides.size(),
                                      problemModes.size(),
                                      alphas.size(),
-                                     betas.size()};
+                                     betas.size(),
+                                     memoryLayouts.size()};
     auto                maxLength = *std::max_element(lengths.begin(), lengths.end());
 
     dataTypes.resize(maxLength, dataTypes.back());
@@ -166,6 +184,7 @@ auto inline load_sequence_config_params()
     problemModes.resize(maxLength, problemModes.back());
     alphas.resize(maxLength, alphas.back());
     betas.resize(maxLength, betas.back());
+    memoryLayouts.resize(maxLength, memoryLayouts.back());
 
     using ParamsTuple = decltype(std::make_tuple(dataTypes.front(),
                                                  algorithms.front(),
@@ -176,7 +195,8 @@ auto inline load_sequence_config_params()
                                                  problemStrides.front(),
                                                  problemModes.front(),
                                                  alphas.front(),
-                                                 betas.front()));
+                                                 betas.front(),
+                                                 memoryLayouts.front()));
 
     std::vector<ParamsTuple> paramsSequence;
     for(int i = 0; i < maxLength; i++)
@@ -190,7 +210,8 @@ auto inline load_sequence_config_params()
                                                  problemStrides[i],
                                                  problemModes[i],
                                                  alphas[i],
-                                                 betas[i]));
+                                                 betas[i],
+                                                 memoryLayouts[i]));
     }
 
     return ::testing::ValuesIn(paramsSequence);

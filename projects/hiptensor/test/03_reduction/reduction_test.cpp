@@ -25,6 +25,7 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "common.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
@@ -122,32 +123,34 @@ namespace hiptensor
             << "OperatorReduce, "       // 5
             << "LogLevel, "             // 6
             << "Lengths, "              // 7
-            << "ReOrder, "              // 8
-            << "Alpha, "                // 9
-            << "Beta, "                 // 10
-            << "ElapsedMs, "            // 11
-            << "Problem Size(GFlops), " // 12
-            << "TFlops/s, "             // 13
-            << "TotalGBytes, "          // 14
-            << "GBytes/s, "             // 15
-            << "Result"                 // 16
+            << "memoryLayout, "         // 8
+            << "ReOrder, "              // 9
+            << "Alpha, "                // 10
+            << "Beta, "                 // 11
+            << "ElapsedMs, "            // 12
+            << "Problem Size(GFlops), " // 13
+            << "TFlops/s, "             // 14
+            << "TotalGBytes, "          // 15
+            << "GBytes/s, "             // 16
+            << "Result"                 // 17
             << std::endl;
         // clang-format on
     }
 
     std::ostream& ReductionTest::printKernel(std::ostream& stream) const
     {
-        auto param      = Base::GetParam();
-        auto testType   = std::get<0>(param);
-        auto logLevel   = std::get<1>(param);
-        auto lengths    = std::get<2>(param);
-        auto outputDims = std::get<3>(param);
-        auto alpha      = std::get<4>(param);
-        auto beta       = std::get<5>(param);
-        auto op         = std::get<6>(param);
-        auto aOp        = op[0];
-        auto cOp        = op[1];
-        auto reduceOp   = op[2];
+        auto param        = Base::GetParam();
+        auto testType     = std::get<0>(param);
+        auto logLevel     = std::get<1>(param);
+        auto lengths      = std::get<2>(param);
+        auto outputDims   = std::get<3>(param);
+        auto alpha        = std::get<4>(param);
+        auto beta         = std::get<5>(param);
+        auto op           = std::get<6>(param);
+        auto aOp          = op[0];
+        auto cOp          = op[1];
+        auto reduceOp     = op[2];
+        auto memoryLayout = std::get<7>(param);
 
         // clang-format off
         stream << hipTypeToString(testType[0]) << ", "                           //1
@@ -157,20 +160,21 @@ namespace hiptensor
                << opTypeToString(reduceOp) << ", "                               //5
                << logLevelToString(logLevel) << ", ";                            //6
         printContainerInCsv(lengths, stream) << ", ";                            //7
-        printContainerInCsv(outputDims, stream) << ", ";                         //8
-        stream << alpha << ", "                                                  //9
-            << beta << ", ";                                                     //10
+        stream << hipMemoryLayoutToString(memoryLayout) << ", ";                 //8
+        printContainerInCsv(outputDims, stream) << ", ";                         //9
+        stream << alpha << ", "                                                  //10
+            << beta << ", ";                                                     //11
         // clang-format on
 
         if(!mRunFlag)
         {
             // clang-format off
-            stream << "n/a" << ", " //11
-                   << "n/a" << ", " //12
+            stream << "n/a" << ", " //12
                    << "n/a" << ", " //13
                    << "n/a" << ", " //14
                    << "n/a" << ", " //15
-                   << "SKIPPED"     //16
+                   << "n/a" << ", " //16
+                   << "SKIPPED"     //17
                    << std::endl;
             // clang-format on
         }
@@ -180,12 +184,12 @@ namespace hiptensor
             auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
             // clang-format off
-            stream << mElapsedTimeMs << ", "     // 11
-                << mTotalGFlops << ", "          // 12
-                << mMeasuredTFlopsPerSec << ", " // 13
-                << mTotalGBytes << ", "          // 14
-                << mGBytesPerSec << ", "         // 15
-                << result                        // 16
+            stream << mElapsedTimeMs << ", "     // 12
+                << mTotalGFlops << ", "          // 13
+                << mMeasuredTFlopsPerSec << ", " // 14
+                << mTotalGBytes << ", "          // 15
+                << mGBytesPerSec << ", "         // 16
+                << result                        // 17
                 << std::endl;
             // clang-format on
         }
@@ -198,17 +202,18 @@ namespace hiptensor
         // reset API log buffer
         sAPILogBuff.str(std::string());
 
-        auto param      = Base::GetParam();
-        auto dataTypes  = std::get<0>(param);
-        auto logLevel   = std::get<1>(param);
-        auto lengths    = std::get<2>(param);
-        auto outputDims = std::get<3>(param);
-        auto alpha      = std::get<4>(param);
-        auto beta       = std::get<5>(param);
-        auto op         = std::get<6>(param);
-        auto aOp        = op[0];
-        auto cOp        = op[1];
-        auto reduceOp   = op[2];
+        auto param        = Base::GetParam();
+        auto dataTypes    = std::get<0>(param);
+        auto logLevel     = std::get<1>(param);
+        auto lengths      = std::get<2>(param);
+        auto outputDims   = std::get<3>(param);
+        auto alpha        = std::get<4>(param);
+        auto beta         = std::get<5>(param);
+        auto op           = std::get<6>(param);
+        auto memoryLayout = std::get<7>(param);
+        auto aOp          = op[0];
+        auto cOp          = op[1];
+        auto reduceOp     = op[2];
 
         EXPECT_TRUE((lengths.size() > 0) && (lengths.size() <= 6));
         EXPECT_TRUE((outputDims.size() >= 0) && (outputDims.size() <= 6));
@@ -270,22 +275,23 @@ namespace hiptensor
             {
                 auto resource = getResource();
 
-                auto param      = Base::GetParam();
-                auto dataTypes  = std::get<0>(param);
-                auto logLevel   = std::get<1>(param);
-                auto lengths    = std::get<2>(param);
-                auto outputDims = std::get<3>(param);
-                auto alpha      = std::get<4>(param);
-                auto beta       = std::get<5>(param);
-                auto op         = std::get<6>(param);
-                auto aOp        = op[0];
-                auto cOp        = op[1];
-                auto reduceOp   = op[2];
+                auto param        = Base::GetParam();
+                auto dataTypes    = std::get<0>(param);
+                auto logLevel     = std::get<1>(param);
+                auto lengths      = std::get<2>(param);
+                auto outputDims   = std::get<3>(param);
+                auto alpha        = std::get<4>(param);
+                auto beta         = std::get<5>(param);
+                auto op           = std::get<6>(param);
+                auto memoryLayout = std::get<7>(param);
+                auto aOp          = op[0];
+                auto cOp          = op[1];
+                auto reduceOp     = op[2];
 
                 stream << "Input [type: " << dataTypes << ", lengths: " << lengths
-                       << ", outputDims: " << outputDims << ", alpha: " << alpha
-                       << ", beta: " << beta << ", opReduce: [" << aOp << ", " << cOp << ", "
-                       << reduceOp << "]\n";
+                       << ", memoryLayout: " << memoryLayout << ", outputDims: " << outputDims
+                       << ", alpha: " << alpha << ", beta: " << beta << ", opReduce: [" << aOp
+                       << ", " << cOp << ", " << reduceOp << "]\n";
 
                 size_t elementsA = resource->getCurrentInputElementCount();
                 size_t elementsC = resource->getCurrentOutputElementCount();
@@ -317,17 +323,18 @@ namespace hiptensor
 
     void ReductionTest::RunKernel()
     {
-        auto param      = Base::GetParam();
-        auto dataTypes  = std::get<0>(param);
-        auto logLevel   = std::get<1>(param);
-        auto lengths    = std::get<2>(param);
-        auto outputDims = std::get<3>(param);
-        auto alpha      = std::get<4>(param);
-        auto beta       = std::get<5>(param);
-        auto op         = std::get<6>(param);
-        auto aOp        = op[0];
-        auto cOp        = op[1];
-        auto reduceOp   = op[2];
+        auto param        = Base::GetParam();
+        auto dataTypes    = std::get<0>(param);
+        auto logLevel     = std::get<1>(param);
+        auto lengths      = std::get<2>(param);
+        auto outputDims   = std::get<3>(param);
+        auto alpha        = std::get<4>(param);
+        auto beta         = std::get<5>(param);
+        auto op           = std::get<6>(param);
+        auto memoryLayout = std::get<7>(param);
+        auto aOp          = op[0];
+        auto cOp          = op[1];
+        auto reduceOp     = op[2];
 
         auto acDataType      = dataTypes[0];
         auto computeDataType = convertToComputeType(dataTypes[1]);
@@ -361,7 +368,7 @@ namespace hiptensor
             // Strides of output are generated in this way:
             //   output dims are [2, 1]
             //     ==> corresponding lengths are [8(2), 5(1)]
-            //     ==> strides are [5,(2) 1(1)]
+            //     ==> strides are [5(2), 1(1)]
             //     ==> sorted strides are [1(1), 5(2)] // sort by dim
             //
             //  strides of output are [1, 5]
@@ -376,6 +383,12 @@ namespace hiptensor
             std::vector<int64_t> extentD(extentC);
 
             auto& options = HiptensorOptions::instance();
+
+            std::vector<int64_t> stridesA
+                = memoryLayout == HIPTENSOR_MEMORY_LAYOUT_DEFAULT
+                      ? std::vector<int64_t>{}
+                      : hiptensor::stridesFromLengths(
+                            extentA, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
             std::vector<int64_t> strideD
                 = hiptensor::stridesFromLengths(extentD, options->isColMajorStrides());
@@ -415,8 +428,14 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
 
             hiptensorTensorDescriptor_t descA = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descA, nmodeA, extentA.data(), NULL /* stride */, acDataType, 0));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descA,
+                                                nmodeA,
+                                                extentA.data(),
+                                                stridesA.empty() ? nullptr : stridesA.data(),
+                                                acDataType,
+                                                0));
 
             hiptensorTensorDescriptor_t descC = nullptr;
             CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
@@ -450,15 +469,14 @@ namespace hiptensor
             * Disable Plan Cache for tests
             ***************************/
             const hiptensorCacheMode_t cacheMode = HIPTENSOR_CACHE_MODE_NONE;
-            CHECK_HIPTENSOR_ERROR(hiptensorPlanPreferenceSetAttribute(
-                 handle,
-                 planPref,
-                 HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE,
-                 &cacheMode,
-                 sizeof(hiptensorCacheMode_t)));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorPlanPreferenceSetAttribute(handle,
+                                                    planPref,
+                                                    HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE,
+                                                    &cacheMode,
+                                                    sizeof(hiptensorCacheMode_t)));
 
-
-            uint64_t worksize = 0;
+            uint64_t                            worksize      = 0;
             const hiptensorWorksizePreference_t workspacePref = HIPTENSOR_WORKSPACE_DEFAULT;
             CHECK_HIPTENSOR_ERROR(
                 hiptensorEstimateWorkspaceSize(handle, desc, planPref, workspacePref, &worksize));
