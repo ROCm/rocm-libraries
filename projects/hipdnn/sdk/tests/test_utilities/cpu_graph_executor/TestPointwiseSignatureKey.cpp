@@ -119,11 +119,13 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
     // Debug output to see the actual mismatch
     std::cout << "Expected key: operation=" << static_cast<int>(expectedKey.operation)
               << ", inputDataType=" << static_cast<int>(expectedKey.inputDataType)
+              << ", computeDataType=" << static_cast<int>(expectedKey.computeDataType)
               << ", outputDataType=" << static_cast<int>(expectedKey.outputDataType)
               << ", input1DataType=" << static_cast<int>(expectedKey.input1DataType) << '\n';
 
     std::cout << "Actual key: operation=" << static_cast<int>(keyFromNode.operation)
               << ", inputDataType=" << static_cast<int>(keyFromNode.inputDataType)
+              << ", computeDataType=" << static_cast<int>(keyFromNode.computeDataType)
               << ", outputDataType=" << static_cast<int>(keyFromNode.outputDataType)
               << ", input1DataType=" << static_cast<int>(keyFromNode.input1DataType) << '\n';
 
@@ -133,7 +135,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
 TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
 {
     PointwiseSignatureKey expectedKey{
-        PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::HALF};
+        PointwiseMode::ADD, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     std::vector<int64_t> input1Dims = {1, 3, 2, 2};
     std::vector<int64_t> input2Dims = {1, 3, 2, 2};
     std::vector<int64_t> outputDims = {1, 3, 2, 2};
@@ -158,11 +160,13 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     // Debug output to see the actual mismatch
     std::cout << "Expected key: operation=" << static_cast<int>(expectedKey.operation)
               << ", inputDataType=" << static_cast<int>(expectedKey.inputDataType)
+              << ", computeDataType=" << static_cast<int>(expectedKey.computeDataType)
               << ", outputDataType=" << static_cast<int>(expectedKey.outputDataType)
               << ", input1DataType=" << static_cast<int>(expectedKey.input1DataType) << '\n';
 
     std::cout << "Actual key: operation=" << static_cast<int>(keyFromNode.operation)
               << ", inputDataType=" << static_cast<int>(keyFromNode.inputDataType)
+              << ", computeDataType=" << static_cast<int>(keyFromNode.computeDataType)
               << ", outputDataType=" << static_cast<int>(keyFromNode.outputDataType)
               << ", input1DataType=" << static_cast<int>(keyFromNode.input1DataType) << '\n';
 

@@ -55,7 +55,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
     initTensorValues(params.dbiasTensor, DataType::FLOAT, planTensorBundle.dbiasTensor, 8);
 
-    BatchnormBwdPlan<float, float, float, float, float> bwdPlan(std::move(params));
+    BatchnormBwdPlan<float, float, float, float, float, float> bwdPlan(std::move(params));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = planTensorBundle.dyTensor.memory().hostData();
@@ -107,13 +107,14 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
+                            DataType::FLOAT,
                             DataType::FLOAT>
         bwdPlanBuilder;
 
     auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     bool result
-        = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float>*>(builtPlan.get())
+        = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
     EXPECT_TRUE(result);
 }
@@ -135,6 +136,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
+                            DataType::FLOAT,
                             DataType::FLOAT>
         floatPlanBuilder;
 
@@ -142,6 +144,7 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 
     BatchnormBwdPlanBuilder<DataType::FLOAT,
                             DataType::HALF,
+                            DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT,
                             DataType::FLOAT>

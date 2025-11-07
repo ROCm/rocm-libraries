@@ -50,7 +50,8 @@ struct BatchnormBwdParams
     hipdnn_sdk::data_objects::TensorAttributesT dbiasTensor;
 };
 
-template <typename InputDataType,
+template <typename DyDataType,
+          typename InputDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
           typename ComputeDataType,
@@ -65,7 +66,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDyTensor = createShallowTensor<InputDataType>(
+        auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
         auto shallowXTensor = createShallowTensor<InputDataType>(
@@ -93,21 +94,23 @@ public:
                                     ScaleBiasDataType,
                                     MeanVarianceDataType,
                                     ComputeDataType,
-                                    OutputDataType>::batchnormBwd(*shallowDyTensor,
-                                                                  *shallowXTensor,
-                                                                  *shallowMeanTensor,
-                                                                  *shallowInvVarianceTensor,
-                                                                  *shallowScaleTensor,
-                                                                  *shallowDxTensor,
-                                                                  *shallowDscaleTensor,
-                                                                  *shallowDbiasTensor);
+                                    OutputDataType,
+                                    DyDataType>::batchnormBwd(*shallowDyTensor,
+                                                              *shallowXTensor,
+                                                              *shallowMeanTensor,
+                                                              *shallowInvVarianceTensor,
+                                                              *shallowScaleTensor,
+                                                              *shallowDxTensor,
+                                                              *shallowDscaleTensor,
+                                                              *shallowDbiasTensor);
     }
 
 private:
     BatchnormBwdParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
@@ -115,6 +118,7 @@ template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
 class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
+    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
     using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
@@ -154,7 +158,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dscale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
@@ -188,7 +192,8 @@ public:
                                   *tensorMap.at(nodeAttributes->dscale_tensor_uid()),
                                   *tensorMap.at(nodeAttributes->dbias_tensor_uid()));
 
-        return std::make_unique<BatchnormBwdPlan<InputDataType,
+        return std::make_unique<BatchnormBwdPlan<DyDataType,
+                                                 InputDataType,
                                                  ScaleBiasDataType,
                                                  MeanVarianceDataType,
                                                  ComputeDataType,

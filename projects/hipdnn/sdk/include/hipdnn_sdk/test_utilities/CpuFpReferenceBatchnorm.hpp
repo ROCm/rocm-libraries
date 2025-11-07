@@ -23,7 +23,8 @@ template <class InputDataType,
           class ScaleBiasDataType,
           class MeanVarianceDataType = ScaleBiasDataType,
           class ComputeDataType = MeanVarianceDataType,
-          class OutputDataType = InputDataType>
+          class OutputDataType = InputDataType,
+          class DyDataType = InputDataType>
 class CpuFpReferenceBatchnormImpl
 {
 public:
@@ -200,7 +201,7 @@ public:
         }
     }
 
-    static void batchnormBwd(const TensorBase<InputDataType>& dy,
+    static void batchnormBwd(const TensorBase<DyDataType>& dy,
                              const TensorBase<InputDataType>& x,
                              const TensorBase<MeanVarianceDataType>& mean,
                              const TensorBase<MeanVarianceDataType>& invVariance,

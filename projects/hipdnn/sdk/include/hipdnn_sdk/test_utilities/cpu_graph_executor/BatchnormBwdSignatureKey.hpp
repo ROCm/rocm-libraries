@@ -16,6 +16,7 @@ struct BatchnormBwdSignatureKey
 {
     const hipdnn_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes;
+    hipdnn_sdk::data_objects::DataType dyDataType;
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
@@ -23,12 +24,14 @@ struct BatchnormBwdSignatureKey
     hipdnn_sdk::data_objects::DataType outputDataType;
 
     BatchnormBwdSignatureKey() = default;
-    constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
+    constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType dy,
+                                       hipdnn_sdk::data_objects::DataType input,
                                        hipdnn_sdk::data_objects::DataType scaleBias,
                                        hipdnn_sdk::data_objects::DataType meanVariance,
                                        hipdnn_sdk::data_objects::DataType compute,
                                        hipdnn_sdk::data_objects::DataType output)
-        : inputDataType(input)
+        : dyDataType(dy)
+        , inputDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
         , computeDataType(compute)
@@ -48,18 +51,20 @@ struct BatchnormBwdSignatureKey
                 "Node attributes could not be cast to BatchnormBackwardAttributes");
         }
 
+        auto dyTensorAttr = tensorMap.at(nodeAttributes->dy_tensor_uid());
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
         auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
 
-        if(xTensorAttr == nullptr || meanTensorAttr == nullptr || scaleTensorAttr == nullptr
-           || dxTensorAttr == nullptr)
+        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || meanTensorAttr == nullptr
+           || scaleTensorAttr == nullptr || dxTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
         }
 
+        dyDataType = dyTensorAttr->data_type();
         inputDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
         meanVarianceDataType = meanTensorAttr->data_type();
@@ -75,16 +80,18 @@ struct BatchnormBwdSignatureKey
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 20);
+               ^ (static_cast<std::size_t>(static_cast<int>(dyDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 12)
+               ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 16)
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20)
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 24);
     }
 
     bool operator==(const BatchnormBwdSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && inputDataType == other.inputDataType
+        return nodeType == other.nodeType && dyDataType == other.dyDataType
+               && inputDataType == other.inputDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
                && computeDataType == other.computeDataType
@@ -105,28 +112,22 @@ struct BatchnormBwdSignatureKey
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::HALF>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
@@ -135,12 +136,38 @@ struct BatchnormBwdSignatureKey
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::HALF>(map);
 
         return map;
     }
 
-    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+    template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
@@ -149,12 +176,14 @@ struct BatchnormBwdSignatureKey
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   BatchnormBwdSignatureKey>& map)
     {
-        map[BatchnormBwdSignatureKey(InputDataTypeEnum,
+        map[BatchnormBwdSignatureKey(DyDataTypeEnum,
+                                     InputDataTypeEnum,
                                      ScaleBiasDataTypeEnum,
                                      MeanVarianceDataTypeEnum,
                                      ComputeDataTypeEnum,
                                      OutputDataTypeEnum)]
-            = std::make_unique<BatchnormBwdPlanBuilder<InputDataTypeEnum,
+            = std::make_unique<BatchnormBwdPlanBuilder<DyDataTypeEnum,
+                                                       InputDataTypeEnum,
                                                        ScaleBiasDataTypeEnum,
                                                        MeanVarianceDataTypeEnum,
                                                        ComputeDataTypeEnum,
@@ -177,7 +206,8 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormBwdSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormBwd(in={}, scale={}, mean={}, compute={}, out={})",
+                              "BatchnormBwd(dy={}, x={}, scale={}, mean={}, compute={}, dx={})",
+                              key.dyDataType,
                               key.inputDataType,
                               key.scaleBiasDataType,
                               key.meanVarianceDataType,

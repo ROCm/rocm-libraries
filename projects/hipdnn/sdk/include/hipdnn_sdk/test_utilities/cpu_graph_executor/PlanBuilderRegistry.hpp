@@ -47,7 +47,8 @@ public:
             return *it->second;
         }
 
-        throw std::runtime_error("No plan builder registered for the given signature key.");
+        throw std::runtime_error(
+            fmt::format("No plan builder registered for signature key: {}", key));
     }
 
 private:

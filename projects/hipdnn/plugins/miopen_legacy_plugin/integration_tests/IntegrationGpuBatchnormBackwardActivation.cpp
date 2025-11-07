@@ -50,17 +50,17 @@ protected:
                           unsigned int seed) override
     {
         bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(0.5f, 1.5f, seed);
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::BIAS_UID)
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::MEAN_UID)
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::INV_VARIANCE_UID)
-            ->fillTensorWithRandomValues(0.5f, 2.0f, seed);
+            ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
     }
 
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override

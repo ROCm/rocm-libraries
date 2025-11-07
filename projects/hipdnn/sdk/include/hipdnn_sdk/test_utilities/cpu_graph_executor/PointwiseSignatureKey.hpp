@@ -135,6 +135,10 @@ struct PointwiseSignatureKey
                              hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
 
         // Add plan builders for implemented binary operations (input0/input1/compute/output)
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF,
                               hipdnn_sdk::data_objects::DataType::HALF,
                               hipdnn_sdk::data_objects::DataType::FLOAT,
@@ -265,11 +269,10 @@ private:
                                   ComputeDataTypeEnum,
                                   OutputDataTypeEnum,
                                   Input1DataTypeEnum)]
-            = std::make_unique<
-                PointwisePlanBuilder<Input0DataTypeEnum,
-                                     Input1DataTypeEnum,
-                                     ComputeDataTypeEnum,
-                                     OutputDataTypeEnum>>();
+            = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
+                                                    Input1DataTypeEnum,
+                                                    ComputeDataTypeEnum,
+                                                    OutputDataTypeEnum>>();
     }
 };
 }

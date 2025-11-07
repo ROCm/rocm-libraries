@@ -34,12 +34,24 @@ TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)
 
 TEST(TestPlanRegistrySignatureKey, HashAndEqualityBwd)
 {
-    BatchnormBwdSignatureKey key1(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
-    BatchnormBwdSignatureKey key2(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
-    BatchnormBwdSignatureKey key3(
-        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+    BatchnormBwdSignatureKey key1(DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT);
+    BatchnormBwdSignatureKey key2(DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT,
+                                  DataType::FLOAT);
+    BatchnormBwdSignatureKey key3(DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF);
 
     PlanRegistrySignatureKey v1 = key1;
     PlanRegistrySignatureKey v2 = key2;
@@ -58,8 +70,12 @@ TEST(TestPlanRegistrySignatureKey, CrossTypeEquality)
 {
     BatchnormFwdInferenceSignatureKey fwdKey(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
-    BatchnormBwdSignatureKey bwdKey(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    BatchnormBwdSignatureKey bwdKey(DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT);
 
     PlanRegistrySignatureKey vFwd = fwdKey;
     PlanRegistrySignatureKey vBwd = bwdKey;
@@ -72,8 +88,12 @@ TEST(TestPlanRegistrySignatureKey, UnorderedMapUsage)
 {
     BatchnormFwdInferenceSignatureKey key1(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
-    BatchnormBwdSignatureKey key2(
-        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+    BatchnormBwdSignatureKey key2(DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF,
+                                  DataType::HALF);
 
     PlanRegistrySignatureKey v1 = key1;
     PlanRegistrySignatureKey v2 = key2;
