@@ -1366,65 +1366,72 @@ namespace
     protected:
         void SetUp() override
         {
-            const hipfftw_input_validation_params<prec>& params = this->GetParam();
+            try
+            {
+                const hipfftw_input_validation_params<prec>& params = this->GetParam();
 
-            if(!params.can_be_tested())
-                GTEST_FAIL() << "invalid parameters which cannot be tested";
-            safe_to_touch_nonnull_io = true;
+                if(!params.can_be_tested())
+                    GTEST_FAIL() << "invalid parameters which cannot be tested";
+                safe_to_touch_nonnull_io = true;
 
-            // get_data_byte_size requires valid ranks and lengths to be calculated (of course)
-            // --> make sure the I/O data sizes are not zero for test consistency w.r.t. testing
-            // for nullptr data args I/O
-            auto compute_io_size = [&](fft_io io) {
-                try
+                // get_data_byte_size requires valid ranks and lengths to be calculated (of course)
+                // --> make sure the I/O data sizes are not zero for test consistency w.r.t. testing
+                // for nullptr data args I/O
+                auto compute_io_size = [&](fft_io io) {
+                    try
+                    {
+                        return params.plan_helper.get_data_byte_size(io);
+                    }
+                    catch(const typename hipfftw_helper<prec>::num_elements_calc_exception& e)
+                    {
+                        safe_to_touch_nonnull_io = false;
+                        return sizeof(hipfftw_complex_t<prec>); // some nonzero value
+                    }
+                };
+                const size_t input_data_size  = compute_io_size(fft_io::fft_io_in);
+                const size_t output_data_size = compute_io_size(fft_io::fft_io_out);
+                if(input_data_size > max_byte_size_for_hipfftw_tests()
+                   || output_data_size > max_byte_size_for_hipfftw_tests())
                 {
-                    return params.plan_helper.get_data_byte_size(io);
+                    GTEST_SKIP()
+                        << "Skipping test due to excessive I/O byte size (max of I/O byte size: "
+                        << std::max(input_data_size, output_data_size)
+                        << " vs limit: " << max_byte_size_for_hipfftw_tests() << ")";
                 }
-                catch(const typename hipfftw_helper<prec>::num_elements_calc_exception& e)
-                {
-                    safe_to_touch_nonnull_io = false;
-                    return sizeof(hipfftw_complex_t<prec>); // some nonzero value
-                }
-            };
-            const size_t input_data_size  = compute_io_size(fft_io::fft_io_in);
-            const size_t output_data_size = compute_io_size(fft_io::fft_io_out);
-            if(input_data_size > max_byte_size_for_hipfftw_tests()
-               || output_data_size > max_byte_size_for_hipfftw_tests())
-            {
-                GTEST_SKIP()
-                    << "Skipping test due to excessive I/O byte size (max of I/O byte size: "
-                    << std::max(input_data_size, output_data_size)
-                    << " vs limit: " << max_byte_size_for_hipfftw_tests() << ")";
-            }
 
-            if(params.creation_io_is_null.first)
-                plan_creation_input.free();
-            else
-                plan_creation_input.alloc(input_data_size);
-
-            if(params.creation_placement() == fft_placement_inplace
-               || params.creation_io_is_null.second)
-                plan_creation_output.free();
-            else
-                plan_creation_output.alloc(output_data_size);
-
-            if(params.use_creation_io_at_execution())
-            {
-                plan_execution_input.free();
-                plan_execution_output.free();
-            }
-            else
-            {
-                if(!params.is_execution_arg_null(fft_io::fft_io_in))
-                    plan_execution_input.alloc(input_data_size);
+                if(params.creation_io_is_null.first)
+                    plan_creation_input.free();
                 else
+                    plan_creation_input.alloc(input_data_size);
+
+                if(params.creation_placement() == fft_placement_inplace
+                   || params.creation_io_is_null.second)
+                    plan_creation_output.free();
+                else
+                    plan_creation_output.alloc(output_data_size);
+
+                if(params.use_creation_io_at_execution())
+                {
                     plan_execution_input.free();
-
-                if(params.execution_placement() == fft_placement_inplace
-                   || params.is_execution_arg_null(fft_io::fft_io_out))
                     plan_execution_output.free();
+                }
                 else
-                    plan_execution_output.alloc(output_data_size);
+                {
+                    if(!params.is_execution_arg_null(fft_io::fft_io_in))
+                        plan_execution_input.alloc(input_data_size);
+                    else
+                        plan_execution_input.free();
+
+                    if(params.execution_placement() == fft_placement_inplace
+                       || params.is_execution_arg_null(fft_io::fft_io_out))
+                        plan_execution_output.free();
+                    else
+                        plan_execution_output.alloc(output_data_size);
+                }
+            }
+            catch(const HOSTBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
             }
         }
         void TearDown() override
@@ -2032,6 +2039,10 @@ namespace
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
                     GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
+            }
+            catch(const HOSTBUF_MEM_USAGE& e)
+            {
+                GTEST_SKIP() << e.what();
             }
         }
         void TearDown() override
