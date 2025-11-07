@@ -417,7 +417,6 @@ def writeSolutionsAndKernelsTCL(
         destLibPath,
         assemblyTmpPath,
         compress,
-        removeTemporaries,
     )
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
