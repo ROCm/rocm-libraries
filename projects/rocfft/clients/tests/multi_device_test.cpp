@@ -95,8 +95,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                                               ooffset_range_zero,
                                               {fft_placement_inplace, fft_placement_notinplace},
                                               false,
-                                              run_callbacks,
-                                              auto_alloc_setting);
+                                              run_callbacks);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
 
         params = param_generator_real(test_prob,
@@ -109,8 +108,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                                       ooffset_range_zero,
                                       {fft_placement_notinplace},
                                       false,
-                                      run_callbacks,
-                                      auto_alloc_setting);
+                                      run_callbacks);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
     }
 
