@@ -97,6 +97,127 @@ protected:
     }
 };
 
+TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::NOT_SET)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ValidateUnsetNodeComputeTypeSetGraphComputeType)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIoType)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::NOT_SET);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIntermediateType)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::NOT_SET)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
+    in0->set_is_virtual(true);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+
+    auto out0 = graph.pointwise(in0, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataTypes)
+{
+    Graph graph;
+
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
+    auto in1 = std::make_shared<TensorAttributes>();
+    in1->set_dim({1, 2, 3, 4})
+        .set_stride({5, 6, 7, 8})
+        .set_data_type(DataType::NOT_SET)
+        .set_is_virtual(true);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::ADD);
+
+    auto out0 = graph.pointwise(in0, in1, attributes);
+
+    auto validationResult = graph.validate();
+
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
 TEST_F(TestGraph, SetAndGetAttributes)
 {
     Graph graph;
@@ -118,6 +239,9 @@ TEST_F(TestGraph, SetAndGetAttributes)
 TEST_F(TestGraph, BatchnormNodeCreation)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -151,6 +275,9 @@ TEST_F(TestGraph, BatchnormNodeCreation)
 TEST_F(TestGraph, BatchnormBackwardNodeCreation)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto dy = std::make_shared<TensorAttributes>();
     auto x = std::make_shared<TensorAttributes>();
@@ -180,6 +307,9 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
 TEST_F(TestGraph, BatchnormInferenceNodeCreation)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -204,6 +334,9 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
 TEST_F(TestGraph, PointwiseNodeCreationSingleInput)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -224,6 +357,9 @@ TEST_F(TestGraph, PointwiseNodeCreationSingleInput)
 TEST_F(TestGraph, PointwiseNodeCreationTwoInputs)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
     auto in1 = std::make_shared<TensorAttributes>();
@@ -247,6 +383,9 @@ TEST_F(TestGraph, PointwiseNodeCreationTwoInputs)
 TEST_F(TestGraph, PointwiseNodeCreationThreeInputs)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
     auto in1 = std::make_shared<TensorAttributes>();
@@ -272,6 +411,9 @@ TEST_F(TestGraph, PointwiseNodeCreationThreeInputs)
 TEST_F(TestGraph, ConvolutionFwdNodeCreation)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
@@ -298,6 +440,9 @@ TEST_F(TestGraph, ConvolutionFwdNodeCreation)
 TEST_F(TestGraph, ConvolutionDgradNodeCreation)
 {
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
@@ -335,6 +480,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
 
     graph.set_name("SerializedGraphTest")
         .set_compute_data_type(DataType::FLOAT)
@@ -375,9 +523,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 6);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -460,9 +608,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedBatchnormGraph");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 12);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -567,9 +715,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormAndPointwiseGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedBatchnormAndPointwiseGraph");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 13);
     EXPECT_EQ(deserializedGraph->nodes.size(), 2);
 
@@ -659,9 +807,9 @@ TEST_F(TestGraph, BuildAndSerializePointwiseGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 2);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -735,9 +883,9 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormInferenceGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 7);
     EXPECT_EQ(deserializedGraph->nodes.size(), 2);
 
@@ -827,9 +975,9 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormBackwardGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 8);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -905,9 +1053,9 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionFwdGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedConvolutionGraph");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 3);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -977,9 +1125,9 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedConvolutionDgradGraph");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 3);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
@@ -1062,9 +1210,9 @@ TEST_F(TestGraph, BuildAndSerializePointwiseAndBatchnormBackwardGraph)
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     EXPECT_EQ(deserializedGraph->name, "SerializedGraphTest");
-    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
-    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
     EXPECT_EQ(deserializedGraph->tensors.size(), 9);
     EXPECT_EQ(deserializedGraph->nodes.size(), 2);
 
@@ -1838,6 +1986,9 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
 TEST_F(TestGraph, ValidateSortsNodesTopologically)
 {
     GraphTestUtils graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -1929,6 +2080,10 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
 TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 {
     GraphTestUtils graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
     auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
