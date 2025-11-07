@@ -21,10 +21,10 @@
 #ifndef ROCFFT_CALLBACK_MAP_H
 #define ROCFFT_CALLBACK_MAP_H
 
-#include <vector>
+#include <map>
 
 // Load/store callbacks for a device, intended to be stored in a
-// std::vector, so that we can derive callback info from a device
+// std::map, so that we can derive callback info from a device
 // ID.
 struct device_callback_t
 {
@@ -34,8 +34,8 @@ struct device_callback_t
     void* store_data = nullptr;
 };
 
-// Build vector of callback structs, so we can know which callback
-// functions run on which devices.  Index in the vector is HIP device
+// Build map of callback structs, so we can know which callback
+// functions run on which devices.  Index in the map is HIP device
 // ID.
 //
 // We do this because callbacks need to be specified in the execution
@@ -43,6 +43,6 @@ struct device_callback_t
 // might not be in any sensible order.
 struct rocfft_execution_info_t;
 struct rocfft_plan_description_t;
-std::vector<device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
-                                                 const rocfft_plan_description_t& desc);
+std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
+                                                   const rocfft_plan_description_t& desc);
 #endif

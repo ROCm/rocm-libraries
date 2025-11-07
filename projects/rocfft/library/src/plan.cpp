@@ -1890,14 +1890,14 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
     return plan.AddMultiPlanItem(std::move(singlePlan), antecedents);
 }
 
-void rocfft_plan_t::C2CField(const rocfft_field_t&         field,
-                             const std::vector<size_t>&    fftDims,
-                             std::vector<BufferPtr>&       input,
-                             std::vector<BufferPtr>&       output,
-                             const std::optional<LoadOps>  loadOps,
-                             const std::optional<StoreOps> storeOps,
-                             const std::vector<size_t>&    inputAntecedents,
-                             std::vector<size_t>&          outputItems)
+void rocfft_plan_t::C2CField(const rocfft_field_t&          field,
+                             const std::vector<size_t>&     fftDims,
+                             std::vector<BufferPtr>&        input,
+                             std::vector<BufferPtr>&        output,
+                             const std::optional<LoadOps>&  loadOps,
+                             const std::optional<StoreOps>& storeOps,
+                             const std::vector<size_t>&     inputAntecedents,
+                             std::vector<size_t>&           outputItems)
 {
     outputItems.resize(field.bricks.size());
 

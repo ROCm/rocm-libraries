@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -525,12 +525,12 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
 // Internal plan executor.
 // For in-place transforms, in_buffer == out_buffer.
-void TransformPowX(const ExecPlan&                       execPlan,
-                   void*                                 in_buffer[],
-                   void*                                 out_buffer[],
-                   rocfft_execution_info                 info,
-                   size_t                                multiPlanIdx,
-                   const std::vector<device_callback_t>& callbacks)
+void TransformPowX(const ExecPlan&                         execPlan,
+                   void*                                   in_buffer[],
+                   void*                                   out_buffer[],
+                   rocfft_execution_info                   info,
+                   size_t                                  multiPlanIdx,
+                   const std::map<int, device_callback_t>& callbacks)
 {
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
 
@@ -557,19 +557,20 @@ void TransformPowX(const ExecPlan&                       execPlan,
     TreeNode* store_node            = nullptr;
     std::tie(load_node, store_node) = execPlan.get_load_store_nodes();
 
-    if(execPlan.location.device < static_cast<int>(callbacks.size()))
+    auto it = callbacks.find(execPlan.location.device);
+    if(it != callbacks.end())
     {
         if(execPlan.rootPlan->loadOps)
         {
-            load_node->callbacks.load_cb_fn        = callbacks[execPlan.location.device].load_fn;
-            load_node->callbacks.load_cb_data      = callbacks[execPlan.location.device].load_data;
+            load_node->callbacks.load_cb_fn        = it->second.load_fn;
+            load_node->callbacks.load_cb_data      = it->second.load_data;
             load_node->callbacks.load_cb_lds_bytes = info->load_cb_lds_bytes;
         }
 
         if(execPlan.rootPlan->storeOps)
         {
-            store_node->callbacks.store_cb_fn   = callbacks[execPlan.location.device].store_fn;
-            store_node->callbacks.store_cb_data = callbacks[execPlan.location.device].store_data;
+            store_node->callbacks.store_cb_fn        = it->second.store_fn;
+            store_node->callbacks.store_cb_data      = it->second.store_data;
             store_node->callbacks.store_cb_lds_bytes = info->store_cb_lds_bytes;
         }
     }

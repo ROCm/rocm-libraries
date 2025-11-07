@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {64, 128, 256},
     {96, 160, 192},
 };
-static const std::vector<size_t>        multi_gpu_batch_range = {10, 1};
+static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
@@ -85,27 +85,29 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
         auto params = param_generator_complex(test_prob,
                                               multi_gpu_sizes,
                                               precision_range_sp_dp,
-                                              {4, 1},
+                                              multi_gpu_batch_range,
                                               stride_generator(stride_range),
                                               stride_generator(stride_range),
-                                              {{0, 0}},
-                                              {{0, 0}},
+                                              ioffset_range_zero,
+                                              ooffset_range_zero,
                                               {fft_placement_inplace, fft_placement_notinplace},
                                               false,
-                                              run_callbacks);
+                                              run_callbacks,
+                                              auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
 
         params = param_generator_real(test_prob,
                                       multi_gpu_sizes,
                                       precision_range_sp_dp,
-                                      {4, 1},
+                                      multi_gpu_batch_range,
                                       stride_generator(stride_range),
                                       stride_generator(stride_range),
-                                      {{0, 0}},
-                                      {{0, 0}},
+                                      ioffset_range_zero,
+                                      ooffset_range_zero,
                                       {fft_placement_notinplace},
                                       false,
-                                      run_callbacks);
+                                      run_callbacks,
+                                      auto_alloc_setting);
         std::copy(params.begin(), params.end(), std::back_inserter(params_single));
     }
 

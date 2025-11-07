@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,11 +46,11 @@ struct rocfft_execution_info_t
     size_t store_cb_lds_bytes = 0;
 };
 
-void TransformPowX(const ExecPlan&                       execPlan,
-                   void*                                 in_buffer[],
-                   void*                                 out_buffer[],
-                   rocfft_execution_info                 info,
-                   size_t                                multiPlanIdx,
-                   const std::vector<device_callback_t>& callbacks);
+void TransformPowX(const ExecPlan&                         execPlan,
+                   void*                                   in_buffer[],
+                   void*                                   out_buffer[],
+                   rocfft_execution_info                   info,
+                   size_t                                  multiPlanIdx,
+                   const std::map<int, device_callback_t>& callbacks);
 
 #endif // TRANSFORM_H
