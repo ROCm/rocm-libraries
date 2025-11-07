@@ -3650,6 +3650,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.flush)
         {
             static std::unordered_map<std::string, double> flush_times_cache;
+            static std::mutex mtx;
+            std::lock_guard<std::mutex> lock(mtx);
             std::string device_uuid(deviceProps.uuid.bytes);
             if(!flush_times_cache.count(device_uuid))
             {
