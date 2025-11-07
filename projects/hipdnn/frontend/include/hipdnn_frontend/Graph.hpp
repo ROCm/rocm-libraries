@@ -144,11 +144,18 @@ private:
                     "No engine configurations retrieved from the heuristic desc."};
         }
 
-        //TODO
-        // Add additional filtering based on user criteria.
-        bool engineConfigSelected = false;
+        // Finalize engine configs
+        for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+        {
+            RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigsShallow[i]),
+                                      "Failed to finalize engine config descriptor");
+        }
+
+        // Select engine config based on preferred ID or use first available
+        size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
         {
+            bool found = false;
             for(size_t i = 0; i < static_cast<size_t>(count); ++i)
             {
                 hipdnnBackendDescriptor_t engineDesc = nullptr;
@@ -170,23 +177,24 @@ private:
                                                          nullptr,
                                                          &engineId),
                     "Failed to get engine id from engine descriptor.");
+
                 if(engineId == _preferredEngineId.value())
                 {
-                    _engineConfigDesc = std::move(engineConfigs[i]);
-                    engineConfigs.erase(engineConfigs.begin() + static_cast<std::ptrdiff_t>(i),
-                                        engineConfigs.begin() + static_cast<std::ptrdiff_t>(i + 1));
-                    engineConfigSelected = true;
+                    selectedIndex = i;
+                    found = true;
                     break;
                 }
             }
+
+            if(!found)
+            {
+                HIPDNN_FE_LOG_WARN(
+                    "Preferred engine id {} not found, using top engine config instead.",
+                    _preferredEngineId.value());
+            }
         }
 
-        // If engine config not selected yet, pick the first one.
-        if(!engineConfigSelected)
-        {
-            _engineConfigDesc = std::move(engineConfigs[0]);
-            engineConfigs.erase(engineConfigs.begin(), engineConfigs.begin() + 1);
-        }
+        _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
 
         return {ErrorCode::OK, ""};
     }
@@ -523,9 +531,6 @@ public:
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph {}", graph_attributes.get_name());
-
-        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
-                                  "Failed to finalize engine config descriptor");
 
         RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendSetAttribute(_executionPlanDesc->get(),
