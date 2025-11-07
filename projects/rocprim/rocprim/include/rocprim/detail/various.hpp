@@ -561,6 +561,28 @@ private:
     }
 };
 
+template<class T>
+struct type_wrapper
+{
+private:
+    T data;
+
+public:
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    static auto create(T& item)
+    {
+        type_wrapper ret;
+        ret.data = item;
+        return ret;
+    }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T unpack()
+    {
+        return data;
+    }
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 
