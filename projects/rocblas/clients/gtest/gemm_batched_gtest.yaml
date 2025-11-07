@@ -520,7 +520,7 @@ Tests:
   batch_count: 1
 
 - name: gemm_large_batch
-  category: stress
+  category: nightly
   function:
     - gemm_batched: *single_precision
     - gemm_batched_ex: *nonint8_real_precisions
