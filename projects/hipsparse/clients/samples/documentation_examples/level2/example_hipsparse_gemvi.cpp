@@ -48,9 +48,9 @@
 //! [doc example]
 int main(int argc, char* argv[])
 {
-    hipsparseOperation_t opA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseOperation_t opA     = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-    
+
     // Scalar alpha and beta
     float alpha = 1.0f;
     float beta  = 1.0f;
@@ -63,12 +63,27 @@ int main(int argc, char* argv[])
     //     5 6 7 8
     //     2 4 6 8
     //     4 3 2 1
-    std::vector<float> hA = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 2.0f, 4.0f, 6.0f, 8.0f, 4.0f, 3.0f, 2.0f, 1.0f};
-    
+    std::vector<float> hA = {1.0f,
+                             2.0f,
+                             3.0f,
+                             4.0f,
+                             5.0f,
+                             6.0f,
+                             7.0f,
+                             8.0f,
+                             2.0f,
+                             4.0f,
+                             6.0f,
+                             8.0f,
+                             4.0f,
+                             3.0f,
+                             2.0f,
+                             1.0f};
+
     // Sparse vector x
-    int nnz = 2;
-    std::vector<int> hxInd = {0, 2};
-    std::vector<float> hx = {10.0f, 11.0f};
+    int                nnz   = 2;
+    std::vector<int>   hxInd = {0, 2};
+    std::vector<float> hx    = {10.0f, 11.0f};
 
     // Dense vector y
     std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -77,8 +92,8 @@ int main(int argc, char* argv[])
     float* dA = nullptr;
     HIP_CHECK(hipMalloc((void**)&dA, sizeof(float) * m * n));
 
-    int* dxInd = nullptr;
-    float* dx = nullptr;
+    int*   dxInd = nullptr;
+    float* dx    = nullptr;
     HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
     HIP_CHECK(hipMalloc((void**)&dx, sizeof(float) * nnz));
 
