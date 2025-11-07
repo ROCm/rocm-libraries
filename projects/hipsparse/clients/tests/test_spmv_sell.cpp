@@ -26,9 +26,15 @@
 
 #include <hipsparse.h>
 
-typedef std::
-    tuple<int, int, int, double, double, hipsparseOperation_t, hipsparseIndexBase_t, hipsparseSpMVAlg_t>
-        spmv_sell_tuple;
+typedef std::tuple<int,
+                   int,
+                   int,
+                   double,
+                   double,
+                   hipsparseOperation_t,
+                   hipsparseIndexBase_t,
+                   hipsparseSpMVAlg_t>
+    spmv_sell_tuple;
 typedef std::tuple<int,
                    double,
                    double,
@@ -38,33 +44,34 @@ typedef std::tuple<int,
                    std::string>
     spmv_sell_bin_tuple;
 
-int spmv_sell_M_range[] = {50};
-int spmv_sell_N_range[] = {84};
+int spmv_sell_M_range[]          = {50};
+int spmv_sell_N_range[]          = {84};
 int spmv_sell_slice_size_range[] = {2, 3, 4};
 
 std::vector<double> spmv_sell_alpha_range = {2.0};
 std::vector<double> spmv_sell_beta_range  = {1.0};
 
 hipsparseOperation_t spmv_sell_transA_range[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE};
-hipsparseIndexBase_t spmv_sell_idxbase_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
+hipsparseIndexBase_t spmv_sell_idxbase_range[]
+    = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 hipsparseSpMVAlg_t spmv_sell_alg_range[] = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_SELL_ALG1};
 #else
-#if(CUDART_VERSION >= 12011)
+#if (CUDART_VERSION >= 12011)
 hipsparseSpMVAlg_t spmv_sell_alg_range[] = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_SELL_ALG1};
 #endif
 #endif
 
 std::string spmv_sell_bin[] = {"nos1.bin",
-                              "nos2.bin",
-                              "nos3.bin",
-                              "nos4.bin",
-                              "nos5.bin",
-                              "nos6.bin",
-                              "nos7.bin",
-                              "Chebyshev4.bin",
-                              "shipsec1.bin"};
+                               "nos2.bin",
+                               "nos3.bin",
+                               "nos4.bin",
+                               "nos5.bin",
+                               "nos6.bin",
+                               "nos7.bin",
+                               "Chebyshev4.bin",
+                               "shipsec1.bin"};
 
 class parameterized_spmv_sell : public testing::TestWithParam<spmv_sell_tuple>
 {
@@ -116,12 +123,12 @@ Arguments setup_spmv_sell_arguments(spmv_sell_bin_tuple tup)
     std::string bin_file = std::get<6>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    arg.set_filename(bin_file);
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 TEST(spmv_sell_bad_arg, spmv_sell_float)
 {
     testing_spmv_sell_bad_arg();
