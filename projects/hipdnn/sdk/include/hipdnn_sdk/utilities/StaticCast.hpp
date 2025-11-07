@@ -45,12 +45,12 @@ struct CastTo<hip_bfloat16>
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    static hip_bfloat16 from(long value)
+    static hip_bfloat16 from(int64_t value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    static hip_bfloat16 from(unsigned long value)
+    static hip_bfloat16 from(uint64_t value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
@@ -75,12 +75,12 @@ struct CastTo<half>
         return static_cast<half>(static_cast<float>(value));
     }
 
-    static half from(long value)
+    static half from(int64_t value)
     {
         return static_cast<half>(static_cast<float>(value));
     }
 
-    static half from(unsigned long value)
+    static half from(uint64_t value)
     {
         return static_cast<half>(static_cast<float>(value));
     }

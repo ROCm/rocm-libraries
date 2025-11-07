@@ -177,10 +177,11 @@ if(NOT SKIP_LIBRARY)
   if( BUILD_WITH_TENSILE )
     # we will have expanded "all" for tensile to ensure consistency as we have local rules
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
-
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
     set( TENSILE_VERSION 4.45.0 CACHE STRING "The version of Tensile to be used")
+
+    set( Tensile_NO_ENUMERATE ON CACHE BOOL "Disable enumerating GPU targets for Tensile builds" FORCE)
 
     if(BUILD_WITH_PIP)
       if (WIN32)

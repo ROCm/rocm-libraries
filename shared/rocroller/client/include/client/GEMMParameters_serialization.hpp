@@ -188,6 +188,12 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "checked", result.benchmarkResults.checked);
             iot::mapRequired(io, "correct", result.benchmarkResults.correct);
             iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
+
+            iot::mapRequired(io, "sgprCount", result.benchmarkResults.sgprCount);
+            iot::mapRequired(io, "vgprCount", result.benchmarkResults.vgprCount);
+            iot::mapRequired(io, "agprCount", result.benchmarkResults.agprCount);
+
+            iot::mapRequired(io, "ldsBytes", result.benchmarkResults.ldsBytes);
         }
 
         static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)

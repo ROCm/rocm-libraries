@@ -43,7 +43,6 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
   .. grid-item-card:: How to
 
     * :doc:`Use rocSPARSE <./how-to/using-rocsparse>`
-    * :doc:`Contribute to rocSPARSE <./how-to/contribute>`
 
   .. grid-item-card:: Examples
 
@@ -71,5 +70,6 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
     * :ref:`reproducibility`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocSPARSE code base, see :doc:`Contribute to rocSPARSE <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

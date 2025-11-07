@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -24,6 +25,21 @@ inline void copyMaxSizeWithNullTerminator(char* destination, const char* source,
     std::strncpy(destination, source, maxSize - 1);
 #endif
     destination[maxSize - 1] = '\0';
+}
+
+inline std::string toLower(const std::string& str)
+{
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+    return lowerStr;
+}
+
+inline std::string removeNewlines(const std::string& str)
+{
+    std::string result = str;
+    result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+    result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
+    return result;
 }
 
 template <typename T>
