@@ -687,7 +687,7 @@ inline flatbuffers::FlatBufferBuilder
                                                                ConvMode::CROSS_CORRELATION);
     nodes.push_back(CreateNodeDirect(builder,
                                      "conv_fwd",
-                                     DataType::UNSET,
+                                     DataType::FLOAT,
                                      NodeAttributes::ConvolutionFwdAttributes,
                                      convAttributes.Union()));
 
@@ -705,7 +705,7 @@ inline flatbuffers::FlatBufferBuilder
                                                         yBiasTensorUid);
         nodes.push_back(CreateNodeDirect(builder,
                                          "bias",
-                                         DataType::UNSET,
+                                         DataType::FLOAT,
                                          NodeAttributes::PointwiseAttributes,
                                          biasAttributes.Union()));
     }
@@ -725,7 +725,7 @@ inline flatbuffers::FlatBufferBuilder
                                                      softplusBeta);
     nodes.push_back(CreateNodeDirect(builder,
                                      "activ",
-                                     DataType::UNSET,
+                                     DataType::FLOAT,
                                      NodeAttributes::PointwiseAttributes,
                                      activAttributes.Union()));
 
