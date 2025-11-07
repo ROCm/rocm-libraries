@@ -383,7 +383,7 @@ def writeSolutionsAndKernelsTCL(
             asmPath.unlink()
         return result
 
-    unaryAssemble = functools.partial(assemble, removeTemporaries)
+    unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = not disableAsmComments
