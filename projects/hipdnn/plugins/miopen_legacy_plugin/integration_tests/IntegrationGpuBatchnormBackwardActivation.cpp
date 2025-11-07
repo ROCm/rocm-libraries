@@ -77,8 +77,8 @@ protected:
         graphObj.set_compute_data_type(fe::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
-        graphObj.set_intermediate_data_type(dataType);
         auto intermediateDataType = fe::DataType::FLOAT;
+        graphObj.set_intermediate_data_type(intermediateDataType);
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, dims, generateStrides(dims, layout.strideOrder));
@@ -208,7 +208,7 @@ protected:
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 
-        this->registerValidator(dxOut, static_cast<float>(tolerance) * 3.0f);
+        this->registerValidator(dxOut, static_cast<float>(tolerance));
         this->registerValidator(dscaleOut, intermediateTolerance);
         this->registerValidator(dbiasOut, intermediateTolerance);
 
