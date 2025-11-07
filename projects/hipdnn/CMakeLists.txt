@@ -46,28 +46,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
-function(remove_compiler_flag flag_to_remove)
-    # Remove the specified flag from CXX flags if present
-    string(REPLACE "${flag_to_remove}" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    string(REPLACE "${flag_to_remove}" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-    string(REPLACE "${flag_to_remove}" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-    string(REPLACE "${flag_to_remove}" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
-    string(REPLACE "${flag_to_remove}" "" CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL}")
-    
-    # Set the modified flags back to parent scope
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}" PARENT_SCOPE)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}" PARENT_SCOPE)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}" PARENT_SCOPE)
-    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}" PARENT_SCOPE)
-    set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL}" PARENT_SCOPE)
-endfunction()
-
-if(WIN32)
-    # Temporary workaround to remove the /Zc:__cplusplus flag on Windows which
-    # gets added by theRock build
-    remove_compiler_flag("/Zc:__cplusplus")
-endif()
-
 if (WIN32)
     set(HIPDNN_PLUGIN_ROOTDIR "${CMAKE_INSTALL_BINDIR}" CACHE STRING "Root location for plugins")
     set(HIPDNN_PLUGIN_FULL_ROOTDIR "${CMAKE_INSTALL_FULL_BINDIR}" CACHE STRING "Root location for plugins")

@@ -93,6 +93,7 @@ _hipdnn_sdk_process_dependency(nlohmann_json nlohmann_json::nlohmann_json
 if(WIN32)
     # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that
     # cause issues when consuming the hipdnn_sdk.  We need to clear these options
+    # Refer to issue: https://github.com/ROCm/TheRock/issues/2003
 
     # Can't do this to an alias
     get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
