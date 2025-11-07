@@ -29,6 +29,7 @@ include: test_roti.yaml
 include: test_sctr.yaml
 include: test_gthr.yaml
 include: test_gthrz.yaml
+
 #level2
 include: test_bsrmv.yaml
 include: test_bsrsv2.yaml
@@ -36,6 +37,13 @@ include: test_csrmv.yaml
 include: test_csrsv2.yaml
 include: test_gemvi.yaml
 include: test_hybmv.yaml
+
+# level3
+include: test_bsrmm.yaml
+include: test_bsrsm2.yaml
+include: test_csrmm.yaml
+include: test_csrsm2.yaml
+include: test_gemmi.yaml
 
 # conversion
 include: test_bsr2csr.yaml
@@ -60,4 +68,3 @@ include: test_prune_csr2csr.yaml
 include: test_prune_csr2csr_by_percentage.yaml
 include: test_prune_dense2csr.yaml
 include: test_prune_dense2csr_by_percentage.yaml
-

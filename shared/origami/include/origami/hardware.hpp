@@ -268,6 +268,7 @@ namespace origami
             gfx950,
             gfx1201,
             gfx1100,
+            gfx1151,
             Count
         };
 
@@ -278,7 +279,8 @@ namespace origami
                     {"gfx942", architecture_t::gfx942},
                     {"gfx950", architecture_t::gfx950},
                     {"gfx1201", architecture_t::gfx1201},
-                    {"gfx1100", architecture_t::gfx1100}};
+                    {"gfx1100", architecture_t::gfx1100},
+                    {"gfx1151", architecture_t::gfx1151}};
 
             auto it = str_to_enum_map.find(str);
             if(it != str_to_enum_map.end())
@@ -336,7 +338,10 @@ namespace origami
                     1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5)},
                {hardware_t::architecture_t::gfx1100,
                 hardware_t::architecture_constants(
-                    1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5)}};
+                    1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5)},
+               {hardware_t::architecture_t::gfx1151,
+                hardware_t::architecture_constants(
+                    1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5)}};
 
         inline static const std::unordered_map<architecture_t,
                                         std::unordered_map<matrix_instruction, size_t>> INSTRUCTION_MAP
@@ -514,13 +519,24 @@ namespace origami
                {hardware_t::architecture_t::gfx1100,
                 {
                     // F16
-                    {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
                     // BF16
-                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
                     // I8
-                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
                     // I4
-                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
+                }},
+               {hardware_t::architecture_t::gfx1151,
+                {
+                    // F16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    // BF16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    // I8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
+                    // I4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
                 }}};
 
         architecture_t                      arch;
@@ -675,12 +691,6 @@ namespace origami
             return heuristicsEnvVar;
         }
 
-        static bool is_wgm_prediction_enabled()
-        {
-            static bool wgmPredictionEnvVar = read_wgm_prediction_env_var(); //Used to cache the read.
-            return wgmPredictionEnvVar;
-        }
-
         void log_debug(const std::string& key, const std::string& value) const
         {
             debug_info[key] = value;
@@ -748,13 +758,6 @@ namespace origami
         {
             const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
             return !(env && std::string(env) == "0");
-        }
-
-        // Helper function to read the heuristics environment variable
-        static bool read_wgm_prediction_env_var()
-        {
-            const char* env = std::getenv("ANALYTICAL_GEMM_WGM_PREDICTION");
-            return env && std::string(env) == "1";
         }
     };
 } // namespace origami
