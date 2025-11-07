@@ -189,12 +189,26 @@ namespace rocRoller
                         Flatten(), {block, SIMDBlock, SIMDIndex}, {iWaveY});
                     graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
                 }
-                if(macTile.subTileSizes.at(0) == 64 && macTile.miTileSizes.at(0) == 32)
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 16)
+                {
+                    graph.coordinates.addElement(Flatten(), {vgprIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprBlock, SIMDBlock, SIMDIndex}, {iWaveY});
+                    graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 64 && macTile.miTileSizes.at(0) == 32)
                 {
                     graph.coordinates.addElement(
                         Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveX});
                     graph.coordinates.addElement(
                         Flatten(), {block, SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveY});
+                    graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 32)
+                {
+                    graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprIndex, SIMDBlock, vgprBlock}, {iWaveY});
                     graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
                 }
             }
@@ -208,12 +222,26 @@ namespace rocRoller
                         Flatten(), {block, SIMDBlock, SIMDIndex}, {iWaveX});
                     graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
                 }
-                if(macTile.subTileSizes.at(0) == 64 && macTile.miTileSizes.at(0) == 32)
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 16)
+                {
+                    graph.coordinates.addElement(Flatten(), {vgprIndex, laneInSIMD}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprBlock, SIMDBlock, SIMDIndex}, {iWaveX});
+                    graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 64 && macTile.miTileSizes.at(0) == 32)
                 {
                     graph.coordinates.addElement(
                         Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveY});
                     graph.coordinates.addElement(
                         Flatten(), {block, SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveX});
+                    graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 32)
+                {
+                    graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprIndex, SIMDBlock, vgprBlock}, {iWaveX});
                     graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
                 }
             }
@@ -498,8 +526,9 @@ namespace rocRoller
 
             AssertFatal(waveSwizzleM == waveSwizzleN,
                         "waveSwizzleM is not equal to waveSwizzleN",
-                        ShowValue(waveM),
-                        ShowValue(waveN));
+                        ShowValue(waveSwizzleM),
+                        ShowValue(waveSwizzleN));
+
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
@@ -513,10 +542,15 @@ namespace rocRoller
             AssertFatal(
                 waveM == waveN, "waveM is not equal to waveN", ShowValue(waveM), ShowValue(waveN));
 
-            auto const waveSwizzleMN = 64;
-            auto const waveSwizzleK  = 4;
+            auto const waveSwizzleM = macTile.swizzleTileSizes.at(0);
+            auto const waveSwizzleN = macTile.swizzleTileSizes.at(1);
+            AssertFatal(waveSwizzleM == waveSwizzleN,
+                        "waveSwizzleM is not equal to waveSwizzleN",
+                        ShowValue(waveSwizzleM),
+                        ShowValue(waveSwizzleN));
+            auto const waveSwizzleK = 256 / waveSwizzleM;
 
-            return std::make_pair(waveSwizzleMN / waveM, waveSwizzleK / waveK);
+            return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
         std::map<int, std::vector<std::pair<int, int>>>

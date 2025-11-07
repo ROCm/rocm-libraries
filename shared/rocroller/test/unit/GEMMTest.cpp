@@ -2286,7 +2286,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaled64x4UnrollGEMMMXF4TN)
     {
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -2352,6 +2352,71 @@ namespace GEMMDriverTest
                 {
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
+                }
+            }
+        }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaled32x8UnrollGEMMMXF4TN)
+    {
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+        for(auto waveK : {64, 128})
+        {
+            int waveM = (waveK == 128) ? 16 : 32;
+            int waveN = (waveK == 128) ? 16 : 32;
+
+            auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+            gemm.macM = 128;
+            gemm.macN = 128;
+            gemm.macK = 256;
+
+            gemm.m = 2 * gemm.macM;
+            gemm.n = 3 * gemm.macN;
+            gemm.k = 4 * gemm.macK;
+
+            gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+            gemm.workgroupSizeY = 2;
+
+            gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+            gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+            gemm.loadLDSScaleA = false;
+            gemm.loadLDSScaleB = false;
+
+            gemm.scaleAMode = Operations::ScaleMode::Separate;
+            gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+            gemm.scaleTypeA = DataType::E8M0;
+            gemm.scaleTypeB = DataType::E8M0;
+
+            gemm.swizzleScale = true;
+            gemm.swizzleM     = 32;
+            gemm.swizzleN     = 32;
+            gemm.swizzleK     = 8;
+
+            gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
+                GPUCapability::DefaultScaleBlockSize);
+
+            for(auto unrollK : {0, 2, 4})
+            {
+                gemm.unrollK = unrollK;
+                basicGEMM<FP4, FP4, float>(gemm);
+
+                std::string generatedCode = m_context->instructions()->toString();
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+                if(unrollK == 0)
+                {
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
+                }
+                else if(unrollK == 2)
+                {
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 8);
+                }
+                else if(unrollK == 4)
+                {
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 16);
                 }
             }
         }

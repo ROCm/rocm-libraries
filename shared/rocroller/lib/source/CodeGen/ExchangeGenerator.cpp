@@ -184,8 +184,8 @@ namespace rocRoller
             }
 
             const uint wfs = m_context->kernel()->wavefront_size();
-            // Exchange tile fixed size: 64 x 4
-            const uint numVgpr = 64 * 4 / wfs;
+            // Exchange tile fixed size: 256 = 64 x 4 or 32 x 8
+            const uint numVgpr = 256 / wfs;
 
             auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 
@@ -247,6 +247,25 @@ namespace rocRoller
                 }
                 else if(waveMN == 64 && miMN == 32)
                 {
+                    for(uint32_t i = 0; i < numVgpr; i += 2)
+                    {
+                        co_yield_(Instruction::InoutInstruction(
+                            "v_permlane32_swap_b32",
+                            {vgpr->element({i}), vgpr->element({i + 1})},
+                            {},
+                            ""));
+                    }
+                }
+                else if(waveMN == 32 && miMN == 32)
+                {
+                    for(uint32_t i = 0; i < numVgpr / 2; i++)
+                    {
+                        co_yield_(Instruction::InoutInstruction(
+                            "v_permlane32_swap_b32",
+                            {vgpr->element({i}), vgpr->element({i + 2})},
+                            {},
+                            ""));
+                    }
                     for(uint32_t i = 0; i < numVgpr; i += 2)
                     {
                         co_yield_(Instruction::InoutInstruction(
