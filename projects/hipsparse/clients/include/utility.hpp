@@ -134,8 +134,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 #define CHECK_HIP_ERROR(error)                \
     if(error != hipSuccess)                   \
@@ -2002,9 +2002,6 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
     }
 }
 
-
-
-
 template <typename I, typename J, typename T>
 void host_csr_to_sell(J                     M,
                       J                     slice_size,
@@ -2036,9 +2033,10 @@ void host_csr_to_sell(J                     M,
             if(row < M)
             {
                 I start = csr_row_ptr[row] - csr_base;
-                I end = csr_row_ptr[row + 1] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
 
-                max_row_length_in_slice = std::max(max_row_length_in_slice, static_cast<J>(end - start));
+                max_row_length_in_slice
+                    = std::max(max_row_length_in_slice, static_cast<J>(end - start));
             }
         }
 
@@ -2053,7 +2051,7 @@ void host_csr_to_sell(J                     M,
     for(I i = 0; i < sell_colval_size; i++)
     {
         sell_col_ind[i] = -1;
-        sell_val[i] = static_cast<T>(0);
+        sell_val[i]     = static_cast<T>(0);
     }
 
     // Fill columns and rows
@@ -2068,7 +2066,7 @@ void host_csr_to_sell(J                     M,
             if(row < M)
             {
                 I start = csr_row_ptr[row] - csr_base;
-                I end = csr_row_ptr[row + 1] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
 
                 for(I j = start; j < end; j++)
                 {
@@ -2076,34 +2074,12 @@ void host_csr_to_sell(J                     M,
                     T val = csr_val[j];
 
                     sell_col_ind[slice_start + slice_size * (j - start) + s] = col + sell_base;
-                    sell_val[slice_start + slice_size * (j - start) + s] = val;
+                    sell_val[slice_start + slice_size * (j - start) + s]     = val;
                 }
             }
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 template <typename T>
 void host_bsr_to_bsc(int                  mb,
@@ -2811,20 +2787,20 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 }
 
 template <typename T, typename I, typename J>
-inline void host_sellmv(hipsparseOperation_t  trans,
-                J                    M,
-                J                    N,
-                I                    nnz,
-                J                    slice_size,
-                I                    sell_colval_size,
-                T                    alpha,
-                const I*             sell_slice_offsets,
-                const J*             sell_col_ind,
-                const T*             sell_val,
-                const T*             x,
-                T                    beta,
-                T*                   y,
-                hipsparseIndexBase_t base)
+inline void host_sellmv(hipsparseOperation_t trans,
+                        J                    M,
+                        J                    N,
+                        I                    nnz,
+                        J                    slice_size,
+                        I                    sell_colval_size,
+                        T                    alpha,
+                        const I*             sell_slice_offsets,
+                        const J*             sell_col_ind,
+                        const T*             sell_val,
+                        const T*             x,
+                        T                    beta,
+                        T*                   y,
+                        hipsparseIndexBase_t base)
 {
     bool conj = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
 
@@ -2835,16 +2811,16 @@ inline void host_sellmv(hipsparseOperation_t  trans,
         for(J slice = 0; slice < nslices; slice++)
         {
             I slice_start = sell_slice_offsets[slice] - base;
-            I slice_end = sell_slice_offsets[slice + 1] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
 
             std::vector<T> sums(slice_size, make_DataType<T>(0));
             for(I j = slice_start; j < slice_end; j++)
             {
                 J local_row = j % slice_size;
-                J col = sell_col_ind[j] - base;
+                J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
-                    sums[local_row] = testing_fma(sell_val[j],  x[col], sums[local_row]);
+                    sums[local_row] = testing_fma(sell_val[j], x[col], sums[local_row]);
                 }
             }
 
@@ -2856,8 +2832,7 @@ inline void host_sellmv(hipsparseOperation_t  trans,
                 {
                     if(beta != make_DataType<T>(0))
                     {
-                        y[row] = testing_fma(
-                            beta, y[row], testing_mult(alpha, sums[local_row]));
+                        y[row] = testing_fma(beta, y[row], testing_mult(alpha, sums[local_row]));
                     }
                     else
                     {
@@ -2879,7 +2854,7 @@ inline void host_sellmv(hipsparseOperation_t  trans,
         for(J slice = 0; slice < nslices; slice++)
         {
             I slice_start = sell_slice_offsets[slice] - base;
-            I slice_end = sell_slice_offsets[slice + 1] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
 
             for(I j = slice_start; j < slice_end; j++)
             {
@@ -2894,13 +2869,6 @@ inline void host_sellmv(hipsparseOperation_t  trans,
         }
     }
 }
-
-
-
-
-
-
-
 
 template <typename I, typename J, typename T>
 inline void host_csrmv(hipsparseOperation_t trans,

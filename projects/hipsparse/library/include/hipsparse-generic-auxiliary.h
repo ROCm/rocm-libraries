@@ -36,7 +36,7 @@ extern "C" {
 *  destroyed at the end using hipsparseDestroySpVec().
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
                                        int64_t                size,
@@ -89,7 +89,7 @@ hipsparseStatus_t hipsparseDestroySpVec(hipsparseSpVecDescr_t spVecDescr);
 *  \p hipsparseSpVecGet gets the fields of the sparse vector descriptor
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpVecGet(const hipsparseSpVecDescr_t spVecDescr,
                                     int64_t*                    size,
@@ -136,7 +136,7 @@ hipsparseStatus_t hipsparseSpVecGetIndexBase(const hipsparseSpVecDescr_t spVecDe
 *  \brief Get pointer to a sparse vector data array.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpVecGetValues(const hipsparseSpVecDescr_t spVecDescr, void** values);
 #endif
@@ -154,7 +154,7 @@ hipsparseStatus_t hipsparseConstSpVecGetValues(hipsparseConstSpVecDescr_t spVecD
 *  \brief Set pointer of a sparse vector data array.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpVecSetValues(hipsparseSpVecDescr_t spVecDescr, void* values);
 #endif
@@ -345,21 +345,6 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
                                                  hipDataType                 valueType);
 #endif
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*! \ingroup generic_module
 *  \brief Create a sparse Sliced ELL matrix descriptor
 *  \details
@@ -392,33 +377,19 @@ hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
-                                                int64_t                rows,
-                                                int64_t                cols,
-                                                int64_t                nnz,
-                                                int64_t                sellValuesSize,
-                                                int64_t                sliceSize,
-                                                const void*            sellSliceOffsets,
-                                                const void*            sellColInd,
-                                                const void*            sellValues,
-                                                hipsparseIndexType_t   sellSliceOffsetsType,
-                                                hipsparseIndexType_t   sellColIndType,
-                                                hipsparseIndexBase_t   idxBase,
-                                                hipDataType            valueType);
+                                                int64_t                     rows,
+                                                int64_t                     cols,
+                                                int64_t                     nnz,
+                                                int64_t                     sellValuesSize,
+                                                int64_t                     sliceSize,
+                                                const void*                 sellSliceOffsets,
+                                                const void*                 sellColInd,
+                                                const void*                 sellValues,
+                                                hipsparseIndexType_t        sellSliceOffsetsType,
+                                                hipsparseIndexType_t        sellColIndType,
+                                                hipsparseIndexBase_t        idxBase,
+                                                hipDataType                 valueType);
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor
@@ -796,7 +767,7 @@ hipsparseStatus_t hipsparseSpMatSetAttribute(hipsparseSpMatDescr_t     spMatDesc
 *  destroyed at the end using hipsparseDestroyDnVec().
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
                                        int64_t                size,
@@ -838,7 +809,7 @@ hipsparseStatus_t hipsparseDestroyDnVec(hipsparseDnVecDescr_t dnVecDescr);
 *  \p hipsparseDnVecGet gets the fields of the dense vector descriptor
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnVecGet(const hipsparseDnVecDescr_t dnVecDescr,
                                     int64_t*                    size,
@@ -865,7 +836,7 @@ hipsparseStatus_t hipsparseConstDnVecGet(hipsparseConstDnVecDescr_t dnVecDescr,
 *  \p hipsparseDnVecGetValues gets the fields of the dense vector descriptor
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnVecGetValues(const hipsparseDnVecDescr_t dnVecDescr, void** values);
 #endif
@@ -887,7 +858,7 @@ hipsparseStatus_t hipsparseConstDnVecGetValues(hipsparseConstDnVecDescr_t dnVecD
 *  \p hipsparseDnVecSetValues sets the fields of the dense vector descriptor
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnVecSetValues(hipsparseDnVecDescr_t dnVecDescr, void* values);
 #endif

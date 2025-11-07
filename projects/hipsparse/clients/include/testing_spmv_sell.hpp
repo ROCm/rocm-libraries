@@ -41,7 +41,7 @@ using namespace hipsparse_test;
 
 void testing_spmv_sell_bad_arg(void)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION > 12011)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 12011)
     int64_t              m                       = 100;
     int64_t              n                       = 100;
     int64_t              nnz                     = 100;
@@ -56,12 +56,12 @@ void testing_spmv_sell_bad_arg(void)
     hipsparseIndexType_t sellColInIdxType        = HIPSPARSE_INDEX_32I;
     hipDataType          dataType                = HIP_R_32F;
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #else
-#if (CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #endif
 #endif
@@ -187,7 +187,7 @@ void testing_spmv_sell_bad_arg(void)
 template <typename I, typename J, typename T>
 hipsparseStatus_t testing_spmv_sell(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION > 12011)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 12011)
     J                    m          = argus.M;
     J                    n          = argus.N;
     J                    slice_size = argus.slice_size;
@@ -240,27 +240,6 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
                      sell_colval_size,
                      idx_base,
                      idx_base);
-
-    // std::cout << "hsell_slice_offsets" << std::endl;
-    // for(size_t i = 0; i < hsell_slice_offsets.size(); i++)
-    // {
-    //     std::cout << hsell_slice_offsets[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // std::cout << "hsell_col_ind" << std::endl;
-    // for(size_t i = 0; i < hsell_col_ind.size(); i++)
-    // {
-    //     std::cout << hsell_col_ind[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // std::cout << "hsell_val" << std::endl;
-    // for(size_t i = 0; i < hsell_val.size(); i++)
-    // {
-    //     std::cout << hsell_val[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
 
     std::vector<T> hx(n);
     std::vector<T> hy_1(m);
@@ -372,20 +351,6 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
                     h_beta,
                     hy_gold.data(),
                     idx_base);
-
-        // std::cout << "hy_1" << std::endl;
-        // for(size_t i = 0; i < hy_1.size(); i++)
-        // {
-        //     std::cout << hy_1[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "hy_gold" << std::endl;
-        // for(size_t i = 0; i < hy_gold.size(); i++)
-        // {
-        //     std::cout << hy_gold[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());

@@ -55,10 +55,10 @@ hipsparseOperation_t spmv_sell_transA_range[] = {HIPSPARSE_OPERATION_NON_TRANSPO
 hipsparseIndexBase_t spmv_sell_idxbase_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 hipsparseSpMVAlg_t spmv_sell_alg_range[] = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_SELL_ALG1};
 #else
-#if (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
 hipsparseSpMVAlg_t spmv_sell_alg_range[] = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_SELL_ALG1};
 #endif
 #endif
@@ -128,7 +128,7 @@ Arguments setup_spmv_sell_arguments(spmv_sell_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
 TEST(spmv_sell_bad_arg, spmv_sell_float)
 {
     testing_spmv_sell_bad_arg();
