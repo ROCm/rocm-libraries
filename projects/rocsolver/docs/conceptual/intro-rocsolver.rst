@@ -8,66 +8,86 @@
 Introduction to rocSOLVER
 *********************************
 
-rocSOLVER is an implementation of the `LAPACK routines <https://www.netlib.org/lapack/index.html>`_.
-LAPACK (Linear Algebra PACKage) is a software package that contains libraries for decompositions and linear system solutions.
+rocSOLVER is an implementation of a subset of 
+`Linear Algebra PACKage (LAPACK) routines <https://www.netlib.org/lapack/index.html>`_.
 
-The LAPACK routines reorganize algorithms to make them more efficient. The high-level routines are structured to
-perform block operations in the innermost loops, where they can be optimized for each architecture.
-The routines are therefore transportable (requiring some optimization for the target system), rather than portable.
+These routines support both real and complex matrices, in single and double precision.
+They provide solutions for a wide range of complex Linear Algebra problems, including:
 
-The LAPACK routines support both real and complex matrices, for single and double precision.
-They provide solutions for a wide range of complex mathematical problems, including:
+*  Solving systems of linear equations and matrix inversion
+*  Least-squares problems
+*  Symmetric Eigenvalue and Generalized Eigenvalue problems
+*  Singular Value Decomposition
+*  Matrix factorizations, including QR, LU, Cholesky, etc.
+*  Matrix and problem reductions, including tridiagonalization, bidiagonalization, etc.
 
-*  Solving systems of simultaneous linear equations
-*  Least-squares solutions for linear systems of equations (LLS)
-*  Eigenvalue problems (singular and generalized)
-*  Singular value problems, including singular value decomposition (SVD)
-*  Orthogonal factorization, including QR, LQ, and other factorizations
-*  Estimating condition numbers
-*  Triangular solve routines
+Many of the computational routines call BLAS routines for the lower-level implementation of basic
+matrix/vector operations (especially Level 3 BLAS routines for matrix multiplication, for example).
+rocSOLVER is integrated with rocBLAS for this purpose.
+For information about rocBLAS and the BLAS routines, see the 
+:doc:`BLAS operations introduction <rocblas:conceptual/blas-operations-intro>`.
+
+The use of optimized BLAS functionality allows rocSOLVER to structure algorithms to perform block operations
+in a more efficient way. In addition to these blocking mechanisms, there are other features in the rocSOLVER
+library that can be optimized for each architecture. The routines are therefore transportable
+(requiring some optimization/tuning for the target system), rather than portable.
+
+.. note::
+
+   For more detailed information on tuning rocSOLVER performance, 
+   see :doc:`rocSOLVER performance tuning <./reference/tuning>`.
+
+rocSOLVER follows LAPACK's naming convention and routine categorization as closely as possible, 
+but there are some differences resulting from special requirements and design choices.
 
 Routine categorization
 ==========================
 
-The LAPACK routines can be divided into several categories, based on the details of the implementation. The categories are:
+The rocSOLVER routines are divided into several categories, based on their visibility from a user or application
+perspective. The categories are:
 
-*  **Driver routines**: High-level routines for solving complete problems, for instance, solving a system of equations.
-   A typical driver routine calls several computational routines. It's easiest to directly call a driver routine, provided
-   there's one that solves the precise problem.
-*  **Computational routines**: Mid-level routines that perform a distinct computational task, such as reducing a matrix
-   to tridiagonal form. If you can't find a driver routine that meets your needs, you can build your own algorithm out of
-   these routines.
-*  **Auxiliary routines**: Lower-level routines that perform subtasks or basic computations. Some of these routines
-   might be considered for inclusion in BLAS in the future.
+* **LAPACK functions**: The high-level functions that LAPACK users are most likely to call. 
+  These routines normally solve a complete well-known problem (such as the Symmetric Eigenvalue Problem), or
+  perform a computational task that users may need to build their own workflows when solving specific problems 
+  from their applications (reducing a matrix to tridiagonal form, for example). 
+  These category corresponds to what LAPACK clasifies as **driver** and 
+  **computational** routines, and includes all flavors of the same algorithm (for example the unblocked QR factorization, 
+  GEQR2, as well as the blocked version, GEQRF).
+* **LAPACK-like functions**: These are also high-level functions that provide similar functionality,
+  but that are not included in the standard LAPACK. The LU factorization without pivoting, or the Jacobi eigensolvers 
+  are a cuple of examples of rocSOLVER LAPACK-like routines. 
+* **Auxiliary functions**: Lower-level functions that perform subtasks or basic computations. These functions are normally
+  called internally by the other high-level LAPACK routines. In consequence, their interface can be convoluted and
+  less user-friendly. rocSOLVER exposes a limited set of these functions in the public API,  
+  but it is less likely for a normal user to call them. 
 
-Many of the computational routines call BLAS routines for the lower-level implementation, 
-especially Level 3 BLAS routines for matrix multiplication, rather than a LAPACK auxiliary routine.
-The rocSOLVER implementation is integrated with rocBLAS for this purpose.
-For information about the BLAS routines, see the :doc:`BLAS operations introduction <rocblas:conceptual/blas-operations-intro>`.
 
 Naming conventions
 ==========================
 
-The name of each routine encodes several key pieces of information about the routine, as follows:
+The name of each function in the rocSOLVER API encodes several key pieces of information about the 
+routine and the problem it tackles:
 
-*  **Data type**: The first letter of the routine indicates the data type that the routine can handle.
-*  **Matrix type**: The next two letters indicate the type of matrix or the most significant matrix if there are several types.
-   Most of these two-letter codes apply to both real and complex matrices, but a few apply specifically to one or the other.
-*  **Computation**: The next three letters (sometimes two) indicate the basic operation to be performed.
+*  **Data type**: The first letter of the function name indicates the data type (precision) that the routine can handle.
+*  **Matrix type**: The next two letters indicate the type of matrix (or the most significant type if there are several) that
+   the routine is expecting. Most of these two-letter codes apply to both real and complex precision, 
+   but a few apply specifically to one or the other.
+*  **Computation**: The remaining letters (normally two or three) indicate the basic operation/computation to be performed.
 
 The three components are combined using the format *XYYZZZ*, where X indicates the data type, YY the matrix type,
 and ZZZ the operation. For example, ``SGEBRD`` is a single-precision (``S``) routine that operates on a 
 general (``GE``) matrix to perform a bidiagonal reduction (``BRD``) operation.
 
+
 Data types
 ------------------------------
 
-The first letter (X) maps to one of the following data types:
+rocSOLVER supports the following data precision types:
 
-*  ``S``: Real
-*  ``D``: Double precision
-*  ``C``: Complex
-*  ``Z``: Double complex (Complex*16)
+*  ``S``: Real single precision
+*  ``D``: Real double precision
+*  ``C``: Complex single precision
+*  ``Z``: Complex double precision
 
 .. note::
 
@@ -77,50 +97,38 @@ The first letter (X) maps to one of the following data types:
 Matrix types
 ------------------------------
 
-The next two letters (YY) indicate the type of matrix (or of the most significant matrix).
-Here are some common LAPACK matrix types that rocSOLVER supports.
+Here are the LAPACK matrix types that rocSOLVER currently supports:
 
-*  ``BD``:	Bidiagonal
-*  ``DI``:	Diagonal
-*  ``GE``:	General (for instance, unsymmetric, or, in some cases, rectangular)
-*  ``GG``:	General matrices, generalized problem (pair of general matrices)
-*  ``GT``:	General tridiagonal
-*  ``HE``:	(complex) Hermitian
-*  ``HG``:	Upper Hessenberg matrix, generalized problem (for instance, a Hessenberg and a triangular matrix)
-*  ``HS``:	Upper Hessenberg
-*  ``OR``:	(real) Orthogonal
-*  ``PO``:	Symmetric or Hermitian positive definite
-*  ``PT``:	Symmetric or Hermitian positive definite tridiagonal
-*  ``ST``:	(real) Symmetric tridiagonal
-*  ``SY``:	Symmetric
-*  ``TG``:	Triangular matrices, generalized problem (a pair of triangular matrices)
-*  ``TR``:	Triangular (or, in some cases, quasi-triangular)
-*  ``TZ``:	Trapezoidal
-*  ``UN``:	(complex) Unitary
+*  ``GE``:	GEneral (for instance, unsymmetric, or, in some cases, rectangular)
+*  ``SY``:	SYmmetric
+*  ``HE``:	HErmitian (only complex)
+*  ``OR``:	ORthogonal (only real)
+*  ``UN``:	UNitary (only complex)
+*  ``PO``:	Symmetric or Hermitian POsitive definite
+*  ``ST``:	Symmetric Tridiagonal (only real)
+*  ``BD``:	BiDiagonal
+*  ``TR``:	TRiangular (or, in some cases, quasi-triangular)
+*  ``LA``:	used for some Auxiliary functions where the matrix type is not relevant
 
 Operation types
 ------------------------------
 
-The last three letters, (ZZZ) indicate the computation performed.
+The encoding of the performed computation in the name of the function is less evident. 
+Below is a list of some computations performed by rocSOLVER functions, for more details, refer to 
+the API reference documents.
 
-Here are the main LAPACK driver routines that rocSOLVER supports:
+Some main LAPACK computations that rocSOLVER performs:
 
-*  ``SV``: Linear equation: simple variant (Solves :math:`AX = B`)
-*  ``SVX``: Linear equation: expert variant (Solves more advanced variations, including :math:`A^{T}X = B` or :math:`A^{H}X = B`,
-   estimating the condition number of ``A``, refining the solution, and computing forward and backward error bounds)
-*  ``LS``, ``LSY``, ``LSS``, and ``LSD``: Linear least squares (LLS) problems
-*  ``LSE`` and ``GLM``: Generalized linear least squares problems
-*  ``EVx``: Symmetric eigenproblems (SEP)
-*  ``SVD`` and ``SDD``: Singular value decomposition (SVD)
-*  ``GV``: Generalized symmetric definite eigenproblems (GSEP)
+*  ``SVD`` and ``SDD``: Singular value decomposition and SVD with divide & conquer approach
+*  ``TRF``: Triangular factorization (LU factorization)
+*  ``TRS``: Linear system solve based on triangular factorization
+*  ``QRF``: QR factorization (blocked version)
+*  ``QR2``: QR factorization (unblocked version)
+*  ``GQR``: Generation of orthogonal matrix from QR factorization
+*  ``RFG``: Generation of Householder reflection
+*  ``EV`` and ``EVD``: Eigenvalue solver and Eigenvalue solver with divide & conquer approach
 
-Here's a list of some of the common LAPACK computational routines that rocSOLVER supports:
+Other examples of LAPACK-like computations performed in rocSOLVER:
 
-*  ``TRF``: Linear equations: factorize
-*  ``TRS``: Linear equations: use the factorization to solve by forward or backward substitution
-*  ``RFS``: Linear equations: compute the error bounds for the solution
-*  ``TRI``: Linear equations: invert using factorization
-*  ``EQU``: Linear equations: equilibrate
-*  ``QRF``: QR factorization
-*  ``LQF``: LQ factorization
-*  ``RQF``: Complete orthogonal factorization
+*  ``EVJ``: Jacobi iteration for Eigenvalue solver
+*  ``BLTTRF``: Triangular factorization of block tridiagonal matrices
