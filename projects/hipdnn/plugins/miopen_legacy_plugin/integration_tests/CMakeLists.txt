@@ -7,10 +7,13 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hipdnn_frontend CONFIG REQUIRED)
 endif()
 
-add_executable(miopen_plugin_integration_test
+add_executable(
+    miopen_plugin_integration_test
     main.cpp
     IntegrationGpuBatchnormBackward.cpp
+    IntegrationGpuBatchnormBackwardActivation.cpp
     IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
@@ -18,18 +21,16 @@ add_executable(miopen_plugin_integration_test
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
-# To use the build tree plugin, we use the path relative to the test binary instead of the installed libhipdnn_backend.so
-# HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
-target_compile_definitions(miopen_plugin_integration_test PRIVATE
-    PLUGIN_PATH="../lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
+# To use the build tree plugin, we use the path relative to the test binary instead of the installed
+# libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
+target_compile_definitions(
+    miopen_plugin_integration_test
+    PRIVATE PLUGIN_PATH="../lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
 )
 
-target_link_libraries(miopen_plugin_integration_test PUBLIC 
-    GTest::gtest
-    hip::host
-    hipdnn_frontend
-    hipdnn_sdk
-    Threads::Threads
+target_link_libraries(
+    miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_frontend hipdnn_sdk
+                                          Threads::Threads
 )
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
