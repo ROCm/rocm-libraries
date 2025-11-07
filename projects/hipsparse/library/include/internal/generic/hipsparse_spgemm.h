@@ -94,8 +94,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
-*          \p spgemmDescr or \p bufferSize1 is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p opA or \p opB is invalid.
+*          \p spgemmDescr or \p bufferSize1 is nullptr, or \p opA or \p opB is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.

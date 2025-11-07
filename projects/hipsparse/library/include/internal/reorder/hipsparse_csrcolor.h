@@ -76,11 +76,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor, 
-*          \p ncolors, \p coloring or \p info is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m or \p nnz is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p csrValA, \p csrRowPtrA or \p csrColIndA is nullptr 
-*          when \p nnz is greater than zero.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
+*          \p ncolors, \p coloring or \p info is nullptr, \p m or \p nnz is negative, or
+*          \p csrValA, \p csrRowPtrA or \p csrColIndA is nullptr when \p nnz is greater than zero.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

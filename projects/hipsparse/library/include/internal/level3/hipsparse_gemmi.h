@@ -86,11 +86,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha or \p beta is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m, \p n, \p k or \p nnz is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p lda or \p ldc is invalid.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p A, \p cscValB, \p cscColPtrB, 
-*          \p cscRowIndB or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha or \p beta is nullptr,
+*          \p m, \p n, \p k or \p nnz is negative, \p lda or \p ldc is invalid, or
+*          \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB or \p C is nullptr.
 *
 *  \par Example
 *  \snippet example_hipsparse_gemmi.cpp doc example

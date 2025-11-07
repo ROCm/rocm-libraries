@@ -86,8 +86,7 @@ hipsparseStatus_t hipsparseSpSM_destroyDescr(hipsparseSpSMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p spsmDescr or
-*          \p pBufferSizeInBytes is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p opA or \p opB is invalid.
+*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)

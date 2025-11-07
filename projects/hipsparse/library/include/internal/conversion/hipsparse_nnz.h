@@ -94,10 +94,8 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p A, \p nnzPerRowColumn 
-*          or \p nnzTotalDevHostPtr is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m or \p n is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p lda is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p A, \p nnzPerRowColumn
+*          or \p nnzTotalDevHostPtr is nullptr, \p m or \p n is negative, or \p lda is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

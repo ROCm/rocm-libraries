@@ -63,9 +63,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B or \p pBufferSizeInBytes is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m is less than 2 or \p n is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2 or \p n is negative,
+*          or \p ldb is invalid.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/

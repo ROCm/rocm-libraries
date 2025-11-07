@@ -112,9 +112,8 @@ hipsparseStatus_t
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
  *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
- *          \p bsrColIndA, \p info or \p pBufferSizeInBytes is nullptr.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb or \p nnzb is negative.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is invalid.
+ *          \p bsrColIndA, \p info or \p pBufferSizeInBytes is nullptr, \p mb or \p nnzb is negative,
+ *          or \p blockDim is invalid.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */

@@ -95,9 +95,8 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m, \p n, \p nnzA or \p nnzB is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p csrRowPtrA, \p csrColIndA, \p csrRowPtrB, 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr,
+*          \p m, \p n, \p nnzA or \p nnzB is negative, or \p csrRowPtrA, \p csrColIndA, \p csrRowPtrB, 
 *          \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

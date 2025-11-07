@@ -110,16 +110,12 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m, \p n, \p k, \p nnzA or \p nnzB is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p csrRowPtrA, \p csrColIndA, \p csrRowPtrB, 
-*          \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not 
-*          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transB is not 
-*          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
-*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr,
+*          \p m, \p n, \p k, \p nnzA or \p nnzB is negative, or \p csrRowPtrA, \p csrColIndA,
+*          \p csrRowPtrB, \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          \p transB is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or
+*          \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT

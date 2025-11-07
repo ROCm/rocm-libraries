@@ -112,14 +112,11 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m, \p n or \p nnz is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd,
-*          \p cscSortedVal, \p cscSortedRowInd or \p cscSortedColPtr is nullptr when \p nnz is greater than zero.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p copyValues is neither \ref HIPSPARSE_ACTION_SYMBOLIC 
-*          nor \ref HIPSPARSE_ACTION_NUMERIC.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO 
-*          nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *

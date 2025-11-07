@@ -65,9 +65,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
-*          \p vecY or \p pBufferSizeInBytes is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p opA is invalid.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE the matrix or vector dimensions are incompatible.
+*          \p vecY or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
+*          or vector dimensions are incompatible.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)

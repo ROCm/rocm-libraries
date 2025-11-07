@@ -94,10 +94,8 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p csrVal, \p csrRowPtr, 
-*          \p csrColInd or \p A is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m or \p n is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p ld is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p csrVal, \p csrRowPtr,
+*          \p csrColInd or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
 *
 *  \par Example
 *  \snippet example_hipsparse_csr2dense.cpp doc example

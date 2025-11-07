@@ -116,11 +116,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p m, \p n, \p k or \p nnz is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p ldb or \p ldc is invalid.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p csrSortedValA, \p csrSortedRowPtrA, 
-*          \p csrSortedColIndA, \p B or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+*          \p m, \p n, \p k or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B or \p C is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

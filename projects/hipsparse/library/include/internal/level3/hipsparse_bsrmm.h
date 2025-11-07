@@ -113,19 +113,14 @@ extern "C" {
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb, \p n, \p kb or \p nnzb is negative.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p ldb or \p ldc is invalid.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is less than or equal to zero.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, 
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+ *          \p mb, \p n, \p kb or \p nnzb is negative, \p ldb or \p ldc is invalid,
+ *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
  *          \p B or \p C is nullptr.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
- *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not 
- *          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
- *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transB is 
- *          \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
- *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
- *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+ *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or
+ *          \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  *
  *  \par Example
  *  \snippet example_hipsparse_bsrmm.cpp doc example

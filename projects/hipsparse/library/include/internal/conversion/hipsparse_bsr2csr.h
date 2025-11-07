@@ -110,9 +110,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
-*          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb or \p nb is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is invalid.
+*          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC is nullptr,
+*          \p mb or \p nb is negative, or \p blockDim is invalid.
 *
 *  \par Example
 *  \snippet example_hipsparse_bsr2csr.cpp doc example

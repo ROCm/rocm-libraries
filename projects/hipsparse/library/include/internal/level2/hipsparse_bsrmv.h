@@ -93,16 +93,12 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb, \p nb or \p nnzb is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is less than or equal to zero.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p bsrSortedValA, \p bsrSortedRowPtrA, 
-*          \p bsrSortedColIndA, \p x or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+*          \p mb, \p nb or \p nnzb is negative, \p blockDim is less than or equal to zero, or
+*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x or \p y is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not 
-*          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
-*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
 *  \snippet example_hipsparse_bsrmv.cpp doc example

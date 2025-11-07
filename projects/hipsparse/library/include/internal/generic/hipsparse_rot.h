@@ -80,8 +80,8 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE the vector sizes or data types are incompatible.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 *
 *  \par Example
 *  \snippet example_hipsparse_rot.cpp doc example

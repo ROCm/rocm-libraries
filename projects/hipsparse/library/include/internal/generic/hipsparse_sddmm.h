@@ -67,8 +67,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p C or
-*          \p pBufferSizeInBytes is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p opA or \p opB is invalid.
+*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
 */

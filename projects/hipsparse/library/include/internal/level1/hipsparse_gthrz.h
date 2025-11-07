@@ -77,12 +77,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p nnz is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p y, \p xVal or \p xInd is nullptr 
-*          when \p nnz is greater than zero.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p idxBase is neither 
-*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative,
+*          \p y, \p xVal or \p xInd is nullptr when \p nnz is greater than zero, or \p idxBase 
+*          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

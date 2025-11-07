@@ -115,17 +115,13 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha or \p beta is nullptr.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p mb, \p nb, \p nnzb or \p sizeOfMask is negative.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p sizeOfMask is greater than \p mb.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p blockDim is less than or equal to 1.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr, 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha or \p beta is nullptr,
+*          \p mb, \p nb, \p nnzb or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
+*          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
 *          \p bsrEndPtr, \p bsrColInd, \p x or \p y is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not 
-*          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
-*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
