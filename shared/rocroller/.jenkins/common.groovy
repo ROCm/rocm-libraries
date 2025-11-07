@@ -257,10 +257,10 @@ def runPerformanceCommand (platform, project)
 
                     #Get Master Results
                     ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
-                    if wget ${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                    if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
                       unzip archive.zip
                     else
-                      echo "WARNING: No lastSuccessfulBuild found at ${ARTIFACT_URL_PREFIX}"
+                      echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
                     fi
 
                     if [ -f archive/*/*/performance_${platform.gpu}_last.zip ]; then
@@ -362,14 +362,14 @@ def runPerformanceCommand (platform, project)
 
                         #Get Master Results
                         ARTIFACT_URL_PREFIX="${masterURL}/lastSuccessfulBuild/artifact"
-                        if wget ${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
+                        if wget \${ARTIFACT_URL_PREFIX}/*zip*/archive.zip; then
                           unzip archive.zip
                         else
                           if [ "${masterCompareString}" == "1" ]; then
-                            echo "ERROR: No lastSuccessfulBuild found at ${ARTIFACT_URL_PREFIX}"
+                            echo "ERROR: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
                             exit 1
                           else
-                            echo "WARNING: No lastSuccessfulBuild found at ${ARTIFACT_URL_PREFIX}"
+                            echo "WARNING: No lastSuccessfulBuild found at \${ARTIFACT_URL_PREFIX}"
                           fi
                         fi
 
