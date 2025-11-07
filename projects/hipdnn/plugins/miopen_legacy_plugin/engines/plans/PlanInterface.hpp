@@ -13,6 +13,8 @@ class IPlan
 public:
     virtual ~IPlan() = default;
 
+    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const = 0;
+
     virtual void execute(const HipdnnEnginePluginHandle& handle,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                          uint32_t numDeviceBuffers,

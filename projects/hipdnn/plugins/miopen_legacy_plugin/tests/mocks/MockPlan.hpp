@@ -13,6 +13,10 @@ namespace miopen_legacy_plugin
 class MockPlan : public IPlan
 {
 public:
+    MOCK_METHOD(size_t,
+                getWorkspaceSize,
+                (const HipdnnEnginePluginHandle& handle),
+                (const, override));
     MOCK_METHOD(void,
                 execute,
                 (const HipdnnEnginePluginHandle& handle,

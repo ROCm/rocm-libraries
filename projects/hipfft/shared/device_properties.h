@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <stdexcept>
+#include <string>
 
 // get device properties
 static hipDeviceProp_t get_curr_device_prop()

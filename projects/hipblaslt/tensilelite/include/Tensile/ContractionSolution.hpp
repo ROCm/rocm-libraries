@@ -35,6 +35,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <Tensile/Activation.hpp>
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
@@ -170,22 +171,23 @@ namespace TensileLite
     };
 
     /**
- * Represents a single kernel or set of kernels that can perform a single
- * tensor contraction.
- *
- * Can generate `KernelInvocation` objects to solve a particular problem
- * given a set of `ContractionInputs`.
- */
+     * Represents a single kernel or set of kernels that can perform a single
+     * tensor contraction.
+     *
+     * Can generate `KernelInvocation` objects to solve a particular problem
+     * given a set of `ContractionInputs`.
+     */
     class ContractionSolution : public Solution
     {
     public:
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
+        using ParamsCache  = CacheMap<std::pair<int32_t, uint32_t>, Problem>;
 
         /**
-  * Indicate a solution is equally or estimatedly matched.
-  */
+         * Indicate a solution is equally or estimatedly matched.
+         */
         enum class MatchingTag
         {
             Equal,
@@ -215,11 +217,6 @@ namespace TensileLite
             return kernelName;
         }
         virtual bool isFallbackForHW(Hardware const&) const;
-
-        bool isStreamK() const
-        {
-            return sizeMapping.streamK > 0;
-        }
 
         //! Estimates based on problem size, solution tile, and  machine hardware
         //! charz:
@@ -274,26 +271,13 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
-        struct TAMetricProblemScore
-        {
-            Granularities granularites;
-
-            int CUs = 0;
-
-            double summationPerformance = 0.0;
-
-            double M;
-            double N;
-            double K;
-        };
-
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
 
         /**
-   * Calculate required workspace size.
-   */
+         * Calculate required workspace size.
+         */
         size_t requiredWorkspaceSize(Problem const& problem, Hardware const& hardware) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
                                                 Hardware const&             hardware) const;
@@ -309,7 +293,7 @@ namespace TensileLite
         static float computeGranularity(float x);
 
         Granularities computeGranularities(
-            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
+            Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const;
 
         StaticPerformanceModel staticPerformanceModel(double M,
                                                       double N,
@@ -321,28 +305,15 @@ namespace TensileLite
                                                       double totalGranularity,
                                                       int    globalSplitU) const;
 
-        TAMetricProblemScore computeProblemScore(
-            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
-
-        double computeTileAwareMetric(TAMetricProblemScore pp,
-                                      TAMetricProblemScore ppReference) const;
-
-        double computeTAMScore(Problem const&  problem,
-                               Hardware const& hardware,
-                               double          model_M,
-                               double          model_N,
-                               double          model_K,
-                               double          model_NumBatches) const;
-
         /**
-   * Calculate the projected performance based on granularity loss.
-   */
+         * Calculate the projected performance based on granularity loss.
+         */
         ProjectedPerformance projectedPerformance(Problem const&  problem,
                                                   Hardware const& hardware) const;
 
         /**
-   * Generate a set of kernel calls to solve a particular problem.
-   */
+         * Generate a set of kernel calls to solve a particular problem.
+         */
         virtual std::vector<KernelInvocation> solve(ContractionProblem const& problem,
                                                     ProblemInputs const&      inputs,
                                                     Hardware const&           hardware,
@@ -410,14 +381,17 @@ namespace TensileLite
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
-                        int32_t                             defaultWGM) const;
+                        int32_t                             defaultWGM,
+                        uint32_t                            defaultWGMXCC,
+                        uint32_t                            autoGsuVal) const;
 
         template <typename KA>
         inline void calculateSingleCallWorkGroupItems(std::vector<Problem> const& problems,
                                                       const TensileLite::dim3&    workGroupSize,
                                                       TensileLite::dim3&          numWorkGroups,
                                                       TensileLite::dim3&          numWorkItems,
-                                                      KA&                         h_args) const;
+                                                      KA&                         h_args,
+                                                      uint32_t                    autoGsuVal) const;
 
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
@@ -447,7 +421,8 @@ namespace TensileLite
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
-                                      StreamKSettings const&   sk) const;
+                                      StreamKSettings const&   sk,
+                                      uint32_t                 autoGsuVal) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -461,7 +436,8 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
-                                                      StreamKSettings const&   sk) const;
+                                                      StreamKSettings const&   sk,
+                                                      uint32_t                 autoGsuVal) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation
@@ -498,6 +474,7 @@ namespace TensileLite
             bool wgm              = true;
             bool staggerU         = true;
             bool useUniversalArgs = true;
+            bool useSFC           = false;
         };
 
         struct ProblemType
@@ -555,6 +532,7 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
+        mutable ParamsCache paramsCache = ParamsCache(std::make_pair(0,0));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
@@ -584,8 +562,10 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        void             calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
-        mutable uint32_t autoGSU = 0;
+        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
+                                                      Hardware const* hardware, 
+                                                      uint32_t        skgrid) const;
+        uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 
     template <typename TAct>

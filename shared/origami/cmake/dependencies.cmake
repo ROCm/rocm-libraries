@@ -10,34 +10,25 @@ find_package(Git REQUIRED)
 # (Thanks to rocBLAS devs for finding workaround for this problem!)
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 
-# ROCm cmake package
-find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET) # First version with Sphinx doc gen improvement
-if(NOT ROCM_FOUND)
-  set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-  set(rocm_cmake_tag "rocm-6.4.1" CACHE STRING "rocm-cmake tag to download")
-  file(DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
-       ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
+find_package(ROCmCMakeBuildTools QUIET CONFIG)
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
+if(NOT ROCmCMakeBuildTools_FOUND)
+    message(STATUS "ROCmCMakeBuildTools not found. Fetching from source...")
+    include(FetchContent)
+    FetchContent_Declare(
+        rocm-cmake GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git GIT_TAG rocm-6.4.3
+        GIT_SHALLOW TRUE
+    )
 
-  if(NOT status_code EQUAL 0)
-    message(FATAL_ERROR "error: downloading
-    'https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}
-    ")
-  endif()
-
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzf ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
-                  WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-  execute_process(COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-                  WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag})
-  execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-                  WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-  find_package( ROCmCMakeBuildTools 0.6 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+    FetchContent_GetProperties(rocm-cmake)
+    if(NOT rocm-cmake_POPULATED)
+        FetchContent_Populate(rocm-cmake)
+        message(
+            STATUS
+                "Added ROCm CMake modules path: ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake"
+        )
+        list(APPEND CMAKE_MODULE_PATH ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake)
+    endif()
 endif()
 
 include(ROCMSetupVersion)

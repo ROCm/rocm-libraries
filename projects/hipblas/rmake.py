@@ -51,6 +51,12 @@ def parse_args():
     parser.add_argument(      '--clients-only', dest='clients_only', required=False, default=False, action='store_true',
                         help='Skip building the library and only build the clients with a pre-built library.')
 
+    parser.add_argument(     '--clients_no_fortran', required=False, default=False, action='store_true',
+                        help='When building clients, build them without Fortran API testing or Fortran examples. (optional, default:False)')
+
+    parser.add_argument(     '--clients_no_blis', required=False, default=False, action='store_true',
+                        help='When building clients, build them without using the BLIS host library. (optional, default:False)')
+
     parser.add_argument(      '--cmake-arg', dest='cmake_args', type=str, required=False, default="",
                         help='Forward the given arguments to CMake when configuring the build.')
 
@@ -304,7 +310,12 @@ def config_cmd():
     if args.build_clients:
         cmake_build_dir = cmake_path(build_dir)
         cmake_options.append( f"-DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_DIR={cmake_build_dir} " )
-        cmake_options.append( f"-DLINK_BLIS=ON")
+        if(args.clients_no_blis):
+            cmake_options.append( f"-DLINK_BLIS=OFF")
+        else:
+            cmake_options.append( f"-DLINK_BLIS=ON")
+        if args.clients_no_fortran:
+            cmake_options.append(f"-DBUILD_FORTRAN_CLIENTS=OFF")
 
 
     if args.build_solver:

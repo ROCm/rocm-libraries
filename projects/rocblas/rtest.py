@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -272,7 +272,7 @@ def batch(script, xml):
     global OS_info
     global args
     #
-    cwd = pathlib.os.curdir
+    cwd = os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
     rtest_path = test_xml()
     if 'rocblas_rtest.xml' in rtest_path:
@@ -368,6 +368,36 @@ def run_tests():
         os.chdir( cwd )
     return 0
 
+def test_xml_reduce():
+    ## open test_detail.xml and strip out the larger extraneous attibutes
+
+    test_detail = os.path.join( os.getcwd(), 'test_detail.xml')
+    test_detail_reduced = os.path.join( os.getcwd(), 'test_detail_reduced.xml')
+    if not os.path.exists(test_detail):
+        return
+
+    import xml.etree.ElementTree as ET
+
+    # Load the XML file
+    try:
+        tree = ET.parse(test_detail)
+        root = tree.getroot()
+
+        # Remove specific attributes
+        attributes_to_remove = {"value_param", "timestamp", "file", "line"}
+        for elem in root.iter():
+            for attr in attributes_to_remove:
+                if attr in elem.attrib:
+                    del elem.attrib[attr]
+
+        # Save the modified XML
+        tree.write(test_detail_reduced)
+        # copy the test_detail_reduced.xml to test_detail.xml
+        os.replace(test_detail_reduced, test_detail)
+    except ET.ParseError as e:
+        print(f"Error parsing XML file {test_detail}: {e}")
+
+
 def main():
     global args
     global timer_thread
@@ -385,6 +415,8 @@ def main():
         status = run_tests()
 
     if args.fail_test: status = 1
+
+    test_xml_reduce()
 
     if (status):
         sys.exit(status)

@@ -102,6 +102,7 @@
 #include "blas_ex/common_geam_ex.hpp"
 #include "blas_ex/common_gemm_ex.hpp"
 #include "blas_ex/common_gemmt.hpp"
+#include "blas_ex/common_syrk_ex.hpp"
 #include "blas_ex/common_trsm_ex.hpp"
 #include "type_dispatch.hpp"
 #undef I
@@ -893,6 +894,33 @@ struct perf_blas_rotg<
     }
 };
 
+// Template to dispatch testing_syrk_ex for performance tests
+// When Ti == void or Ti == To == Tc == bfloat16, the test is marked invalid
+template <typename Ti, typename To = Ti, typename Tc = To, typename = void>
+struct perf_syrk_ex : rocblas_test_invalid
+{
+};
+
+template <typename Ti, typename To, typename Tc>
+struct perf_syrk_ex<
+    Ti,
+    To,
+    Tc,
+    std::enable_if_t<
+        !std::is_same_v<
+            Ti,
+            void> && !(std::is_same_v<Ti, To> && std::is_same_v<Ti, Tc> && (std::is_same_v<Tc, rocblas_half> || std::is_same_v<Tc, rocblas_bfloat16>))>>
+    : rocblas_test_valid
+{
+    void operator()(const Arguments& arg)
+    {
+        static const func_map map = {
+            {"syrk_ex", testing_syrk_ex<Ti, To, Tc>},
+        };
+        run_function(map, arg);
+    }
+};
+
 //
 // globals, functions, and main()
 
@@ -1066,6 +1094,8 @@ int run_bench_test(bool               init,
         else if(!strcmp(function, "gemv_batched") || !strcmp(function, "gemv_strided_batched"))
             rocblas_gemv_batched_and_strided_batched_dispatch<
                 perf_gemv_batched_and_strided_batched>(arg);
+        else if(!strcmp(function, "syrk_ex"))
+            rocblas_syrk_ex_dispatch<perf_syrk_ex>(arg);
         else
             rocblas_simple_dispatch<perf_blas>(arg);
     }

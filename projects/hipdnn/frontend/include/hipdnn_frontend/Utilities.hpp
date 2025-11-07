@@ -4,6 +4,7 @@
 
 #include "Error.hpp"
 #include "attributes/TensorAttributes.hpp"
+#include "node/Node.hpp"
 #include <algorithm>
 #include <hipdnn_backend.h>
 #include <hipdnn_sdk/logging/CallbackTypes.h>
@@ -73,6 +74,22 @@ inline TensorAttributes
         .set_data_type(dataType)
         .set_dim(tensor.dims())
         .set_stride(tensor.strides());
+}
+
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             DataType dataType,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
+        strides);
+}
+
+inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+    createTensorFromAttribute(const TensorAttributes& attribute)
+{
+    return hipdnn_sdk::utilities::createTensor(
+        toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
 }

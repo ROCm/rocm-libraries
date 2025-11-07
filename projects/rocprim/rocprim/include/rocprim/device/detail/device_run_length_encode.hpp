@@ -23,16 +23,18 @@
 
 #include "device_partition.hpp"
 #include "lookback_scan_state.hpp"
+#include "ordered_block_id.hpp"
 
+#include "../../config.hpp"
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../detail/various.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics/arch.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../thread/thread_reduce.hpp"
 #include "../../thread/thread_scan.hpp"
 #include "../../type_traits.hpp"
 #include "../../warp/warp_scan.hpp"
-#include "rocprim/intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -823,7 +825,8 @@ template<typename ArchConfig,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     non_trivial_kernel_impl(InputIterator,
                             const OffsetsOutputIterator,
@@ -831,7 +834,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const RunsCountOutputIterator,
                             const LookbackScanState,
                             const size_t,
-                            const size_t)
+                            const size_t,
+                            BlockIdWrapper)
         -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
@@ -843,15 +847,17 @@ template<typename ArchConfig,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    non_trivial_kernel_impl(InputIterator                  input,
-                            const OffsetsOutputIterator    offsets_output,
-                            const CountsOutputIterator     counts_output,
-                            const RunsCountOutputIterator  runs_count_output,
-                            const LookbackScanState        scan_state,
-                            const size_t              grid_size,
-                            const size_t              size)
+    non_trivial_kernel_impl(InputIterator                 input,
+                            const OffsetsOutputIterator   offsets_output,
+                            const CountsOutputIterator    counts_output,
+                            const RunsCountOutputIterator runs_count_output,
+                            const LookbackScanState       scan_state,
+                            const size_t                  grid_size,
+                            const size_t                  size,
+                            BlockIdWrapper                ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
     static constexpr non_trivial_runs_config_params params     = ArchConfig::params;
@@ -874,12 +880,16 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                          load_input_method,
                                          scan_algorithm>;
 
-    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH ROCPRIM_SHARED_MEMORY
-    typename detail::raw_storage<typename block_processor::storage_type>
-        storage;
-    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+    ROCPRIM_SHARED_MEMORY union
+    {
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+        typename detail::raw_storage<typename block_processor::storage_type>
+            block_processor_storage;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+        typename BlockIdWrapper::storage_type ordered_bid_storage;
+    } storage;
 
-    const size_t block_id = flat_block_id<block_size, 1, 1>();
+    const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), storage.ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;
     const InputIterator block_input  = input + block_offset;
@@ -896,18 +906,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                         block_id,
                                         grid_size,
                                         size,
-                                        storage.get());
+                                        storage.block_processor_storage.get());
     }
     else if(valid_in_last_block > 0)
     {
-        OffsetCountPairType total = block_processor{}.process_block(block_input,
-                                                                    offsets_output,
-                                                                    counts_output,
-                                                                    scan_state,
-                                                                    block_id,
-                                                                    grid_size,
-                                                                    size,
-                                                                    storage.get());
+        OffsetCountPairType total
+            = block_processor{}.process_block(block_input,
+                                              offsets_output,
+                                              counts_output,
+                                              scan_state,
+                                              block_id,
+                                              grid_size,
+                                              size,
+                                              storage.block_processor_storage.get());
         // First thread of last block sets the total number of non-trivial runs found and updates
         // the counts with the last run's length if necessary.
         if(threadIdx.x == 0)

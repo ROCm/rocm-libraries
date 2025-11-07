@@ -44,9 +44,10 @@ namespace rocRoller
         {
             int device;
 
-            int numWarmUp;
-            int numOuter;
-            int numInner;
+            int    numWarmUp;
+            int    numOuter;
+            int    numInner;
+            size_t rotatingBuffSize;
 
             bool check;
             bool visualize;
@@ -64,6 +65,13 @@ namespace rocRoller
             bool                checked = false;
             bool                correct = true;
             double              rnorm   = 1.e12;
+
+            // Max usage
+            int sgprCount = -1;
+            int vgprCount = -1;
+            int agprCount = -1;
+
+            int ldsBytes = -1;
         };
     }
 }

@@ -454,7 +454,7 @@ TEST(TestConvolutionDgradNode, PackNode)
     EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
-TEST(TestConvolutionDgradNode, GatherHipdnnTensorIds)
+TEST(TestConvolutionDgradNode, GatherHipdnnTensors)
 {
     ConvDgradAttributes convAttributes;
     auto dyTensor = std::make_shared<TensorAttributes>();
@@ -477,55 +477,14 @@ TEST(TestConvolutionDgradNode, GatherHipdnnTensorIds)
     GraphAttributes graphAttributes;
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<int64_t> usedIds;
-    node.gather_hipdnn_tensor_ids(usedIds);
+    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
 
-    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
-    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
-}
+    node.gather_hipdnn_tensors(allTensors);
 
-TEST(TestConvolutionDgradNode, PopulateHipdnnTensorIds)
-{
-    ConvDgradAttributes convAttributes;
-    convAttributes.set_dy(std::make_shared<TensorAttributes>());
-    convAttributes.set_w(std::make_shared<TensorAttributes>());
-    convAttributes.set_dx(std::make_shared<TensorAttributes>());
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-
-    GraphAttributes graphAttributes;
-    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
-
-    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-    std::unordered_set<int64_t> usedIds;
-    int64_t currentTensorId = 1;
-
-    auto error = node.populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds);
-    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
-
-    std::vector<std::shared_ptr<TensorAttributes>> tensors;
-    tensors.reserve(node.attributes.inputs.size() + node.attributes.outputs.size());
-
-    for(const auto& inputPair : node.attributes.inputs)
-    {
-        tensors.emplace_back(inputPair.second);
-    }
-
-    for(const auto& outputPair : node.attributes.outputs)
-    {
-        tensors.emplace_back(outputPair.second);
-    }
-
-    std::unordered_set<int64_t> tensorIds;
-    for(const auto& tensor : tensors)
-    {
-        ASSERT_TRUE(tensor->has_uid());
-        EXPECT_TRUE(tensorIds.insert(tensor->get_uid()).second)
-            << "Duplicate tensor ID found: " << tensor->get_uid();
-    }
+    EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(wTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(dxTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3);
 }
 
 TEST(TestConvolutionDgradNode, StrideInferenceNchwLayoutSuccess)
@@ -559,10 +518,11 @@ TEST(TestConvolutionDgradNode, StrideInferenceNchwLayoutSuccess)
 
     auto inferredStrides = dxTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    // Should maintain the same stride order as dy (NCHW)
-    EXPECT_GT(inferredStrides[1], inferredStrides[2]); // C stride > H stride
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // H stride > W stride
-    EXPECT_EQ(inferredStrides[3], 1); // W stride should be 1 (contiguous)
+    // NCHW strides
+    EXPECT_EQ(inferredStrides[0], 3072); // N stride: 3 * 32 * 32
+    EXPECT_EQ(inferredStrides[1], 1024); // C stride: 32 * 32
+    EXPECT_EQ(inferredStrides[2], 32); // H stride: 32
+    EXPECT_EQ(inferredStrides[3], 1); // W stride: 1
 }
 
 TEST(TestConvolutionDgradNode, StrideInferenceNhwcLayoutSuccess)
@@ -570,8 +530,8 @@ TEST(TestConvolutionDgradNode, StrideInferenceNhwcLayoutSuccess)
     ConvDgradAttributes convAttributes;
 
     auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_dim({1, 32, 32, 64});
-    dyTensor->set_stride({65536, 2048, 64, 1}); // NHWC layout
+    dyTensor->set_dim({1, 64, 32, 32}); // Dims in NCHW order
+    dyTensor->set_stride({65536, 1, 2048, 64}); // NHWC strides (channels last)
     convAttributes.set_dy(dyTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
@@ -579,7 +539,7 @@ TEST(TestConvolutionDgradNode, StrideInferenceNhwcLayoutSuccess)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
-    dxTensor->set_dim({1, 32, 32, 3});
+    dxTensor->set_dim({1, 3, 32, 32}); // Dims in NCHW order
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -595,11 +555,11 @@ TEST(TestConvolutionDgradNode, StrideInferenceNhwcLayoutSuccess)
 
     auto inferredStrides = dxTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    // Should maintain the same stride order as dy (NHWC)
-    EXPECT_GT(inferredStrides[0], inferredStrides[1]); // N stride > H stride
-    EXPECT_GT(inferredStrides[1], inferredStrides[2]); // H stride > W stride
-    EXPECT_GT(inferredStrides[2], inferredStrides[3]); // W stride > C stride
-    EXPECT_EQ(inferredStrides[3], 1); // C stride should be 1 (contiguous)
+    // NHWC strides (channels last)
+    EXPECT_EQ(inferredStrides[0], 3072); // N stride: 32 * 32 * 3
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 96); // H stride: 32 * 3
+    EXPECT_EQ(inferredStrides[3], 3); // W stride: 3
 }
 
 TEST(TestConvolutionDgradNode, InferPropertiesGroupedConv2Groups)
@@ -1128,8 +1088,8 @@ TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNhwcLayout)
     ConvDgradAttributes convAttributes;
 
     auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_dim({1, 32, 32, 128});
-    dyTensor->set_stride({131072, 4096, 128, 1}); // NHWC layout
+    dyTensor->set_dim({1, 128, 32, 32}); // Dims in NCHW order
+    dyTensor->set_stride({131072, 1, 4096, 128}); // NHWC strides (channels last)
     convAttributes.set_dy(dyTensor);
 
     auto wTensor = std::make_shared<TensorAttributes>();
@@ -1138,7 +1098,7 @@ TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNhwcLayout)
 
     auto dxTensor = std::make_shared<TensorAttributes>();
     // Set dimensions to establish groups = 2
-    dxTensor->set_dim({1, 32, 32, 64});
+    dxTensor->set_dim({1, 64, 32, 32}); // Dims in NCHW order
     // No stride set - should be inferred
     convAttributes.set_dx(dxTensor);
 
@@ -1156,9 +1116,9 @@ TEST(TestConvolutionDgradNode, InferGroupedConvStrideInferenceNhwcLayout)
     auto inferredStrides = dxTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
     EXPECT_EQ(inferredStrides[0], 65536); // N stride: 32 * 32 * 64
-    EXPECT_EQ(inferredStrides[1], 2048); // H stride: 32 * 64
-    EXPECT_EQ(inferredStrides[2], 64); // W stride: 64
-    EXPECT_EQ(inferredStrides[3], 1); // C stride: 1
+    EXPECT_EQ(inferredStrides[1], 1); // C stride: 1 (channels last)
+    EXPECT_EQ(inferredStrides[2], 2048); // H stride: 32 * 64
+    EXPECT_EQ(inferredStrides[3], 64); // W stride: 64
 }
 
 TEST(TestConvolutionDgradNode, InferGroupedConvWithDilation)
@@ -1193,10 +1153,11 @@ TEST(TestConvolutionDgradNode, InferGroupedConvWithDilation)
 
     auto inferredStrides = dxTensor->get_stride();
     EXPECT_EQ(inferredStrides.size(), 4);
-    EXPECT_GT(inferredStrides[0], 0);
-    EXPECT_GT(inferredStrides[1], 0);
-    EXPECT_GT(inferredStrides[2], 0);
-    EXPECT_GT(inferredStrides[3], 0);
+    // NCHW strides
+    EXPECT_EQ(inferredStrides[0], 12800); // N stride: 32 * 20 * 20
+    EXPECT_EQ(inferredStrides[1], 400); // C stride: 20 * 20
+    EXPECT_EQ(inferredStrides[2], 20); // H stride: 20
+    EXPECT_EQ(inferredStrides[3], 1); // W stride: 1
 }
 
 TEST(TestConvolutionDgradNode, InferGroupedConvWithLargeStride)

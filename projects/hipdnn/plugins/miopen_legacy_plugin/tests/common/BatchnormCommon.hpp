@@ -8,36 +8,161 @@
 #include <random>
 #include <vector>
 
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
+
 namespace test_bn_common
 {
 
-struct Batchnorm2dTestCase
+struct BatchnormTestCase
 {
-    int64_t n;
-    int64_t c;
-    int64_t h;
-    int64_t w;
+    std::vector<int64_t> dims;
     unsigned int seed;
 
-    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm2dTestCase& tc)
+    BatchnormTestCase(std::vector<int64_t>&& dimsLocal, unsigned int seedLocal)
+        : dims(std::move(dimsLocal))
+        , seed(seedLocal)
     {
-        return ss << "(n:" << tc.n << " c:" << tc.c << " h:" << tc.h << " w:" << tc.w
-                  << " seed:" << tc.seed << ")";
+        if(dims.size() != 4 && dims.size() != 5)
+        {
+            throw std::invalid_argument(
+                "dims must be either 4D (N, C, H, W) or 5D (N, C, D, H, W)");
+        }
     }
 
-    std::vector<int64_t> getDims() const
+    friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
     {
-        return {n, c, h, w};
+        using namespace hipdnn_sdk::test_utilities;
+
+        ss << "(dims:";
+        vecToStream(ss, tc.dims);
+        ss << " seed:" << tc.seed;
+        ss << ")";
+
+        return ss;
     }
 };
 
-inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
+// This is used for operation tests
+inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()
 {
-    unsigned int seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
-        {1, 3, 14, 14, seed},
-        {2, 3, 14, 14, seed},
+        {{1, 3, 14, 14}, seed},
+        {{2, 3, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdInferenceTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14, 14}, seed},
+        {{1, 256, 1, 1}, seed},
+        {{2, 3, 1, 1}, seed},
+        {{32, 1, 14, 14}, seed},
+        {{32, 3, 1, 14}, seed},
+        {{32, 3, 14, 1}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdInferenceFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{64, 64, 112, 112}, seed},
+        {{64, 512, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{16, 3, 8, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14, 14}, seed},
+        {{1, 256, 1, 1}, seed},
+        {{2, 3, 1, 1}, seed},
+        {{32, 1, 14, 14}, seed},
+        {{32, 3, 1, 14}, seed},
+        {{32, 3, 14, 1}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdFullTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{64, 64, 112, 112}, seed},
+        {{64, 512, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{16, 3, 8, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke2dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        // {1, 256, 1, 1, seed}, // miopen's driver command for this shape fails. There is a PR in miopen that fixes this issue.
+        {{2, 3, 1, 1}, seed}, // Minimal case
+        {{32, 3, 1, 14}, seed}, // Typical small training case
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull2dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14, 14}, seed}, // Small batch
+        {{2, 3, 1, 1}, seed}, // Edge case: 1x1 spatial
+        {{8, 16, 28, 28}, seed}, // Medium size
+        {{4, 64, 7, 7}, seed}, // Many channels, smaller spatial
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed}, // Minimal 3D case
+        {{2, 3, 2, 4, 4}, seed}, // Small case with non-1 spatial dims
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
+{
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed}, // Minimal case
+        {{2, 3, 2, 4, 4}, seed}, // Small case
+        {{16, 3, 8, 14, 14}, seed}, // Larger regression case
     };
 }
 

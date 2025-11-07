@@ -1,25 +1,31 @@
-# ########################################################################
-# Copyright (c) 2022 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-# Include sources
-include(src/hcc_detail/rocsparselt/src/CMakeLists.txt)
+target_compile_definitions(hipsparselt PRIVATE ROCSPARSELT_TENSILE_LAZY_LOAD=1)
+
+target_sources(hipsparselt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/handle.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Debug.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/status.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/utility.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rocsparselt_auxiliary.cpp"
+)
+
+target_sources(hipsparselt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_compress.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_prune.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_spmm.cpp"
+)
+
+target_include_directories(hipsparselt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include"
+)
+
+target_sources(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
+target_include_directories(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/Tensile")
+
+set(tensile_source_files "${CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
+list(APPEND hipsparselt_source_backend ${tensile_source_files})
+
+target_link_libraries(hipsparselt PRIVATE tensilelite::tensilelite-host)

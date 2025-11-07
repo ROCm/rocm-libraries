@@ -3,6 +3,13 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.2.0 for ROCm 7.2
+
+### Added
+
+* Added `thrust::unique_ptr` - a smart pointer for managing device memory with automatic cleanup.
+* Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocThrust is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
+
 ## rocThrust 4.1.0 for ROCm 7.1
 
 ### Added
@@ -11,7 +18,12 @@ Documentation for rocThrust available at
 * Introduced `libhipcxx` as a soft depedency. When `liphipcxx` can be included, rocthrust, may use structs and methods defined in `libhipcxx`. This allows for a more complete behaviour parity with CCCL and mirrors CCCL's thrust own depedency on `libcudacxx`.
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 
+### Resolved issues
+
+* Fixed an issue where the test `test_scan_by_key.inclusive.hip` failed when performing an "in-place" inclusive scan by reusing "keys" as output, by adding a buffer to store the last keys of each block (excluding the last block). Changes were made in rocprim. This fix only affects the specific case of reusing "keys" as output in an inclusive scan, and does not affect other cases.
+
 ### Known Issues
+
 * `event` test is failing on CI and local runs on MI300, MI250 and MI210.
 
 * rocThrust, as well as its dependencies rocPRIM and rocRAND have been moved into the new rocm-libraries "monorepo" repository (https://github.com/ROCm/rocm-libraries). This repository contains a number of ROCm libraries that are frequently used together.
@@ -27,7 +39,8 @@ Documentation for rocThrust available at
 * The previously hidden cmake build option `FORCE_DEPENDENCIES_DOWNLOAD` has been unhidden and renamed `EXTERNAL_DEPS_FORCE_DOWNLOAD` to differentiate it from the new rocPRIM and rocRAND dependency options described above. It's behaviour remains the same - it forces non-ROCm dependencies (Google Benchmark, Google Test, and SQLite) to be downloaded instead of searching for existing installed packages. This option defaults to `OFF`.
 
 ### Removed
-  * The previous dependency-related build options `DOWNLOAD_ROCPRIM` and `DOWNLOAD_ROCRAND` have been removed. Please use `ROCPRIM_FETCH_METHOD=DOWNLOAD` and `ROCRAND_FETCH_METHOD=DOWNLOAD` instead.
+
+* The previous dependency-related build options `DOWNLOAD_ROCPRIM` and `DOWNLOAD_ROCRAND` have been removed. Please use `ROCPRIM_FETCH_METHOD=DOWNLOAD` and `ROCRAND_FETCH_METHOD=DOWNLOAD` instead.
 
 ## rocThrust 4.0.0 for ROCm 7.0
 
