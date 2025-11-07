@@ -156,6 +156,49 @@ int main()
                                       temp_buffer,
                                       nullptr));
 
+    std::cout << "SpMV with extra vectors computed successfully!\n";
+
+    // Demonstrate enable/disable extra functionality
+    std::cout << "Demonstrating enable/disable extra functionality...\n";
+
+    // Disable extra vectors temporarily
+    ROCSPARSE_CHECK(rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr));
+    std::cout << "Extra vectors disabled\n";
+
+    // Run SpMV again without extra vectors
+    ROCSPARSE_CHECK(rocsparse_v2_spmv(handle,
+                                      spmv_descr,
+                                      &alpha,
+                                      A,
+                                      x_vec,
+                                      &beta,
+                                      y_vec,
+                                      rocsparse_v2_spmv_stage_compute,
+                                      buffer_size,
+                                      temp_buffer,
+                                      nullptr));
+
+    std::cout << "SpMV without extra vectors computed\n";
+
+    // Re-enable extra vectors
+    ROCSPARSE_CHECK(rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr));
+    std::cout << "Extra vectors re-enabled\n";
+
+    // Run SpMV again with extra vectors
+    ROCSPARSE_CHECK(rocsparse_v2_spmv(handle,
+                                      spmv_descr,
+                                      &alpha,
+                                      A,
+                                      x_vec,
+                                      &beta,
+                                      y_vec,
+                                      rocsparse_v2_spmv_stage_compute,
+                                      buffer_size,
+                                      temp_buffer,
+                                      nullptr));
+
+    std::cout << "SpMV with re-enabled extra vectors computed\n";
+
     // Clear extra parameters
     ROCSPARSE_CHECK(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
 

@@ -28,6 +28,9 @@
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "internal/generic/rocsparse_v2_spmv.h"
+#include "rocsparse_spmv_helpers.h"
+
 #include "csrmv_device.h"
 #include "csrmv_symm_device.h"
 #include <vector>
@@ -650,29 +653,20 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     bool      temp_alloc         = false;
     void*     temp_storage_ptr   = nullptr;
 
+    // Check if pre-extracted arrays are available in spmv descriptor
     if(num_extra > 0)
     {
-        size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
-
-        if(handle->buffer_size >= buffer_size)
+        if(handle && handle->temp_spmv_descr
+           && rocsparse_spmv_has_device_arrays(handle->temp_spmv_descr))
         {
-            temp_storage_ptr = handle->buffer;
-            temp_alloc       = false;
+            gamma_device_array = rocsparse::get_gamma_array_helper<T>(handle->temp_spmv_descr);
+            z_array            = rocsparse::get_z_array_helper<Z>(handle->temp_spmv_descr);
         }
         else
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
-            temp_alloc = true;
+            // throw an error here as the extra data cannot be retrieved
+            return rocsparse_status_invalid_value;
         }
-
-        gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
-        z_array            = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
-                                              + num_extra * sizeof(T));
-
-        // Fill the preallocated buffers
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
-            handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
     }
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);

@@ -698,6 +698,183 @@ public:
             CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
             CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
         }
+
+        // Test enable/disable extra functionality
+        if(matrix_type == rocsparse_matrix_type_general && arg.unit_check)
+        {
+            // Create a new spmv descriptor for enable/disable testing
+            rocsparse_spmv_descr spmv_descr;
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_spmv_descr(&spmv_descr));
+
+            // Set mandatory inputs
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(
+                handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_operation,
+                                                           &trans,
+                                                           sizeof(trans),
+                                                           nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_scalar_datatype,
+                                                           &ttype,
+                                                           sizeof(ttype),
+                                                           nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_compute_datatype,
+                                                           &ttype,
+                                                           sizeof(ttype),
+                                                           nullptr));
+
+            // Set extra vectors
+            T                     gamma_val = static_cast<T>(1.0);
+            rocsparse_dnvec_descr gamma_vec;
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr(&gamma_vec, 1, &gamma_val, ttype));
+            rocsparse_const_dnvec_descr z_vecs[1] = {extra};
+
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmv_set_extra(handle, spmv_descr, 1, gamma_vec, z_vecs, nullptr));
+
+            // Run analysis
+            size_t buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                                spmv_descr,
+                                                                matA,
+                                                                x,
+                                                                y,
+                                                                rocsparse_v2_spmv_stage_analysis,
+                                                                &buffer_size,
+                                                                nullptr));
+
+            void* dbuffer = nullptr;
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                    spmv_descr,
+                                                    h_alpha,
+                                                    matA,
+                                                    x,
+                                                    h_beta,
+                                                    y,
+                                                    rocsparse_v2_spmv_stage_analysis,
+                                                    buffer_size,
+                                                    dbuffer,
+                                                    nullptr));
+
+            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+
+            // Test compute stage with extras enabled (default state)
+            buffer_size = 0;
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                                spmv_descr,
+                                                                matA,
+                                                                x,
+                                                                y,
+                                                                rocsparse_v2_spmv_stage_compute,
+                                                                &buffer_size,
+                                                                nullptr));
+            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+            // Store original y values for comparison
+            host_dense_matrix<Y> hy_enabled(hy);
+            hy_enabled.transfer_from(dy);
+
+            // Run with extras enabled
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                    spmv_descr,
+                                                    h_alpha,
+                                                    matA,
+                                                    x,
+                                                    h_beta,
+                                                    y,
+                                                    rocsparse_v2_spmv_stage_compute,
+                                                    buffer_size,
+                                                    dbuffer,
+                                                    nullptr));
+
+            host_dense_matrix<Y> hy_with_extra(hy);
+            hy_with_extra.transfer_from(dy);
+
+            // Reset y values
+            dy.transfer_from(hy_enabled);
+
+            // Disable extras and run again
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                    spmv_descr,
+                                                    h_alpha,
+                                                    matA,
+                                                    x,
+                                                    h_beta,
+                                                    y,
+                                                    rocsparse_v2_spmv_stage_compute,
+                                                    buffer_size,
+                                                    dbuffer,
+                                                    nullptr));
+
+            host_dense_matrix<Y> hy_without_extra(hy);
+            hy_without_extra.transfer_from(dy);
+
+            // Verify results are different (extras disabled should not include z vector)
+            const size_t hy_size           = (trans == rocsparse_operation_none) ? M : N;
+            int          results_different = 0;
+            for(size_t i = 0; i < hy_size; ++i)
+            {
+                if(hy_with_extra[i] != hy_without_extra[i])
+                {
+                    results_different = 1;
+                    break;
+                }
+            }
+            unit_check_scalar(results_different, (int)1);
+
+            // Re-enable extras and verify we get the same result as before
+            dy.transfer_from(hy_enabled);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                    spmv_descr,
+                                                    h_alpha,
+                                                    matA,
+                                                    x,
+                                                    h_beta,
+                                                    y,
+                                                    rocsparse_v2_spmv_stage_compute,
+                                                    buffer_size,
+                                                    dbuffer,
+                                                    nullptr));
+
+            host_dense_matrix<Y> hy_re_enabled(hy);
+            hy_re_enabled.transfer_from(dy);
+
+            // Verify re-enabled results match original enabled results
+            for(size_t i = 0; i < hy_size; ++i)
+            {
+                unit_check_scalar(hy_with_extra[i], hy_re_enabled[i]);
+            }
+
+            // Test error cases: enable/disable when no extras are set
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
+
+            // These should return errors since no extras are set
+            rocsparse_status status;
+            status = rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr);
+            unit_check_enum(status, rocsparse_status_invalid_value);
+
+            status = rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr);
+            unit_check_enum(status, rocsparse_status_invalid_value);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
+            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+        }
     }
 
     static void testing_v2_spmv_multiple_extra(const Arguments& arg)

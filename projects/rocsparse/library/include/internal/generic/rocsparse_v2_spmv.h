@@ -316,8 +316,81 @@ rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
                                             rocsparse_spmv_descr descr,
                                             rocsparse_error*     p_error);
 
+/*! \ingroup generic_module
+ *  \brief Enable extra parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_enable_extra enables the extra parameters that were previously
+ *  set by \ref rocsparse_spmv_set_extra. The extra computation will be included
+ *  in subsequent \ref rocsparse_v2_spmv calls.
+ *
+ *  \note This function requires that \ref rocsparse_spmv_set_extra has been called
+ *  previously with valid extra parameters. If no extra parameters have been set,
+ *  or if \ref rocsparse_spmv_clear_extra was called without a subsequent
+ *  \ref rocsparse_spmv_set_extra, this function will return an error.
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ *  \retval rocsparse_status_invalid_value no extra parameters have been set or they have been cleared.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_enable_extra(rocsparse_handle     handle,
+                                             rocsparse_spmv_descr descr,
+                                             rocsparse_error*     p_error);
+
+/*! \ingroup generic_module
+ *  \brief Disable extra parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_disable_extra temporarily disables the extra parameters that were
+ *  previously set by \ref rocsparse_spmv_set_extra. The extra computation will be
+ *  skipped in subsequent \ref rocsparse_v2_spmv calls until \ref rocsparse_spmv_enable_extra
+ *  is called. The extra parameters remain stored and can be re-enabled.
+ *
+ *  \note This function requires that \ref rocsparse_spmv_set_extra has been called
+ *  previously with valid extra parameters. If no extra parameters have been set,
+ *  or if \ref rocsparse_spmv_clear_extra was called without a subsequent
+ *  \ref rocsparse_spmv_set_extra, this function will return an error.
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ *  \retval rocsparse_status_invalid_value no extra parameters have been set or they have been cleared.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_disable_extra(rocsparse_handle     handle,
+                                              rocsparse_spmv_descr descr,
+                                              rocsparse_error*     p_error);
+
 #ifdef __cplusplus
 }
+#endif
+
+// Helper functions for accessing pre-extracted arrays (C++ functions)
+#ifdef __cplusplus
+bool rocsparse_spmv_has_device_arrays(void* spmv_descr_ptr);
+
+// Template functions for accessing pre-extracted arrays
+template <typename T>
+T* rocsparse_spmv_get_gamma_device_array(void* spmv_descr_ptr);
+
+template <typename Z>
+const Z** rocsparse_spmv_get_z_array(void* spmv_descr_ptr);
 #endif
 
 #endif

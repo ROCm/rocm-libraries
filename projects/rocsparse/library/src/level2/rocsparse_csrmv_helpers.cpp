@@ -24,6 +24,7 @@
 
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_logging.hpp"
 
 namespace rocsparse
 {
@@ -35,6 +36,8 @@ namespace rocsparse
                                                       T*        gamma_device_array,
                                                       const Y** z_array)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         using Z = Y;
 
         if(num_extra <= 0)
