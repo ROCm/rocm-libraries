@@ -6,6 +6,7 @@
 #include <functional>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -122,3 +123,23 @@ struct ConvolutionWrwSignatureKey
 };
 
 }
+
+template <>
+struct fmt::formatter<hipdnn_sdk::test_utilities::ConvolutionWrwSignatureKey>
+{
+    static constexpr auto parse(format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const hipdnn_sdk::test_utilities::ConvolutionWrwSignatureKey& key,
+                FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "ConvolutionWrw(in={}, accumulator={}, out={})",
+                              key.inputDataType,
+                              key.accumulatorDataType,
+                              key.outputDataType);
+    }
+};

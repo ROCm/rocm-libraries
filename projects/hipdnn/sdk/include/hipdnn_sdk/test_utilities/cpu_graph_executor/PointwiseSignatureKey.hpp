@@ -7,9 +7,9 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -157,7 +157,6 @@ struct PointwiseSignatureKey
         addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
                               hipdnn_sdk::data_objects::DataType::FLOAT,
                               hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        
 
         return map;
     }
@@ -171,12 +170,26 @@ private:
                                                         PointwiseSignatureKey>& map)
     {
         // Add all implemented unary operations
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(
-            map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG,
+                            InputDataTypeEnum,
+                            ComputeDataTypeEnum,
+                            OutputDataTypeEnum>(map);
     }
 
     template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
@@ -187,13 +200,30 @@ private:
                                                          PointwiseSignatureKey>& map)
     {
         // Add all implemented binary operations
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ADD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SUB, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::MUL, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(
-            map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ADD,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SUB,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::MUL,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD,
+                             InputDataTypeEnum,
+                             ComputeDataTypeEnum,
+                             OutputDataTypeEnum>(map);
     }
 
     template <hipdnn_sdk::data_objects::PointwiseMode ModeEnum,
@@ -204,7 +234,8 @@ private:
                                                        std::unique_ptr<IGraphNodePlanBuilder>,
                                                        PointwiseSignatureKey>& map)
     {
-        map[PointwiseSignatureKey(ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
+        map[PointwiseSignatureKey(
+            ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<OutputDataTypeEnum>>();
     }
 
@@ -216,8 +247,45 @@ private:
                                                         std::unique_ptr<IGraphNodePlanBuilder>,
                                                         PointwiseSignatureKey>& map)
     {
-        map[PointwiseSignatureKey(ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum, InputDataTypeEnum)]
+        map[PointwiseSignatureKey(ModeEnum,
+                                  InputDataTypeEnum,
+                                  ComputeDataTypeEnum,
+                                  OutputDataTypeEnum,
+                                  InputDataTypeEnum)]
             = std::make_unique<PointwisePlanBuilder<OutputDataTypeEnum>>();
     }
 };
 }
+
+template <>
+struct fmt::formatter<hipdnn_sdk::test_utilities::PointwiseSignatureKey>
+{
+    static constexpr auto parse(format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const hipdnn_sdk::test_utilities::PointwiseSignatureKey& key,
+                FormatContext& ctx) const
+    {
+        if(key.input1DataType != hipdnn_sdk::data_objects::DataType::UNSET)
+        {
+            // Binary operation
+            return fmt::format_to(ctx.out(),
+                                  "Pointwise(op={}, in0={}, in1={}, compute={}, out={})",
+                                  key.operation,
+                                  key.inputDataType,
+                                  key.input1DataType,
+                                  key.computeDataType,
+                                  key.outputDataType);
+        }
+        // Unary operation
+        return fmt::format_to(ctx.out(),
+                              "Pointwise(op={}, in={}, compute={}, out={})",
+                              key.operation,
+                              key.inputDataType,
+                              key.computeDataType,
+                              key.outputDataType);
+    }
+};

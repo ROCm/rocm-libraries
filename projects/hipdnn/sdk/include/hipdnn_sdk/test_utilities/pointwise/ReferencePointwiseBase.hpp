@@ -112,7 +112,8 @@ private:
             policy.executeUnary(input, output, pointwise::ReluForward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-            policy.executeUnary(input, output, pointwise::SigmoidForward<OutputType, ComputeType>{});
+            policy.executeUnary(
+                input, output, pointwise::SigmoidForward<OutputType, ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
             policy.executeUnary(input, output, pointwise::TanhForward<OutputType, ComputeType>{});
@@ -145,12 +146,12 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            policy.executeUnary(
-                input,
-                output,
-                pointwise::ReluForward<OutputType, ComputeType>{static_cast<ComputeType>(lowerClip),
-                                                                static_cast<ComputeType>(upperClip),
-                                                                static_cast<ComputeType>(lowerSlope)});
+            policy.executeUnary(input,
+                                output,
+                                pointwise::ReluForward<OutputType, ComputeType>{
+                                    static_cast<ComputeType>(lowerClip),
+                                    static_cast<ComputeType>(upperClip),
+                                    static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
@@ -214,13 +215,14 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeBinaryBroadcast(input1,
-                                          input2,
-                                          output,
-                                          pointwise::ParameterizedReluBackward<OutputType, ComputeType>{
-                                              static_cast<ComputeType>(lowerClip),
-                                              static_cast<ComputeType>(upperClip),
-                                              static_cast<ComputeType>(lowerSlope)});
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::ParameterizedReluBackward<OutputType, ComputeType>{
+                    static_cast<ComputeType>(lowerClip),
+                    static_cast<ComputeType>(upperClip),
+                    static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "

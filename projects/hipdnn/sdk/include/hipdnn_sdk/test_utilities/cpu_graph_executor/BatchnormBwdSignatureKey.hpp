@@ -6,6 +6,7 @@
 #include <functional>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -162,3 +163,25 @@ struct BatchnormBwdSignatureKey
 };
 
 }
+
+template <>
+struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormBwdSignatureKey>
+{
+    static constexpr auto parse(format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const hipdnn_sdk::test_utilities::BatchnormBwdSignatureKey& key,
+                FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "BatchnormBwd(in={}, scale={}, mean={}, compute={}, out={})",
+                              key.inputDataType,
+                              key.scaleBiasDataType,
+                              key.meanVarianceDataType,
+                              key.computeDataType,
+                              key.outputDataType);
+    }
+};

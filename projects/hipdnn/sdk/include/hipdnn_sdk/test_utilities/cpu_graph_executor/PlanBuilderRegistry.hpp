@@ -13,6 +13,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 
+#include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -37,6 +38,8 @@ public:
     const IGraphNodePlanBuilder& getPlanBuilder(const PlanRegistrySignatureKey& key)
     {
         initializeRegistry();
+
+        HIPDNN_LOG_INFO("Looking up plan builder for signature key: {}", key);
 
         auto it = _registry.find(key);
         if(it != _registry.end())
