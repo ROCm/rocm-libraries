@@ -1116,6 +1116,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         std::cout << "Running forward train spatial with R and S set." << std::endl;
 #endif
 <<<<<<< HEAD
+<<<<<<< HEAD
 <<<<<<<< HEAD:projects/miopen/test/gtest/bn_3d_spatial_test.cpp
         const auto outpair =
             Verify(verify_forward_train_3d_bn_spatial<T, PREC_TYPE>{input, scale, shift});
@@ -1123,11 +1124,14 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
 std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_spatial]" << std::endl;
 =======
 >>>>>>> e19aeb97a2 (Port bn_3d_spatial_test to GTest)
+=======
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_spatial]" << std::endl;
+>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress)
         auto outpair =
             verify(verify_forward_train_3d_bn_spatial<T, PREC_TYPE>{input, scale, shift});
 >>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress):projects/miopen/test/bn_3d_spatial_test_old.cpp
 // returns:  std::make_tuple(out,runMean,runVar,saveMean,saveInvVar);
-
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_spatial]" << std::endl;
 // inference recalc
 #if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward inference spatial recalc." << std::endl;
@@ -1137,6 +1141,7 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_s
         // std::fill(input.begin(), input.end(), 1);
         // std::fill(scale.begin(), scale.end(), 1);
         // std::fill(shift.begin(), shift.end(), 1);
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<<< HEAD:projects/miopen/test/gtest/bn_3d_spatial_test.cpp
         Verify(verify_forward_infer_3d_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift});
@@ -1148,6 +1153,11 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_s
 =======
         verify(verify_forward_infer_3d_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift});
 >>>>>>> e19aeb97a2 (Port bn_3d_spatial_test to GTest)
+=======
+        std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_recalc]" << std::endl;
+        verify(verify_forward_infer_3d_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift});
+        std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_recalc]" << std::endl;
+>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress)
 
         // inference use estimated running values
         const auto estMean = std::get<1>(outpair.second);
@@ -1156,15 +1166,20 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_s
         std::cout << "Running forward inference spatial with R set." << std::endl;
 #endif
 <<<<<<< HEAD
+<<<<<<< HEAD
 <<<<<<<< HEAD:projects/miopen/test/gtest/bn_3d_spatial_test.cpp
         Verify(verify_forward_infer_3d_bn_spatial_use_est<T, PREC_TYPE>{
 ========
 std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_use_est]" << std::endl;
 =======
 >>>>>>> e19aeb97a2 (Port bn_3d_spatial_test to GTest)
+=======
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_use_est]" << std::endl;
+>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress)
         verify(verify_forward_infer_3d_bn_spatial_use_est<T, PREC_TYPE>{
 >>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress):projects/miopen/test/bn_3d_spatial_test_old.cpp
             input, scale, shift, estMean, estVar});
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_use_est]" << std::endl;
 
         // backprop recalc
         auto dy_input = std::get<0>(outpair.second);
@@ -1224,7 +1239,9 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_s
         Verify(verify_backward_3d_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale});
 ========
         this->tolerance = 80 * input.desc.GetElementSize();
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_recalc]" << std::endl;
         verify(verify_backward_3d_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale});
+<<<<<<< HEAD
 <<<<<<< HEAD
 std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_recalc]" << std::endl;
 >>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress):projects/miopen/test/bn_3d_spatial_test_old.cpp
@@ -1235,6 +1252,9 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatia
         const auto savedInvVar = std::get<4>(outpair.second);
 
 =======
+=======
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_recalc]" << std::endl;
+>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress)
 #endif
 
         // backprop use saved values
@@ -1291,15 +1311,20 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatia
         std::cout << "Running back propagation spatial with S set." << std::endl;
 #endif
 <<<<<<< HEAD
+<<<<<<< HEAD
 <<<<<<<< HEAD:projects/miopen/test/gtest/bn_3d_spatial_test.cpp
         Verify(verify_backward_3d_bn_spatial_use_saved<T, PREC_TYPE>{
 ========
 std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_use_saved]" << std::endl;
 =======
 >>>>>>> e19aeb97a2 (Port bn_3d_spatial_test to GTest)
+=======
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_use_saved]" << std::endl;
+>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress)
         verify(verify_backward_3d_bn_spatial_use_saved<T, PREC_TYPE>{
 >>>>>>>> 11a1335101 (Port bn_3d_spatial_test to GTest - Work in progress):projects/miopen/test/bn_3d_spatial_test_old.cpp
             input, dy_input, scale, savedMean, savedInvVar});
+std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_use_saved]" << std::endl;
 #endif
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
