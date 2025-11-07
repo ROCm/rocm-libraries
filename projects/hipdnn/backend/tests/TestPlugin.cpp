@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include <utility>
 
+#include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
 #include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -78,11 +79,7 @@ protected:
 
 bool TestPluginCallback::s_callbackCalled = false;
 
-#if defined(_WIN32)
-const auto TEST_PLUGIN_DIR = std::filesystem::path("bin/test_plugins");
-#else
-const auto TEST_PLUGIN_DIR = std::filesystem::path("lib/test_plugins");
-#endif
+const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;

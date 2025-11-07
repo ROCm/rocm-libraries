@@ -40,7 +40,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreatePvt(&_handle);
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     }
 
@@ -48,7 +48,7 @@ protected:
     {
         if(_handle != nullptr)
         {
-            hipdnnPluginStatus_t status = hipdnnEnginePluginDestroyPvt(_handle);
+            hipdnnPluginStatus_t status = hipdnnEnginePluginDestroyImpl(_handle);
             ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         }
     }
@@ -93,26 +93,26 @@ protected:
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContextPvt(
+        status = hipdnnEnginePluginCreateExecutionContextImpl(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         size_t workspaceSize;
-        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContextPvt(
+        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContextImpl(
             _handle, executionContext, &workspaceSize);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 
-        status = hipdnnEnginePluginExecuteOpGraphPvt(_handle,
-                                                     executionContext,
-                                                     workspace.get(),
-                                                     deviceBuffers.data(),
-                                                     static_cast<uint32_t>(deviceBuffers.size()));
+        status = hipdnnEnginePluginExecuteOpGraphImpl(_handle,
+                                                      executionContext,
+                                                      workspace.get(),
+                                                      deviceBuffers.data(),
+                                                      static_cast<uint32_t>(deviceBuffers.size()));
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         yTensor.memory().markDeviceModified();
 
-        status = hipdnnEnginePluginDestroyExecutionContextPvt(_handle, executionContext);
+        status = hipdnnEnginePluginDestroyExecutionContextImpl(_handle, executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         Tensor<DataType> xTensorCpu(xTensor.dims(), _layout);

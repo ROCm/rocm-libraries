@@ -8,6 +8,7 @@
 
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
+#include "TestPluginConstants.hpp"
 #include "descriptors/TestMacros.hpp"
 #include "plugin/SharedLibrary.hpp"
 
@@ -16,11 +17,7 @@ using namespace hipdnn_backend;
 namespace
 {
 
-#if defined(_WIN32)
-const auto TEST_PLUGIN_DIR = std::filesystem::path("bin/test_plugins");
-#else
-const auto TEST_PLUGIN_DIR = std::filesystem::path("lib/test_plugins");
-#endif
+const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto LIBRARY_PATH = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto LIBRARY_PATH_LIB_EXT

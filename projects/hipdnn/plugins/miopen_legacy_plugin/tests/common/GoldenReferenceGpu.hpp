@@ -41,7 +41,7 @@ protected:
             GTEST_SKIP();
         }
 
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreatePvt(&_handle);
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);
         ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
@@ -62,16 +62,16 @@ protected:
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContextPvt(
+        status = hipdnnEnginePluginCreateExecutionContextImpl(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         auto deviceBuffers = _graphAndTensors.deviceBuffers();
 
-        status = hipdnnEnginePluginExecuteOpGraphPvt(_handle,
-                                                     executionContext,
-                                                     nullptr,
-                                                     deviceBuffers.data(),
-                                                     static_cast<uint32_t>(deviceBuffers.size()));
+        status = hipdnnEnginePluginExecuteOpGraphImpl(_handle,
+                                                      executionContext,
+                                                      nullptr,
+                                                      deviceBuffers.data(),
+                                                      static_cast<uint32_t>(deviceBuffers.size()));
         EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
         for(auto uid : _graphAndTensors.outputTensorUids)
         {
