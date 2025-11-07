@@ -35,11 +35,11 @@
 class rocsolver_timer
 {
 public:
-    typedef enum averages_
+    typedef enum average_type_
     {
         median,
         mean
-    } averages;
+    } average_type;
 
     void reset()
     {
@@ -61,7 +61,7 @@ public:
         m_times.push_back(get_time_us_sync(stream) - m_start_time);
     }
 
-    double get_combined(averages avg = median)
+    double get_combined(average_type avg = median)
     {
         const auto n = m_times.size();
         if(n == 0)
