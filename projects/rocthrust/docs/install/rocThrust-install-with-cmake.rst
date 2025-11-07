@@ -10,12 +10,12 @@ Building and installing rocThrust on Windows and Linux with CMake
 
 You can build and install rocThrust with CMake on either Windows or Linux.
 
-Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the compiler you'll be using, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example:
+Set ``CXX`` to ``hipcc`` and set ``CMAKE_CXX_COMPILER`` to hipcc's absolute path. For example:
 
 .. code:: shell
 
-    CXX=amdclang++
-    CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
+    CXX=hipcc
+    CMAKE_CXX_COMPILER=/usr/bin/hipcc
 
 After :doc:`cloning the project <./rocThrust-install-overview>`, create the ``build`` directory under the ``rocthrust`` root directory, then change directory to the ``build`` directory:
 
@@ -32,16 +32,22 @@ Generate the rocThrust makefile using the ``cmake`` command:
 
 The available build options are:
 
-* ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Off by default.
-* ``BUILD_EXAMPLE``. Set this to ``ON`` to build rocThrust examples. Off by default.
-* ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
-* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default.
-* ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
-* ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
-* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` library provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
-* ``USE_SYSTEM_LIB``. Set to ``ON`` to use the installed ``ROCm`` libraries when building the tests. Off by default. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the ``rocprim`` and ``rocthrust`` install must be compatible with the version of the tests.
-* ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Set to 0 by default.
-* ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds are passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. Set to 1 by default.
+* ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. Default is ``ON``.
+* ``BUILD_TEST``. Set this to ``ON`` to enable rocThrust tests. Default is ``OFF``.
+* ``BUILD_HIPSTDPAR_TEST``. Set this to ``ON`` to enable HIPSTDPAR tests. Default is ``OFF``.
+* ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Default is ``OFF``.
+* ``BUILD_EXAMPLE``. Set this to ``ON`` to build the rocThrust examples. Default is ``OFF``.
+* ``USE_SYSTEM_LIB``. Set this to ``ON`` to use the installed ``ROCm`` libraries when building the tests. For this option to take effect, ``BUILD_TEST`` must be set to ``ON``. Default is ``OFF``.
+* ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Default is 0.
+* ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds must be passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. ``-DPRNG_SEEDS=1`` is used by default.
+* ``BUILD_ADDRESS_SANITIZER``. Set this to ``ON`` to build with the Clang address sanitizer enabled. Default is ``OFF``.
+* ``EXTERNAL_DEPS_FORCE_DOWNLOAD``. Set this to ``ON`` to download the non-ROCm dependencies such as Google Test even if they're already installed. Default is ``OFF``.
+* ``USE_HIPCXX``. Set this to ``ON`` to build with CMake HIP language support. Setting this to ``ON`` eliminates the need to use ``CXX=hipcc``. Default is ``OFF``.
+* ``ROCPRIM_FETCH_METHOD`` and  ``ROCRAND_FETCH_METHOD``. Set these to the method to use to download the rocPRIM and rocRAND components, respectively. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if the component isn't already installed and you're building rocThrust from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that includes the component. Set to ``DOWNLOAD`` if the component isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes the component. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if the component is already installed. If the component isn't installed, it'll be downloaded form the repository in the same way as using the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
+
+.. note::
+
+    If you're using a version of git earlier than 2.25, ``-DROCPRIM_FETCH_METHOD=DOWNLOAD`` and ``-DROCRAND_FETCH_METHOD=DOWNLOAD`` will download the entire ``rocm-libraries`` repository.
 
 Build rocThrust using the generated make file:
 

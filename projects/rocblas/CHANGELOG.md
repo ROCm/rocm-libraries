@@ -22,6 +22,10 @@ rocBLAS documentation is available at
 
 * Improved the performance of Level 2 gemv transposed (`TransA != N`) for the problem sizes where `m` is small and `n` is large on gfx90a and gfx942.
 
+### Resolved issues
+
+* A ROCm 7.0 optimization was fixed to prevent half/f32_r gemm_ex from using the 16-bit gemv kernel, which failed the required 32-bit arithmetic precision.  
+
 ## rocBLAS 5.0.0 for ROCm 7.0
 
 ### Added

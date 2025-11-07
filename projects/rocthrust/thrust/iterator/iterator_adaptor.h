@@ -40,6 +40,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/attributes.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/detail/iterator_adaptor_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -126,13 +127,7 @@ template <typename Derived,
           typename Traversal  = use_default,
           typename Reference  = use_default,
           typename Difference = use_default>
-#if !defined(THRUST_DOXYGEN_INVOKED)                    \
-  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC \
-      || (defined(__has_declspec_attribute) && __has_declspec_attribute(empty_bases)))
-class __declspec(empty_bases) iterator_adaptor
-#else
-class iterator_adaptor
-#endif
+class THRUST_DECLSPEC_EMPTY_BASES iterator_adaptor
     : public detail::iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type
 {
   /*! \cond

@@ -21,11 +21,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-    branches:
-      - develop
-      - staging
-      - main
-      - release-staging/rocm-rel-7.*
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
@@ -35,8 +30,39 @@ jobs:
   dispatch-azure-ci:
     name: Trigger Azure CI
     if: github.repository == 'ROCm/rocm-libraries' && github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
+    - name: Check if branch is allowed
+      id: branch-check
+      run: |
+        allowed_branches=("develop" "staging" "main")
+        # Add pattern matching for release branches
+        branch="${{ github.event.pull_request.base.ref }}"
+        echo "Target branch: $branch"
+
+        should_run=false
+
+        # Check exact matches
+        for allowed in "${allowed_branches[@]}"; do
+          if [[ "$branch" == "$allowed" ]]; then
+            should_run=true
+            break
+          fi
+        done
+
+        # Check pattern match for release-staging branches
+        if [[ "$branch" =~ ^release-staging/rocm-rel-7\. ]]; then
+          should_run=true
+        fi
+
+        if [[ "$should_run" == "true" ]]; then
+          echo "Branch '$branch' is allowed"
+          echo "should-run=true" >> $GITHUB_OUTPUT
+        else
+          echo "Branch '$branch' is not in the allowed list"
+          echo "Allowed branches: ${allowed_branches[*]} and release-staging/rocm-rel-7.*"
+          echo "should-run=false" >> $GITHUB_OUTPUT
+        fi
     - name: Generate a token
       id: generate-token
       uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
@@ -48,6 +74,7 @@ jobs:
           rocm-libraries
 
     - name: Wait until refs/pull/${{ github.event.pull_request.number }}/merge exists
+      if: steps.branch-check.outputs.should-run == 'true'
       run: |
         merge_ref="refs/pull/${{ github.event.pull_request.number }}/merge"
         check_merge_ref() {
@@ -75,6 +102,7 @@ jobs:
         fi
 
     - name: Checkout code
+      if: steps.branch-check.outputs.should-run == 'true'
       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         ref: refs/pull/${{ github.event.pull_request.number }}/merge
@@ -83,12 +111,14 @@ jobs:
         token: ${{ steps.generate-token.outputs.token }}
 
     - name: Install dependencies
+      if: steps.branch-check.outputs.should-run == 'true'
       run: |
         python -m pip install --upgrade pip
         pip install -r .github/requirements.txt
 
     - name: Detect changed subtrees
       id: detect
+      if: steps.branch-check.outputs.should-run == 'true'
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
@@ -99,7 +129,7 @@ jobs:
 
     - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress
-      if: steps.detect.outputs.subtrees
+      if: steps.branch-check.outputs.should-run == 'true' && steps.detect.outputs.subtrees
       run: |
         pr_number=${{ github.event.pull_request.number }}
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
@@ -135,7 +165,7 @@ jobs:
 
     - name: Rerun previous failed/cancelled runs for current PR merge commit
       id: rerun-failed
-      if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
+      if: steps.branch-check.outputs.should-run == 'true' && steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
       run: |
         pr_number=${{ github.event.pull_request.number }}
         pr_merge_sha=$(curl -sSX GET "https://api.github.com/repos/ROCm/rocm-libraries/git/ref/pull/${pr_number}/merge" | jq -r '.object.sha')
@@ -192,7 +222,7 @@ jobs:
 
     - name: Start new Azure CI runs
       id: dispatch
-      if: steps.detect.outputs.subtrees && (steps.cancel-in-progress.outputs.status == 'true' || steps.rerun-failed.outputs.status == 'false')
+      if: steps.branch-check.outputs.should-run == 'true' && steps.detect.outputs.subtrees && (steps.cancel-in-progress.outputs.status == 'true' || steps.rerun-failed.outputs.status == 'false')
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |

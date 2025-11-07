@@ -21,22 +21,15 @@
 
 #pragma once
 
-#if defined(__HIP__)
-// Macro enables Device Malloc
-#  ifndef __HIP_ENABLE_DEVICE_MALLOC__
-#    define __HIP_ENABLE_DEVICE_MALLOC__ 1
-#  endif
-#  include <hip/hip_runtime.h>
-#endif
+// Internal config header that is only included through thrust/detail/config/config.h
 
-// For _CCCL_IMPLICIT_SYSTEM_HEADER
-#if defined(__CUDACC__)
-#  include <cuda/__cccl_config>
-#elif defined(__has_include)
-#  if __has_include(<cuda/__cccl_config>)
-#    include <cuda/__cccl_config>
-#  endif
-#endif
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 // enumerate host compilers we know about
 //! deprecated [Since 2.7]
