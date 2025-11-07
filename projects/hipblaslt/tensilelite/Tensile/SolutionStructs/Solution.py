@@ -777,7 +777,6 @@ class Solution(collections.abc.Mapping):
   # determine can we use DirectToLds
   @staticmethod
   def isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason: bool):
-
     numBytes = state["ProblemType"]["DataType"].numBytes()
     isa = state["ISA"]
 
@@ -2023,16 +2022,15 @@ class Solution(collections.abc.Mapping):
          and not isMixedPrec and not state["ProblemType"]["Sparse"] \
          and state["MatrixInstB"] == 1 \
          and not disableGNLC:
-        # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
-        grwidthA = state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()
-        grwidthB = state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()
-        # Check that GR layout is the same as LDS layout for A/B
-        sameLayoutA = state["ProblemType"]["TLUA"] != state["UnrollMajorLDSA"]
-        sameLayoutB = state["ProblemType"]["TLUB"] != state["UnrollMajorLDSB"]
-        state["UseGeneralizedNLCOneA"] = grwidthA != 8 and sameLayoutA \
-          and state["WaveSeparateGlobalReadA"] == 0 and not state["DirectToVgprA"]
-        state["UseGeneralizedNLCOneB"] = grwidthB != 8 and sameLayoutB \
-          and state["WaveSeparateGlobalReadB"] == 0 and not state["DirectToVgprB"]
+
+        for tc in ['A', 'B']:
+          # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
+          grwidth = state["GlobalReadVectorWidth%s"%tc] * state["ProblemType"]["DataType%s"%tc].numBytes()
+          # Check that GR layout is the same as LDS layout for A/B
+          sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
+          state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
+            and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
+
         state["UseGeneralizedNLCOneMetadata"] = False
         state["_UseSgprForGRO"] = 0
       else:

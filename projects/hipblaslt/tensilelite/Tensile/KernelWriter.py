@@ -4390,7 +4390,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # to the offset calc.
           # TODO: Add support for VW=4,8, this will require more changes in LR offset
           # calculations
-          usePerpPerm = False if kernel["VectorWidth%s"%tc] in [4, 8] else True
+          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 else True
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
           else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]

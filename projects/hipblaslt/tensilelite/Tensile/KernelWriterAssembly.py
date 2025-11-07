@@ -5372,12 +5372,6 @@ class KernelWriterAssembly(KernelWriter):
     imod.addComment1("global read for tail done")
     imod.add(tailGlobalLoadEndLabel)
 
-    if ((doA and kernel["DirectToLds%s"%tPA["tensorChar"]]) or \
-       (doB and kernel["DirectToLds%s"%tPB["tensorChar"]])) and \
-       (self.states.archCaps["HasM0LDSClamp"]):
-      imod.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
-            comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
-
     if doA or doB:
       self.vgprPool.checkIn(tmpVgpr)
     for s in singSgprList:
@@ -8331,11 +8325,6 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment=""))
           module.add(SBarrier(comment="debug"))
 
-      # TODO - can remove one of these m0 restores if A and B both TLU
-      if kernel["DirectToLds%s"%tP["tensorChar"]] and (self.states.archCaps["HasM0LDSClamp"]):
-        module.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
-            comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
-
       if isTr:
         self.vgprPool.checkIn(maxGroVgpr)
       elif not kernel["BufferLoad"]:
@@ -8775,17 +8764,6 @@ class KernelWriterAssembly(KernelWriter):
         imod.footer.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="conservative wait"))
         imod.footer.add(SBarrier(comment="debug"))
         #module.add(self.getCmpAssert(self.asmAssert.lt, vgpr("Serial"), 64)) # examine second wavefront
-
-    # TODO - can remove one of these m0 restores if A and B both TLU
-    if kernel["DirectToLds%s"%tP["tensorChar"]] and not (mode == 1 and kernel["PrefetchGlobalRead"]==2) and (self.states.archCaps["HasM0LDSClamp"]):
-      dst = mgpr(0)
-      src = hex(kernel["LdsNumBytes"])
-      comment = "Restore LDS clamp at %u bytes"%(kernel["LdsNumBytes"])
-      # PGR=2 case, footer is located before global read. To avoid setting clamp before global read, store lds clamp code in middle
-      if kernel["PrefetchGlobalRead"] == 2:
-        imod.middle.add(SMovB32(dst=dst, src=src, comment=comment))
-      else:
-        imod.footer.add(SMovB32(dst=dst, src=src, comment=comment))
 
     return imod
 
