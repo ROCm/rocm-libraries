@@ -23,6 +23,7 @@
 
 #include "fft_enums.h"
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -31,27 +32,38 @@
 #include <type_traits>
 #include <vector>
 
+// type traits to distinguish between std::array and other supposedly dynamically-sized containers
+template <typename C>
+struct is_std_array : std::false_type
+{
+};
+template <typename T, std::size_t N>
+struct is_std_array<std::array<T, N>> : std::true_type
+{
+};
+
 /**
  * @brief calculates the default strides for a given Discrete Fourier transform (row-major convention).
  * @note This function assumes interleaved complex representation for hermitian-symmetric data.
  * @note Empty strides are returned for empty lengths.
  * 
- * @tparam T integral value type for lengths, the same type is used for the returned strides
+ * @tparam C container type for the transform's lengths (container's value_type must be an integral type).
+ * The same type is used for the returned strides.
  * @param[in] dft_type type of transform
  * @param[in] placement placement of the transform
  * @param[in] io input/output flag
- * @param[in] lengths vector of lengths for the transform of interest (row-major ordering convention)
- * @return std::vector<T> desired default strides
+ * @param[in] lengths container of lengths for the transform of interest (row-major ordering convention)
+ * @return desired default strides (same type as ``lengths`` input argument)
  */
-template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static std::vector<T> default_strides(fft_transform_type    dft_type,
-                                      fft_result_placement  placement,
-                                      fft_io                io,
-                                      const std::vector<T>& lengths)
+template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
+static C default_strides(fft_transform_type   dft_type,
+                         fft_result_placement placement,
+                         fft_io               io,
+                         const C&             lengths)
 {
     validate_enums_or_throw("default_strides", dft_type, placement, io);
-    std::vector<T> ret(lengths.size());
-    T              def_stride = 1;
+    C                      ret(lengths);
+    typename C::value_type def_stride = 1;
     for(auto dim_idx = lengths.size(); dim_idx-- > 0;)
     {
         ret[dim_idx] = def_stride;
@@ -296,45 +308,61 @@ struct ionembed_t
     /**
      * @brief calculates generalized (row-major) strides from the advanced plan's data layout parameters
      * 
-     * @tparam U integral value type for the generalized strides and the transform's lengths.
+     * @tparam C container type for the generalized strides and the transform's lengths (container's
+     * value_type must be an integral type).
      * @param[in] io flag for requesting input (fft_io::fft_io_in) or output (fft_io::fft_io_out) strides.
      * @param[in] dft_kind type of the discrete Fourier transform of interest.
      * @param[in] placement placement of the discrete Fourier transform of interest.
      * @param[in] lengths lengths of the discrete Fourier transform of interest (row-major ordering).
-     * @return std::vector<U> generalized strides calculated from the advanced plan's data layout parameters
-     * or from the provided args if implicit default layout is used. ``dft_kind``, ``placement``, and
-     * ``lengths`` are all ignored if implicit default layout is NOT used (i.e., if {i,o}nembed is explicitly
-     * set internally).
+     * @return generalized strides calculated from the advanced plan's data layout parameters
+     * or from the provided args if implicit default layout is used. ``dft_kind``, ``placement``,
+     * and ``lengths`` are all ignored if implicit default layout is NOT used (i.e., if
+     * {i,o}nembed is explicitly set internally). The returned value is of the same type as ``lengths``.
      * @note a ionembed_type_conversion_error may be thrown if an error is detected when converting
-     * internally-calculated values to U (e.g. if a negative value is to be assigned but U is unsigned,
-     * or if U := int32_t and T := int64_t and an overflow/underflow is detected internally).
+     * internally-calculated values to C::value_type (e.g. if a negative value is to be assigned but
+     * C::value_type is unsigned, or if C::value_type := int32_t and T := int64_t and an overflow/underflow
+     * is detected internally).
      */
-    template <typename U, std::enable_if_t<std::is_integral_v<U>, bool> = true>
-    std::vector<U> as_generalized_strides(fft_io                io,
-                                          fft_transform_type    dft_kind,
-                                          fft_result_placement  placement,
-                                          const std::vector<U>& lengths) const
+    template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
+    C as_generalized_strides(fft_io               io,
+                             fft_transform_type   dft_kind,
+                             fft_result_placement placement,
+                             const C&             lengths) const
     {
+        using C_val_t = typename C::value_type;
         validate_enums_or_throw("ionembed_t::as_generalized_strides", io, dft_kind, placement);
-        const auto& nembed      = io == fft_io::fft_io_in ? inembed : onembed;
-        const U     elem_stride = convert_to<U>(io == fft_io::fft_io_in ? istride : ostride);
+        const auto&   nembed = io == fft_io::fft_io_in ? inembed : onembed;
+        const C_val_t elem_stride
+            = convert_to<C_val_t>(io == fft_io::fft_io_in ? istride : ostride);
         if(!nembed)
         {
             // --> default strides, use lengths, type of transform, etc.
-            // note: value type used below is same of lengths', i.e., U
+            // note: value type used below is same of lengths', i.e., C_val_t
             auto ret = default_strides(dft_kind, placement, io, lengths);
             if constexpr(!ignore_elementary_stride_if_null_nembed)
             {
                 if(elem_stride != 1)
-                    std::for_each(ret.begin(), ret.end(), [&](U& val) { val *= elem_stride; });
+                    std::for_each(
+                        ret.begin(), ret.end(), [&](C_val_t& val) { val *= elem_stride; });
             }
             return ret;
         }
-        std::vector<U> ret(nembed->size());
+        C ret;
+        if constexpr(is_std_array<C>::value)
+        {
+            if(ret.size() != nembed->size())
+                throw std::invalid_argument(
+                    "Incompatible size of std::array ``lengths`` w.r.t. internal {i,o}nembed "
+                    "detected in ionembed_t::as_generalized_strides");
+        }
+        else
+        {
+            ret.resize(nembed->size());
+        }
         ret.back() = elem_stride;
         for(auto dim = ret.size() - 1; dim-- > 0;)
         {
-            ret[dim] = ret[dim + 1] * convert_to<U>(nembed->at(dim + 1));
+            ret[dim] = ret[dim + 1] * convert_to<C_val_t>(nembed->at(dim + 1));
         }
         return ret;
     }
@@ -508,10 +536,11 @@ using hipfft_ionembed_t = ionembed_t<T, false>;
 
 // in FFTW3/hipFFTW
 // @ T := int
-// @ T := size_t internally to the implementation details of hipFFTW
+// @ T := ptrdiff_t internally to the implementation details of hipFFTW
 // @ elementary strides are not ignored when implicit default inembed/onembed are used
 //   --> "false" template specialization value for second template arg of ionembed_t
-using hipfftw_ionembed_t = ionembed_t<int, false>;
-using fftw_ionembed_t    = ionembed_t<int, false>;
+using hipfftw_ionembed_t          = ionembed_t<int, false>;
+using fftw_ionembed_t             = ionembed_t<int, false>;
+using hipfftw_internal_ionembed_t = ionembed_t<ptrdiff_t, false>;
 
 #endif // DATA_LAYOUT_H
