@@ -26,8 +26,7 @@
 
 #include "lstm.hpp"
 #include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
+#include "gtest_common.hpp"
 #include <boost/algorithm/string.hpp>
 
 namespace lstm_extra {

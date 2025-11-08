@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest_common.hpp>
+#include "gtest_common.hpp"
 
 #if MIOPEN_USE_COMPOSABLEKERNEL
 #define WORAROUND_ISSUE_2533 1

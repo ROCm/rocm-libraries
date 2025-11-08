@@ -23,11 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-#include <miopen/conv/solvers.hpp>
 #include <miopen/miopen.h>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/solver_id.hpp>
-#include <serialize.hpp>
+#include "../serialize.hpp"
 
 #include "tensor_util.hpp"
 #include "get_handle.hpp"

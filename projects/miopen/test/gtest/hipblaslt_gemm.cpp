@@ -35,9 +35,7 @@
 #include "get_handle.hpp"
 #include "../workspace.hpp"
 #include "gemm_cpu_util.hpp"
-
-#include <gtest/gtest.h>
-#include <gtest/gtest_common.hpp>
+#include "gtest_common.hpp"
 
 #include <miopen/gemm_v2.hpp>
 

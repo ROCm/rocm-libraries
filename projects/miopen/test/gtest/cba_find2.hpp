@@ -25,15 +25,12 @@
  *******************************************************************************/
 #pragma once
 
-#include <random>
-
-#include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/problem.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include "../serialize.hpp"
+#include "../fusionHost.hpp"
 
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
@@ -41,6 +38,8 @@
 
 #include "conv_test_base.hpp"
 #include "conv_tensor_gen.hpp"
+
+#include <random>
 
 template <typename T = float>
 struct ConvBiasActivInferFind2Test

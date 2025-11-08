@@ -7,7 +7,6 @@
 #include <type_traits>
 #include <cstdint>
 #include <half/half.hpp>
-#include <boost/container/small_vector.hpp>
 
 struct OpKernelArg
 {
@@ -31,7 +30,8 @@ struct OpKernelArg
     }
 
     std::size_t size() const { return buffer.size(); };
-    boost::container::small_vector<char, 8> buffer;
+    //boost::container::small_vector<char, 8> buffer;
+    std::vector<char> buffer = {' ',' ',' ',' ',' ',' ',' ',' '};
     bool is_ptr = false;
 };
 

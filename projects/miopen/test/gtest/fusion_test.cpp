@@ -23,10 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <gtest/gtest.h>
-#include <gtest/gtest_common.hpp>
 #include <miopen/miopen.h>
 
+#include "gtest_common.hpp"
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
 #include "cba.hpp"

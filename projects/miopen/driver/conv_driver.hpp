@@ -49,11 +49,11 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/tensor.hpp>
 
-#include <../test/cpu_bias.hpp>
-#include <../test/cpu_conv.hpp>
-#include <../test/serialize.hpp>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
+#include "../test/cpu_bias.hpp"
+#include "../test/cpu_conv.hpp"
+#include "../test/serialize.hpp"
+#include "../test/tensor_holder.hpp"
+#include "../test/verify.hpp"
 
 #include <boost/optional.hpp>
 #include <boost/optional/optional_io.hpp>

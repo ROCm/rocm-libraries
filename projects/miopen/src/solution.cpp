@@ -39,11 +39,12 @@
 #include <miopen/softmax/problem_description.hpp>
 #include <miopen/softmax/solvers.hpp>
 
+#include <miopen/fusion/problem_description.hpp>
+#include <miopen/fusion/context.hpp>
+
 #include <nlohmann/json.hpp>
 
 #include <boost/hof/match.hpp>
-#include "miopen/fusion/problem_description.hpp"
-#include "miopen/fusion/context.hpp"
 
 namespace miopen::debug {
 // Todo: This should be updated when a separate driver command is implemented

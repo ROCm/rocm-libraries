@@ -26,8 +26,7 @@
 #pragma once
 
 #include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <gtest/gtest_common.hpp>
+#include "gtest_common.hpp"
 
 #include <miopen/process.hpp>
 #include <miopen/filesystem.hpp>

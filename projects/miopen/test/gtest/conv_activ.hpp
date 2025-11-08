@@ -25,19 +25,19 @@
  *******************************************************************************/
 #pragma once
 
-#include <random>
-
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include "../serialize.hpp"
+#include "../fusionHost.hpp"
 
 #include "tensor_util.hpp"
 #include "conv_common.hpp"
 
 #include "conv_test_base.hpp"
 #include "conv_tensor_gen.hpp"
+
+#include <random>
 
 template <typename T = float, typename TestCaseType = ConvTestCaseBase>
 struct ConvActivInferTest : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t,

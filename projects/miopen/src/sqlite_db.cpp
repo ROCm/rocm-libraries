@@ -35,21 +35,14 @@
 #if MIOPEN_EMBED_DB
 #include <miopen_data.hpp>
 #endif
-#include <boost/date_time/posix_time/posix_time_types.hpp>
-#include <boost/none.hpp>
-#include <boost/optional.hpp>
 
 #include <memory>
-#include <algorithm>
-#include <cassert>
-#include <chrono>
-#include <cstdio>
-#include <fstream>
-#include <ios>
-#include <mutex>
-#include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <thread>
+#include <functional>
+#include <chrono>
+#include <sstream>
 
 extern "C" {
 int miopen_sqlite3_memvfs_init(sqlite3* db, char** pzErrMsg, const sqlite3_api_routines* pApi);

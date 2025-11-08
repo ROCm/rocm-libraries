@@ -25,9 +25,8 @@
  *******************************************************************************/
 #include "../conv2d.hpp"
 #include <miopen/miopen.h>
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
 #include <miopen/env.hpp>
+#include "gtest_common.hpp"
 #include "get_handle.hpp"
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)

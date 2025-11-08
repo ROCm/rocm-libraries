@@ -23,12 +23,11 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <utility>
+#include <sstream>
+#include <iterator>
 
 #include "lstm.hpp"
 #include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
 #include "gtest_common.hpp"
 
 namespace deepbench_lstm {

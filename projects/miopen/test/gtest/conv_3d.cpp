@@ -25,8 +25,8 @@
  *******************************************************************************/
 #include "../conv3d.hpp"
 #include <miopen/miopen.h>
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
+
+#include "gtest_common.hpp"
 #include "get_handle.hpp"
 
 namespace conv_3d {
