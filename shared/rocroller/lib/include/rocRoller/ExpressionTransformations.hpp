@@ -35,6 +35,8 @@ namespace rocRoller
 {
     namespace Expression
     {
+        using ExpressionTransformType = std::function<ExpressionPtr(ExpressionPtr)>;
+
         ExpressionPtr identity(ExpressionPtr expr);
 
         /**
@@ -91,6 +93,11 @@ namespace rocRoller
          * - Opposite shifts by same amount: mask off bits that would be zeroed out.
          */
         ExpressionPtr combineShifts(ExpressionPtr expr);
+
+        /**
+         * Splits BitfieldCombine expressions that target more than 32 bits into a Concatenate of 32 bit sub-expressions.
+         */
+        ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
 
         /**
          * @brief Simplify expressions
@@ -176,7 +183,10 @@ namespace rocRoller
             FastArithmetic() = delete;
             explicit FastArithmetic(ContextPtr);
 
-            ExpressionPtr operator()(ExpressionPtr) const;
+            ExpressionPtr                        operator()(ExpressionPtr) const;
+            std::vector<ExpressionTransformType> getTransforms() const;
+            ExpressionPtr                        applyTransforms(ExpressionPtr,
+                                                                 const std::vector<ExpressionTransformType>&) const;
 
         private:
             ContextPtr m_context;

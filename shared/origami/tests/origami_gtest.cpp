@@ -257,7 +257,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
                           input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
-                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("splittingFactor"));
+                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("splittingFactor"),
+                          input_case.values.at("max_cus"));
         }
     }
     else if(test.name == "ComputePerfGflops")
@@ -268,7 +269,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
                           input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
-                          input_case.values.at("WGM"));
+                          input_case.values.at("WGM"), input_case.values.at("max_cus"));
         }
     }
     else if(test.name == "EstimateMallHit")
@@ -276,8 +277,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         for(const auto& input_case : test.inputs)
         {
             EstimateMallHit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("numActiveCUs"), 
-                          input_case.values.at("splittingFactor"), input_case.expected_gt);
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"),input_case.values.at("element_size_A"),
+                           input_case.values.at("numActiveCUs"), input_case.values.at("splittingFactor"), input_case.expected_gt);
         }
     }
     else if(test.name == "CheckLDSCapacity")
@@ -303,7 +304,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
                           input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
                           input_case.values.at("mx_block_size"), input_case.values.at("H_L2"), input_case.values.at("WGM"), 
-                          input_case.values.at("biggest_allowable_split"), input_case.expected_gt);
+                          input_case.values.at("biggest_allowable_split"), input_case.values.at("max_cus"), input_case.expected_gt);
         }
     }
     else if(test.name == "BestMacroTileSize")
@@ -313,7 +314,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
             BestMacroTileSize(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("element_size_A"), 
                           input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"), 
-                          input_case.values.at("H_L2"), input_case.values.at("WGM"));
+                          input_case.values.at("H_L2"), input_case.values.at("WGM"), input_case.values.at("max_cus"));
         }
     }
     else if(test.name == "BestWGM")
@@ -321,8 +322,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         for(const auto& input_case : test.inputs)
         {
             BestWGM(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("MI_M"), 
-                          input_case.values.at("MI_N"), input_case.values.at("MI_K"), input_case.values.at("element_size"), input_case.values.at("H_L2"));
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"));
         }
     }
     else if(test.name == "UtilsTFlopsFromLatency")

@@ -41,7 +41,7 @@ import pandas as pd
 import rrperf
 import rrperf.args as args
 import scipy.stats
-from rrperf.problems import GEMMResult
+from rrperf.problems import GEMMResult, RRPerfResult
 from rrperf.specs import MachineSpecs
 
 
@@ -275,7 +275,81 @@ def significant_changes(summary, threshold=0.05):
     return result_diff
 
 
-def markdown_summary(md, perf_runs):
+def resource_usage_changes(
+    summary: dict[str, dict[str, tuple[str, ComparisonResult]]],
+) -> str:
+    """Report resource usage changes between runs."""
+    resource_diffs = dict()
+    for run in summary:
+        for result in summary[run]:
+            token, comparison = summary[run][result]
+            A: RRPerfResult
+            B: RRPerfResult
+            A, B = comparison.results
+
+            sgprA = A.sgprCount
+            sgprB = B.sgprCount
+            vgprA = A.vgprCount
+            vgprB = B.vgprCount
+            agprA = A.agprCount
+            agprB = B.agprCount
+            ldsBytesA = A.ldsBytes
+            ldsBytesB = B.ldsBytes
+
+            if (
+                sgprA != sgprB
+                or vgprA != vgprB
+                or agprA != agprB
+                or ldsBytesA != ldsBytesB
+            ):
+                # Have diff viewer show red if *any* resource increased, green otherwise
+                any_increase = (
+                    sgprB > sgprA
+                    or vgprB > vgprA
+                    or agprB > agprA
+                    or ldsBytesB > ldsBytesA
+                )
+                line_sign = "-" if any_increase else "+"
+
+                changes = []
+                register_pairs = [
+                    ("SGPR", sgprA, sgprB),
+                    ("VGPR", vgprA, vgprB),
+                    ("AGPR", agprA, agprB),
+                ]
+
+                for register_type, value_a, value_b in register_pairs:
+                    if value_a != value_b:
+                        diff = value_b - value_a
+                        sign = "+" if diff > 0 else ""
+                        changes.append(
+                            f"{register_type}: {value_a} -> {value_b} ({sign}{diff})"
+                        )
+
+                if ldsBytesA != ldsBytesB:
+                    diff = ldsBytesB - ldsBytesA
+                    sign = "+" if diff > 0 else ""
+                    changes.append(
+                        f"LDS: {ldsBytesA} -> {ldsBytesB} bytes ({sign}{diff})"
+                    )
+
+                resource_diffs[
+                    A.problem_token(priority_problems()) + A.run_invariant_token
+                ] = (
+                    f"{line_sign} {' | '.join(changes)}"
+                    f"\n\t| {A.problem_token(priority_problems())}"
+                    f"| {A.solution_token} "
+                    f"| {token}\n"
+                )
+
+    keys = sorted(resource_diffs.keys())
+    result_diff = ""
+    for key in keys:
+        result_diff += resource_diffs[key]
+    return result_diff
+
+
+def markdown_summary(md, perf_runs, detail=False):
     """Create Markdown report of summary statistics."""
 
     summary = summary_statistics(perf_runs)
@@ -291,24 +365,25 @@ def markdown_summary(md, perf_runs):
     result_diff = significant_changes(summary)
 
     result_table = ""
-    for run in summary:
-        for result in summary[run]:
-            token, comparison = summary[run][result]
-            A, B = comparison.results
-            percent = (
-                ((comparison.median[1] - comparison.median[0]) * 100.0)
-                / comparison.median[0]
-                if comparison.median[0] != 0
-                else 0.0
-            )
-            row_str = [
-                f"{token}",
-                f"{(percent):.2f}%",
-                f"{comparison.moods_pval:0.4e}",
-                f"{A.kernelGenerate:,.0f}",
-                f"{B.kernelGenerate:,.0f}",
-            ]
-            result_table += " | ".join(row_str) + "\n"
+    if detail:
+        for run in summary:
+            for result in summary[run]:
+                token, comparison = summary[run][result]
+                A, B = comparison.results
+                percent = (
+                    ((comparison.median[1] - comparison.median[0]) * 100.0)
+                    / comparison.median[0]
+                    if comparison.median[0] != 0
+                    else 0.0
+                )
+                row_str = [
+                    f"{token}",
+                    f"{(percent):.2f}%",
+                    f"{comparison.moods_pval:0.4e}",
+                    f"{A.kernelGenerate:,.0f}",
+                    f"{B.kernelGenerate:,.0f}",
+                ]
+                result_table += " | ".join(row_str) + "\n"
 
     if len(result_diff) > 0:
         print("```diff", file=md)
@@ -325,14 +400,34 @@ def markdown_summary(md, perf_runs):
             file=md,
         )
 
-    print("<details><summary>Full table of results</summary>\n", file=md)
+    if detail:
+        print("<details><summary>Full table of results</summary>\n", file=md)
+        print(" | ".join(header), file=md)
+        print(" | ".join(["---"] * len(header)), file=md)
+        print(result_table, file=md)
+        print("\n</details>", file=md)
 
-    print(" | ".join(header), file=md)
-    print(" | ".join(["---"] * len(header)), file=md)
-    print(result_table, file=md)
-    print("\n</details>", file=md)
 
-    perf_runs.sort()
+def markdown_resource_summary(md, perf_runs):
+    """Create Markdown report of resource usage changes."""
+
+    summary = summary_statistics(perf_runs)
+    resource_diff = resource_usage_changes(summary)
+
+    if len(resource_diff) > 0:
+        print("```diff", file=md)
+        print(
+            "@@                    Resource Usage Changes                         @@",
+            file=md,
+        )
+        print("=" * 100, file=md)
+        print(resource_diff, file=md)
+        print("```\n\n", file=md)
+    else:
+        print(
+            ":heavy_check_mark: **_No Resource Usage Changes_** :heavy_check_mark:\n\n",
+            file=md,
+        )
 
 
 def html_overview_table(html_file, summary, problems):
@@ -352,6 +447,14 @@ def html_overview_table(html_file, summary, problems):
         "Run B",
         "Gen A (ns)",
         "Gen B (ns)",
+        "SGPR A",
+        "SGPR B",
+        "VGPR A",
+        "VGPR B",
+        "AGPR A",
+        "AGPR B",
+        "LDS A",
+        "LDS B",
     ]
 
     print("</td><td> ".join(header), file=html_file)
@@ -360,6 +463,8 @@ def html_overview_table(html_file, summary, problems):
     for run in summary:
         for i, result in enumerate(summary[run]):
             token, comparison = summary[run][result]
+            A: RRPerfResult
+            B: RRPerfResult
             A, B = comparison.results
             relative_diff = (
                 (comparison.median[1] - comparison.median[0]) / comparison.median[0]
@@ -386,6 +491,14 @@ def html_overview_table(html_file, summary, problems):
                     <td> {B.path.parent.stem} </td>
                     <td> {A.kernelGenerate:,.0f} </td>
                     <td> {B.kernelGenerate:,.0f} </td>
+                    <td> {A.sgprCount} </td>
+                    <td> {B.sgprCount} </td>
+                    <td> {A.vgprCount} </td>
+                    <td> {B.vgprCount} </td>
+                    <td> {A.agprCount} </td>
+                    <td> {B.agprCount} </td>
+                    <td> {A.ldsBytes:,} </td>
+                    <td> {B.ldsBytes:,} </td>
                 </tr>""",
                 file=html_file,
             )
@@ -653,11 +766,19 @@ def html_summary(  # noqa: C901
 def console_summary(f, perf_runs):
     summary = summary_statistics(perf_runs)
     result_diff = significant_changes(summary)
+    resource_diff = resource_usage_changes(summary)
+
     if len(result_diff) > 0:
         print("Significant Diffs (p-val < 0.05)", file=f)
         print(result_diff, file=f)
     else:
         print("No statistically significant performance diffs", file=f)
+
+    if len(resource_diff) > 0:
+        print("\nResource Usage Changes", file=f)
+        print(resource_diff, file=f)
+    else:
+        print("\nNo resource usage changes", file=f)
 
 
 def get_args(parser: argparse.ArgumentParser):
@@ -676,7 +797,7 @@ def get_args(parser: argparse.ArgumentParser):
 
     parser.add_argument(
         "--format",
-        choices=["md", "html", "email_html", "console", "gemmdf"],
+        choices=["md", "html", "email_html", "console", "gemmdf", "resource_md"],
         default="md",
         help="Output format.",
     )
@@ -729,6 +850,8 @@ def compare(
         email_html_summary(output, perf_runs)
     elif format == "md":
         markdown_summary(output, perf_runs)
+    elif format == "resource_md":
+        markdown_resource_summary(output, perf_runs)
     elif format == "console":
         console_summary(output, perf_runs)
     elif format == "gemmdf":
@@ -754,6 +877,14 @@ def compare(
             "medianB(ns)",
             "genA(ns)",
             "genB(ns)",
+            "sgprA",
+            "sgprB",
+            "vgprA",
+            "vgprB",
+            "agprA",
+            "agprB",
+            "ldsBytesA",
+            "ldsBytesB",
         ]
         scols = [
             "PREC",
@@ -773,6 +904,14 @@ def compare(
             "medianA(ns)",
             "genA(ns)",
             "genB(ns)",
+            "sgprA",
+            "sgprB",
+            "vgprA",
+            "vgprB",
+            "agprA",
+            "agprB",
+            "ldsBytesA",
+            "ldsBytesB",
         ]
 
         print(df[cols].sort_values(scols, axis="index"), file=output)

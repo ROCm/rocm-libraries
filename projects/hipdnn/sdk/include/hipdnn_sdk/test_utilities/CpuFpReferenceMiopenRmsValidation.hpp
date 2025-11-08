@@ -10,7 +10,9 @@
 #endif
 
 #include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 
 namespace hipdnn_sdk
 {
@@ -25,7 +27,7 @@ using namespace hipdnn_sdk::utilities;
 // RMS check is only relative tolerance based. We recommend using cpu_fp_reference_validation
 // instead, but this class can be used to compare with MIOpen tolerance checks.
 template <class T>
-class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation<T>
+class CpuFpReferenceMiopenRmsValidation : public IReferenceValidation
 {
 public:
     CpuFpReferenceMiopenRmsValidation(T relativeTolerance = std::numeric_limits<T>::epsilon())
@@ -39,42 +41,71 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) const override
     {
-        if(reference.count() != implementation.count())
+        if(reference.elementCount() != implementation.elementCount()
+           || reference.dims() != implementation.dims())
         {
             return false;
         }
 
-        size_t elementCount = reference.count();
-
-        if(elementCount == 0)
+        if(reference.elementCount() == 0)
         {
             return true;
         }
 
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
+        std::atomic<double> squareDifference(0.0);
+        std::atomic<double> maxRefMagnitude(0.0);
+        std::atomic<double> maxImplMagnitude(0.0);
 
-        double squareDifference = 0.0;
-        double maxRefMagnitude = 0.0;
-        double maxImplMagnitude = 0.0;
+        TensorView<T> refView(reference);
+        TensorView<T> implView(implementation);
 
-        // Iterate through all elements to calculate square differences and find max magnitudes
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            auto refValue = static_cast<double>(refData[i]);
-            auto implValue = static_cast<double>(implData[i]);
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValueT = refView.getHostValue(indices);
+            T implValueT = implView.getHostValue(indices);
 
-            // Accumulate square differences
+            auto refValue = static_cast<double>(refValueT);
+            auto implValue = static_cast<double>(implValueT);
+
             auto diff = refValue - implValue;
-            squareDifference += diff * diff;
+            double diffSquared = diff * diff;
+            double currentSum = squareDifference.load(std::memory_order_relaxed);
+            while(!squareDifference.compare_exchange_weak(
+                currentSum, currentSum + diffSquared, std::memory_order_relaxed))
+            {
+            }
 
             // Track maximum magnitudes
-            maxRefMagnitude = std::max(maxRefMagnitude, std::fabs(refValue));
-            maxImplMagnitude = std::max(maxImplMagnitude, std::fabs(implValue));
-        }
+            double currentMaxRef = maxRefMagnitude.load(std::memory_order_relaxed);
+            double absRefValue = std::fabs(refValue);
+            while(absRefValue > currentMaxRef
+                  && !maxRefMagnitude.compare_exchange_weak(
+                      currentMaxRef, absRefValue, std::memory_order_relaxed))
+            {
+            }
 
+            double currentMaxImpl = maxImplMagnitude.load(std::memory_order_relaxed);
+            double absImplValue = std::fabs(implValue);
+            while(absImplValue > currentMaxImpl
+                  && !maxImplMagnitude.compare_exchange_weak(
+                      currentMaxImpl, absImplValue, std::memory_order_relaxed))
+            {
+            }
+        };
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
+
+        return checkRmsError(
+            squareDifference, maxRefMagnitude, maxImplMagnitude, reference.elementCount());
+    }
+
+private:
+    bool checkRmsError(double squareDifference,
+                       double maxRefMagnitude,
+                       double maxImplMagnitude,
+                       size_t elementCount) const
+    {
         // Find the maximum magnitude between reference and implementation
         double maxMagnitude
             = std::max({maxRefMagnitude, maxImplMagnitude, std::numeric_limits<double>::min()});
@@ -92,10 +123,30 @@ public:
         return relativeRmsError <= _relativeTolerance;
     }
 
-private:
     // Tolerance for comparison
     double _relativeTolerance;
 };
+
+inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
+    createRmsValidator(hipdnn_sdk::data_objects::DataType dataType, float relativeTolerance)
+{
+    switch(dataType)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<float>>(relativeTolerance);
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<half>>(
+            static_cast<half>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<hip_bfloat16>>(
+            static_cast<hip_bfloat16>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<double>>(
+            static_cast<double>(relativeTolerance));
+    default:
+        throw std::runtime_error("Unsupported data type for RMS validator");
+    }
+}
 
 } // namespace test_utilities
 } // namespace hipdnn_sdk

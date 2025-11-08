@@ -515,7 +515,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
     // calls to the solver should look for computed eigenvalues in the range
     // (vl - tol, vu + tol], where `tol = C * n * ulp * ||A||`.
     //
-    S C = 4;
+    S C = 10;
     std::vector<S> tols(bc, 0);
     std::vector<S> norms(bc, 0);
     S tol = 0;

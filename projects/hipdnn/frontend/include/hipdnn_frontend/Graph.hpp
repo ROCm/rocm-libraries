@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
@@ -16,8 +17,10 @@
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
 
 namespace hipdnn_frontend
 {
@@ -146,6 +149,137 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    GraphStructure buildAdjacencyList(const std::unordered_map<std::shared_ptr<TensorAttributes>,
+                                                               size_t>& tensorToOriginNode) const
+    {
+        size_t nodeCount = _sub_nodes.size();
+        GraphStructure structure;
+        structure.adjacencyList.resize(nodeCount);
+
+        for(size_t inputNodeIndex = 0; inputNodeIndex < nodeCount; ++inputNodeIndex)
+        {
+            auto inputs = _sub_nodes[inputNodeIndex]->getNodeInputTensorAttributes();
+            for(auto& input : inputs)
+            {
+                auto it = tensorToOriginNode.find(input);
+                if(it != tensorToOriginNode.end())
+                {
+                    size_t outputNodeIndex = it->second;
+                    structure.adjacencyList[outputNodeIndex].push_back(inputNodeIndex);
+                }
+            }
+        }
+
+        return structure;
+    }
+
+    std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> buildTensorToOriginNodeMap() const
+    {
+        std::unordered_map<std::shared_ptr<TensorAttributes>, size_t> tensorToOriginNode;
+        size_t nodeCount = _sub_nodes.size();
+
+        for(size_t i = 0; i < nodeCount; ++i)
+        {
+            auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
+            for(auto& output : outputs)
+            {
+                tensorToOriginNode[output] = i;
+            }
+        }
+
+        return tensorToOriginNode;
+    }
+
+    void reorderNodesTopologically(const std::vector<size_t>& topologicalOrder)
+    {
+        std::vector<std::shared_ptr<INode>> reorderedNodes;
+        reorderedNodes.reserve(topologicalOrder.size());
+
+        for(auto idx : topologicalOrder)
+        {
+            reorderedNodes.push_back(_sub_nodes[idx]);
+        }
+
+        _sub_nodes = std::move(reorderedNodes);
+    }
+
+    static std::unordered_set<int64_t>
+        getUsedIds(const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
+    {
+        std::unordered_set<int64_t> usedIds;
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                usedIds.insert(tensor->get_uid());
+            }
+        }
+        return usedIds;
+    }
+
+    static int64_t getUnusedTensorUid(int64_t& currentTensorId,
+                                      std::unordered_set<int64_t>& usedIds)
+    {
+        while(usedIds.find(currentTensorId) != usedIds.end())
+        {
+            ++currentTensorId;
+        }
+        usedIds.insert(currentTensorId);
+        return currentTensorId++;
+    }
+
+    static void populateHipdnnTensorIds(
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors,
+        std::unordered_set<int64_t>& usedIds)
+    {
+        int64_t currentTensorId = 0;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(!tensor)
+            {
+                continue;
+            }
+
+            if(!tensor->has_uid())
+            {
+                tensor->set_uid(getUnusedTensorUid(currentTensorId, usedIds));
+            }
+        }
+    }
+
+    static Error checkNoDuplicateTensorIdsImpl(
+        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+    {
+        std::unordered_set<int64_t> seenUids;
+        std::unordered_set<int64_t> duplicateUids;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                auto uid = tensor->get_uid();
+                if(!seenUids.insert(uid).second)
+                {
+                    duplicateUids.insert(uid);
+                }
+            }
+        }
+
+        if(!duplicateUids.empty())
+        {
+            std::string errorMsg = "Duplicate tensor UIDs found in the graph: ";
+            for(const auto& uid : duplicateUids)
+            {
+                errorMsg += std::to_string(uid) + ", ";
+            }
+            errorMsg.erase(errorMsg.length() - 2);
+            return {ErrorCode::INVALID_VALUE, errorMsg};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -157,23 +291,92 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        return validateSubtree();
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        result = topologicallySortGraph();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        result = validateSubtree();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        for(const auto& tensor : allTensors)
+        {
+            result = tensor->validate();
+            if(result.code != ErrorCode::OK)
+            {
+                return result;
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error checkNoDuplicateTensorIds()
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        return checkNoDuplicateTensorIdsImpl(allTensors);
+    }
+
+    Error topologicallySortGraph()
+    {
+        size_t nodeCount = _sub_nodes.size();
+
+        if(nodeCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        auto tensorToOriginNode = buildTensorToOriginNodeMap();
+        auto graphStructure = buildAdjacencyList(tensorToOriginNode);
+
+        auto sortResult = performTopologicalSortWithComponentDetection(graphStructure);
+
+        if(sortResult.hasCycle)
+        {
+            return {ErrorCode::INVALID_VALUE, "Graph contains a cycle, cannot be sorted."};
+        }
+
+        if(sortResult.componentCount > 1)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph contains multiple disconnected components, please split the graph into "
+                    "individual graphs"};
+        }
+
+        reorderNodesTopologically(sortResult.order);
+
+        return {ErrorCode::OK, ""};
     }
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        std::unordered_set<int64_t> usedTensorUids;
-        gatherHipdnnTensorIdsSubtree(usedTensorUids);
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
 
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-        int64_t currentTensorId = 0;
+        auto usedIds = getUsedIds(allTensors);
 
-        populateHipdnnTensorIdsSubtree(tensorLookup, currentTensorId, usedTensorUids);
+        populateHipdnnTensorIds(allTensors, usedIds);
+
         flatbuffers::FlatBufferBuilder builder;
 
         std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
-        for(auto& [_, tensor] : tensorLookup)
+        for(auto& tensor : allTensors)
         {
             if(tensor)
             {
@@ -306,7 +509,7 @@ public:
                                                  1,
                                                  nullptr,
                                                  &workspaceSize),
-            "Failed to get engine configurations from the execution plan descriptor.");
+            "Failed to get workspace size from the execution plan descriptor.");
 
         return {ErrorCode::OK, ""};
     }
@@ -677,6 +880,37 @@ public:
             std::make_shared<ConvolutionDgradNode>(std::move(attributes), graph_attributes));
 
         return dx;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> conv_wgrad(std::shared_ptr<TensorAttributes> dy,
+                                                 std::shared_ptr<TensorAttributes> x,
+                                                 ConvWgradAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ConvolutionWgrad_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(dy->get_name().empty())
+        {
+            dy->set_name(attributes.get_name() + "::DY");
+        }
+
+        auto dw = outputTensor(attributes.get_name() + "::DW");
+
+        attributes.set_x(std::move(x));
+        attributes.set_dy(std::move(dy));
+        attributes.set_dw(dw);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ConvolutionWgradNode>(std::move(attributes), graph_attributes));
+
+        return dw;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

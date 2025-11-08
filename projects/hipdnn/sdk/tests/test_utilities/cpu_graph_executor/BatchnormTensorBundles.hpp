@@ -6,72 +6,44 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
 namespace hipdnn_sdk_test_utils
 {
 
-template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-struct BatchnormFwdTensorBundle
+struct BatchnormFwdTensorBundle : public GraphTensorBundle
 {
-    BatchnormFwdTensorBundle(const std::vector<int64_t>& dims,
-                             unsigned int seed = 1,
-                             const TensorLayout& layout = TensorLayout::NCHW)
-        : derivedDims(getDerivedShape(dims))
-        , xTensor(dims, layout)
-        , yTensor(dims, layout)
-        , scaleTensor(derivedDims)
-        , biasTensor(derivedDims)
-        , meanTensor(derivedDims)
-        , invVarianceTensor(derivedDims)
+    BatchnormFwdTensorBundle(
+        const hipdnn_plugin::INodeWrapper& node,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap,
+        unsigned int seed)
+        : GraphTensorBundle(tensorMap)
     {
-        xTensor.fillWithRandomValues(
-            static_cast<InputType>(0.0f), static_cast<InputType>(1.0f), seed);
-        scaleTensor.fillWithRandomValues(
-            static_cast<ScaleBiasType>(0.0f), static_cast<ScaleBiasType>(1.0f), seed);
-        biasTensor.fillWithRandomValues(
-            static_cast<ScaleBiasType>(0.0f), static_cast<ScaleBiasType>(1.0f), seed);
-        meanTensor.fillWithRandomValues(
-            static_cast<MeanVarianceType>(0.0f), static_cast<MeanVarianceType>(1.0f), seed);
-        invVarianceTensor.fillWithRandomValues(
-            static_cast<MeanVarianceType>(0.1f), static_cast<MeanVarianceType>(1.0f), seed);
-    }
+        const auto& attributes
+            = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
 
-    std::unordered_map<int64_t, void*>
-        createVariantPack(const hipdnn_frontend::graph::TensorAttributes& xTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& scaleTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& biasTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& meanTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& invVarianceTensorAttr,
-                          const hipdnn_frontend::graph::TensorAttributes& yTensorAttr)
-    {
-        std::unordered_map<int64_t, void*> variantPack;
-        variantPack[xTensorAttr.get_uid()] = xTensor.memory().hostData();
-        variantPack[scaleTensorAttr.get_uid()] = scaleTensor.memory().hostData();
-        variantPack[biasTensorAttr.get_uid()] = biasTensor.memory().hostData();
-        variantPack[meanTensorAttr.get_uid()] = meanTensor.memory().hostData();
-        variantPack[invVarianceTensorAttr.get_uid()] = invVarianceTensor.memory().hostData();
-        variantPack[yTensorAttr.get_uid()] = yTensor.memory().hostData();
-        return variantPack;
+        randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.bias_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.mean_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.inv_variance_tensor_uid(), 0.1f, 1.0f, seed);
     }
-
-    std::vector<int64_t> derivedDims;
-    Tensor<InputType> xTensor;
-    Tensor<InputType> yTensor;
-    Tensor<ScaleBiasType> scaleTensor;
-    Tensor<ScaleBiasType> biasTensor;
-    Tensor<MeanVarianceType> meanTensor;
-    Tensor<MeanVarianceType> invVarianceTensor;
 };
 
 template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
 struct BatchnormTrainTensorBundle
 {
     BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
-                               unsigned int seed = 1,
+                               unsigned int seed = getGlobalTestSeed(),
                                const TensorLayout& layout = TensorLayout::NCHW,
                                bool useOptionalTensors = false)
         : derivedDims(getDerivedShape(dims))
@@ -98,7 +70,8 @@ struct BatchnormTrainTensorBundle
         invVarianceTensor.fillWithRandomValues(
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
 
-        epsilonTensor.fillWithValue(static_cast<MeanVarianceDataType>(1e-5f));
+        epsilonTensor.fillWithValue(
+            static_cast<MeanVarianceDataType>(static_cast<float>(BATCHNORM_DEFAULT_EPSILON)));
 
         if(useOptionalTensors)
         {
@@ -199,7 +172,7 @@ template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 struct BatchnormBwdTensorBundle
 {
     BatchnormBwdTensorBundle(const std::vector<int64_t>& dims,
-                             unsigned int seed = 1,
+                             unsigned int seed = getGlobalTestSeed(),
                              const TensorLayout& layout = TensorLayout::NCHW)
         : derivedDims(getDerivedShape(dims))
         , xTensor(dims, layout)
@@ -255,5 +228,4 @@ struct BatchnormBwdTensorBundle
     Tensor<MeanVarianceType> meanTensor;
     Tensor<MeanVarianceType> invVarianceTensor;
 };
-
 }

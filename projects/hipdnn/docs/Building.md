@@ -5,8 +5,6 @@
   - [System Requirements](#system-requirements)
   - [Dependencies](#dependencies)
 - [Quick Start Guide](#quick-start-guide)
-  - [Using Docker (Recommended)](#using-docker-recommended)
-  - [Native Build](#native-build)
 - [Build Configurations](#build-configurations)
 - [Build Targets](#build-targets)
 - [Platform-Specific Instructions](#platform-specific-instructions)
@@ -20,10 +18,12 @@
 ### System Requirements
 - **GPU**: AMD GPU with ROCm support
 - **Operating System**: 
-  - Linux: Matching support to [TheRock](https://github.com/ROCm/TheRock)
+  - Linux: Any distribution supported by [TheRock](https://github.com/ROCm/TheRock), such as Ubuntu 24
   - Windows: Windows 11 (limited support, see [Windows section](#windows))
 
 ### Dependencies
+> [!TIP]
+> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not availble for Windows. Refer to the [Windoows](#windows) section for details on building under Windows.
 
 #### Required Dependencies
 | Dependency | Version | Description |
@@ -51,64 +51,21 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 
 ## Quick Start Guide
 
-### Using Docker (Recommended)
+Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
 
 > [!TIP]
-> 💡 Docker provides a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about Docker images, see the [Docker README](../dockerfiles/README.md).
+> 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build enviornment.
 
-1. **Clone hipDNN**
+Refer to the [Platform-Specific Instructions](#platform-specific-instructions) section for details on building under Windows.
+
+1. **Clone rocm-libraries**
    ```bash
-   git clone https://github.com/ROCm/hipDNN.git
+   git clone https://github.com/ROCm/rocm-libraries.git
    ```
 
-2. **Build the Development Container**
+2. **Build**
    ```bash
-   cd hipDNN/dockerfiles/
-   
-   # For Ubuntu 24.04 using prebuilt tarballs with gfx94X support (recommended)
-   # (see Docker README for other options if needed)
-   docker build -f ./Dockerfile.ubuntu24 -t hipdnn-dev:ubuntu24 .
-   ```
-
-3. **Run the Container**
-   ```bash
-   # Replace <path/to/hipDNN> with your hipDNN repository path
-   docker run -it \
-     -v <path/to/hipDNN>:/workspace/hipDNN \
-     --privileged \
-     --rm \
-     --device=/dev/kfd \
-     --device=/dev/dri:/dev/dri:rw \
-     --volume=/dev/dri:/dev/dri:rw \
-     -v /var/lib/docker:/var/lib/docker \
-     --group-add video \
-     --cap-add=SYS_PTRACE \
-     --security-opt seccomp=unconfined \
-     hipdnn-dev:ubuntu24
-   ```
-
-4. **Build and Test**
-   ```bash
-   cd /workspace/hipDNN
-   mkdir build && cd build
-   cmake -GNinja ..
-   ninja check
-   ```
-
-5. **Install**
-   ```bash
-   # Default installation to /opt/rocm
-   sudo ninja install
-   ```
-
-### Native Build
-
-1. **Install ROCm** (follow [official ROCm installation guide](https://rocm.docs.amd.com/))
-
-2. **Clone and Build**
-   ```bash
-   git clone https://github.com/ROCm/hipDNN.git
-   cd hipDNN
+   cd rocm-libraries/projects/hipDNN
    mkdir build && cd build
    
    # Configure with Ninja (recommended)
@@ -116,8 +73,13 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
    
    # Build and run tests
    ninja check
+   ```
+   Refer to the [Build Targets](#build-targets) section below for additional build targets that can be used.
 
-   # Install
+3. **Install**
+   
+   Refer to the [Build Configurations](#build-configurations) section below for details on using an install path other than the default `/opt/rocm`.
+   ```bash
    sudo ninja install
    ```
 
@@ -147,11 +109,6 @@ ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Custom Installation Path
-```bash
-cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
-```
-
 ### Building Specific Components
 ```bash
 # Build without plugins
@@ -164,6 +121,23 @@ cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
 cmake -GNinja -DHIP_DNN_BUILD_SAMPLES=OFF ..
 ```
 
+### ROCM_PATH & CMAKE_INSTALL_PREFIX
+
+- **`ROCM_PATH`**: Specifies where the build system looks for ROCm dependencies (default: `/opt/rocm`)
+- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH`)
+
+These variables can be set independently:
+
+```bash
+# Default: Both use /opt/rocm
+cmake -GNinja ..
+
+# Install hipDNN to custom location, find ROCm dependencies in /opt/rocm
+cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
+
+# Both custom (if ROCm is in a non-standard location)
+cmake -GNinja -DROCM_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
+```
 ## Build Targets
 
 > [!NOTE]

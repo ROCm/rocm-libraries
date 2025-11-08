@@ -308,6 +308,29 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<Buffer, IO, Context>
+        {
+            static const bool flow = false;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Buffer& buffer, Context& ctx)
+            {
+                iot::mapRequired(io, "desc0", buffer.desc0);
+                iot::mapRequired(io, "desc1", buffer.desc1);
+                iot::mapRequired(io, "desc2", buffer.desc2);
+                iot::mapRequired(io, "desc3", buffer.desc3);
+            }
+
+            static void mapping(IO& io, Buffer& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<CommandArgumentPtr, IO, Context>
         {
             static const bool flow = true;

@@ -22,7 +22,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::NONE, ""}})
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
+inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
 {
     auto type = node.attributes_type();
 
@@ -47,15 +47,16 @@ void to_json(nlohmann::json& nodeJson, data_objects::Node const& node)
     }
     nodeJson["name"] = node.name()->c_str();
     nodeJson["type"] = node.attributes_type();
+    nodeJson["compute_data_type"] = node.compute_data_type();
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
+inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
 {
     graphJson["nodes"] = graph.nodes();
-    graphJson["compute_type"] = graph.compute_type();
-    graphJson["io_type"] = graph.io_type();
-    graphJson["intermediate_type"] = graph.intermediate_type();
+    graphJson["compute_data_type"] = graph.compute_data_type();
+    graphJson["io_data_type"] = graph.io_data_type();
+    graphJson["intermediate_data_type"] = graph.intermediate_data_type();
     graphJson["name"] = graph.name()->c_str();
     graphJson["tensors"] = graph.tensors();
 }
@@ -64,10 +65,12 @@ void to_json(nlohmann::json& graphJson, data_objects::Graph const& graph)
 namespace hipdnn_sdk::json
 {
 template <>
-auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
+                                   const nlohmann::json& entry)
 {
     auto type = entry.at("type").get<data_objects::NodeAttributes>();
     auto name = entry.at("name").get<std::string>();
+    auto computeDataType = entry.at("compute_data_type").get<data_objects::DataType>();
 
     flatbuffers::Offset<void> node = [&]() {
         switch(type)
@@ -87,19 +90,20 @@ auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder, const nlohm
         }
     }();
 
-    return data_objects::CreateNodeDirect(builder, name.c_str(), type, node);
+    return data_objects::CreateNodeDirect(builder, name.c_str(), computeDataType, type, node);
 }
 
 template <>
-auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
+                                    const nlohmann::json& entry)
 {
     using namespace data_objects;
     using namespace flatbuffers;
 
     auto name = entry.at("name").get<std::string>();
-    auto computeType = entry.at("compute_type").get<data_objects::DataType>();
-    auto ioType = entry.at("io_type").get<data_objects::DataType>();
-    auto intermediateType = entry.at("intermediate_type").get<data_objects::DataType>();
+    auto computeType = entry.at("compute_data_type").get<data_objects::DataType>();
+    auto ioType = entry.at("io_data_type").get<data_objects::DataType>();
+    auto intermediateType = entry.at("intermediate_data_type").get<data_objects::DataType>();
 
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));

@@ -296,6 +296,7 @@ try
     bool        datafile          = hipblaslt_parse_data(argc, argv);
     bool        log_function_name = false;
     bool        any_stride        = false;
+    bool        dump_matrix       = false;
 
     int         api_method      = 0;
     std::string api_method_str  = "";
@@ -430,7 +431,7 @@ try
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
-         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist")
+         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -626,6 +627,10 @@ try
         ("flush",
         value<bool>(&arg.flush)->default_value(tuningEnv ? true : false),
         "Flush icache, only works for gemm.")
+
+        ("dump_matrix",
+        value<bool>(&arg.dump_matrix)->default_value(false),
+        "Dump input and output matrices to a file.")
 
         ("help,h", "produces this help message")
 

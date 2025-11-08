@@ -18,6 +18,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "batchnorm_inference_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
+#include "convolution_wrw_attributes_generated.h"
 #include "data_types_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "tensor_attributes_generated.h"
@@ -46,11 +47,12 @@ enum class NodeAttributes : uint8_t {
   BatchnormAttributes = 4,
   ConvolutionFwdAttributes = 5,
   ConvolutionBwdAttributes = 6,
+  ConvolutionWrwAttributes = 7,
   MIN = NONE,
-  MAX = ConvolutionBwdAttributes
+  MAX = ConvolutionWrwAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[7] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[8] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -58,13 +60,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[7] {
     NodeAttributes::BatchnormBackwardAttributes,
     NodeAttributes::BatchnormAttributes,
     NodeAttributes::ConvolutionFwdAttributes,
-    NodeAttributes::ConvolutionBwdAttributes
+    NodeAttributes::ConvolutionBwdAttributes,
+    NodeAttributes::ConvolutionWrwAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[8] = {
+  static const char * const names[9] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -72,13 +75,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "BatchnormAttributes",
     "ConvolutionFwdAttributes",
     "ConvolutionBwdAttributes",
+    "ConvolutionWrwAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ConvolutionBwdAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ConvolutionWrwAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -111,6 +115,10 @@ template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::ConvolutionBwdA
   static const NodeAttributes enum_value = NodeAttributes::ConvolutionBwdAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_sdk::data_objects::ConvolutionWrwAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -137,6 +145,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::Convolutio
 
 template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::ConvolutionBwdAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::ConvolutionWrwAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -217,6 +229,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::ConvolutionBwdAttributes ?
       reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value) : nullptr;
   }
+  hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *AsConvolutionWrwAttributes() {
+    return type == NodeAttributes::ConvolutionWrwAttributes ?
+      reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *AsConvolutionWrwAttributes() const {
+    return type == NodeAttributes::ConvolutionWrwAttributes ?
+      reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -250,6 +270,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
       return *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(rhs.value));
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      return *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(rhs.value));
+    }
     default: {
       return false;
     }
@@ -266,6 +290,7 @@ bool VerifyNodeAttributesVector(::flatbuffers::Verifier &verifier, const ::flatb
 struct NodeT : public ::flatbuffers::NativeTable {
   typedef Node TableType;
   std::string name{};
+  hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET;
   hipdnn_sdk::data_objects::NodeAttributesUnion attributes{};
 };
 
@@ -274,14 +299,21 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef NodeBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
-    VT_ATTRIBUTES_TYPE = 6,
-    VT_ATTRIBUTES = 8
+    VT_COMPUTE_DATA_TYPE = 6,
+    VT_ATTRIBUTES_TYPE = 8,
+    VT_ATTRIBUTES = 10
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
   }
   ::flatbuffers::String *mutable_name() {
     return GetPointer<::flatbuffers::String *>(VT_NAME);
+  }
+  hipdnn_sdk::data_objects::DataType compute_data_type() const {
+    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_COMPUTE_DATA_TYPE, 0));
+  }
+  bool mutate_compute_data_type(hipdnn_sdk::data_objects::DataType _compute_data_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
+    return SetField<int8_t>(VT_COMPUTE_DATA_TYPE, static_cast<int8_t>(_compute_data_type), 0);
   }
   hipdnn_sdk::data_objects::NodeAttributes attributes_type() const {
     return static_cast<hipdnn_sdk::data_objects::NodeAttributes>(GetField<uint8_t>(VT_ATTRIBUTES_TYPE, 0));
@@ -308,6 +340,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *attributes_as_ConvolutionBwdAttributes() const {
     return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes ? static_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *attributes_as_ConvolutionWrwAttributes() const {
+    return attributes_type() == hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes ? static_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -315,6 +350,7 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
+           VerifyField<int8_t>(verifier, VT_COMPUTE_DATA_TYPE, 1) &&
            VerifyField<uint8_t>(verifier, VT_ATTRIBUTES_TYPE, 1) &&
            VerifyOffset(verifier, VT_ATTRIBUTES) &&
            VerifyNodeAttributes(verifier, attributes(), attributes_type()) &&
@@ -349,12 +385,19 @@ template<> inline const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *Node
   return attributes_as_ConvolutionBwdAttributes();
 }
 
+template<> inline const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *Node::attributes_as<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>() const {
+  return attributes_as_ConvolutionWrwAttributes();
+}
+
 struct NodeBuilder {
   typedef Node Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
   void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(Node::VT_NAME, name);
+  }
+  void add_compute_data_type(hipdnn_sdk::data_objects::DataType compute_data_type) {
+    fbb_.AddElement<int8_t>(Node::VT_COMPUTE_DATA_TYPE, static_cast<int8_t>(compute_data_type), 0);
   }
   void add_attributes_type(hipdnn_sdk::data_objects::NodeAttributes attributes_type) {
     fbb_.AddElement<uint8_t>(Node::VT_ATTRIBUTES_TYPE, static_cast<uint8_t>(attributes_type), 0);
@@ -376,24 +419,28 @@ struct NodeBuilder {
 inline ::flatbuffers::Offset<Node> CreateNode(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
     hipdnn_sdk::data_objects::NodeAttributes attributes_type = hipdnn_sdk::data_objects::NodeAttributes::NONE,
     ::flatbuffers::Offset<void> attributes = 0) {
   NodeBuilder builder_(_fbb);
   builder_.add_attributes(attributes);
   builder_.add_name(name);
   builder_.add_attributes_type(attributes_type);
+  builder_.add_compute_data_type(compute_data_type);
   return builder_.Finish();
 }
 
 inline ::flatbuffers::Offset<Node> CreateNodeDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
+    hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
     hipdnn_sdk::data_objects::NodeAttributes attributes_type = hipdnn_sdk::data_objects::NodeAttributes::NONE,
     ::flatbuffers::Offset<void> attributes = 0) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   return hipdnn_sdk::data_objects::CreateNode(
       _fbb,
       name__,
+      compute_data_type,
       attributes_type,
       attributes);
 }
@@ -403,9 +450,9 @@ inline ::flatbuffers::Offset<Node> CreateNodeDirect(
 struct GraphT : public ::flatbuffers::NativeTable {
   typedef Graph TableType;
   std::string name{};
-  hipdnn_sdk::data_objects::DataType compute_type = hipdnn_sdk::data_objects::DataType::UNSET;
-  hipdnn_sdk::data_objects::DataType intermediate_type = hipdnn_sdk::data_objects::DataType::UNSET;
-  hipdnn_sdk::data_objects::DataType io_type = hipdnn_sdk::data_objects::DataType::UNSET;
+  hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET;
+  hipdnn_sdk::data_objects::DataType intermediate_data_type = hipdnn_sdk::data_objects::DataType::UNSET;
+  hipdnn_sdk::data_objects::DataType io_data_type = hipdnn_sdk::data_objects::DataType::UNSET;
   std::vector<std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT>> tensors{};
   std::vector<std::unique_ptr<hipdnn_sdk::data_objects::NodeT>> nodes{};
   GraphT() = default;
@@ -419,9 +466,9 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GraphBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_NAME = 4,
-    VT_COMPUTE_TYPE = 6,
-    VT_INTERMEDIATE_TYPE = 8,
-    VT_IO_TYPE = 10,
+    VT_COMPUTE_DATA_TYPE = 6,
+    VT_INTERMEDIATE_DATA_TYPE = 8,
+    VT_IO_DATA_TYPE = 10,
     VT_TENSORS = 12,
     VT_NODES = 14
   };
@@ -431,23 +478,23 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_name() {
     return GetPointer<::flatbuffers::String *>(VT_NAME);
   }
-  hipdnn_sdk::data_objects::DataType compute_type() const {
-    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_COMPUTE_TYPE, 0));
+  hipdnn_sdk::data_objects::DataType compute_data_type() const {
+    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_COMPUTE_DATA_TYPE, 0));
   }
-  bool mutate_compute_type(hipdnn_sdk::data_objects::DataType _compute_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
-    return SetField<int8_t>(VT_COMPUTE_TYPE, static_cast<int8_t>(_compute_type), 0);
+  bool mutate_compute_data_type(hipdnn_sdk::data_objects::DataType _compute_data_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
+    return SetField<int8_t>(VT_COMPUTE_DATA_TYPE, static_cast<int8_t>(_compute_data_type), 0);
   }
-  hipdnn_sdk::data_objects::DataType intermediate_type() const {
-    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_INTERMEDIATE_TYPE, 0));
+  hipdnn_sdk::data_objects::DataType intermediate_data_type() const {
+    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_INTERMEDIATE_DATA_TYPE, 0));
   }
-  bool mutate_intermediate_type(hipdnn_sdk::data_objects::DataType _intermediate_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
-    return SetField<int8_t>(VT_INTERMEDIATE_TYPE, static_cast<int8_t>(_intermediate_type), 0);
+  bool mutate_intermediate_data_type(hipdnn_sdk::data_objects::DataType _intermediate_data_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
+    return SetField<int8_t>(VT_INTERMEDIATE_DATA_TYPE, static_cast<int8_t>(_intermediate_data_type), 0);
   }
-  hipdnn_sdk::data_objects::DataType io_type() const {
-    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_IO_TYPE, 0));
+  hipdnn_sdk::data_objects::DataType io_data_type() const {
+    return static_cast<hipdnn_sdk::data_objects::DataType>(GetField<int8_t>(VT_IO_DATA_TYPE, 0));
   }
-  bool mutate_io_type(hipdnn_sdk::data_objects::DataType _io_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
-    return SetField<int8_t>(VT_IO_TYPE, static_cast<int8_t>(_io_type), 0);
+  bool mutate_io_data_type(hipdnn_sdk::data_objects::DataType _io_data_type = static_cast<hipdnn_sdk::data_objects::DataType>(0)) {
+    return SetField<int8_t>(VT_IO_DATA_TYPE, static_cast<int8_t>(_io_data_type), 0);
   }
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> *tensors() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> *>(VT_TENSORS);
@@ -465,9 +512,9 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
-           VerifyField<int8_t>(verifier, VT_COMPUTE_TYPE, 1) &&
-           VerifyField<int8_t>(verifier, VT_INTERMEDIATE_TYPE, 1) &&
-           VerifyField<int8_t>(verifier, VT_IO_TYPE, 1) &&
+           VerifyField<int8_t>(verifier, VT_COMPUTE_DATA_TYPE, 1) &&
+           VerifyField<int8_t>(verifier, VT_INTERMEDIATE_DATA_TYPE, 1) &&
+           VerifyField<int8_t>(verifier, VT_IO_DATA_TYPE, 1) &&
            VerifyOffset(verifier, VT_TENSORS) &&
            verifier.VerifyVector(tensors()) &&
            verifier.VerifyVectorOfTables(tensors()) &&
@@ -488,14 +535,14 @@ struct GraphBuilder {
   void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(Graph::VT_NAME, name);
   }
-  void add_compute_type(hipdnn_sdk::data_objects::DataType compute_type) {
-    fbb_.AddElement<int8_t>(Graph::VT_COMPUTE_TYPE, static_cast<int8_t>(compute_type), 0);
+  void add_compute_data_type(hipdnn_sdk::data_objects::DataType compute_data_type) {
+    fbb_.AddElement<int8_t>(Graph::VT_COMPUTE_DATA_TYPE, static_cast<int8_t>(compute_data_type), 0);
   }
-  void add_intermediate_type(hipdnn_sdk::data_objects::DataType intermediate_type) {
-    fbb_.AddElement<int8_t>(Graph::VT_INTERMEDIATE_TYPE, static_cast<int8_t>(intermediate_type), 0);
+  void add_intermediate_data_type(hipdnn_sdk::data_objects::DataType intermediate_data_type) {
+    fbb_.AddElement<int8_t>(Graph::VT_INTERMEDIATE_DATA_TYPE, static_cast<int8_t>(intermediate_data_type), 0);
   }
-  void add_io_type(hipdnn_sdk::data_objects::DataType io_type) {
-    fbb_.AddElement<int8_t>(Graph::VT_IO_TYPE, static_cast<int8_t>(io_type), 0);
+  void add_io_data_type(hipdnn_sdk::data_objects::DataType io_data_type) {
+    fbb_.AddElement<int8_t>(Graph::VT_IO_DATA_TYPE, static_cast<int8_t>(io_data_type), 0);
   }
   void add_tensors(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>> tensors) {
     fbb_.AddOffset(Graph::VT_TENSORS, tensors);
@@ -517,27 +564,27 @@ struct GraphBuilder {
 inline ::flatbuffers::Offset<Graph> CreateGraph(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
-    hipdnn_sdk::data_objects::DataType compute_type = hipdnn_sdk::data_objects::DataType::UNSET,
-    hipdnn_sdk::data_objects::DataType intermediate_type = hipdnn_sdk::data_objects::DataType::UNSET,
-    hipdnn_sdk::data_objects::DataType io_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType intermediate_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType io_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>> tensors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>>> nodes = 0) {
   GraphBuilder builder_(_fbb);
   builder_.add_nodes(nodes);
   builder_.add_tensors(tensors);
   builder_.add_name(name);
-  builder_.add_io_type(io_type);
-  builder_.add_intermediate_type(intermediate_type);
-  builder_.add_compute_type(compute_type);
+  builder_.add_io_data_type(io_data_type);
+  builder_.add_intermediate_data_type(intermediate_data_type);
+  builder_.add_compute_data_type(compute_data_type);
   return builder_.Finish();
 }
 
 inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *name = nullptr,
-    hipdnn_sdk::data_objects::DataType compute_type = hipdnn_sdk::data_objects::DataType::UNSET,
-    hipdnn_sdk::data_objects::DataType intermediate_type = hipdnn_sdk::data_objects::DataType::UNSET,
-    hipdnn_sdk::data_objects::DataType io_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType compute_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType intermediate_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
+    hipdnn_sdk::data_objects::DataType io_data_type = hipdnn_sdk::data_objects::DataType::UNSET,
     const std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> *tensors = nullptr,
     const std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> *nodes = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
@@ -546,9 +593,9 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
   return hipdnn_sdk::data_objects::CreateGraph(
       _fbb,
       name__,
-      compute_type,
-      intermediate_type,
-      io_type,
+      compute_data_type,
+      intermediate_data_type,
+      io_data_type,
       tensors__,
       nodes__);
 }
@@ -559,6 +606,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
 inline bool operator==(const NodeT &lhs, const NodeT &rhs) {
   return
       (lhs.name == rhs.name) &&
+      (lhs.compute_data_type == rhs.compute_data_type) &&
       (lhs.attributes == rhs.attributes);
 }
 
@@ -577,6 +625,7 @@ inline void Node::UnPackTo(NodeT *_o, const ::flatbuffers::resolver_function_t *
   (void)_o;
   (void)_resolver;
   { auto _e = name(); if (_e) _o->name = _e->str(); }
+  { auto _e = compute_data_type(); _o->compute_data_type = _e; }
   { auto _e = attributes_type(); _o->attributes.type = _e; }
   { auto _e = attributes(); if (_e) _o->attributes.value = hipdnn_sdk::data_objects::NodeAttributesUnion::UnPack(_e, attributes_type(), _resolver); }
 }
@@ -590,11 +639,13 @@ inline ::flatbuffers::Offset<Node> CreateNode(::flatbuffers::FlatBufferBuilder &
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const NodeT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _name = _o->name.empty() ? 0 : _fbb.CreateString(_o->name);
+  auto _compute_data_type = _o->compute_data_type;
   auto _attributes_type = _o->attributes.type;
   auto _attributes = _o->attributes.Pack(_fbb);
   return hipdnn_sdk::data_objects::CreateNode(
       _fbb,
       _name,
+      _compute_data_type,
       _attributes_type,
       _attributes);
 }
@@ -603,9 +654,9 @@ inline ::flatbuffers::Offset<Node> CreateNode(::flatbuffers::FlatBufferBuilder &
 inline bool operator==(const GraphT &lhs, const GraphT &rhs) {
   return
       (lhs.name == rhs.name) &&
-      (lhs.compute_type == rhs.compute_type) &&
-      (lhs.intermediate_type == rhs.intermediate_type) &&
-      (lhs.io_type == rhs.io_type) &&
+      (lhs.compute_data_type == rhs.compute_data_type) &&
+      (lhs.intermediate_data_type == rhs.intermediate_data_type) &&
+      (lhs.io_data_type == rhs.io_data_type) &&
       (lhs.tensors.size() == rhs.tensors.size() && std::equal(lhs.tensors.cbegin(), lhs.tensors.cend(), rhs.tensors.cbegin(), [](std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT> const &a, std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.nodes.size() == rhs.nodes.size() && std::equal(lhs.nodes.cbegin(), lhs.nodes.cend(), rhs.nodes.cbegin(), [](std::unique_ptr<hipdnn_sdk::data_objects::NodeT> const &a, std::unique_ptr<hipdnn_sdk::data_objects::NodeT> const &b) { return (a == b) || (a && b && *a == *b); }));
 }
@@ -617,9 +668,9 @@ inline bool operator!=(const GraphT &lhs, const GraphT &rhs) {
 
 inline GraphT::GraphT(const GraphT &o)
       : name(o.name),
-        compute_type(o.compute_type),
-        intermediate_type(o.intermediate_type),
-        io_type(o.io_type) {
+        compute_data_type(o.compute_data_type),
+        intermediate_data_type(o.intermediate_data_type),
+        io_data_type(o.io_data_type) {
   tensors.reserve(o.tensors.size());
   for (const auto &tensors_ : o.tensors) { tensors.emplace_back((tensors_) ? new hipdnn_sdk::data_objects::TensorAttributesT(*tensors_) : nullptr); }
   nodes.reserve(o.nodes.size());
@@ -628,9 +679,9 @@ inline GraphT::GraphT(const GraphT &o)
 
 inline GraphT &GraphT::operator=(GraphT o) FLATBUFFERS_NOEXCEPT {
   std::swap(name, o.name);
-  std::swap(compute_type, o.compute_type);
-  std::swap(intermediate_type, o.intermediate_type);
-  std::swap(io_type, o.io_type);
+  std::swap(compute_data_type, o.compute_data_type);
+  std::swap(intermediate_data_type, o.intermediate_data_type);
+  std::swap(io_data_type, o.io_data_type);
   std::swap(tensors, o.tensors);
   std::swap(nodes, o.nodes);
   return *this;
@@ -646,9 +697,9 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   (void)_o;
   (void)_resolver;
   { auto _e = name(); if (_e) _o->name = _e->str(); }
-  { auto _e = compute_type(); _o->compute_type = _e; }
-  { auto _e = intermediate_type(); _o->intermediate_type = _e; }
-  { auto _e = io_type(); _o->io_type = _e; }
+  { auto _e = compute_data_type(); _o->compute_data_type = _e; }
+  { auto _e = intermediate_data_type(); _o->intermediate_data_type = _e; }
+  { auto _e = io_data_type(); _o->io_data_type = _e; }
   { auto _e = tensors(); if (_e) { _o->tensors.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->tensors[_i]) { _e->Get(_i)->UnPackTo(_o->tensors[_i].get(), _resolver); } else { _o->tensors[_i] = std::unique_ptr<hipdnn_sdk::data_objects::TensorAttributesT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->tensors.resize(0); } }
   { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->nodes.resize(0); } }
 }
@@ -662,17 +713,17 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const GraphT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _name = _o->name.empty() ? 0 : _fbb.CreateString(_o->name);
-  auto _compute_type = _o->compute_type;
-  auto _intermediate_type = _o->intermediate_type;
-  auto _io_type = _o->io_type;
+  auto _compute_data_type = _o->compute_data_type;
+  auto _intermediate_data_type = _o->intermediate_data_type;
+  auto _io_data_type = _o->io_data_type;
   auto _tensors = _o->tensors.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> (_o->tensors.size(), [](size_t i, _VectorArgs *__va) { return CreateTensorAttributes(*__va->__fbb, __va->__o->tensors[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _nodes = _o->nodes.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> (_o->nodes.size(), [](size_t i, _VectorArgs *__va) { return CreateNode(*__va->__fbb, __va->__o->nodes[i].get(), __va->__rehasher); }, &_va ) : 0;
   return hipdnn_sdk::data_objects::CreateGraph(
       _fbb,
       _name,
-      _compute_type,
-      _intermediate_type,
-      _io_type,
+      _compute_data_type,
+      _intermediate_data_type,
+      _io_data_type,
       _tensors,
       _nodes);
 }
@@ -704,6 +755,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
     }
     case NodeAttributes::ConvolutionBwdAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;
@@ -749,6 +804,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -780,6 +839,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value);
       return CreateConvolutionBwdAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value);
+      return CreateConvolutionWrwAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -808,6 +871,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::ConvolutionBwdAttributes: {
       value = new hipdnn_sdk::data_objects::ConvolutionBwdAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      value = new hipdnn_sdk::data_objects::ConvolutionWrwAttributesT(*reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(u.value));
       break;
     }
     default:
@@ -844,6 +911,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::ConvolutionBwdAttributes: {
       auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionBwdAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::ConvolutionWrwAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_sdk::data_objects::ConvolutionWrwAttributesT *>(value);
       delete ptr;
       break;
     }
