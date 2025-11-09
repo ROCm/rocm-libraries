@@ -67,4 +67,21 @@ inline void initializeCallbackLogging(const std::string& componentName,
     }
 }
 
+// Converts a vector of numbers to a string "[1,2,3...]".
+template <typename T>
+std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to numeric types
+vectorToString(const std::vector<T>& vec)
+{
+    std::string result = "[";
+    if(!vec.empty())
+    {
+        result += std::to_string(vec[0]);
+        for(size_t i = 1; i < vec.size(); ++i)
+        {
+            result += ", " + std::to_string(vec[i]);
+        }
+    }
+    return result + "]";
+}
+
 } // namespace hipdnn::logging

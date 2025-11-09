@@ -6,6 +6,49 @@
 
 using namespace hipdnn_sdk::utilities;
 
+static std::vector<std::string> s_capturedLogs; //NOLINT
+static std::mutex s_logMutex; //NOLINT
+
+class TestShapeUtilitiesWithLoggerTestFixture : public ::testing::Test
+{
+protected:
+    const std::string _testLoggerName = COMPONENT_NAME;
+
+    void SetUp() override
+    {
+        s_capturedLogs.clear();
+
+        spdlog::drop_all();
+
+        hipdnn::logging::initializeCallbackLogging(_testLoggerName, testLoggingCallback);
+
+        auto testLogger = spdlog::get(_testLoggerName);
+        ASSERT_NE(testLogger, nullptr);
+        testLogger->set_level(spdlog::level::trace);
+    }
+
+    void TearDown() override
+    {
+        spdlog::shutdown();
+    }
+
+    static std::vector<std::string> getCapturedLogs()
+    {
+        spdlog::shutdown(); // block until async queue is fully processed
+        return s_capturedLogs;
+    }
+
+    // Simplified custom logging callback for testing only.
+    static void testLoggingCallback([[maybe_unused]] hipdnnSeverity_t severity, const char* msg)
+    {
+        std::lock_guard<std::mutex> lock(s_logMutex);
+        if(msg != nullptr)
+        {
+            s_capturedLogs.emplace_back(msg);
+        }
+    }
+};
+
 TEST(TestShapeUtils, GenerateStridesNhwcValid)
 {
     std::vector<int64_t> dim = {1, 2, 3, 4};
@@ -433,6 +476,111 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesAllOnes)
 
     EXPECT_EQ(strides, (std::vector<int64_t>{1, 1, 1, 1}));
 }
+
+struct ExtractStrideOrderTestParams
+{
+    std::vector<int64_t> strides;
+    std::vector<int64_t> order;
+    bool log;
+    std::vector<int64_t> dim;
+};
+
+class ExtractStrideOrderParameterizedTestFixture :
+    public TestShapeUtilitiesWithLoggerTestFixture,
+    public ::testing::WithParamInterface<ExtractStrideOrderTestParams>
+{};
+
+TEST_P(ExtractStrideOrderParameterizedTestFixture, VerifyExtractedStrideOrder) {
+    auto& testCase = GetParam();
+
+    // Sanity-check test data
+    EXPECT_EQ(generateStrides(testCase.dim, testCase.order), testCase.strides);
+
+    std::vector<int64_t> deducedStrideOrder = extractStrideOrder(testCase.strides);
+    EXPECT_EQ(deducedStrideOrder, testCase.order);
+    auto logs = getCapturedLogs();
+    if(testCase.log)
+    {
+        ASSERT_EQ(logs.size(), 1);
+        std::string expectedLog = "extractStrideOrder(): Stride lengths "
+            + hipdnn::logging::vectorToString(testCase.strides)
+            + " are not unique, the deduced stride order "
+            + hipdnn::logging::vectorToString(deducedStrideOrder)
+            + " may not be correct";
+        SCOPED_TRACE("expectedLog = '" + expectedLog + "'");
+        SCOPED_TRACE("logs[0] = '" + logs[0] + "'");
+        EXPECT_NE(logs[0].find(expectedLog), std::string::npos);
+    }
+    else
+    {
+        EXPECT_EQ(logs.size(), 0);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TestShapeUtilsExtractedStrideOrderTestInstance,
+    ExtractStrideOrderParameterizedTestFixture,
+    ::testing::Values(
+        // NHWC tests
+        ExtractStrideOrderTestParams{{24, 1, 8, 2}, {3, 0, 2, 1}, false, {10, 2, 3, 4}},
+        ExtractStrideOrderTestParams{{2, 1, 2, 1},  {3, 0, 2, 1}, true,  {10, 1, 1, 2}},
+        ExtractStrideOrderTestParams{{2, 1, 2, 2},  {3, 0, 2, 1}, true,  {10, 2, 1, 1}},
+
+        // NDHWC tests
+        ExtractStrideOrderTestParams{{120, 1, 40, 10, 2}, {4, 0, 3, 2, 1}, false, {10, 2, 3, 4, 5}},
+        ExtractStrideOrderTestParams{{4, 1, 4, 4, 4},     {4, 0, 3, 2, 1}, true,  {10, 4, 1, 1, 1}},
+        ExtractStrideOrderTestParams{{4, 1, 4, 1, 1},     {4, 0, 3, 2, 1}, true,  {10, 1, 1, 4, 1}},
+        ExtractStrideOrderTestParams{{2, 1, 2, 2, 1},     {4, 0, 3, 2, 1}, true,  {10, 1, 1, 1, 2}},
+
+        // NCHW tests
+        ExtractStrideOrderTestParams{{24, 12, 4, 1}, {3, 2, 1, 0}, false, {10, 2, 3, 4}},
+        ExtractStrideOrderTestParams{{4, 4, 1, 1},   {3, 2, 1, 0}, true,  {10, 1, 4, 1}},
+        ExtractStrideOrderTestParams{{4, 4, 4, 1},   {3, 2, 1, 0}, true,  {10, 1, 1, 4}},
+
+        // NCDHW tests
+        ExtractStrideOrderTestParams{{120, 60, 20, 5, 1}, {4, 3, 2, 1, 0}, false, {1, 2, 3, 4, 5}},
+        ExtractStrideOrderTestParams{{4, 4, 4, 1, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 1, 4, 1}},
+        ExtractStrideOrderTestParams{{4, 4, 1, 1, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 4, 1, 1}},
+        ExtractStrideOrderTestParams{{4, 4, 4, 4, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 1, 1, 4}},
+
+        // All ones --> NC...W
+        ExtractStrideOrderTestParams{{1, 1, 1, 1},    {3, 2, 1, 0},    true, {1, 1, 1, 1}},
+        ExtractStrideOrderTestParams{{1, 1, 1, 1, 1}, {4, 3, 2, 1, 0}, true, {1, 1, 1, 1, 1}},
+
+        // Uncommon
+
+        ExtractStrideOrderTestParams{{}, {}, false, {}},
+
+        ExtractStrideOrderTestParams{{1}, {0}, false, {1}},
+
+        ExtractStrideOrderTestParams{{1,1}, {1,0}, true, {1,1}},
+        ExtractStrideOrderTestParams{{2,1}, {1,0}, false, {1,2}},
+        ExtractStrideOrderTestParams{{1,2}, {0,1}, false, {2,1}},
+
+        ExtractStrideOrderTestParams{{1,1,1}, {2,1,0}, true,  {1,1,1}},
+        ExtractStrideOrderTestParams{{4,2,1}, {2,1,0}, false, {1,2,2}},
+        ExtractStrideOrderTestParams{{4,1,2}, {2,0,1}, false, {1,2,2}},
+        ExtractStrideOrderTestParams{{1,2,4}, {0,1,2}, false, {2,2,1}},
+        ExtractStrideOrderTestParams{{1,1,2}, {1,0,2}, true,  {2,1,1}},
+        ExtractStrideOrderTestParams{{2,1,2}, {2,0,1}, true,  {1,2,1}}, // NWC
+        ExtractStrideOrderTestParams{{2,1,1}, {2,1,0}, true,  {1,2,1}}, // NCW
+
+        ExtractStrideOrderTestParams{{1,2,4,8}, {0,1,2,3}, false, {2,2,2,1}},
+        ExtractStrideOrderTestParams{{1,4,2,2}, {0,3,2,1}, true,  {2,1,2,1}},
+        ExtractStrideOrderTestParams{{1,1,4,8}, {1,0,2,3}, true,  {4,1,2,1}},
+        ExtractStrideOrderTestParams{{1,4,8,1}, {1,2,3,0}, true,  {4,2,1,1}},
+
+        ExtractStrideOrderTestParams{{1,4,2,16,8}, {0,2,1,4,3}, false, {2,2,2,1,2}},
+        ExtractStrideOrderTestParams{{1,4,2,2,2},  {0,4,3,2,1}, true,  {2,1,2,1,1}},
+        ExtractStrideOrderTestParams{{1,1,1,4,8},  {2,1,0,3,4}, true,  {4,1,1,2,1}},
+        ExtractStrideOrderTestParams{{1,4,8,8,1},  {1,2,4,3,0}, true,  {4,2,1,1,1}},
+
+        ExtractStrideOrderTestParams{{1,4,2,32,16,8}, {0,2,1,5,4,3}, false, {2,2,2,1,2,2}},
+        ExtractStrideOrderTestParams{{1,4,2,2,2,2},   {0,5,4,3,2,1}, true,  {2,1,2,1,1,1}},
+        ExtractStrideOrderTestParams{{1,1,1,4,4,8},   {2,1,0,4,3,5}, true,  {4,1,1,2,1,1}},
+        ExtractStrideOrderTestParams{{1,4,8,8,8,1},   {1,2,5,4,3,0}, true,  {4,2,1,1,1,1}}
+    )
+);
 
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
