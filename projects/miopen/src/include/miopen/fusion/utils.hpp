@@ -94,9 +94,8 @@ inline bool WinoCommonIsApplicable(const FusionContext& context, const FusionDes
         return false;
 
     const auto& target = conv_ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false;
+    if(target.isXnackEnabled())
+        return false;
 
     return true;
 }

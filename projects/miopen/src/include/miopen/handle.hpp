@@ -84,7 +84,7 @@ using hipblasLt_handle_ptr = MIOPEN_MANAGE_PTR(hipblasLtHandle_t, hipblasLtDestr
 
 struct MIOPEN_EXPORT Handle : miopenHandle
 {
-    friend struct TargetProperties;
+    friend class TargetProperties;
 
     Handle();
     Handle(miopenAcceleratorQueue_t stream);
@@ -159,7 +159,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void AddProgram(Program prog, const fs::path& program_name, const std::string& params) const;
 
     void Finish() const;
-    void Flush() const;
+    void Flush() const; // TODO checkme
 
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;

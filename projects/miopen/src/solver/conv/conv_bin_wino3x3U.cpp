@@ -54,9 +54,8 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false; // NOLINT (readability-simplify-boolean-expr)
+    if(target.isXnackEnabled())
+        return false; // NOLINT (readability-simplify-boolean-expr)
 
     const auto name = ctx.GetStream().GetDeviceName();
     if(!(name == "gfx803" || name == "gfx900" || name == "gfx906" || name == "gfx908"))

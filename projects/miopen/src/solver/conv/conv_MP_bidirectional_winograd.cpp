@@ -192,9 +192,8 @@ static bool IsApplicableTransform(const ExecutionContext& ctx, const ProblemDesc
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false; // NOLINT (readability-simplify-boolean-expr)
+    if(target.isXnackEnabled())
+        return false;
 
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!StartsWith(name, "gfx9"))

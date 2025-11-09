@@ -478,9 +478,8 @@ bool ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false; // NOLINT (readability-simplify-boolean-expr)
+    if(target.isXnackEnabled())
+        return false;
 
     if(!(InTransform<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::IsApplicable(ctx, problem) &&
          OutTransform<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::IsApplicable(problem) &&

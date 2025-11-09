@@ -64,9 +64,8 @@ bool ConvAsm7x7c3h224w224k64u2v2p3q3f1::IsApplicable(const ExecutionContext& ctx
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false;
+    if(target.isXnackEnabled())
+        return false;
 
     const std::string name = ctx.GetStream().GetDeviceName();
 #if WORKAROUND_ISSUE_1146

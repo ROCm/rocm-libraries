@@ -58,19 +58,15 @@ public:
     const std::string targetId;
     LcOptionTargetStrings(const TargetProperties& target)
         : device(target.Name()),
-          xnack([&]() -> std::string {
-              if(target.Xnack())
-                  return std::string{":xnack"} + (*target.Xnack() ? "+" : "-");
-              return {};
-          }()),
+          xnack(std::string{":xnack"} + (target.isXnackEnabled() ? "+" : "-")),
           sramecc([&]() -> std::string {
-              if(target.Sramecc())
-                  return std::string{":sramecc"} + (*target.Sramecc() ? "+" : "-");
+              if(target.sramecc.isReported())
+                  return std::string{":sramecc"} + (target.sramecc.isEnabled() ? "+" : "-");
               return {};
           }()),
           sramecc_reported([&]() -> std::string {
-              if(target.SrameccReported())
-                  return std::string{":sramecc"} + (*target.SrameccReported() ? "+" : "-");
+              if(target.sramecc.isReported())
+                  return std::string{":sramecc"} + (target.sramecc.isReported() ? "+" : "-");
               return {};
           }()),
 #if MIOPEN_USE_COMGR

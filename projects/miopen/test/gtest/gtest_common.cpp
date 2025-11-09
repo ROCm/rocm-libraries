@@ -40,9 +40,9 @@ MockTargetProperties::MockTargetProperties(const TargetProperties& target_proper
 
 const std::string& MockTargetProperties::Name() const { return name; }
 
-std::optional<bool> MockTargetProperties::Xnack() const
+bool MockTargetProperties::isXnackEnabled() const
 {
-    return xnack_disabled ? std::nullopt : TargetProperties::Xnack();
+    return xnack_disabled ? false : TargetProperties::isXnackEnabled();
 }
 
 MockHandle::MockHandle(const DevDescription& dev_description, bool disable_xnack)

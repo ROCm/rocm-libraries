@@ -28,10 +28,7 @@
 #include <miopen/target_properties.hpp>
 
 #include <map>
-#include <optional>
 #include <string>
-
-#define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_ENFORCE_DEVICE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEVICE_ARCH)
@@ -83,33 +80,10 @@ void TargetProperties::Init(const Handle* const handle)
         return handle->GetDeviceNameImpl();
     }();
     name = GetDeviceNameFromMap(rawName);
-    // DKMS driver older than 5.9 may report incorrect state of SRAMECC feature.
-    // Therefore we compute default SRAMECC and rely on it for now.
-    sramecc = [&]() -> std::optional<bool> {
-        if(name == "gfx906" || name == "gfx908")
-            return {true};
-        return {};
-    }();
-    // However we need to store the reported state, even if it is incorrect,
-    // to use together with COMGR.
-    sramecc_reported = [&]() -> std::optional<bool> {
-#if WORKAROUND_ISSUE_1204
-        if(name == "gfx900")
-            return {};
-#endif
-        if(rawName.find(":sramecc+") != std::string::npos)
-            return true;
-        if(rawName.find(":sramecc-") != std::string::npos)
-            return false;
-        return sramecc; // default
-    }();
-    xnack = [&]() -> std::optional<bool> {
-        if(rawName.find(":xnack+") != std::string::npos)
-            return true;
-        if(rawName.find(":xnack-") != std::string::npos)
-            return false;
-        return {}; // default
-    }();
+
+    xnack.Init(rawName, name);
+    sramecc.Init(rawName, name);
+
     InitDbId();
 }
 
@@ -122,15 +96,15 @@ void TargetProperties::InitDbId()
         // When feature equal to the default (SRAMECC ON), do not
         // append feature suffix. This is for backward compatibility
         // with legacy databases ONLY!
-        if(!sramecc || !(*sramecc))
+        if(sramecc.isDisabled())
             dbId += "_nosramecc";
     }
     else
     {
-        if(sramecc && *sramecc)
+        if(sramecc.isEnabled())
             dbId += "_sramecc";
     }
-    if(xnack && *xnack)
+    if(xnack.isEnabled())
         dbId += "_xnack";
 }
 

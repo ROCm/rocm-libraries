@@ -248,9 +248,8 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(const auto xnack = target.Xnack(); xnack.has_value())
-        if(*xnack)
-            return false; // NOLINT (readability-simplify-boolean-expr)
+    if(target.isXnackEnabled())
+        return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
     const bool fp16 = problem.IsFp16();
