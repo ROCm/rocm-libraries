@@ -141,9 +141,9 @@ def runCodeCovTestCommand(platform, project)
         }
         commentString += "## Artifacts\n\n"
         commentString += "* [HTML Coverage Report and Diff](${JOB_URL}/Code_20coverage_20${platform.gpu}_20report) \n"
-        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.report/*view*/) \n"
-        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
-        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/build/code_cov_${platform.gpu}.zip) \n"
+        commentString += "* [File Coverage Summary](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.report/*view*/) \n"
+        commentString += "* [Diff Text File](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.diff/*view*/) \n"
+        commentString += "* [Full Text Coverage Report](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/build/code_cov_${platform.gpu}.zip) \n"
         commentString += "* [Python Coverage Report](${JOB_URL}/Python_20Code_20coverage_20${platform.gpu}_20report) \n"
         commentString += "\n"
         commentString += "## Commit Hashes\n\n"
@@ -244,6 +244,10 @@ def runPerformanceCommand (platform, project)
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
+                    
+                    ./scripts/rrperf compare --format resource_md \\
+                        \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
+                            > resource_comparison_${platform.gpu}.md
                 """
             }
             else
@@ -281,9 +285,15 @@ def runPerformanceCommand (platform, project)
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
+                        
+                        ./scripts/rrperf compare --format resource_md \\
+                            ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
+                            ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
+                            > resource_comparison_${platform.gpu}.md
                     else
                         touch performance_comparison_${platform.gpu}.html
                         touch performance_comparison_${platform.gpu}.md
+                        touch resource_comparison_${platform.gpu}.md
                         echo "Skipped ${env.CHANGE_TARGET} compare for ${platform.gpu}, no archived performance_${platform.gpu}_last.zip found."
                     fi
                 """
@@ -320,28 +330,60 @@ def runPerformanceCommand (platform, project)
                         reportName: "Performance Report for ${platform.gpu}",
                         reportTitles: "Report"])
 
-            def commentTitle = "# Performance Report for ${platform.gpu}"
-            def commentString = "${commentTitle}\n\n"
-            def results = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+            def perfCommentTitle = "# Performance Report for ${platform.gpu}"
+            def perfCommentString = "${perfCommentTitle}\n\n"
+            def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
             def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
-            commentString += "## Results${estimateString}\n\n"
-            commentString += "${results}\n\n"
-            commentString += "<details><summary>Links</summary>\n\n"
-            commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
-            commentString += "* [Job Link](${env.BUILD_URL}) \n"
-            commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
-            commentString += "</details>\n\n"
+            perfCommentString += "## Results${estimateString}\n\n"
+            perfCommentString += "<details open>\n\n${perfResults}\n</details>\n"
+            perfCommentString += "<details><summary>Links</summary>\n\n"
+            perfCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            perfCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            perfCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            perfCommentString += "</details>\n\n"
 
-            boolean commentExists = false
+            boolean perfCommentExists = false
             for (prComment in getPrComments(pullRequest)) {
-                if (prComment.body.contains(commentTitle))
+                if (prComment.body.contains(perfCommentTitle))
                 {
-                    commentExists = true
-                    prComment.body = commentString
+                    perfCommentExists = true
+                    prComment.body = perfCommentString
                 }
             }
-            if (!commentExists) {
-                def comment = pullRequest.comment(commentString)
+            if (!perfCommentExists) {
+                def comment = pullRequest.comment(perfCommentString)
+            }
+            
+            def resCommentTitle = "# Resource Report for ${platform.gpu}"
+            def resCommentString = "${resCommentTitle}\n\n"
+            def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
+            
+            def maxResultsLength = 60000
+            def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
+            
+            if (resResults.length() > maxResultsLength) {
+                def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
+                resResults = resResults.substring(0, truncateIndex) + truncatedMessage
+            }
+            
+            resCommentString += "## Results${estimateString}\n\n"
+            resCommentString += "<details open>\n\n${resResults}\n</details>\n"
+            resCommentString += "<details><summary>Links</summary>\n\n"
+            resCommentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            resCommentString += "* [Job Link](${env.BUILD_URL}) \n"
+            resCommentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip) \n"
+            resCommentString += "</details>\n\n"
+
+            boolean resCommentExists = false
+            for (prComment in getPrComments(pullRequest)) {
+                if (prComment.body.contains(resCommentTitle))
+                {
+                    resCommentExists = true
+                    prComment.body = resCommentString
+                }
+            }
+            if (!resCommentExists) {
+                def comment = pullRequest.comment(resCommentString)
             }
         }
         else
@@ -427,7 +469,7 @@ def runPerformanceCommand (platform, project)
                         <ul>
                         <li><a href='${JOB_URL}/Performance_20Report_20for_20${platform.gpu}'>HTML Report</a></li>
                         <li><a href='${env.BUILD_URL}'>Job Link</a></li>
-                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
+                        <li><a href='${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocroller/shared/rocroller/performance_${platform.gpu}_archive.zip'>Result Archive</a></li>
                         </ul>
                         ${email_results}""",
                 to: "dl.rocroller@amd.com"

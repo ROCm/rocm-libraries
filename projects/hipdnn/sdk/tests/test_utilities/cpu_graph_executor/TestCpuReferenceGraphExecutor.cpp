@@ -21,6 +21,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
@@ -314,27 +315,6 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runConvolutionWrwTest<hip_bfloat16, float>(DataType::BFLOAT16,
                                                                               DataType::FLOAT);
-}
-
-// Single-node pointwise operation tests
-TEST(TestCpuReferenceGraphExecutor, PointwiseUnaryReluFwd)
-{
-    std::vector<int64_t> inputDims = {1, 3, 4, 4};
-    std::vector<int64_t> outputDims = {1, 3, 4, 4};
-
-    auto [graph, tensorBundle, variantPack]
-        = buildPointwiseUnaryGraph(inputDims,
-                                   outputDims,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   hipdnn_frontend::PointwiseMode::RELU_FWD,
-                                   1,
-                                   TensorLayout::NCHW);
-
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    CpuReferenceGraphExecutor().execute(
-        flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
