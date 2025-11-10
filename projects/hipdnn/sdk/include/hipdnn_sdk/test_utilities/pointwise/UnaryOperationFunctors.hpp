@@ -94,15 +94,6 @@ struct Negation
     }
 };
 
-struct Identity
-{
-    template <typename X>
-    auto operator()(const X& x) const -> X
-    {
-        return x;
-    }
-};
-
 } // namespace pointwise
 } // namespace test_utilities
 } // namespace hipdnn_sdk

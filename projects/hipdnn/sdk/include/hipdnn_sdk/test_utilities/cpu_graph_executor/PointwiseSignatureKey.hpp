@@ -142,7 +142,6 @@ private:
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD, DataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS, DataTypeEnum>(map);
         addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG, DataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::IDENTITY, DataTypeEnum>(map);
     }
 
     template <hipdnn_sdk::data_objects::DataType DataTypeEnum>

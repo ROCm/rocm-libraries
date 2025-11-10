@@ -33,7 +33,6 @@ inline const PointwiseModeBitset& getImplementedUnaryModesBitset()
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::ABS));
         bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::NEG));
-        bitset.set(toBitPosition(hipdnn_sdk::data_objects::PointwiseMode::IDENTITY));
         return bitset;
     }();
     return s_implementedUnaryModes;

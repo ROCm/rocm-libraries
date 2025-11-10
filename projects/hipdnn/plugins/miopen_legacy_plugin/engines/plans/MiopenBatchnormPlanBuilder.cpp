@@ -199,13 +199,13 @@ void batchnormFwdFusionCheckTensors(
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
     using PM = hipdnn_sdk::data_objects::PointwiseMode;
-    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD, PM::IDENTITY};
+    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
 
     if(s_supportedActivations.count(actAttr.operation()) == 0)
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion currently only supports RELU_FWD && IDENTITY activation");
+            "Batchnorm fusion currently only supports RELU_FWD activation");
     }
 
     // in_0 must be the batchnorm inference output (forward path)
@@ -349,7 +349,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         if(!(isFwdInferenceFirst && isPointwiseSecond))
         {
-            std::cout << "here";
             HIPDNN_LOG_INFO(
                 "Batchnorm plan builder is not applicable for this graph node order and types");
             return false;
@@ -360,8 +359,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
                node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>(),
                opGraph.getTensorMap()))
         {
-            std::cout << "here2";
-
             return false;
         }
 

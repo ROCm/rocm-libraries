@@ -243,7 +243,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
         hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
-    // Node 1: Pointwise (RELU_BWD)
+    // Node 1: Pointwise (RELU_FWD)
     auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
