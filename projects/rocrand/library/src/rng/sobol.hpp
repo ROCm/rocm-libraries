@@ -99,8 +99,7 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__
-    __launch_bounds__(block_size)
+__global__ __launch_bounds__(block_size)
 void generate_sobol_kernel(T*                 data,
                            const size_t       n,
                            const Constant*    direction_vectors,
@@ -685,7 +684,7 @@ public:
             // On AMD GPUs we must resort to static shared memory for performance.
             = 0;
 #else
-            = system_type::is_device() ? ((Is64 ? 64 : 32) * sizeof(constant_type)) : 0;
+                = system_type::is_device() ? ((Is64 ? 64 : 32) * sizeof(constant_type)) : 0;
 #endif
 
         const size_t       size             = data_size / m_dimensions;

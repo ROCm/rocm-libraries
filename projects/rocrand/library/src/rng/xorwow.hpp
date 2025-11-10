@@ -296,7 +296,7 @@ public:
 
     rocrand_status init()
     {
-        if (m_engines_initialized)
+        if(m_engines_initialized)
         {
             return ROCRAND_STATUS_SUCCESS;
         }
@@ -357,12 +357,11 @@ public:
         return ROCRAND_STATUS_SUCCESS;
     }
 
-    template<class T, class Distribution = uniform_distribution<T> >
-    rocrand_status generate(T * data, size_t data_size,
-                            Distribution distribution = Distribution())
+    template<class T, class Distribution = uniform_distribution<T>>
+    rocrand_status generate(T* data, size_t data_size, Distribution distribution = Distribution())
     {
         rocrand_status status = init();
-        if (status != ROCRAND_STATUS_SUCCESS)
+        if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
         }
@@ -413,9 +412,8 @@ public:
         }
 
         // Generating data_size values will use this many distributions
-        const auto touched_engines =
-            (data_size + Distribution::output_width - 1) /
-            Distribution::output_width;
+        const auto touched_engines
+            = (data_size + Distribution::output_width - 1) / Distribution::output_width;
 
         m_start_engine_id = (m_start_engine_id + touched_engines) % m_engines_size;
 
@@ -441,27 +439,27 @@ public:
     }
 
     template<class T>
-    rocrand_status generate_uniform(T * data, size_t data_size)
+    rocrand_status generate_uniform(T* data, size_t data_size)
     {
         uniform_distribution<T> distribution;
         return generate(data, data_size, distribution);
     }
 
     template<class T>
-    rocrand_status generate_normal(T * data, size_t data_size, T mean, T stddev)
+    rocrand_status generate_normal(T* data, size_t data_size, T mean, T stddev)
     {
         normal_distribution<T> distribution(mean, stddev);
         return generate(data, data_size, distribution);
     }
 
     template<class T>
-    rocrand_status generate_log_normal(T * data, size_t data_size, T mean, T stddev)
+    rocrand_status generate_log_normal(T* data, size_t data_size, T mean, T stddev)
     {
         log_normal_distribution<T> distribution(mean, stddev);
         return generate(data, data_size, distribution);
     }
 
-    rocrand_status generate_poisson(unsigned int * data, size_t data_size, double lambda)
+    rocrand_status generate_poisson(unsigned int* data, size_t data_size, double lambda)
     {
         auto result = m_poisson.get_distribution(lambda);
         if(auto* dis = std::get_if<poisson_distribution_t>(&result))

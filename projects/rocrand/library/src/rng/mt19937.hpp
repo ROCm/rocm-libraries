@@ -119,7 +119,7 @@ struct jump_ahead_mt19937
         constexpr unsigned int tail_n = mt19937_constants::n - (items_per_thread - 1) * block_size;
 
 #if defined(__HIP_DEVICE_COMPILE__)
-        __shared__ unsigned int temp[mt19937_constants::n];
+       __shared__ unsigned int temp[mt19937_constants::n];
         unsigned int            state[items_per_thread];
 
 #else
@@ -163,15 +163,15 @@ struct jump_ahead_mt19937
         }
     // clang-format on
 
-        system::syncthreads<isDevice>{}();
+    system::syncthreads<isDevice>{}();
 
-        const unsigned int engine_id = block_idx.x;
+    const unsigned int engine_id = block_idx.x;
 
-        // Jump ahead by engine_id * 2 ^ 1000 using precomputed polynomials for jumps of
-        // i * 2 ^ 1000 and mt19937_jumps_radix * i * 2 ^ 1000 values
-        // where i is in range [1; mt19937_jumps_radix).
-        unsigned int e = engine_id;
-        // clang-format off
+    // Jump ahead by engine_id * 2 ^ 1000 using precomputed polynomials for jumps of
+    // i * 2 ^ 1000 and mt19937_jumps_radix * i * 2 ^ 1000 values
+    // where i is in range [1; mt19937_jumps_radix).
+    unsigned int e = engine_id;
+    // clang-format off
         for(unsigned int r = 0; r < mt19937_jumps_radixes; r++)
         {
             const unsigned int radix = e % mt19937_jumps_radix;
@@ -277,8 +277,9 @@ struct jump_ahead_mt19937
 #endif
         }
 // clang-format on
-    }
-};
+}
+}
+;
 
 // This kernel is not explicitly tuned, but uses the same configs as the generate-kernels.
 // As this kernel is not dependent on any type just use void for the config, as mt19937 is not tuned for types independently, so all configs are the same for different types.
@@ -444,7 +445,7 @@ struct generate_short_mt19937
         }
 #endif
     }
-        // clang-format on
+    // clang-format on
     }
 };
 
@@ -666,8 +667,8 @@ struct generate_long_mt19937
 #if !defined(__HIP_DEVICE_COMPILE__)
             }
 #endif
-            // clang-format on
-        }
+        // clang-format on
+    }
 
     // save state
     // clang-format off
@@ -680,8 +681,9 @@ struct generate_long_mt19937
         }
 #endif
     // clang-format on
-    }
-};
+}
+}
+;
 
 template<class System, class ConfigProvider>
 class mt19937_generator_template : public generator_impl_base
@@ -955,7 +957,7 @@ public:
         const unsigned int full_stride = stride * inputs_per_state;
 
         generator_config config;
-        hipError_t err = ConfigProvider::template host_config<T>(m_stream, m_order, config);
+        hipError_t       err = ConfigProvider::template host_config<T>(m_stream, m_order, config);
         if(err != hipSuccess)
         {
             return ROCRAND_STATUS_INTERNAL_ERROR;

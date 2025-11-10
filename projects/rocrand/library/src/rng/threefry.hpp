@@ -61,12 +61,13 @@ struct threefry_device_engine : public BaseType
     __forceinline__ __device__ __host__ threefry_device_engine() {}
 
     __forceinline__ __device__ __host__ threefry_device_engine(const unsigned long long seed,
-                                                               const unsigned long long subsequence,
-                                                               const unsigned long long offset)
+                                                             const unsigned long long subsequence,
+                                                             const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
-    __forceinline__ __device__ __host__ vector_type next_leap(unsigned int leap)
+    __forceinline__ __device__ __host__
+    vector_type next_leap(unsigned int leap)
     {
         vector_type ret = this->m_state.result;
         if(this->m_state.substate > 0)
@@ -337,8 +338,8 @@ public:
                 return status;
             }
 
-            generator_config                       config;
-            const hipError_t                       error
+            generator_config config;
+            const hipError_t error
                 = ConfigProvider::template host_config<T>(m_stream, m_order, config);
             if(error != hipSuccess)
             {

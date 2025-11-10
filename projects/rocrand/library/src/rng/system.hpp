@@ -373,7 +373,8 @@ struct syncthreads;
 template<>
 struct syncthreads<true>
 {
-    __device__ void operator()()
+    __device__
+    void operator()()
     {
         __syncthreads();
     }

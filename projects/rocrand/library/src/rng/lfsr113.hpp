@@ -266,7 +266,7 @@ public:
         if(seeds.y < ROCRAND_LFSR113_DEFAULT_SEED_Y)
             seeds.y += ROCRAND_LFSR113_DEFAULT_SEED_Y;
 
-        m_seed                = seeds;
+        m_seed = seeds;
         reset();
     }
 
@@ -284,7 +284,7 @@ public:
         if(seed.w < ROCRAND_LFSR113_DEFAULT_SEED_W)
             seed.w += ROCRAND_LFSR113_DEFAULT_SEED_W;
 
-        m_seed                = seed;
+        m_seed = seed;
         reset();
         return ROCRAND_STATUS_SUCCESS;
     }

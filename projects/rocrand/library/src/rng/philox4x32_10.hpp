@@ -80,14 +80,15 @@ struct philox4x32_10_device_engine : public ::rocrand_device::philox4x32_10_engi
 
     __forceinline__ philox4x32_10_device_engine() = default;
 
-    __forceinline__ __device__ __host__
-        philox4x32_10_device_engine(const unsigned long long seed,
-                                    const unsigned long long subsequence,
-                                    const unsigned long long offset)
+    __forceinline__ __device__ __host__ philox4x32_10_device_engine(
+        const unsigned long long seed,
+        const unsigned long long subsequence,
+        const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
-    __forceinline__ __device__ __host__ uint4 next4_leap(unsigned int leap)
+    __forceinline__ __device__ __host__
+    uint4 next4_leap(unsigned int leap)
     {
         uint4 ret = m_state.result;
         if(m_state.substate > 0)
