@@ -158,7 +158,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     InstStreams = convOptToStream(opt1)
 
     macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
-    #module.add(SBarrier(comment="debug"))
+    #macro.add(SBarrier(comment="debug"))
 
     lastIter = numLoopIter - 1
 
@@ -472,43 +472,43 @@ def hasCustomSchedule(kernel):
         optSchedule = dict()
         syncCode = []
         if isNN and useLDSTr and TLDS==1:
+            # TODO: This schedule can be improved when BC are resolved for MT192
             # Note: A/B Global read orders are swapped
             # i.e. GRA contains GR for B
+            kernel["SwapGlobalReadOrder"] = True
             optSchedule = {
-                'SYNC'    : [[20,21,23,25,27,29,31,33,46,57,58,94],
-                             [20,21,24,26,28,30,32,34,47,58,58,94]],
-                'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-                'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
-                'LRB0'    : [[0,0,1,1,2,2,6,8],
-                             [3,3,4,4,5,5,7,9]],
-                'LRA0'    : [[10,12,14,16,18,23,35,37,39,41,43,45],
-                             [11,13,15,17,19,22,36,38,40,42,44,46]],
-                'LWA'     : [[23,25,27,29,31,33],
-                             [24,26,28,30,32,34]],
-                'GRA'     : [[22,22,24,24,26,26,28,28,30,30, 42,42,43,43,45,45],
-                             [23,23,25,25,27,27,29,29,31,31, 43,43,44,44,46,46]],
-                'GRB'     : [[54, 56, 58, 60, 62, 64],
-                             [55, 57, 59, 61, 63, 65]],
-                'LRSA'   : [[47]],
-                'LRSB'   : [[37]],
-                'LWSB'   : [[47]], # For B
-                'LWSA'   : [[52]], # For A
-                'LRB1'    : [[59,59,61,61,63,63,65,67],
-                             [60,60,62,62,64,64,66,68]],
-                'LRA1'    : [[69,71,73,75,77,79,81,83,85,85,87,87],
-                             [70,72,74,76,78,80,82,84,86,86,88,88]],
+                'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 94]],
+                'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
+                'GRIncA' : [[9,10,11,12,13,14,15,16,17]],
+                'LRB0'   : [[0,0,1,1,2,2,6,8],
+                            [3,3,4,4,5,5,7,9]],
+                # These local reads have BC
+                'LRA0'   : [[10, 15,17,19,21,23, 25,27,29,33,37,39],
+                            [11, 14,16,18,20,22, 24,26,28,32,36,38]],
+                'GRA'    : [[14,14, 16,16, 18,18, 20,20, 22,22, 34,34,36,36,38,38],
+                            [15,15, 17,17, 19,19, 21,21, 23,23, 35,35,37,37,39,39]],
+                'GRB'    : [[54,54, 56,56, 58,58, 60,60, 62,62, 64,64],
+                            [55,55, 57,57, 59,59, 61,61, 63,63, 65,65]],
+                'LRSA'   : [[40]],
+                'LRSB'   : [[40]],
+                'LWSB'   : [[41]], # For B
+                'LWSA'   : [[66]], # For A
+                'LRB1'   : [[57,57,59,59,61,61,63,65],
+                            [58,58,60,60,62,62,64,64]],
+                'LRA1'   : [[67,71,73,75,77,79,81,85,87,89,91,93],
+                            [68,72,74,76,78,80,82,86,88,90,92,94]],
                 'LCC'    : [[95, 95]],
             }
-            syncCode = [SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
+            syncCode = [SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for LRB0 to complete"),
+                        SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SBarrier(comment=""),
+                        SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
 
