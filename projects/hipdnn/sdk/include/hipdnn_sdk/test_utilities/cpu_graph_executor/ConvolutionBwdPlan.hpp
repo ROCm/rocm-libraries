@@ -73,15 +73,14 @@ public:
         auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolution::
-            convBwdData<OutputDataType, WDataType, ComputeDataType, DyDataType>(
-                *shallowDXTensor,
-                *shallowWTensor,
-                *shallowDYTensor,
-                _params.stride,
-                _params.dilation,
-                _params.prePadding,
-                _params.postPadding);
+        CpuFpReferenceConvolution::dgrad<OutputDataType, WDataType, ComputeDataType, DyDataType>(
+            *shallowDXTensor,
+            *shallowWTensor,
+            *shallowDYTensor,
+            _params.stride,
+            _params.dilation,
+            _params.prePadding,
+            _params.postPadding);
     }
 
 private:

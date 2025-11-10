@@ -161,19 +161,16 @@ protected:
                                                   static_cast<IntermediateType>(2.0f),
                                                   testCase.seed);
 
-        CpuFpReferenceBatchnorm::backward<InputType,
-                                          InputType,
-                                          IntermediateType,
-                                          IntermediateType,
-                                          float,
-                                          InputType>(dyTensorCpu,
-                                                     xTensorCpu,
-                                                     meanTensorCpu,
-                                                     invVarianceTensorCpu,
-                                                     scaleTensorCpu,
-                                                     dxTensorCpu,
-                                                     dscaleTensorCpu,
-                                                     dbiasTensorCpu);
+        CpuFpReferenceBatchnorm::
+            backward<InputType, InputType, IntermediateType, IntermediateType, float, InputType>(
+                dyTensorCpu,
+                xTensorCpu,
+                meanTensorCpu,
+                invVarianceTensorCpu,
+                scaleTensorCpu,
+                dxTensorCpu,
+                dscaleTensorCpu,
+                dbiasTensorCpu);
 
         CpuFpReferenceValidation<InputType> cpuRefValidationInput(tolerance, tolerance);
         CpuFpReferenceValidation<IntermediateType> cpuRefValidationIntermediate(

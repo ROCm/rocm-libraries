@@ -105,16 +105,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
         auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
         double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
-        test_utilities::CpuFpReferenceBatchnorm::fwdInference<InputType,
-                                                              IntermediateType,
-                                                              IntermediateType,
-                                                              float,
-                                                              InputType>(xTensor,
-                                                                         scaleTensor,
-                                                                         biasTensor,
-                                                                         meanTensor,
-                                                                         invVarianceTensor,
-                                                                         yRefTensor);
+        test_utilities::CpuFpReferenceBatchnorm::
+            fwdInference<InputType, IntermediateType, IntermediateType, float, InputType>(
+                xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);
 
         auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 

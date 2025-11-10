@@ -122,7 +122,7 @@ protected:
             static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> yTensorCpu(yTensor.dims(), _layout);
 
-        CpuFpReferenceConvolution::convFwdInference<DataType, DataType, float, DataType>(
+        CpuFpReferenceConvolution::fprop<DataType, DataType, float, DataType>(
             xTensorCpu,
             wTensorCpu,
             yTensorCpu,

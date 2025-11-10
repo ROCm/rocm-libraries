@@ -46,24 +46,24 @@ public:
 
     // Overload for uniform padding
     template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
-    static void convFwdInference(const TensorBase<XDataType>& x,
-                                 const TensorBase<WDataType>& w,
-                                 TensorBase<YDataType>& y,
-                                 const std::vector<int64_t>& strides,
-                                 const std::vector<int64_t>& dilations,
-                                 const std::vector<int64_t>& padding)
+    static void fprop(const TensorBase<XDataType>& x,
+                      const TensorBase<WDataType>& w,
+                      TensorBase<YDataType>& y,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& padding)
     {
-        convFwdInference(x, w, y, strides, dilations, padding, padding);
+        fprop(x, w, y, strides, dilations, padding, padding);
     }
 
     template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
-    static void convFwdInference(const TensorBase<XDataType>& x,
-                                 const TensorBase<WDataType>& w,
-                                 TensorBase<YDataType>& y,
-                                 const std::vector<int64_t>& strides,
-                                 const std::vector<int64_t>& dilations,
-                                 const std::vector<int64_t>& prePadding,
-                                 const std::vector<int64_t>& postPadding)
+    static void fprop(const TensorBase<XDataType>& x,
+                      const TensorBase<WDataType>& w,
+                      TensorBase<YDataType>& y,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding)
     {
         validateInput(x, w, y, strides, dilations, prePadding, postPadding);
 
@@ -172,24 +172,24 @@ public:
 
     // Overload for uniform padding
     template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
-    static void convBwdData(TensorBase<DxDataType>& gradX,
-                            const TensorBase<WDataType>& w,
-                            const TensorBase<DyDataType>& gradY,
-                            const std::vector<int64_t>& strides,
-                            const std::vector<int64_t>& dilations,
-                            const std::vector<int64_t>& padding)
+    static void dgrad(TensorBase<DxDataType>& gradX,
+                      const TensorBase<WDataType>& w,
+                      const TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& padding)
     {
-        convBwdData(gradX, w, gradY, strides, dilations, padding, padding);
+        dgrad(gradX, w, gradY, strides, dilations, padding, padding);
     }
 
     template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
-    static void convBwdData(TensorBase<DxDataType>& gradX,
-                            const TensorBase<WDataType>& w,
-                            const TensorBase<DyDataType>& gradY,
-                            const std::vector<int64_t>& strides,
-                            const std::vector<int64_t>& dilations,
-                            const std::vector<int64_t>& prePadding,
-                            const std::vector<int64_t>& postPadding)
+    static void dgrad(TensorBase<DxDataType>& gradX,
+                      const TensorBase<WDataType>& w,
+                      const TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding)
     {
         validateInput(gradX, w, gradY, strides, dilations, prePadding, postPadding);
 
@@ -303,24 +303,24 @@ public:
     }
 
     template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
-    static void convBwdWeight(const TensorBase<XDataType>& x,
-                              TensorBase<DwDataType>& gradW,
-                              const TensorBase<DyDataType>& gradY,
-                              const std::vector<int64_t>& strides,
-                              const std::vector<int64_t>& dilations,
-                              const std::vector<int64_t>& padding)
+    static void wgrad(const TensorBase<XDataType>& x,
+                      TensorBase<DwDataType>& gradW,
+                      const TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& padding)
     {
-        convBwdWeight(x, gradW, gradY, strides, dilations, padding, padding);
+        wgrad(x, gradW, gradY, strides, dilations, padding, padding);
     }
 
     template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
-    static void convBwdWeight(const TensorBase<XDataType>& x,
-                              TensorBase<DwDataType>& gradW,
-                              const TensorBase<DyDataType>& gradY,
-                              const std::vector<int64_t>& strides,
-                              const std::vector<int64_t>& dilations,
-                              const std::vector<int64_t>& prePadding,
-                              const std::vector<int64_t>& postPadding)
+    static void wgrad(const TensorBase<XDataType>& x,
+                      TensorBase<DwDataType>& gradW,
+                      const TensorBase<DyDataType>& gradY,
+                      const std::vector<int64_t>& strides,
+                      const std::vector<int64_t>& dilations,
+                      const std::vector<int64_t>& prePadding,
+                      const std::vector<int64_t>& postPadding)
     {
         validateInput(x, gradW, gradY, strides, dilations, prePadding, postPadding);
 

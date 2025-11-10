@@ -68,13 +68,12 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
     variantPack[2] = planTensorBundle.dwTensor.memory().hostData();
     variantPack[3] = planTensorBundle.dyTensor.memory().hostData();
 
-    CpuFpReferenceConvolution::convBwdWeight<float, float, float, float>(
-        directTensorBundle.xTensor,
-        directTensorBundle.dwTensor,
-        directTensorBundle.dyTensor,
-        strides,
-        dilation,
-        padding);
+    CpuFpReferenceConvolution::wgrad<float, float, float, float>(directTensorBundle.xTensor,
+                                                                 directTensorBundle.dwTensor,
+                                                                 directTensorBundle.dyTensor,
+                                                                 strides,
+                                                                 dilation,
+                                                                 padding);
 
     patient.execute(variantPack);
 
