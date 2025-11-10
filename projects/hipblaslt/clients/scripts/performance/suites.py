@@ -86,6 +86,12 @@ def amax_set_1():
 
     yield ProblemSet(benchType="amax", name="benchset_1", problems=problemlist)
 
+def matmul_examples():
+    """gemm examples"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_example_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="example", problems=problemlist)
+
 def matmul_set_1():
     """gemm benchset 1"""
 
@@ -121,10 +127,20 @@ def all():
     yield from api_overhead()
     yield from amax_set_1()
 
-    if "942" in target_arch:
+    if "gfx942" in target_arch:
+        # Put focused tests set for gfx942
         yield from matmul_set_1() # this problemset is an initial test example for gfx942
         yield from matmul_set_2()
-        # Can put any other interested set for gfx942
-    elif "950" in target_arch:
+    elif "gfx950" in target_arch:
+        # Put focused tests set for gfx950
         yield from matmul_set_2()
-        # Can put any other interested set for gfx950
+    elif "gfx90a" in target_arch:
+        # FIXME- please replace the examples with the real interested problems for gfx90a
+        yield from matmul_examples()
+    elif "gfx110" in target_arch:
+        # FIXME- please replace the examples with the real interested problems for gfx110?
+        yield from matmul_examples()
+    elif "gfx120" in target_arch:
+        # FIXME- please replace the examples with the real interested problems for gfx120?
+        yield from matmul_examples()
+
