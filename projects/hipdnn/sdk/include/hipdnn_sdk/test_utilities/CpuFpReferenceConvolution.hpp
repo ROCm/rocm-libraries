@@ -18,7 +18,10 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class InputDataType, class ComputeDataType, class OutputDataType = InputDataType>
+template <class Input0DataType,
+          class Input1DataType,
+          class ComputeDataType,
+          class OutputDataType = Input0DataType>
 class CpuFpReferenceConvolutionImpl
 {
 public:
@@ -46,8 +49,8 @@ public:
     }
 
     // Overload for uniform padding
-    static void convFwdInference(const TensorBase<InputDataType>& input,
-                                 const TensorBase<InputDataType>& weight,
+    static void convFwdInference(const TensorBase<Input0DataType>& input,
+                                 const TensorBase<Input1DataType>& weight,
                                  TensorBase<OutputDataType>& output,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
@@ -56,8 +59,8 @@ public:
         convFwdInference(input, weight, output, strides, dilations, padding, padding);
     }
 
-    static void convFwdInference(const TensorBase<InputDataType>& input,
-                                 const TensorBase<InputDataType>& weight,
+    static void convFwdInference(const TensorBase<Input0DataType>& input,
+                                 const TensorBase<Input1DataType>& weight,
                                  TensorBase<OutputDataType>& output,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
@@ -144,8 +147,8 @@ public:
                             auto weightFullIndices
                                 = buildTensorIndices(weightIdx, c, kernelSpatialIndices);
 
-                            InputDataType inputVal = input.getHostValue(inputFullIndices);
-                            InputDataType weightVal = weight.getHostValue(weightFullIndices);
+                            Input0DataType inputVal = input.getHostValue(inputFullIndices);
+                            Input1DataType weightVal = weight.getHostValue(weightFullIndices);
 
                             accumulator = accumulator
                                           + (static_cast<ComputeDataType>(inputVal)
@@ -173,8 +176,8 @@ public:
 
     // Overload for uniform padding
     static void convBwdData(TensorBase<OutputDataType>& gradInput,
-                            const TensorBase<InputDataType>& weight,
-                            const TensorBase<InputDataType>& gradOutput,
+                            const TensorBase<Input1DataType>& weight,
+                            const TensorBase<Input0DataType>& gradOutput,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& padding)
@@ -183,8 +186,8 @@ public:
     }
 
     static void convBwdData(TensorBase<OutputDataType>& gradInput,
-                            const TensorBase<InputDataType>& weight,
-                            const TensorBase<InputDataType>& gradOutput,
+                            const TensorBase<Input1DataType>& weight,
+                            const TensorBase<Input0DataType>& gradOutput,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& prePadding,
@@ -274,8 +277,8 @@ public:
                             auto weightFullIndices = buildTensorIndices(
                                 weightBatchIdx, weightChannelIdx, kernelSpatialIndices);
 
-                            InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
-                            InputDataType vWei = weight.getHostValue(weightFullIndices);
+                            Input0DataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
+                            Input1DataType vWei = weight.getHostValue(weightFullIndices);
 
                             vAcc = vAcc
                                    + (static_cast<ComputeDataType>(vOut)
@@ -302,9 +305,9 @@ public:
         gradInput.memory().markHostModified();
     }
 
-    static void convBwdWeight(const TensorBase<InputDataType>& input,
+    static void convBwdWeight(const TensorBase<Input0DataType>& input,
                               TensorBase<OutputDataType>& gradWeight,
-                              const TensorBase<InputDataType>& gradOutput,
+                              const TensorBase<Input1DataType>& gradOutput,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& padding)
@@ -312,9 +315,9 @@ public:
         convBwdWeight(input, gradWeight, gradOutput, strides, dilations, padding, padding);
     }
 
-    static void convBwdWeight(const TensorBase<InputDataType>& input,
+    static void convBwdWeight(const TensorBase<Input0DataType>& input,
                               TensorBase<OutputDataType>& gradWeight,
-                              const TensorBase<InputDataType>& gradOutput,
+                              const TensorBase<Input1DataType>& gradOutput,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,
@@ -392,9 +395,9 @@ public:
                             auto inputFullIndices
                                 = buildTensorIndices(n, inputChannelIdx, inputSpatialIndices);
 
-                            InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
+                            Input1DataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
 
-                            InputDataType vIn = input.getHostValue(inputFullIndices);
+                            Input0DataType vIn = input.getHostValue(inputFullIndices);
 
                             vAcc = vAcc
                                    + (static_cast<ComputeDataType>(vOut)

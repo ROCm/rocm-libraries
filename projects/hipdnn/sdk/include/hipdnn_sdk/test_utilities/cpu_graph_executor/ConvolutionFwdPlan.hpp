@@ -50,7 +50,10 @@ struct ConvolutionFwdParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename InputDataType, typename AccumulatorType, typename OutputDataType>
+template <typename Input0DataType,
+          typename Input1DataType,
+          typename ComputeDataType,
+          typename OutputDataType>
 class ConvolutionFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -61,37 +64,41 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = createShallowTensor<InputDataType>(
+        auto shallowXTensor = createShallowTensor<Input0DataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowWTensor = createShallowTensor<InputDataType>(
+        auto shallowWTensor = createShallowTensor<Input1DataType>(
             _params.wTensor, variantPack.at(_params.wTensor.uid));
 
         auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType, OutputDataType>::
-            convFwdInference(*shallowXTensor,
-                             *shallowWTensor,
-                             *shallowYTensor,
-                             _params.stride,
-                             _params.dilation,
-                             _params.prePadding,
-                             _params.postPadding);
+        CpuFpReferenceConvolutionImpl<Input0DataType,
+                                      Input1DataType,
+                                      ComputeDataType,
+                                      OutputDataType>::convFwdInference(*shallowXTensor,
+                                                                        *shallowWTensor,
+                                                                        *shallowYTensor,
+                                                                        _params.stride,
+                                                                        _params.dilation,
+                                                                        _params.prePadding,
+                                                                        _params.postPadding);
     }
 
 private:
     ConvolutionFwdParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
+          hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
           hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
-    using AccumulatorDataType = DataTypeToNative<AccumulatorDataTypeEnum>;
+    using Input0DataType = DataTypeToNative<Input0DataTypeEnum>;
+    using Input1DataType = DataTypeToNative<Input1DataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
@@ -109,8 +116,8 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->w_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), Input0DataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), Input1DataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
         return true;
@@ -138,7 +145,7 @@ public:
             nodeAttributes->conv_mode());
 
         return std::make_unique<
-            ConvolutionFwdPlan<InputDataType, AccumulatorDataType, OutputDataType>>(
+            ConvolutionFwdPlan<Input0DataType, Input1DataType, ComputeDataType, OutputDataType>>(
             std::move(params));
     }
 };

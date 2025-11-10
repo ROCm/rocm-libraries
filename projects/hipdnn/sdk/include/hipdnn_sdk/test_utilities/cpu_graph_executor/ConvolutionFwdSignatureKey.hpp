@@ -16,16 +16,19 @@ struct ConvolutionFwdSignatureKey
 {
     const hipdnn_sdk::data_objects::NodeAttributes nodeType{
         hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes};
-    hipdnn_sdk::data_objects::DataType inputDataType;
-    hipdnn_sdk::data_objects::DataType accumulatorDataType;
+    hipdnn_sdk::data_objects::DataType input0DataType;
+    hipdnn_sdk::data_objects::DataType input1DataType;
+    hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
 
     ConvolutionFwdSignatureKey() = default;
-    constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
-                                         hipdnn_sdk::data_objects::DataType accumulator,
+    constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType input0,
+                                         hipdnn_sdk::data_objects::DataType input1,
+                                         hipdnn_sdk::data_objects::DataType compute,
                                          hipdnn_sdk::data_objects::DataType output)
-        : inputDataType(input)
-        , accumulatorDataType(accumulator)
+        : input0DataType(input0)
+        , input1DataType(input1)
+        , computeDataType(compute)
         , outputDataType(output)
     {
     }
@@ -44,15 +47,17 @@ struct ConvolutionFwdSignatureKey
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto wTensorAttr = tensorMap.at(nodeAttributes->w_tensor_uid());
         auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
-        if(xTensorAttr == nullptr || yTensorAttr == nullptr)
+        if(xTensorAttr == nullptr || wTensorAttr == nullptr || yTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
         }
 
-        inputDataType = xTensorAttr->data_type();
-        accumulatorDataType = computeType;
+        input0DataType = xTensorAttr->data_type();
+        input1DataType = wTensorAttr->data_type();
+        computeDataType = computeType;
         outputDataType = yTensorAttr->data_type();
     }
 
@@ -64,15 +69,16 @@ struct ConvolutionFwdSignatureKey
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(accumulatorDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 12);
+               ^ (static_cast<std::size_t>(static_cast<int>(input0DataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16);
     }
 
     bool operator==(const ConvolutionFwdSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && inputDataType == other.inputDataType
-               && accumulatorDataType == other.accumulatorDataType
+        return nodeType == other.nodeType && input0DataType == other.input0DataType
+               && input1DataType == other.input1DataType && computeDataType == other.computeDataType
                && outputDataType == other.outputDataType;
     }
 
@@ -88,28 +94,33 @@ struct ConvolutionFwdSignatureKey
 
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::HALF>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }
 
-    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum,
+    template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
+              hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
+              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
               hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<ConvolutionFwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   ConvolutionFwdSignatureKey>& map)
     {
         map[ConvolutionFwdSignatureKey(
-            InputDataTypeEnum, AccumulatorDataTypeEnum, OutputDataTypeEnum)]
-            = std::make_unique<ConvolutionFwdPlanBuilder<InputDataTypeEnum,
-                                                         AccumulatorDataTypeEnum,
+            Input0DataTypeEnum, Input1DataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
+            = std::make_unique<ConvolutionFwdPlanBuilder<Input0DataTypeEnum,
+                                                         Input1DataTypeEnum,
+                                                         ComputeDataTypeEnum,
                                                          OutputDataTypeEnum>>();
     }
 };
@@ -129,9 +140,10 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::ConvolutionFwdSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "ConvolutionFwd(in={}, accumulator={}, out={})",
-                              key.inputDataType,
-                              key.accumulatorDataType,
+                              "ConvolutionFwd(x={}, w={}, compute={}, y={})",
+                              key.input0DataType,
+                              key.input1DataType,
+                              key.computeDataType,
                               key.outputDataType);
     }
 };
