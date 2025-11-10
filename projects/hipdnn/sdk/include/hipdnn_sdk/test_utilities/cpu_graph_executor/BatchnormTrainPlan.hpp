@@ -244,58 +244,57 @@ public:
         // Optional batch statistics tensors
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->inv_variance_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
         }
 
         // Momentum can be any type - will be cast to double during extraction
         if(nodeAttributes->momentum_tensor_uid())
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->momentum_tensor_uid().value());
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->momentum_tensor_uid());
         }
 
         // Optional running mean/variance tensors
         if(nodeAttributes->prev_running_mean_tensor_uid())
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->prev_running_mean_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->prev_running_mean_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->prev_running_mean_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
+                                       nodeAttributes->prev_running_mean_tensor_uid(),
+                                       MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->prev_running_variance_tensor_uid())
         {
-            CHECK_TENSOR_EXISTS(tensorMap,
-                                nodeAttributes->prev_running_variance_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->prev_running_variance_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap,
+                                         nodeAttributes->prev_running_variance_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
+                                       nodeAttributes->prev_running_variance_tensor_uid(),
+                                       MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->next_running_mean_tensor_uid())
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->next_running_mean_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
+                                       nodeAttributes->next_running_mean_tensor_uid(),
+                                       MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->next_running_variance_tensor_uid())
         {
-            CHECK_TENSOR_EXISTS(tensorMap,
-                                nodeAttributes->next_running_variance_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->next_running_variance_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap,
+                                         nodeAttributes->next_running_variance_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
+                                       nodeAttributes->next_running_variance_tensor_uid(),
+                                       MeanVarianceDataTypeEnum);
         }
 
         return true;
