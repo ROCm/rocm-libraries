@@ -36,12 +36,15 @@ public:
     const MiopenTensor& y() const;
     const MiopenConvDescriptor& conv() const;
 
+    bool validTensors() const;
+
 private:
     size_t _spatialDimCount;
     MiopenTensor _x;
     MiopenTensor _w;
     MiopenTensor _y;
     MiopenConvDescriptor _conv;
+    bool _tensorsValid;
 };
 
 class ConvFwdPlan : public IPlan
@@ -53,8 +56,8 @@ public:
     ConvFwdPlan(const ConvFwdPlan&) = delete;
     ConvFwdPlan& operator=(const ConvFwdPlan&) = delete;
 
-    ConvFwdPlan(ConvFwdPlan&& other) noexcept;
-    ConvFwdPlan& operator=(ConvFwdPlan&& other) noexcept;
+    ConvFwdPlan(ConvFwdPlan&& other) = default;
+    ConvFwdPlan& operator=(ConvFwdPlan&& other) = default;
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 

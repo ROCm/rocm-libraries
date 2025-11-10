@@ -20,7 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
+from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
+                        StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
@@ -156,16 +157,15 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     InstStreams = convOptToStream(opt1)
 
-
-    module.add(TextBlock(".macro MAINLOOP ID useGR=1 usePLR=1 useGRInc=1 useLoop=1\n"))
-    #module.add(SBarrier(comment="debug"))
+    macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
+    #macro.add(SBarrier(comment="debug"))
 
     lastIter = numLoopIter - 1
 
     for miIndex in range(-1, len(mfmaCode)):
         if miIndex >= 0:
-            module.addComment0("mfmaIndex:%u"%(miIndex))
-            module.add(mfmaCode[miIndex])
+            macro.addComment0("mfmaIndex:%u"%(miIndex))
+            macro.add(mfmaCode[miIndex])
 
         def scheduleInst(indexList, instructionList):
             ret = [None]*len(indexList)
@@ -197,55 +197,54 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             if len(instList) == 1:
                 if instList[0] != None:
                     if macroGuard != "":
-                        module.add(TextBlock(macroGuard))
-                    module.add(instList[0])
+                        macro.add(ValueIf(macroGuard))
+                    macro.add(instList[0])
                     if macroGuard != "":
-                        module.add(TextBlock(".endif\n"))
-
+                        macro.add(ValueEndif())
         for k,ts in ToSched.items():
             if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                scheduleInst1(ts, ".if     \\useGRInc == 1\n")
+                scheduleInst1(ts, "\\useGRInc == 1")
             elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                scheduleInst1(ts, ".if     \\useGR == 1\n")
+                scheduleInst1(ts, "\\useGR == 1")
             elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                scheduleInst1(ts, ".if     \\usePLR == 1\n")
+                scheduleInst1(ts, "\\usePLR == 1")
             elif k in ['LCC']: # check for next prefetch
-                scheduleInst1(ts, ".if     \\useLoop == 1\n")
+                scheduleInst1(ts, "\\useLoop == 1")
             else:
                 scheduleInst1(ts)
 
         if needIfMacro:
             for codepath in range(numCodePath):
                 if codepath == 0:
-                    module.add(TextBlock(".if     \\ID == %u\n"%codepath))
+                    macro.add(ValueIf("\\ID == %u"%codepath))
                 else:
-                    module.add(TextBlock(".elseif \\ID == %u\n"%codepath))
+                    macro.add(ValueElseIf("\\ID == %u\n"%codepath))
 
                 def scheduleInst2(instList, macroGuard=""):
                     if len(instList) == numCodePath:
                         if instList[codepath] != None:
                             if macroGuard != "":
-                                module.add(TextBlock(macroGuard))
-                            module.add(instList[codepath])
+                                macro.add(ValueIf(macroGuard))
+                            macro.add(instList[codepath])
                             if macroGuard != "":
-                                module.add(TextBlock(".endif\n"))
+                                macro.add(ValueEndif())
 
                 for k,ts in ToSched.items():
                     if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                        scheduleInst2(ts, ".if     \\useGRInc == 1\n")
+                        scheduleInst2(ts, "\\useGRInc == 1\n")
                     elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                        scheduleInst2(ts, ".if     \\useGR == 1\n")
+                        scheduleInst2(ts, "\\useGR == 1\n")
                     elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                        scheduleInst2(ts, ".if     \\usePLR == 1\n")
+                        scheduleInst2(ts, "\\usePLR == 1\n")
                     elif k in ['LCC']: # check for next prefetch
-                        scheduleInst2(ts, ".if     \\useLoop == 1\n")
+                        scheduleInst2(ts, "\\useLoop == 1\n")
                     else:
                         scheduleInst2(ts)
 
                 if codepath == numCodePath - 1:
-                    module.add(TextBlock(".endif\n"))
+                    macro.add(ValueEndif())
 
-    module.add(TextBlock(".endm\n"))
+    module.add(macro)
     return module, numCodePath
 
 
@@ -427,22 +426,24 @@ def hasCustomSchedule(kernel):
         optSchedule = dict()
         syncCode = []
 
+        plr = 3 if kernel["ForceUnrollSubIter"] else 1
+
         if isTN and TLDS == 1:
             optSchedule = {
-                'SYNC'   : [[6,7, 20,21, 46,47, 61]],
-                'GRIncA' : [[0,1,2,3,4,4,4,4,4]],
-                'GRIncB' : [[5,5,5,5,5,6,6,6,6]],
-                'LRA0'   : [[0,0, 1,1, 2,2, 3,3]],
-                'GRA'    : [[8,8,9,9,10,10,11,11,12,12, 23,23,24,24,25,25]],
-                'LRB0'   : [[13,13,14,14,15,15,16,16]],
-                'LRA1'   : [[48,48,49,49,50,50,51,51]],
-                'LRB1'   : [[52,52,54,54,55,55,56,56]],
-                'GRB'    : [[26,26,27,27, 39,39,40,40,41,41,42,42,43,43, 53,53]],
-                'LCC'    : [[60, 60]],
-                'LRSA'   : [[17]],
-                'LRSB'   : [[17]],
-                'LWSA'   : [[57]],
-                'LWSB'   : [[57]],
+                'SYNC'      : [[6,7, 20,21, 46,47, 61]],
+                'GRIncA'    : [[0,1,2,3,4,4,4,4,4]],
+                'GRIncB'    : [[5,5,5,5,5,6,6,6,6]],
+                'LRA0'      : [[0,0, 1,1, 2,2, 3,3]],
+                'GRA'       : [[8,8,9,9,10,10,11,11,12,12, 23,23,24,24,25,25]],
+                'LRB0'      : [[13,13,14,14,15,15,16,16]],
+                'LRA%u'%plr : [[48,48,49,49,50,50,51,51]],
+                'LRB%u'%plr : [[52,52,54,54,55,55,56,56]],
+                'GRB'       : [[26,26,27,27, 39,39,40,40,41,41,42,42,43,43, 53,53]],
+                'LCC'       : [[60, 60]],
+                'LRSA'      : [[17]],
+                'LRSB'      : [[17]],
+                'LWSA'      : [[57]],
+                'LWSB'      : [[57]],
             }
             syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0/LRB0 to complete"),
                         SBarrier(comment=""),
@@ -456,10 +457,12 @@ def hasCustomSchedule(kernel):
 
         numMfma = 64
         # B0A0, B0A1, B1A0, B1A1
-        mfmaReorder = [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27,
-                       4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31,
-                       32,33,34,35, 40,41,42,43, 48,49,50,51, 56,57,58,59,
-                       36,37,38,39, 44,45,46,47, 52,53,54,55, 60,61,62,63]
+        mfmaReorder = []
+        if not kernel["ForceUnrollSubIter"]:
+            mfmaReorder = [0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27,
+                           4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31,
+                           32,33,34,35, 40,41,42,43, 48,49,50,51, 56,57,58,59,
+                           36,37,38,39, 44,45,46,47, 52,53,54,55, 60,61,62,63]
         opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, mfmaReorder)
         return True, opt1
     elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
@@ -469,43 +472,43 @@ def hasCustomSchedule(kernel):
         optSchedule = dict()
         syncCode = []
         if isNN and useLDSTr and TLDS==1:
+            # TODO: This schedule can be improved when BC are resolved for MT192
             # Note: A/B Global read orders are swapped
             # i.e. GRA contains GR for B
+            kernel["SwapGlobalReadOrder"] = True
             optSchedule = {
-                'SYNC'    : [[20,21,23,25,27,29,31,33,46,57,58,94],
-                             [20,21,24,26,28,30,32,34,47,58,58,94]],
-                'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-                'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
-                'LRB0'    : [[0,0,1,1,2,2,6,8],
-                             [3,3,4,4,5,5,7,9]],
-                'LRA0'    : [[10,12,14,16,18,23,35,37,39,41,43,45],
-                             [11,13,15,17,19,22,36,38,40,42,44,46]],
-                'LWA'     : [[23,25,27,29,31,33],
-                             [24,26,28,30,32,34]],
-                'GRA'     : [[22,22,24,24,26,26,28,28,30,30, 42,42,43,43,45,45],
-                             [23,23,25,25,27,27,29,29,31,31, 43,43,44,44,46,46]],
-                'GRB'     : [[54, 56, 58, 60, 62, 64],
-                             [55, 57, 59, 61, 63, 65]],
-                'LRSA'   : [[47]],
-                'LRSB'   : [[37]],
-                'LWSB'   : [[47]], # For B
-                'LWSA'   : [[52]], # For A
-                'LRB1'    : [[59,59,61,61,63,63,65,67],
-                             [60,60,62,62,64,64,66,68]],
-                'LRA1'    : [[69,71,73,75,77,79,81,83,85,85,87,87],
-                             [70,72,74,76,78,80,82,84,86,86,88,88]],
+                'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 94]],
+                'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
+                'GRIncA' : [[9,10,11,12,13,14,15,16,17]],
+                'LRB0'   : [[0,0,1,1,2,2,6,8],
+                            [3,3,4,4,5,5,7,9]],
+                # These local reads have BC
+                'LRA0'   : [[10, 15,17,19,21,23, 25,27,29,33,37,39],
+                            [11, 14,16,18,20,22, 24,26,28,32,36,38]],
+                'GRA'    : [[14,14, 16,16, 18,18, 20,20, 22,22, 34,34,36,36,38,38],
+                            [15,15, 17,17, 19,19, 21,21, 23,23, 35,35,37,37,39,39]],
+                'GRB'    : [[54,54, 56,56, 58,58, 60,60, 62,62, 64,64],
+                            [55,55, 57,57, 59,59, 61,61, 63,63, 65,65]],
+                'LRSA'   : [[40]],
+                'LRSB'   : [[40]],
+                'LWSB'   : [[41]], # For B
+                'LWSA'   : [[66]], # For A
+                'LRB1'   : [[57,57,59,59,61,61,63,65],
+                            [58,58,60,60,62,62,64,64]],
+                'LRA1'   : [[67,71,73,75,77,79,81,85,87,89,91,93],
+                            [68,72,74,76,78,80,82,86,88,90,92,94]],
                 'LCC'    : [[95, 95]],
             }
-            syncCode = [SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
+            syncCode = [SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=5, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),
-                        SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for LRB0 to complete"),
+                        SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
+                        SBarrier(comment=""),
+                        SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
 

@@ -42,6 +42,65 @@ namespace rocRoller::Serialization
     }
 
     template <typename IO>
+    struct MappingTraits<Client::GEMMClient::MNKTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::MNKTuple& x)
+        {
+            iot::mapRequired(io, "m", x.m);
+            iot::mapRequired(io, "n", x.n);
+            iot::mapRequired(io, "k", x.k);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::MNKTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
+    struct MappingTraits<Client::GEMMClient::MNKBTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::MNKBTuple& x)
+        {
+            iot::mapRequired(io, "m", x.m);
+            iot::mapRequired(io, "n", x.n);
+            iot::mapRequired(io, "k", x.k);
+            iot::mapRequired(io, "b", x.b);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::MNKBTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
+    struct MappingTraits<Client::GEMMClient::MKNLTuple, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::GEMMClient::MKNLTuple& x)
+        {
+            iot::mapRequired(io, "m", x.m);
+            iot::mapRequired(io, "k", x.k);
+            iot::mapRequired(io, "n", x.n);
+            iot::mapRequired(io, "l", x.l);
+        }
+
+        static void mapping(IO& io, Client::GEMMClient::MKNLTuple& x, EmptyContext& ctx)
+        {
+            mapping(io, x);
+        }
+    };
+
+    template <typename IO>
     struct MappingTraits<Client::GEMMClient::TypeParameters, IO, EmptyContext>
     {
         static const bool flow = false;
@@ -129,6 +188,12 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "checked", result.benchmarkResults.checked);
             iot::mapRequired(io, "correct", result.benchmarkResults.correct);
             iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
+
+            iot::mapRequired(io, "sgprCount", result.benchmarkResults.sgprCount);
+            iot::mapRequired(io, "vgprCount", result.benchmarkResults.vgprCount);
+            iot::mapRequired(io, "agprCount", result.benchmarkResults.agprCount);
+
+            iot::mapRequired(io, "ldsBytes", result.benchmarkResults.ldsBytes);
         }
 
         static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)
@@ -179,11 +244,9 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
             iot::mapRequired(io, "unroll_x", params.unrollX);
             iot::mapRequired(io, "unroll_y", params.unrollY);
-            iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
-            iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
+            iot::mapRequired(io, "load_A", params.loadPathA);
+            iot::mapRequired(io, "load_B", params.loadPathB);
             iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
-            iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
-            iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
             iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
@@ -198,6 +261,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
             iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
+            iot::mapRequired(io, "swizzleTileSize", params.swizzleTileSize);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
             iot::mapRequired(io, "streamK", params.streamK);

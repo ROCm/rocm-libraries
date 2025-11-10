@@ -7,8 +7,11 @@ endif()
 
 hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
 include(GoogleTest)
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 find_package(Python3 COMPONENTS Interpreter)
+
+findAndCheckLlvmSymbolizer()
 
 # Set executable prefix based on platform
 if(WIN32)
@@ -93,21 +96,21 @@ function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STAT
     if(CODE_COVERAGE)
         # For code coverage builds, we want each profraw file to have a unique name.  The %m
         # in the LLVM_PROFILE_FILE environment variable will auto generate a unique id.
-        list(APPEND ENVIRONMENT_LIST "LLVM_PROFILE_FILE=./bin/%m.profraw")
+        list(APPEND ENVIRONMENT_LIST "LLVM_PROFILE_FILE=./${CMAKE_INSTALL_BINDIR}/%m.profraw")
     endif()
     
     set(NEW_COMMAND "")
     if("${${COMMAND_VAR}}" STREQUAL "")
-        set(NEW_COMMAND ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/bin/${TARGET})
+        set(NEW_COMMAND ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${TARGET})
     else()
-        set(NEW_COMMAND && ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/bin/${TARGET})
+        set(NEW_COMMAND && ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/${TARGET})
     endif()
     
     set(${COMMAND_VAR} ${${COMMAND_VAR}} ${NEW_COMMAND} CACHE INTERNAL "${CACHE_DESC}" FORCE)
     set(${DEPENDS_VAR} ${${DEPENDS_VAR}} ${TARGET} CACHE INTERNAL "Accumulated ${TEST_TYPE} check depends" FORCE)
     
     # Track the binary paths for test name validation
-    set(EXECUTABLE_PATH "bin/${TARGET}")
+    set(EXECUTABLE_PATH "${CMAKE_INSTALL_BINDIR}/${TARGET}")
     set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} ${EXECUTABLE_PATH} CACHE INTERNAL "Accumulated check executable paths" FORCE)
 endfunction()
 
@@ -154,7 +157,7 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     endif()
     
     set_target_properties(${TARGET} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
     
     # Track this test target for later use in generating installed CTestTestfile.cmake
@@ -163,7 +166,7 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # Make test executables relocatable so they can find libraries when build directory is moved
     # Include both the main lib directory and the engine plugin directories
     set_target_properties(${TARGET} PROPERTIES
-        INSTALL_RPATH "\$ORIGIN/../lib;\$ORIGIN/../lib/hipdnn_plugins/engines"
+        INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
         INSTALL_RPATH_USE_LINK_PATH TRUE
         BUILD_RPATH_USE_ORIGIN TRUE
     )
@@ -196,6 +199,9 @@ function(add_integration_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(integration_test ${TARGET} ${WORKING_DIR})
 endfunction()
 
+# Define the CTest installation directory
+set(HIPDNN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipdnn")
+
 # Install CTest configuration files for direct test execution
 # This should be called once at the end of the main CMakeLists.txt after all tests are registered
 function(install_hipdnn_ctest_files)
@@ -209,19 +215,14 @@ function(install_hipdnn_ctest_files)
     get_property(all_tests GLOBAL PROPERTY HIPDNN_TEST_TARGETS)
     
     foreach(test_target ${all_tests})
-        # Test executables are in the same directory as CTestTestfile.cmake
         file(APPEND "${INSTALLED_CTEST_FILE}" 
-            "add_test(${test_target} \"./${test_target}\")\n")
-        
-        # Working directory is the bin directory where tests and CTestTestfile.cmake live
-        file(APPEND "${INSTALLED_CTEST_FILE}"
-            "set_tests_properties(${test_target} PROPERTIES WORKING_DIRECTORY \".\")\n")
+            "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
     
-    # Install the generated CTestTestfile.cmake to bin directory
+    # Install the generated CTestTestfile.cmake to HIPDNN_CTEST_FILE_INSTALL_PATH
     install(
         FILES "${INSTALLED_CTEST_FILE}"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        DESTINATION ${HIPDNN_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
     )
     

@@ -4,7 +4,9 @@
 #include <array>
 
 #include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvBwdPlan.hpp"
@@ -21,8 +23,18 @@ ConvBwdParams::ConvBwdParams(
     , _dx(miopen_utils::createTensor(tensorMap, attributes.dx_tensor_uid()))
     , _w(miopen_utils::createTensor(tensorMap, attributes.w_tensor_uid()))
     , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
-    , _conv(_spatialDimCount, attributes)
 {
+    const auto& attrDX = miopen_utils::findTensorAttributes(tensorMap, _dx.uid());
+    const auto& attrW = miopen_utils::findTensorAttributes(tensorMap, _w.uid());
+    const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
+
+    const auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDX.dims());
+    const auto weightDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(inputDims, weightDims);
+
+    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
+
+    _tensorsValid = (!attrDX.virtual_() && !attrW.virtual_() && !attrDY.virtual_());
 }
 
 const MiopenTensor& ConvBwdParams::dx() const
@@ -43,6 +55,11 @@ const MiopenTensor& ConvBwdParams::dy() const
 const MiopenConvDescriptor& ConvBwdParams::conv() const
 {
     return _conv;
+}
+
+bool ConvBwdParams::validTensors() const
+{
+    return _tensorsValid;
 }
 
 ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&& params)
@@ -75,7 +92,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
                 auto status = miopenDestroySolution(s);
                 if(status != miopenStatusSuccess)
                 {
-                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvFwdPlan destructor");
+                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan destructor");
                 }
             });
     }
@@ -87,26 +104,6 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
     }
 
     THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
-}
-
-ConvBwdPlan::ConvBwdPlan(ConvBwdPlan&& other) noexcept
-    : _params(std::move(other._params))
-    , _solution(std::move(other._solution))
-    , _workspaceSize(other._workspaceSize)
-{
-    other._workspaceSize = 0;
-}
-
-ConvBwdPlan& ConvBwdPlan::operator=(ConvBwdPlan&& other) noexcept
-{
-    if(this != &other)
-    {
-        _params = std::move(other._params);
-        _solution = std::move(other._solution);
-        _workspaceSize = other._workspaceSize;
-        other._workspaceSize = 0;
-    }
-    return *this;
 }
 
 size_t ConvBwdPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const

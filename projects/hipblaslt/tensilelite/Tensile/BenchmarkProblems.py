@@ -249,6 +249,7 @@ def writeBenchmarkFiles(
                             kernelWriterAssembly,
                             debugConfig.splitGSU,
                             cmdLineArchs,
+                            disableAsmComments=globalParameters["DisableAsmComments"],
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,

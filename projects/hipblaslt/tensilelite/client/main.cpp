@@ -770,7 +770,7 @@ int main(int argc, const char* argv[])
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
-                    listeners.preSolution(*solution);
+                    listeners.preSolution(solution.get());
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try

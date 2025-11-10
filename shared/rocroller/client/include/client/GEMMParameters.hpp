@@ -32,6 +32,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
@@ -51,6 +52,21 @@ namespace rocRoller
                 N,
 
                 Count
+            };
+
+            struct MNKTuple
+            {
+                int m, n, k;
+            };
+
+            struct MNKBTuple
+            {
+                int m, n, k, b;
+            };
+
+            struct MKNLTuple
+            {
+                int m, k, n, l;
             };
 
             std::string toString(TransposeType trans);
@@ -139,16 +155,16 @@ namespace rocRoller
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool swizzleScale  = false;
-                bool prefetchScale = false;
+                bool      swizzleScale    = false;
+                MKNLTuple swizzleTileSize = {0, 0, 0, 0};
+                bool      prefetchScale   = false;
 
                 // Other options
-                bool loadLDSA  = true;
-                bool loadLDSB  = true;
+                Parameters::Solution::LoadPath loadPathA{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
+                Parameters::Solution::LoadPath loadPathB{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
-
-                bool direct2LDSA = false;
-                bool direct2LDSB = false;
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
@@ -181,10 +197,42 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
         }
     }
+}
+
+namespace rocRoller::Client::GEMMClient::CLI
+{
+    constexpr bool PARSE_SUCCESS = true;
+    constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an MxNxK or MxNxKxB tuple from a string.
+     *
+     * If B is missing, it is set to 1.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x);
+
+    /**
+     * @brief Parse an MxNxK tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& x);
+
+    /**
+     * @brief Parse an MxK/NxL tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x);
 }

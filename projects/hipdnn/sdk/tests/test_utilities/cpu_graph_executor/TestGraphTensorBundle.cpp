@@ -23,8 +23,12 @@ protected:
                                                  DataType meanVarianceDataType)
     {
         std::vector<int64_t> dims = {2, 3, 4, 4};
-        auto graph = buildBatchnormFwdInferenceGraph(
-            inputDataType, scaleBiasDataType, meanVarianceDataType, dims, TensorLayout::NCHW);
+        auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
+                                                     scaleBiasDataType,
+                                                     meanVarianceDataType,
+                                                     meanVarianceDataType,
+                                                     dims,
+                                                     TensorLayout::NCHW);
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
         _flatbufferData = std::move(flatbufferGraph);
@@ -55,8 +59,13 @@ TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
 TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
 {
     std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto graph = buildBatchnormFwdInferenceGraph(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NCHW, true);
+    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 dims,
+                                                 TensorLayout::NCHW,
+                                                 true);
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
@@ -114,7 +123,7 @@ TEST_F(TestGraphTensorBundle, ToVariantPackReturnsCorrectMapping)
 
     GraphTensorBundle bundle(tensorMap);
 
-    auto variantPack = bundle.toVariantPack();
+    auto variantPack = bundle.toHostVariantPack();
 
     EXPECT_EQ(variantPack.size(), bundle.tensors.size());
 

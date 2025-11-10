@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,23 +31,23 @@
 namespace TensileLite
 {
     /**
- * \ingroup Utilities
- * \defgroup Comparison Comparison
- */
+     * \ingroup Utilities
+     * \defgroup Comparison Comparison
+     */
 
     /**
- * \addtogroup Comparison
- * @{
- */
+     * \addtogroup Comparison
+     * @{
+     */
 
     /**
- * Lexicographically compares two lists of values, one pair of values at a
- * time.
- *
- * \return -1: The first list is lesser.
- *          1: The second list is lesser.
- *          0: The lists are equal.
- */
+     * Lexicographically compares two lists of values, one pair of values at a
+     * time.
+     *
+     * \return -1: The first list is lesser.
+     *          1: The second list is lesser.
+     *          0: The lists are equal.
+     */
     inline int LexicographicCompare()
     {
         return 0;
@@ -76,14 +76,14 @@ namespace TensileLite
     }
 
     /**
- * @brief Traits class which enables comparison operators to be implemented
- * based on a `compare()` function.
- *
- * Specializations must implement a `compare(lhs, rhs)` function which returns:
- *  - -1: lhs is lesser
- *  -  0: values are equal
- *  -  1: rhs is lesser
- */
+     * @brief Traits class which enables comparison operators to be implemented
+     * based on a `compare()` function.
+     *
+     * Specializations must implement a `compare(lhs, rhs)` function which returns:
+     *  - -1: lhs is lesser
+     *  -  0: values are equal
+     *  -  1: rhs is lesser
+     */
     template <typename T, typename U = T>
     struct Comparison
     {
@@ -142,8 +142,8 @@ namespace TensileLite
     }
 
     /**
- * Combines a number of already-hashed values.
- */
+     * Combines a number of already-hashed values.
+     */
     template <typename... Ts>
     inline size_t combine_hashes(size_t a, Ts... rest)
     {
@@ -216,8 +216,8 @@ namespace TensileLite
     }
 
     /**
- * @}
- */
+     * @}
+     */
 } // namespace TensileLite
 
 namespace std

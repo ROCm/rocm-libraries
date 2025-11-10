@@ -410,6 +410,8 @@ void TreeNode::CollapseContiguousDims()
         auto curStride = dist;
         for(auto i = collapsibleDims.rbegin(); i != collapsibleDims.rend(); ++i)
         {
+            if(stride[*i] == 0)
+                break;
             if(curStride % stride[*i] != 0)
                 break;
             if(curStride / stride[*i] != length[*i])
@@ -543,7 +545,8 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                     void*                 in_buffer[],
                                     void*                 out_buffer[],
                                     rocfft_execution_info info,
-                                    size_t                multiPlanIdx)
+                                    size_t                multiPlanIdx,
+                                    const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -656,7 +659,8 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                void*                 in_buffer[],
                                void*                 out_buffer[],
                                rocfft_execution_info info,
-                               size_t                multiPlanIdx)
+                               size_t                multiPlanIdx,
+                               const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -784,7 +788,8 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                               void*                 in_buffer[],
                               void*                 out_buffer[],
                               rocfft_execution_info info,
-                              size_t                multiPlanIdx)
+                              size_t                multiPlanIdx,
+                              const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -918,7 +923,8 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
                                 void*                 in_buffer[],
                                 void*                 out_buffer[],
                                 rocfft_execution_info info,
-                                size_t                multiPlanIdx)
+                                size_t                multiPlanIdx,
+                                const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
     {

@@ -319,6 +319,8 @@ namespace
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Clamp;
+	    case ROCBLASLT_EPILOGUE_SIGMOID:
+	        return TensileLite::ActivationType::Sigmoid;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -591,8 +593,9 @@ namespace
         {
             return "xf32_r";
         }
-        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
-                && typeB == rocisa::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16
+                && (typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Float && typeB == rocisa::DataType::Float))
         {
             return "f32_bf16_r";
         }
@@ -632,8 +635,9 @@ namespace
         {
             return "c_xf32_r";
         }
-        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
-                && typeB == rocisa::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16
+                && (typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Float && typeB == rocisa::DataType::Float))
         {
             return "c_f32_fast_bf16_r";
         }
@@ -801,6 +805,7 @@ namespace
 
     inline void logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
                                               const TensileLite::ContractionInputs&      inputs,
+                                              const int&                                 solutionIndex,
                                               bool                                       flush,
                                               const int32_t& rotatingBufferSize,
                                               const int32_t& coldIterations,
@@ -882,6 +887,10 @@ namespace
                                                               problem.computeInputType(),
                                                               problem.a().dataType(),
                                                               problem.b().dataType()),
+                    "algo_method",
+                    2,
+                    "solution_index",
+                    solutionIndex,                                          
                     "activation_type",
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
@@ -1144,6 +1153,7 @@ namespace
     inline void
         logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
                                       const TensileLite::ContractionGroupedInputs&      inputs,
+                                      const int&                                        solutionIndex,
                                       bool                                              flush,
                                       const int32_t& rotatingBufferSize,
                                       const int32_t& coldIterations,
@@ -1270,6 +1280,10 @@ namespace
                                                       problem.gemms[0].computeInputType(),
                                                       problem.gemms[0].a().dataType(),
                                                       problem.gemms[0].b().dataType()),
+            "algo_method",
+            2,
+            "solution_index",
+            solutionIndex,                                          
             "activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
@@ -2582,6 +2596,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         {
             logProfileFromTensileDataGemm(data->problem,
                                           data->inputs,
+                                          data->algoIndex,
                                           flush,
                                           rotatingBufferSize,
                                           coldIterations,
@@ -3140,6 +3155,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             {
                 logProfileFromTensileDataGemm(data->problem,
                                               data->inputs,
+                                              data->algoIndex,
                                               flush,
                                               rotatingBufferSize,
                                               coldIterations,
@@ -3176,6 +3192,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             {
                 logProfileFromTensileDataGemm(data->problem,
                                               data->inputs,
+                                              data->algoIndex,
                                               flush,
                                               rotatingBufferSize,
                                               coldIterations,
@@ -3336,6 +3353,7 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             {
                 logProfileFromTensileDataGemm(data->problem,
                                               data->inputs,
+                                              data->algoIndex,
                                               flush,
                                               rotatingBufferSize,
                                               coldIterations,

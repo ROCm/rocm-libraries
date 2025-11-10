@@ -156,6 +156,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsv_alg& p)
 }
 
 template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsv_alg& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spitsv_alg& p)
 {
     return rocsparse_status_invalid_value;
@@ -181,6 +187,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_gpsv_interleav
 
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsm_alg& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsm_alg& p)
 {
     return rocsparse_status_invalid_value;
 }
@@ -294,6 +306,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsv_stage& p)
 }
 
 template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsv_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spitsv_stage& p)
 {
     return rocsparse_status_invalid_value;
@@ -301,6 +319,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spitsv_stage& 
 
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsm_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsm_stage& p)
 {
     return rocsparse_status_invalid_value;
 }

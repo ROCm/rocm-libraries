@@ -31,6 +31,7 @@
 #include <variant>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 
@@ -374,6 +375,16 @@ namespace rocRoller
         inline ExpressionPtr literal(T value)
         {
             return std::make_shared<Expression>(value);
+        }
+
+        inline ExpressionPtr literal(Buffer value)
+        {
+            std::vector<ExpressionPtr> operands{literal(value.desc0),
+                                                literal(value.desc1),
+                                                literal(value.desc2),
+                                                literal(value.desc3)};
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
         }
 
         template <CCommandArgumentValue T>

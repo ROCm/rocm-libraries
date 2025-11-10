@@ -290,6 +290,8 @@ globalParameters["AsmDebug"] = (
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
+globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -317,6 +319,7 @@ defaultInternalSupportParams = {
     "SupportCustomStaggerU": True,
     # Use GG as G's backend
     "UseUniversalArgs": True,
+    "UseSFC": False,
 }
 
 # same parameter for all solution b/c depends only on compiler
@@ -419,8 +422,10 @@ defaultBenchmarkCommonParameters = [
     {"ForceDisableShadowInit": [False]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
-    {"MbskPrefetchMethod": [0]},
-    {"UseCustomMainLoopSchedule": [1]}
+    {"MbskPrefetchMethod": [-1]},
+    {"UseCustomMainLoopSchedule": [1]},
+    {"SpaceFillingAlgo": [[]]},
+    {"SFCWGM": [[[1,1],[1,1]]]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

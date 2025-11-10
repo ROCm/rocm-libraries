@@ -31,7 +31,7 @@ public:
     const MiopenTensor& scale() const;
     const MiopenTensor& bias() const;
     const MiopenTensor& estMean() const;
-    const MiopenTensor& estVariance() const;
+    const MiopenTensor& invVariance() const;
 
 private:
     MiopenTensor _x;
@@ -39,7 +39,7 @@ private:
     MiopenTensor _scale;
     MiopenTensor _bias;
     MiopenTensor _estMean;
-    MiopenTensor _estVariance;
+    MiopenTensor _invVariance;
 };
 
 class BatchnormFwdInferencePlan : public IPlan

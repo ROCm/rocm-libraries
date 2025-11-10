@@ -755,6 +755,10 @@ auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
         std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
 };
 
+auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
+    return static_cast<decltype(in)>(static_cast<decltype(in)>(1)/(static_cast<decltype(in)>(1) + std::exp(-in)));
+};
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -1867,10 +1871,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleA == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -1918,10 +1923,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleB == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
-               && arg.initialization != hipblaslt_initialization::trig_float)
+               && arg.initialization != hipblaslt_initialization::trig_float
+               && arg.initialization != hipblaslt_initialization::uniform_01)
             {
                 hipblaslt_cout
-                    << "Initialization of microscaling data only allows hpl and trig_float not "
+                    << "Initialization of microscaling data only allows hpl, trig_float or uniform_01, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -3976,6 +3982,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     break;
                 case hipblaslt_activation_type::clamp:
                     flops += clamp_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
+                    break;
+                case hipblaslt_activation_type::sigmoid:
+                    flops += sigmoid_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
                     break;
                 default:
                     break;

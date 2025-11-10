@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <functional>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -37,19 +38,13 @@ public:
     {
         return {};
     }
-    virtual Error populate_hipdnn_tensor_ids( // NOLINT(readability-identifier-naming)
-        [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>&
-            tensorLookup,
-        [[maybe_unused]] int64_t& currentTensorId,
-        [[maybe_unused]] std::unordered_set<int64_t>& usedIds) const
-    {
-        return {};
-    }
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
-        gather_hipdnn_tensor_ids([[maybe_unused]] std::unordered_set<int64_t>& usedIds,
-                                 [[maybe_unused]] std::unordered_set<int64_t>& duplicateIds) const {
-        };
+        gather_hipdnn_tensors(
+            [[maybe_unused]] std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
+            const
+    {
+    }
 
     virtual flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
         pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
@@ -67,6 +62,38 @@ public:
         return {};
     }
 
+    void visit(const std::function<void(INode&)>& visitor)
+    {
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                child->visit(visitor);
+            }
+        }
+    }
+
+    void visit(const std::function<void(const INode&)>& visitor) const
+    {
+        // Visit current node first (pre-order traversal)
+        visitor(*this);
+
+        // Then visit all children
+        for(const auto& child : _sub_nodes)
+        {
+            if(child)
+            {
+                // Explicitly call const version by getting const reference
+                const INode& constChild = *child;
+                constChild.visit(visitor);
+            }
+        }
+    }
+
 protected:
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 
@@ -82,42 +109,14 @@ protected:
         return {};
     }
 
-    void gatherHipdnnTensorIdsSubtree(std::unordered_set<int64_t>& usedIds,
-                                      std::unordered_set<int64_t>& duplicateIds) const
+    void gatherHipdnnTensorsSubtree(
+        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const
     {
-        gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+        gather_hipdnn_tensors(allTensors);
 
         for(const auto& node : _sub_nodes)
         {
-            node->gatherHipdnnTensorIdsSubtree(usedIds, duplicateIds);
-        }
-    }
-
-    Error populateHipdnnTensorIdsSubtree(
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorLookup,
-        int64_t& currentTensorId,
-        std::unordered_set<int64_t>& usedIds)
-    {
-        HIPDNN_CHECK_ERROR(populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds));
-        for(const auto& node : _sub_nodes)
-        {
-            HIPDNN_CHECK_ERROR(
-                node->populate_hipdnn_tensor_ids(tensorLookup, currentTensorId, usedIds));
-        }
-        return {};
-    }
-
-    static void processTensorUid(const std::shared_ptr<TensorAttributes>& tensor,
-                                 std::unordered_set<int64_t>& usedIds,
-                                 std::unordered_set<int64_t>& duplicateIds)
-    {
-        if(tensor && tensor->has_uid())
-        {
-            if(usedIds.find(tensor->get_uid()) != usedIds.end())
-            {
-                duplicateIds.insert(tensor->get_uid());
-            }
-            usedIds.insert(tensor->get_uid());
+            node->gatherHipdnnTensorsSubtree(allTensors);
         }
     }
 };
@@ -140,63 +139,34 @@ private:
 
 public:
     // NOLINTNEXTLINE(readability-identifier-naming)
-    void gather_hipdnn_tensor_ids(
-        [[maybe_unused]] std::unordered_set<int64_t>& usedIds,
-        [[maybe_unused]] std::unordered_set<int64_t>& duplicateIds) const override
+    void gather_hipdnn_tensors(
+        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
         for(auto& [_, tensor] : self().attributes.inputs)
         {
-            processTensorUid(tensor, usedIds, duplicateIds);
+            if(tensor)
+            {
+                allTensors.insert(tensor);
+            }
         }
 
         for(auto& [_, tensor] : self().attributes.outputs)
         {
-            processTensorUid(tensor, usedIds, duplicateIds);
+            if(tensor)
+            {
+                allTensors.insert(tensor);
+            }
         }
     }
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static int64_t get_unused_tensor_uid(int64_t& currentTensorId,
-                                         std::unordered_set<int64_t>& usedIds)
+
+    Error post_validate_node() const override // NOLINT(readability-identifier-naming)
     {
-        while(usedIds.find(currentTensorId) != usedIds.end())
+        if(self().attributes.compute_data_type == DataType::NOT_SET)
         {
-            ++currentTensorId;
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "Node " + self().attributes.name + " does not have a compute_data_type set"};
         }
-        usedIds.insert(currentTensorId);
-        return currentTensorId++;
-    }
-
-    // NOLINT(readability-identifier-naming)
-    Error populate_hipdnn_tensor_ids(
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorLookup,
-        int64_t& currentTensorId,
-        std::unordered_set<int64_t>& usedIds) const override
-    {
-        for(auto& [_, tensor] : self().attributes.inputs)
-        {
-            if(tensor && !tensor->has_uid())
-            {
-                tensor->set_uid(get_unused_tensor_uid(currentTensorId, usedIds));
-            }
-
-            tensorLookup[tensor->get_uid()] = tensor;
-        }
-
-        for(auto& [_, tensor] : self().attributes.outputs)
-        {
-            if(!tensor)
-            {
-                continue;
-            }
-
-            if(!tensor->has_uid())
-            {
-                tensor->set_uid(get_unused_tensor_uid(currentTensorId, usedIds));
-            }
-            tensorLookup[tensor->get_uid()] = tensor;
-        }
-
-        return {};
+        return {ErrorCode::OK, ""};
     }
 
     std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const override
