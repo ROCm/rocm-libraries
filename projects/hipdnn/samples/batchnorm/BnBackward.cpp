@@ -114,15 +114,19 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
-            dyTensor,
-            xTensor,
-            savedMeanTensor,
-            savedInvVarTensor,
-            scaleTensor,
-            dxRefTensor,
-            dscaleRefTensor,
-            dbiasRefTensor);
+        test_utilities::CpuFpReferenceBatchnorm::backward<InputType,
+                                                          InputType,
+                                                          IntermediateType,
+                                                          IntermediateType,
+                                                          float,
+                                                          InputType>(dyTensor,
+                                                                     xTensor,
+                                                                     savedMeanTensor,
+                                                                     savedInvVarTensor,
+                                                                     scaleTensor,
+                                                                     dxRefTensor,
+                                                                     dscaleRefTensor,
+                                                                     dbiasRefTensor);
 
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 

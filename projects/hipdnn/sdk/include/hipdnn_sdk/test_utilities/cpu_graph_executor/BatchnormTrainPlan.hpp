@@ -181,22 +181,22 @@ public:
             nextRunningVariancePtr = nextRunningVariance.get();
         }
 
-        CpuFpReferenceBatchnormImpl<XDataType,
-                                    ScaleBiasDataType,
-                                    MeanVarianceDataType,
-                                    ComputeDataType,
-                                    OutputDataType>::batchnormFwdTraining(*shallowXTensor,
-                                                                          *shallowScaleTensor,
-                                                                          *shallowBiasTensor,
-                                                                          *shallowYTensor,
-                                                                          epsilon,
-                                                                          momentumValue,
-                                                                          meanPtr,
-                                                                          invVariancePtr,
-                                                                          prevRunningMeanPtr,
-                                                                          prevRunningVariancePtr,
-                                                                          nextRunningMeanPtr,
-                                                                          nextRunningVariancePtr);
+        CpuFpReferenceBatchnorm::fwdTraining<XDataType,
+                                             ScaleBiasDataType,
+                                             MeanVarianceDataType,
+                                             ComputeDataType,
+                                             OutputDataType>(*shallowXTensor,
+                                                             *shallowScaleTensor,
+                                                             *shallowBiasTensor,
+                                                             *shallowYTensor,
+                                                             epsilon,
+                                                             momentumValue,
+                                                             meanPtr,
+                                                             invVariancePtr,
+                                                             prevRunningMeanPtr,
+                                                             prevRunningVariancePtr,
+                                                             nextRunningMeanPtr,
+                                                             nextRunningVariancePtr);
     }
 
 private:

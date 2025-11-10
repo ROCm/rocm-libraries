@@ -67,15 +67,14 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     variantPack[7] = planTensorBundle.dscaleTensor.memory().hostData();
     variantPack[8] = planTensorBundle.dbiasTensor.memory().hostData();
 
-    CpuFpReferenceBatchnormImpl<float, float, float, float, float>::batchnormBwd(
-        directTensorBundle.dyTensor,
-        directTensorBundle.xTensor,
-        directTensorBundle.meanTensor,
-        directTensorBundle.invVarianceTensor,
-        directTensorBundle.scaleTensor,
-        directTensorBundle.dxTensor,
-        directTensorBundle.dscaleTensor,
-        directTensorBundle.dbiasTensor);
+    CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
+                                      directTensorBundle.xTensor,
+                                      directTensorBundle.meanTensor,
+                                      directTensorBundle.invVarianceTensor,
+                                      directTensorBundle.scaleTensor,
+                                      directTensorBundle.dxTensor,
+                                      directTensorBundle.dscaleTensor,
+                                      directTensorBundle.dbiasTensor);
 
     bwdPlan.execute(variantPack);
 

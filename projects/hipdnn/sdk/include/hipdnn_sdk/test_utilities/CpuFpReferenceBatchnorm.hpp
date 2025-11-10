@@ -19,21 +19,20 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class XDataType,
-          class ScaleBiasDataType,
-          class MeanVarianceDataType = ScaleBiasDataType,
-          class ComputeDataType = MeanVarianceDataType,
-          class OutputDataType = XDataType,
-          class DyDataType = XDataType>
-class CpuFpReferenceBatchnormImpl
+class CpuFpReferenceBatchnorm
 {
 public:
-    static void batchnormFwdInference(const TensorBase<XDataType>& x,
-                                      const TensorBase<ScaleBiasDataType>& scale,
-                                      const TensorBase<ScaleBiasDataType>& bias,
-                                      const TensorBase<MeanVarianceDataType>& estimatedMean,
-                                      const TensorBase<MeanVarianceDataType>& invVariance,
-                                      TensorBase<OutputDataType>& output)
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType,
+              class ComputeDataType,
+              class YDataType>
+    static void fwdInference(const TensorBase<XDataType>& x,
+                             const TensorBase<ScaleBiasDataType>& scale,
+                             const TensorBase<ScaleBiasDataType>& bias,
+                             const TensorBase<MeanVarianceDataType>& estimatedMean,
+                             const TensorBase<MeanVarianceDataType>& invVariance,
+                             TensorBase<YDataType>& y)
     {
         if(x.dims().size() < 2)
         {
@@ -51,11 +50,10 @@ public:
             ComputeDataType elemStd = inVal - mean;
             ComputeDataType inhat = elemStd * invVarianceValue;
 
-            output.setHostValue(
-                staticCast<OutputDataType>(
-                    (staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * inhat)
-                    + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
-                indices);
+            y.setHostValue(staticCast<YDataType>(
+                               (staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * inhat)
+                               + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
+                           indices);
         };
 
         // Iterate all indices in parallel
@@ -63,22 +61,26 @@ public:
             batchnormFwdInferenceFunc, x.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
-        output.memory().markHostModified(); // Mark output memory as modified on host
+        y.memory().markHostModified(); // Mark y memory as modified on host
     }
 
-    static void
-        batchnormFwdTraining(const TensorBase<XDataType>& x,
-                             const TensorBase<ScaleBiasDataType>& scale,
-                             const TensorBase<ScaleBiasDataType>& bias,
-                             TensorBase<OutputDataType>& y,
-                             double epsilon,
-                             double momentum,
-                             TensorBase<MeanVarianceDataType>* mean = nullptr,
-                             TensorBase<MeanVarianceDataType>* invVariance = nullptr,
-                             const TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
-                             const TensorBase<MeanVarianceDataType>* prevRunningVariance = nullptr,
-                             TensorBase<MeanVarianceDataType>* nextRunningMean = nullptr,
-                             TensorBase<MeanVarianceDataType>* nextRunningVariance = nullptr)
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class ComputeDataType = ScaleBiasDataType,
+              class YDataType>
+    static void fwdTraining(const TensorBase<XDataType>& x,
+                            const TensorBase<ScaleBiasDataType>& scale,
+                            const TensorBase<ScaleBiasDataType>& bias,
+                            TensorBase<YDataType>& y,
+                            double epsilon,
+                            double momentum,
+                            TensorBase<MeanVarianceDataType>* mean = nullptr,
+                            TensorBase<MeanVarianceDataType>* invVariance = nullptr,
+                            const TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
+                            const TensorBase<MeanVarianceDataType>* prevRunningVariance = nullptr,
+                            TensorBase<MeanVarianceDataType>* nextRunningMean = nullptr,
+                            TensorBase<MeanVarianceDataType>* nextRunningVariance = nullptr)
     {
         if(x.dims().size() < 2)
         {
@@ -128,7 +130,7 @@ public:
                     auto xHat = (xVal - channelMean) * invVar;
 
                     y.setHostValue(
-                        staticCast<OutputDataType>(
+                        staticCast<YDataType>(
                             staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * xHat
                             + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
                         fullIndices);
@@ -201,14 +203,20 @@ public:
         }
     }
 
-    static void batchnormBwd(const TensorBase<DyDataType>& dy,
-                             const TensorBase<XDataType>& x,
-                             const TensorBase<MeanVarianceDataType>& mean,
-                             const TensorBase<MeanVarianceDataType>& invVariance,
-                             const TensorBase<ScaleBiasDataType>& scale,
-                             TensorBase<OutputDataType>& dx,
-                             TensorBase<ScaleBiasDataType>& dscale,
-                             TensorBase<ScaleBiasDataType>& dbias)
+    template <class DyDataType,
+              class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class ComputeDataType = MeanVarianceDataType,
+              class DxDataType = XDataType>
+    static void backward(const TensorBase<DyDataType>& dy,
+                         const TensorBase<XDataType>& x,
+                         const TensorBase<MeanVarianceDataType>& mean,
+                         const TensorBase<MeanVarianceDataType>& invVariance,
+                         const TensorBase<ScaleBiasDataType>& scale,
+                         TensorBase<DxDataType>& dx,
+                         TensorBase<ScaleBiasDataType>& dscale,
+                         TensorBase<ScaleBiasDataType>& dbias)
     {
         if(x.dims().size() < 2)
         {
@@ -271,7 +279,7 @@ public:
                     auto xHat = (xVal - channelMean) * channelInvVariance;
                     auto dxVal = (dyVal - meanDy - xHat * meanDyXhat) * scalarCoef;
 
-                    dx.setHostValue(staticCast<OutputDataType>(dxVal), fullIndices);
+                    dx.setHostValue(staticCast<DxDataType>(dxVal), fullIndices);
                 });
         };
 

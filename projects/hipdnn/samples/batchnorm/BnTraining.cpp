@@ -135,19 +135,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
-        // TODO: Uncomment when CPU reference implemented
-        // CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnorm_fwd_training(x_tensor,
-        //                                scale_tensor,
-        //                                bias_tensor,
-        //                                prev_mean_tensor,
-        //                                prev_var_tensor,
-        //                                momentum_tensor,
-        //                                epsilon_tensor,
-        //                                y_ref_tensor,
-        //                                next_mean_ref_tensor,
-        //                                next_var_ref_tensor,
-        //                                saved_mean_ref_tensor,
-        //                                saved_inv_var_ref_tensor);
+        // TODO: Uncomment when CPU reference validation is enabled
+        // CpuFpReferenceBatchnorm::fwdTraining<InputType, IntermediateType, IntermediateType, float, InputType>(
+        //     xTensor,
+        //     scaleTensor,
+        //     biasTensor,
+        //     yRefTensor,
+        //     epsilonTensor.memory().hostData()[0],
+        //     momentumTensor.memory().hostData()[0],
+        //     &savedMeanRefTensor,
+        //     &savedInvVarRefTensor,
+        //     &prevMeanTensor,
+        //     &prevVarTensor,
+        //     &nextMeanRefTensor,
+        //     &nextVarRefTensor);
 
         // auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
         //

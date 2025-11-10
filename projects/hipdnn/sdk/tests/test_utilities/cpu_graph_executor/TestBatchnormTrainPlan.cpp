@@ -75,19 +75,14 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     variantPack[6] = planTensorBundle.meanTensor.memory().hostData();
     variantPack[7] = planTensorBundle.invVarianceTensor.memory().hostData();
 
-    CpuFpReferenceBatchnormImpl<float, float, float, float, float>::batchnormFwdTraining(
-        directTensorBundle.xTensor,
-        directTensorBundle.scaleTensor,
-        directTensorBundle.biasTensor,
-        directTensorBundle.yTensor,
-        epsilon,
-        momentum,
-        &directTensorBundle.meanTensor,
-        &directTensorBundle.invVarianceTensor,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr);
+    CpuFpReferenceBatchnorm::fwdTraining(directTensorBundle.xTensor,
+                                         directTensorBundle.scaleTensor,
+                                         directTensorBundle.biasTensor,
+                                         directTensorBundle.yTensor,
+                                         epsilon,
+                                         momentum,
+                                         &directTensorBundle.meanTensor,
+                                         &directTensorBundle.invVarianceTensor);
 
     patient.execute(variantPack);
 

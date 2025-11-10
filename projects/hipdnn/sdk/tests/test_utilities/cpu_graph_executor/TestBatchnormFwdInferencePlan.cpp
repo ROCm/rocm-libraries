@@ -82,13 +82,12 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceBatchnormImpl<float, float, float, float, float>::batchnormFwdInference(
-        *shallowXTensor,
-        *shallowScaleTensor,
-        *shallowBiasTensor,
-        *shallowMeanTensor,
-        *shallowInvVarTensor,
-        *shallowYTensor);
+    CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
+                                          *shallowScaleTensor,
+                                          *shallowBiasTensor,
+                                          *shallowMeanTensor,
+                                          *shallowInvVarTensor,
+                                          *shallowYTensor);
 
     BatchnormFwdPlan<float, float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);

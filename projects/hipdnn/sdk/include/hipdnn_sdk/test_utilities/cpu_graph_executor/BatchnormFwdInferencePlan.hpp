@@ -79,17 +79,16 @@ public:
         auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
 
-        CpuFpReferenceBatchnormImpl<
-            XDataType,
-            ScaleBiasDataType,
-            MeanVarianceDataType,
-            ComputeDataType,
-            OutputDataType>::batchnormFwdInference(*shallowXTensor,
-                                                   *shallowScaleTensor,
-                                                   *shallowBiasTensor,
-                                                   *shallowMeanTensor,
-                                                   *shallowInvVarianceTensor,
-                                                   *shallowYTensor);
+        CpuFpReferenceBatchnorm::fwdInference<XDataType,
+                                              ScaleBiasDataType,
+                                              MeanVarianceDataType,
+                                              ComputeDataType,
+                                              OutputDataType>(*shallowXTensor,
+                                                              *shallowScaleTensor,
+                                                              *shallowBiasTensor,
+                                                              *shallowMeanTensor,
+                                                              *shallowInvVarianceTensor,
+                                                              *shallowYTensor);
     }
 
 private:

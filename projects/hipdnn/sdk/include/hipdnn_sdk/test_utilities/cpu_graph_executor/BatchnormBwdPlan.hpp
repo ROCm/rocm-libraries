@@ -90,19 +90,19 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        CpuFpReferenceBatchnormImpl<XDataType,
-                                    ScaleBiasDataType,
-                                    MeanVarianceDataType,
-                                    ComputeDataType,
-                                    OutputDataType,
-                                    DyDataType>::batchnormBwd(*shallowDyTensor,
-                                                              *shallowXTensor,
-                                                              *shallowMeanTensor,
-                                                              *shallowInvVarianceTensor,
-                                                              *shallowScaleTensor,
-                                                              *shallowDxTensor,
-                                                              *shallowDscaleTensor,
-                                                              *shallowDbiasTensor);
+        CpuFpReferenceBatchnorm::backward<DyDataType,
+                                          XDataType,
+                                          ScaleBiasDataType,
+                                          MeanVarianceDataType,
+                                          ComputeDataType,
+                                          OutputDataType>(*shallowDyTensor,
+                                                          *shallowXTensor,
+                                                          *shallowMeanTensor,
+                                                          *shallowInvVarianceTensor,
+                                                          *shallowScaleTensor,
+                                                          *shallowDxTensor,
+                                                          *shallowDscaleTensor,
+                                                          *shallowDbiasTensor);
     }
 
 private:
