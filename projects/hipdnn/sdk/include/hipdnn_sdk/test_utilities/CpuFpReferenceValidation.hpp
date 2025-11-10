@@ -70,12 +70,14 @@ public:
                                  _absoluteTolerance,
                                  _relativeTolerance);
 #else
-                std::cerr << "Validation failed: reference value = " << refValue
+                static std::mutex s_cerrMutex;
+                std::lock_guard<std::mutex> lock(s_cerrMutex);
+                std::cerr << "\n\nValidation failed: reference value = " << refValue
                           << ", implementation value = " << implValue
                           << ", absolute difference = " << absDiff
                           << ", threshold = " << threshold
                           << " (atol=" << _absoluteTolerance
-                          << ", rtol=" << _relativeTolerance << ")\n";
+                          << ", rtol=" << _relativeTolerance << ")\n\n";
 #endif
                 result.store(false, std::memory_order_relaxed);
             }
