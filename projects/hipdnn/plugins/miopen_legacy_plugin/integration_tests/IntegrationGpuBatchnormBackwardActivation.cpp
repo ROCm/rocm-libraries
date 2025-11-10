@@ -255,7 +255,7 @@ using IntegrationGpuBatchnormBackwardActivationNdhwcFp16 = BatchnormBackwardActi
 
 } // namespace
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCHW);
 }
@@ -266,7 +266,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCHW);
 }
@@ -277,7 +277,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCHW);
 }
@@ -288,7 +288,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NHWC);
 }
@@ -299,7 +299,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
@@ -310,7 +310,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
@@ -321,7 +321,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NCDHW);
 }
@@ -332,7 +332,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NCDHW);
 }
@@ -343,7 +343,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NCDHW);
 }
@@ -354,7 +354,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<float>(), TensorLayout::NDHWC);
 }
@@ -365,7 +365,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
 
-TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
