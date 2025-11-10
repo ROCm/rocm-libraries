@@ -219,7 +219,9 @@ namespace rocRoller
                 if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
                    or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
                 {
-                    s << " BlockSize:" << x.scaleBlockSize;
+                    s << " BlockSize: " << x.scaleBlockSize;
+                    s << " Pretile A: " << x.scalePretileA;
+                    s << " Pretile B: " << x.scalePretileB;
                 }
                 s << std::endl;
                 return s;
