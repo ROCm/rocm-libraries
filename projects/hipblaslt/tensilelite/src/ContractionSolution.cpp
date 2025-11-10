@@ -565,8 +565,9 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
+        auto autoSU                = calculateAutoStaggerU(problem, hardware, sk.grid);
         auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware, sk.grid);
-        uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
+        uint32_t autoGsuVal        = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
         {
@@ -788,6 +789,7 @@ namespace TensileLite
                                           0,
                                           hardware,
                                           problem.getParams(),
+                                          autoSU,
                                           autoWGM,
                                           autoWGMXCC,
                                           autoGsuVal);
@@ -956,6 +958,43 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
+    uint32_t ContractionSolution::calculateAutoStaggerU(Problem const&  problem,
+                                                        Hardware const* hardware,
+                                                        uint32_t const  skgrid) const
+    {
+        // Constants
+        constexpr uint32_t mask8        = 0xFF;
+        constexpr uint32_t staggerMask1 = 0x1F00;
+
+        // Hardware
+        AMDGPU const* pAMDGPU           = dynamic_cast<AMDGPU const*>(hardware);
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+       
+        // Default SU
+        uint32_t staggerU;
+        uint32_t staggerUMapping = (sizeMapping.staggerUMapping << 13);
+        uint32_t staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
+
+        staggerU = mask8 & sizeMapping.staggerU;
+        staggerU = staggerU | staggerUShift;
+        staggerU = staggerU | staggerUMapping;
+        
+        // If SU is explicitly specified at runtime, they override default and predictions
+        if(pAMDGPU->fixedSU != std::numeric_limits<int>::max())
+        {
+            staggerU = pAMDGPU->fixedSU;
+        }
+
+        // SU should be in this range: 
+        // assert(std::fabs(staggerU) < ???);
+        
+        // 
+        if(Debug::Instance().printPropertyEvaluation())
+            std::cout << "Dynamic StaggerU " << staggerU << std::endl;
+        
+        return staggerU;
+    }
+    
     std::pair<int32_t, uint32_t> ContractionSolution::calculateAutoWGM(
         Problem const&  problem,
         Hardware const* hardware,
@@ -1119,6 +1158,7 @@ namespace TensileLite
                                          uint32_t                            numWorkGroups,
                                          Hardware const*                     hardware,
                                          const ContractionProblemParameters& param,
+                                         uint32_t                            autoSU,
                                          int32_t                             autoWGM,
                                          uint32_t                            autoWGMXCC,
                                          uint32_t                            autoGsuVal) const
@@ -1131,12 +1171,13 @@ namespace TensileLite
             args.template append<uint32_t>("gemm_count", gemmCount);
         }
 
-        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGsuVal;
-        bool           gsuc         = false; // initialized false
-        bool           gsuwgmrr     = false; // initialized false
+        uint32_t       staggerU     = autoSU;
         int32_t        wgm          = param.wgm() != 0 ? param.wgm() : autoWGM;
         uint32_t       wgmxcc       = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
         int32_t        wgmxccg      = -1;
+        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGsuVal;
+        bool           gsuc         = false; // initialized false
+        bool           gsuwgmrr     = false; // initialized false
         const uint32_t mask16       = 0xFFFF;
         const uint32_t mask14       = 0x3FFF;
         const uint32_t mask8        = 0xFF;
@@ -1193,14 +1234,6 @@ namespace TensileLite
         // StaggerU
         if(internalArgsSupport.staggerU)
         {
-            const uint32_t staggerMask1    = 0x1F00;
-            uint32_t       staggerUMapping = (sizeMapping.staggerUMapping << 13);
-            uint32_t       staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
-            uint32_t       staggerU        = mask8 & sizeMapping.staggerU;
-            if(Debug::Instance().disableStaggerU())
-                staggerU = 0;
-            staggerU                       = staggerU | staggerUShift;
-            staggerU                       = staggerU | staggerUMapping;
             internalArg0                   = internalArg0 | (staggerU << 16);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
@@ -1314,14 +1347,16 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
+            auto autoSU                = calculateAutoStaggerU(problem, &hardware, sk.grid);
             auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware, sk.grid);
             if(T_Debug)
             {
+                std::cout << "AutoSU: " << autoSU << std::endl;
                 std::cout << "AutoWGM: " << autoWGM << std::endl;
                 std::cout << "AutoWGMXCC: " << autoWGMXCC << std::endl;
             }
             kernelArgs<T_Debug, false>(
-                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoGsuVal);
+                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoSU, autoWGM, autoWGMXCC, autoGsuVal);
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1485,6 +1520,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
+            auto autoSU                = calculateAutoStaggerU(problems[0], &hardware, 0);
             auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware, 0);
 
             if(internalArgsSupport.useUniversalArgs)
@@ -1500,6 +1536,7 @@ namespace TensileLite
                                            getNumWorkGroups(rv),
                                            &hardware,
                                            problems[0].getParams(),
+                                           autoSU,
                                            autoWGM,
                                            autoWGMXCC,
                                            autoGsuVal);
@@ -1528,6 +1565,7 @@ namespace TensileLite
                                           0,
                                           &hardware,
                                           problems[0].getParams(),
+                                          autoSU,
                                           autoWGM,
                                           autoWGMXCC,
                                           autoGsuVal);

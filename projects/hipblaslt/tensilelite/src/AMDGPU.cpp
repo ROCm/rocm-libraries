@@ -52,7 +52,7 @@ namespace TensileLite
         , computeUnitCount(cus)
         , deviceName(name)
         , skDynamicGrid(getSKDynamicGrid())
-        , skDynamicWGM(getSKDynamicWGM())
+        , fixedSU(getFixedSU())
         , fixedWGM(getFixedWGM())
         , fixedWGMXCC(getFixedWGMXCC())
         , skMaxCUs(getSKMaxCUs())

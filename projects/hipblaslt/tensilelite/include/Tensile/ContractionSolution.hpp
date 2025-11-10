@@ -381,8 +381,9 @@ namespace TensileLite
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
-                        int32_t                             defaultWGM,
-                        uint32_t                            defaultWGMXCC,
+                        uint32_t                            autoSU,
+                        int32_t                             autoWGM,
+                        uint32_t                            autoWGMXCC,
                         uint32_t                            autoGsuVal) const;
 
         template <typename KA>
@@ -562,6 +563,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
+        uint32_t calculateAutoStaggerU(Problem const&  problem, 
+                                       Hardware const* hardware, 
+                                       uint32_t        skgrid) const;
         std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
                                                       Hardware const* hardware, 
                                                       uint32_t        skgrid) const;
