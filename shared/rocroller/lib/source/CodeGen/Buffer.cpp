@@ -117,4 +117,102 @@ namespace rocRoller
     {
         return m_bufferResourceDescriptor->subset({3});
     }
+
+    namespace buffDescriptor
+    {
+        ExpressionPtr getDefaultOptions(ContextPtr ctx)
+        {
+            AssertFatal(ctx, "Context cannot be null.");
+
+            if(ctx->targetArchitecture().HasCapability(GPUCapability::HasBufferOutOfBoundsCheckOption))
+            {
+                // Bits 29:28 are for Out-of-Bounds check.
+                //   0 - index >= NumRecords || offset + payload > stride, used for structured buffers.
+                //   1 - index >= NumRecords, used for raw buffers (RR default)
+                //   2 - NumRecords == 0, empty buffers
+                //
+                // Bits 17:12 are for data format.
+                //   5 - 8_UINT. Currently, everything is buffer-loaded in terms of bytes.
+                // TODO: Add GFX12 buffer descriptor when other formats and/or features are needed.
+                return literal((1u << 28) | (5u << 12));
+            }
+            // 0x00020000
+            return literal((4u << 15));
+        }
+
+        ExpressionPtr setDefaults(ExpressionPtr bufferExpr, ContextPtr ctx)
+        {
+            AssertFatal(bufferExpr && ctx, "Buffer and context cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            bufferExpr = buffDescriptor::setSize(bufferExpr, literal(2147483548));
+            bufferExpr = buffDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
+            return bufferExpr;
+        }
+
+        ExpressionPtr setBasePointer(ExpressionPtr bufferExpr, ExpressionPtr ptrExpr)
+        {
+            AssertFatal(bufferExpr && ptrExpr, "Buffer and ptr expressions cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfc(ptrExpr, bufferExpr, 0, 0, 64);
+        }
+
+        ExpressionPtr getBasePointer(ExpressionPtr bufferExpr)
+        {
+            AssertFatal(bufferExpr, "Buffer expression cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfe(DataType::UInt64, bufferExpr, 0, 64);
+        }
+
+        ExpressionPtr incrementBasePointer(ExpressionPtr bufferExpr, ExpressionPtr valueExpr)
+        {
+            AssertFatal(bufferExpr && valueExpr, "Buffer and value expressions cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            auto basePointer = bfe(DataType::UInt64, bufferExpr, 0, 64);
+            return bfc(basePointer + valueExpr, bufferExpr, 0, 0, 64);
+        }
+
+        ExpressionPtr setSize(ExpressionPtr bufferExpr, ExpressionPtr sizeExpr)
+        {
+            AssertFatal(bufferExpr && sizeExpr, "Buffer and size expressions cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfc(sizeExpr, bufferExpr, 0, 64, 32);
+        }
+
+        ExpressionPtr getSize(ExpressionPtr bufferExpr)
+        {
+            AssertFatal(bufferExpr, "Buffer expression cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfe(DataType::UInt32, bufferExpr, 64, 32);
+        }
+
+        ExpressionPtr setOptions(ExpressionPtr bufferExpr, ExpressionPtr optsExpr)
+        {
+            AssertFatal(bufferExpr && optsExpr, "Buffer and options expressions cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfc(optsExpr, bufferExpr, 0, 96, 32);
+        }
+
+        ExpressionPtr getOptions(ExpressionPtr bufferExpr)
+        {
+            AssertFatal(bufferExpr, "Buffer expression cannot be null.");
+            AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
+                        "Buffer expression must be of buffer pointer type.");
+
+            return bfe(DataType::UInt32, bufferExpr, 96, 32);
+        }
+    }
 }
