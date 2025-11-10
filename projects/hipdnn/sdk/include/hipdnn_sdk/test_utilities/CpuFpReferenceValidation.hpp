@@ -57,8 +57,7 @@ public:
 
             if(absDiff > threshold)
             {
-                // Log error and mark as failed
-#if 0
+#if 1
                 HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
