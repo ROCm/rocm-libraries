@@ -26,6 +26,21 @@
 #include "handle.hpp"
 #include "logging.hpp"
 
+template <typename T>
+inline size_t rocblas_internal_syrk_herk_ex_workspace(rocblas_handle handle,
+                                                      rocblas_int    n,
+                                                      rocblas_int    k,
+                                                      rocblas_int    batch_count)
+{
+    size_t size = 1;
+
+    //Allocating workspace memory when for high precision compute and result C
+    if(n > 0 && batch_count > 0)
+        size = int64_t(n) * (n) * sizeof(T) * batch_count;
+
+    return size;
+}
+
 template <bool BATCHED>
 rocblas_status rocblas_syrk_ex_template(rocblas_handle    handle,
                                         rocblas_fill      uplo,
