@@ -46,8 +46,7 @@ void checkTensorVirtuality1Node(
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
     // Check for virtual tensors - 1-node case (solo batchnorm training)
-    const auto& bnTensorX
-        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
+    const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
     const auto& bnTensorScale
         = miopen_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
     const auto& bnTensorBias
@@ -144,8 +143,7 @@ void checkTensorVirtuality2Node(
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
     // Check for virtual tensors - 2-node case (batchnorm training + activation)
-    const auto& bnTensorX
-        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
+    const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
     const auto& bnTensorScale
         = miopen_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
     const auto& bnTensorBias
@@ -263,11 +261,10 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             return false;
         }
 
-        const auto& bnAttr
-            = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+        const auto& bnAttr = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
 
-#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics
-        // Running statistics will be supported - no rejection needed
+#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics \
+    // Running statistics will be supported - no rejection needed
 #else
         // Until MIOpen is updated, reject graphs with running statistics
         // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
@@ -309,10 +306,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             return false;
         }
 
-        const auto& bnAttr
-            = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr
-            = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+        const auto& bnAttr = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+        const auto& activAttr = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
         // Check if activation is supported
         if(!isNodeActivFwd(activAttr))
@@ -328,8 +323,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             return false;
         }
 
-#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics
-        // Running statistics will be supported - no rejection needed
+#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics \
+    // Running statistics will be supported - no rejection needed
 #else
         // Until MIOpen is updated, reject graphs with running statistics
         // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
@@ -380,9 +375,8 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     if(opGraph.nodeCount() == 1)
     {
         // Solo batchnorm training
-        const auto& bnAttr
-            = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+        const auto& bnAttr = opGraph.getNodeWrapper(0)
+                                 .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
 
         checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
 
@@ -393,12 +387,10 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     else if(opGraph.nodeCount() == 2)
     {
         // Batchnorm training + activation fusion
-        const auto& bnAttr
-            = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr
-            = opGraph.getNodeWrapper(1)
-                  .attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+        const auto& bnAttr = opGraph.getNodeWrapper(0)
+                                 .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+        const auto& activAttr = opGraph.getNodeWrapper(1)
+                                    .attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 

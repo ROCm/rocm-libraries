@@ -303,31 +303,34 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                 });
 
         const auto& activParams = _trainingParams.optActivation().value();
-        THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(
-            activationDesc, activParams.mode, activParams.alpha, activParams.beta, activParams.gamma));
+        THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(activationDesc,
+                                                              activParams.mode,
+                                                              activParams.alpha,
+                                                              activParams.beta,
+                                                              activParams.gamma));
 
-        THROW_ON_MIOPEN_FAILURE(
-            miopenBatchNormForwardTrainingActivation(handle.miopenHandle,
-                                                     MIOPEN_BATCHNORM_MODE_TRAINING,
-                                                     &alpha,
-                                                     &beta,
-                                                     _trainingParams.x().tensorDescriptor(),
-                                                     xBuffer.ptr,
-                                                     _trainingParams.activationOut().value().tensorDescriptor(),
-                                                     yBuffer.ptr,
-                                                     _trainingParams.scale().tensorDescriptor(),
-                                                     _trainingParams.bias().tensorDescriptor(),
-                                                     savedMeanDesc,
-                                                     savedVarDesc,
-                                                     scaleBuffer.ptr,
-                                                     biasBuffer.ptr,
-                                                     expAvgFactor,
-                                                     resultRunningMeanPtr,
-                                                     resultRunningVariancePtr,
-                                                     epsilon,
-                                                     resultSaveMeanPtr,
-                                                     resultSaveInvVariancePtr,
-                                                     activationDesc));
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation(
+            handle.miopenHandle,
+            MIOPEN_BATCHNORM_MODE_TRAINING,
+            &alpha,
+            &beta,
+            _trainingParams.x().tensorDescriptor(),
+            xBuffer.ptr,
+            _trainingParams.activationOut().value().tensorDescriptor(),
+            yBuffer.ptr,
+            _trainingParams.scale().tensorDescriptor(),
+            _trainingParams.bias().tensorDescriptor(),
+            savedMeanDesc,
+            savedVarDesc,
+            scaleBuffer.ptr,
+            biasBuffer.ptr,
+            expAvgFactor,
+            resultRunningMeanPtr,
+            resultRunningVariancePtr,
+            epsilon,
+            resultSaveMeanPtr,
+            resultSaveInvVariancePtr,
+            activationDesc));
     }
     else
     {

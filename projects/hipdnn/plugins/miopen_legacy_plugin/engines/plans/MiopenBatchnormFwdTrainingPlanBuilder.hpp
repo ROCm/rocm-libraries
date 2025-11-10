@@ -17,8 +17,7 @@ public:
 
     // Disallow copy and assignment
     MiopenBatchnormFwdTrainingPlanBuilder(const MiopenBatchnormFwdTrainingPlanBuilder&) = delete;
-    MiopenBatchnormFwdTrainingPlanBuilder&
-        operator=(const MiopenBatchnormFwdTrainingPlanBuilder&)
+    MiopenBatchnormFwdTrainingPlanBuilder& operator=(const MiopenBatchnormFwdTrainingPlanBuilder&)
         = delete;
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,

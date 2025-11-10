@@ -23,7 +23,8 @@ protected:
     HipdnnEnginePluginHandle _dummyHandle;
 };
 
-TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph)
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
+       IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
