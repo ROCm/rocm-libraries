@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "engines/plans/MiopenBatchnormFwdTrainingActivPlan.hpp"
+#include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
@@ -21,14 +21,14 @@ TEST(TestBatchnormFwdTrainingActivParams, InitializesRequiredTensorsFromValidGra
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    BatchnormFwdTrainingActivParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     // All required tensors should be initialized
     EXPECT_NO_THROW(params.x());
     EXPECT_NO_THROW(params.y());
     EXPECT_NO_THROW(params.scale());
     EXPECT_NO_THROW(params.bias());
-    EXPECT_NO_THROW(params.activParams());
+    EXPECT_TRUE(params.optActivation().has_value());
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
@@ -44,7 +44,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ExtractsEpsilonValueCorrectly)
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    BatchnormFwdTrainingActivParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     // Epsilon should be extracted as double
     EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
@@ -63,7 +63,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    BatchnormFwdTrainingActivParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     EXPECT_TRUE(params.hasSaveMeanVariance());
     EXPECT_NO_THROW(params.mean());
@@ -83,7 +83,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    BatchnormFwdTrainingActivParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     EXPECT_FALSE(params.hasSaveMeanVariance());
 }
@@ -103,7 +103,7 @@ TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
     ASSERT_NE(activAttrs, nullptr);
 
     // Should throw because running stats are provided
-    EXPECT_THROW(BatchnormFwdTrainingActivParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
+    EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
                  hipdnn_plugin::HipdnnPluginException);
 }
 
@@ -120,7 +120,7 @@ TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProv
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    BatchnormFwdTrainingActivParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     EXPECT_FALSE(params.hasRunningStats());
 }
@@ -141,5 +141,5 @@ TEST(TestBatchnormFwdTrainingActivParams, ValidatesActivationInputMatchesBnOutpu
     auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttrs, nullptr);
 
-    EXPECT_NO_THROW(BatchnormFwdTrainingActivParams(*bnAttrs, *activAttrs, graph.getTensorMap()));
+    EXPECT_NO_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()));
 }

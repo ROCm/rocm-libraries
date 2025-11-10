@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+
+#include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp" //temporary
 #include "PlanInterface.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 
 namespace miopen_legacy_plugin
 {
@@ -17,6 +19,12 @@ class BatchnormFwdInferenceParams
 public:
     BatchnormFwdInferenceParams(
         const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& attributes,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdInferenceParams(
+        const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
+        const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
@@ -33,6 +41,9 @@ public:
     const MiopenTensor& estMean() const;
     const MiopenTensor& invVariance() const;
 
+    const std::optional<MiopenActivationDescriptor>& optActivation() const;
+    const std::optional<MiopenTensor>& activationOut() const;
+
 private:
     MiopenTensor _x;
     MiopenTensor _y;
@@ -40,6 +51,9 @@ private:
     MiopenTensor _bias;
     MiopenTensor _estMean;
     MiopenTensor _invVariance;
+
+    std::optional<MiopenActivationDescriptor> _optActivation;
+    std::optional<MiopenTensor> _activationOut;
 };
 
 class BatchnormFwdInferencePlan : public IPlan

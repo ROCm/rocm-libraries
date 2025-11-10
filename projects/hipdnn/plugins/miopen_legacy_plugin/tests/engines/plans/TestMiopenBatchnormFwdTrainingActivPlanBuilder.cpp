@@ -9,7 +9,7 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
-#include "engines/plans/MiopenBatchnormFwdTrainingActivPlanBuilder.hpp"
+#include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
@@ -19,18 +19,18 @@ using namespace hipdnn_plugin;
 class TestMiopenBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
 {
 protected:
-    MiopenBatchnormFwdTrainingActivPlanBuilder _planBuilder;
+    MiopenBatchnormFwdTrainingPlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _dummyHandle;
 };
 
-TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForSingleNodeGraph)
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
-    MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
-    EXPECT_FALSE(applicable);
+    EXPECT_TRUE(applicable);
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)

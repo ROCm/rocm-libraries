@@ -9,17 +9,16 @@
 namespace miopen_legacy_plugin
 {
 
-class MiopenBatchnormFwdTrainingActivPlanBuilder : public IPlanBuilder
+class MiopenBatchnormFwdTrainingPlanBuilder : public IPlanBuilder
 {
 public:
-    MiopenBatchnormFwdTrainingActivPlanBuilder() = default;
-    ~MiopenBatchnormFwdTrainingActivPlanBuilder() override = default;
+    MiopenBatchnormFwdTrainingPlanBuilder() = default;
+    ~MiopenBatchnormFwdTrainingPlanBuilder() override = default;
 
     // Disallow copy and assignment
-    MiopenBatchnormFwdTrainingActivPlanBuilder(const MiopenBatchnormFwdTrainingActivPlanBuilder&)
-        = delete;
-    MiopenBatchnormFwdTrainingActivPlanBuilder&
-        operator=(const MiopenBatchnormFwdTrainingActivPlanBuilder&)
+    MiopenBatchnormFwdTrainingPlanBuilder(const MiopenBatchnormFwdTrainingPlanBuilder&) = delete;
+    MiopenBatchnormFwdTrainingPlanBuilder&
+        operator=(const MiopenBatchnormFwdTrainingPlanBuilder&)
         = delete;
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
