@@ -675,7 +675,6 @@ namespace rocRoller
             auto extracted = visitor.call(expr.arg);
             int  offset    = visitor.get_offset();
 
-            // return bfe(expr.outputDataType, extracted, offset, expr.width);
             return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
         }
 
