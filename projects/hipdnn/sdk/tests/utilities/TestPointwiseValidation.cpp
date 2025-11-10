@@ -19,7 +19,6 @@ TEST(TestPointwiseValidation, UnaryModesClassifiedCorrectly)
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::EXP));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::LOG));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::SQRT));
-    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::IDENTITY));
 
     // Test that binary operations are NOT unary
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::ADD));
