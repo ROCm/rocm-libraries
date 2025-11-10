@@ -10,6 +10,7 @@ target_sources(origami-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/origami_gtest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_tile_ordering_issue.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_variance_issue.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_negative_occupancy.cpp"
 )
 
