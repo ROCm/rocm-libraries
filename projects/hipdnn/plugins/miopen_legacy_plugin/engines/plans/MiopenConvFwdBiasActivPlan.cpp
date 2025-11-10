@@ -147,9 +147,6 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
             &_workspaceSize,
             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
     }
-
-    std::cerr << "\ncompile=" << compile << "\n";
-    std::cerr << "\ngetWsSize=" << getWsSize << ", workspaceSize=" << _workspaceSize << '\n';
 }
 
 size_t ConvFwdBiasActivPlan::getWorkspaceSize(
