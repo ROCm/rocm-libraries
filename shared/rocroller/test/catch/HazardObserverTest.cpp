@@ -695,13 +695,6 @@ namespace HazardObserverTest
 
             SECTION("NOPs added for buffer_store_dwordx4 followed by VALU")
             {
-                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
-                       GPUCapability::HasAccCD))
-                {
-                    SKIP("Architecture " + arch.toString()
-                         + " does not use Accumulator registers.");
-                }
-
                 auto context = TestContext::ForTarget(arch);
                 auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
                 auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
@@ -734,13 +727,6 @@ namespace HazardObserverTest
 
             SECTION("No NOPs when soffset is an SGPR")
             {
-                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
-                       GPUCapability::HasAccCD))
-                {
-                    SKIP("Architecture " + arch.toString()
-                         + " does not use Accumulator registers.");
-                }
-
                 auto context = TestContext::ForTarget(arch);
                 auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
                 auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
@@ -770,13 +756,6 @@ namespace HazardObserverTest
 
             SECTION("No NOPs after buffer_store_dwordx4")
             {
-                if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
-                       GPUCapability::HasAccCD))
-                {
-                    SKIP("Architecture " + arch.toString()
-                         + " does not use Accumulator registers.");
-                }
-
                 auto context = TestContext::ForTarget(arch);
                 auto v1
                     = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
