@@ -17,7 +17,7 @@ struct BatchnormBwdSignatureKey
     const hipdnn_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes;
     hipdnn_sdk::data_objects::DataType dyDataType;
-    hipdnn_sdk::data_objects::DataType inputDataType;
+    hipdnn_sdk::data_objects::DataType xDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
     hipdnn_sdk::data_objects::DataType computeDataType;
@@ -25,13 +25,13 @@ struct BatchnormBwdSignatureKey
 
     BatchnormBwdSignatureKey() = default;
     constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType dy,
-                                       hipdnn_sdk::data_objects::DataType input,
+                                       hipdnn_sdk::data_objects::DataType x,
                                        hipdnn_sdk::data_objects::DataType scaleBias,
                                        hipdnn_sdk::data_objects::DataType meanVariance,
                                        hipdnn_sdk::data_objects::DataType compute,
                                        hipdnn_sdk::data_objects::DataType output)
         : dyDataType(dy)
-        , inputDataType(input)
+        , xDataType(x)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
         , computeDataType(compute)
@@ -65,7 +65,7 @@ struct BatchnormBwdSignatureKey
         }
 
         dyDataType = dyTensorAttr->data_type();
-        inputDataType = xTensorAttr->data_type();
+        xDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
         meanVarianceDataType = meanTensorAttr->data_type();
         computeDataType = node.compute_data_type();
@@ -81,7 +81,7 @@ struct BatchnormBwdSignatureKey
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
                ^ (static_cast<std::size_t>(static_cast<int>(dyDataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 16)
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20)
@@ -91,8 +91,7 @@ struct BatchnormBwdSignatureKey
     bool operator==(const BatchnormBwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && dyDataType == other.dyDataType
-               && inputDataType == other.inputDataType
-               && scaleBiasDataType == other.scaleBiasDataType
+               && xDataType == other.xDataType && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
                && computeDataType == other.computeDataType
                && outputDataType == other.outputDataType;
@@ -208,7 +207,7 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormBwdSignatureKey>
         return fmt::format_to(ctx.out(),
                               "BatchnormBwd(dy={}, x={}, scale={}, mean={}, compute={}, dx={})",
                               key.dyDataType,
-                              key.inputDataType,
+                              key.xDataType,
                               key.scaleBiasDataType,
                               key.meanVarianceDataType,
                               key.computeDataType,

@@ -71,8 +71,8 @@ TEST(TestConvolutionFwdSignatureKey, Copy)
     ConvolutionFwdSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
-    EXPECT_EQ(copied.input0DataType, DataType::BFLOAT16);
-    EXPECT_EQ(copied.input1DataType, DataType::FLOAT);
+    EXPECT_EQ(copied.xDataType, DataType::BFLOAT16);
+    EXPECT_EQ(copied.wDataType, DataType::FLOAT);
     EXPECT_EQ(copied.computeDataType, DataType::HALF);
     EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
 }

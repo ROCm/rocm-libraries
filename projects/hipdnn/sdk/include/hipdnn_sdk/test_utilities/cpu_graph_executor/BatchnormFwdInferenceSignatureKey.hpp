@@ -16,19 +16,19 @@ struct BatchnormFwdInferenceSignatureKey
 {
     const hipdnn_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-    hipdnn_sdk::data_objects::DataType inputDataType;
+    hipdnn_sdk::data_objects::DataType xDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
     hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
 
     BatchnormFwdInferenceSignatureKey() = default;
-    constexpr BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType input,
+    constexpr BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType x,
                                                 hipdnn_sdk::data_objects::DataType scaleBias,
                                                 hipdnn_sdk::data_objects::DataType meanVariance,
                                                 hipdnn_sdk::data_objects::DataType compute,
                                                 hipdnn_sdk::data_objects::DataType output)
-        : inputDataType(input)
+        : xDataType(x)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
         , computeDataType(compute)
@@ -60,7 +60,7 @@ struct BatchnormFwdInferenceSignatureKey
                                      "failed to construct key");
         }
 
-        inputDataType = xTensorAttr->data_type();
+        xDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
         meanVarianceDataType = meanTensorAttr->data_type();
         computeDataType = node.compute_data_type();
@@ -75,7 +75,7 @@ struct BatchnormFwdInferenceSignatureKey
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16)
@@ -84,7 +84,7 @@ struct BatchnormFwdInferenceSignatureKey
 
     bool operator==(const BatchnormFwdInferenceSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && inputDataType == other.inputDataType
+        return nodeType == other.nodeType && xDataType == other.xDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
                && computeDataType == other.computeDataType
@@ -140,7 +140,7 @@ struct BatchnormFwdInferenceSignatureKey
         return map;
     }
 
-    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+    template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
@@ -149,12 +149,12 @@ struct BatchnormFwdInferenceSignatureKey
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   BatchnormFwdInferenceSignatureKey>& map)
     {
-        map[BatchnormFwdInferenceSignatureKey(InputDataTypeEnum,
+        map[BatchnormFwdInferenceSignatureKey(XDataTypeEnum,
                                               ScaleBiasDataTypeEnum,
                                               MeanVarianceDataTypeEnum,
                                               ComputeDataTypeEnum,
                                               OutputDataTypeEnum)]
-            = std::make_unique<BatchnormFwdInferencePlanBuilder<InputDataTypeEnum,
+            = std::make_unique<BatchnormFwdInferencePlanBuilder<XDataTypeEnum,
                                                                 ScaleBiasDataTypeEnum,
                                                                 MeanVarianceDataTypeEnum,
                                                                 ComputeDataTypeEnum,
@@ -177,8 +177,8 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormFwdInferenceSignature
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormFwdInference(in={}, scale={}, mean={}, compute={}, out={})",
-                              key.inputDataType,
+                              "BatchnormFwdInference(x={}, scale={}, mean={}, compute={}, out={})",
+                              key.xDataType,
                               key.scaleBiasDataType,
                               key.meanVarianceDataType,
                               key.computeDataType,

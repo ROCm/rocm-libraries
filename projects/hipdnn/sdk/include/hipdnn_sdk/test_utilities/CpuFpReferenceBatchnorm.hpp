@@ -19,23 +19,23 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class InputDataType,
+template <class XDataType,
           class ScaleBiasDataType,
           class MeanVarianceDataType = ScaleBiasDataType,
           class ComputeDataType = MeanVarianceDataType,
-          class OutputDataType = InputDataType,
-          class DyDataType = InputDataType>
+          class OutputDataType = XDataType,
+          class DyDataType = XDataType>
 class CpuFpReferenceBatchnormImpl
 {
 public:
-    static void batchnormFwdInference(const TensorBase<InputDataType>& input,
+    static void batchnormFwdInference(const TensorBase<XDataType>& x,
                                       const TensorBase<ScaleBiasDataType>& scale,
                                       const TensorBase<ScaleBiasDataType>& bias,
                                       const TensorBase<MeanVarianceDataType>& estimatedMean,
                                       const TensorBase<MeanVarianceDataType>& invVariance,
                                       TensorBase<OutputDataType>& output)
     {
-        if(input.dims().size() < 2)
+        if(x.dims().size() < 2)
         {
             throw std::runtime_error(
                 "Batchnorm inference requires at least 2D tensor (batch and channel).");
@@ -47,7 +47,7 @@ public:
             auto invVarianceValue = staticCast<ComputeDataType>(invVariance.getHostValue(0, cidx));
 
             //There is some extra casting in here to deal with double -> float implicit casts.
-            auto inVal = staticCast<ComputeDataType>(input.getHostValue(indices));
+            auto inVal = staticCast<ComputeDataType>(x.getHostValue(indices));
             ComputeDataType elemStd = inVal - mean;
             ComputeDataType inhat = elemStd * invVarianceValue;
 
@@ -60,14 +60,14 @@ public:
 
         // Iterate all indices in parallel
         auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            batchnormFwdInferenceFunc, input.dims());
+            batchnormFwdInferenceFunc, x.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified(); // Mark output memory as modified on host
     }
 
     static void
-        batchnormFwdTraining(const TensorBase<InputDataType>& x,
+        batchnormFwdTraining(const TensorBase<XDataType>& x,
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
                              TensorBase<OutputDataType>& y,
@@ -202,7 +202,7 @@ public:
     }
 
     static void batchnormBwd(const TensorBase<DyDataType>& dy,
-                             const TensorBase<InputDataType>& x,
+                             const TensorBase<XDataType>& x,
                              const TensorBase<MeanVarianceDataType>& mean,
                              const TensorBase<MeanVarianceDataType>& invVariance,
                              const TensorBase<ScaleBiasDataType>& scale,

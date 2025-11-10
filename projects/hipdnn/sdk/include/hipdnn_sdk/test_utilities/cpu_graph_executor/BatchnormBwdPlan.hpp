@@ -51,7 +51,7 @@ struct BatchnormBwdParams
 };
 
 template <typename DyDataType,
-          typename InputDataType,
+          typename XDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
           typename ComputeDataType,
@@ -69,8 +69,8 @@ public:
         auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        auto shallowXTensor = createShallowTensor<InputDataType>(
-            _params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
             _params.meanTensor, variantPack.at(_params.meanTensor.uid));
@@ -90,7 +90,7 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        CpuFpReferenceBatchnormImpl<InputDataType,
+        CpuFpReferenceBatchnormImpl<XDataType,
                                     ScaleBiasDataType,
                                     MeanVarianceDataType,
                                     ComputeDataType,
@@ -110,7 +110,7 @@ private:
 };
 
 template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
@@ -119,7 +119,7 @@ class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using DyDataType = DataTypeToNative<DyDataTypeEnum>;
-    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
+    using XDataType = DataTypeToNative<XDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
@@ -159,7 +159,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(
@@ -193,7 +193,7 @@ public:
                                   *tensorMap.at(nodeAttributes->dbias_tensor_uid()));
 
         return std::make_unique<BatchnormBwdPlan<DyDataType,
-                                                 InputDataType,
+                                                 XDataType,
                                                  ScaleBiasDataType,
                                                  MeanVarianceDataType,
                                                  ComputeDataType,

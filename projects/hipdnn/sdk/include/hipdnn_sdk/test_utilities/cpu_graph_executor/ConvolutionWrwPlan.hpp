@@ -50,8 +50,8 @@ struct ConvolutionWrwParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename Input0DataType,
-          typename Input1DataType,
+template <typename XDataType,
+          typename DyDataType,
           typename ComputeDataType,
           typename OutputDataType>
 class ConvolutionWrwPlan : public IGraphNodePlanExecutor
@@ -64,40 +64,38 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = createShallowTensor<Input0DataType>(
-            _params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowDWTensor = createShallowTensor<OutputDataType>(
             _params.dwTensor, variantPack.at(_params.dwTensor.uid));
 
-        auto shallowDYTensor = createShallowTensor<Input1DataType>(
+        auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<Input0DataType,
-                                      Input1DataType,
-                                      ComputeDataType,
-                                      OutputDataType>::convBwdWeight(*shallowXTensor,
-                                                                     *shallowDWTensor,
-                                                                     *shallowDYTensor,
-                                                                     _params.stride,
-                                                                     _params.dilation,
-                                                                     _params.prePadding,
-                                                                     _params.postPadding);
+        CpuFpReferenceConvolutionImpl<XDataType, DyDataType, ComputeDataType, OutputDataType>::
+            convBwdWeight(*shallowXTensor,
+                          *shallowDWTensor,
+                          *shallowDYTensor,
+                          _params.stride,
+                          _params.dilation,
+                          _params.prePadding,
+                          _params.postPadding);
     }
 
 private:
     ConvolutionWrwParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
           hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using Input0DataType = DataTypeToNative<Input0DataTypeEnum>;
-    using Input1DataType = DataTypeToNative<Input1DataTypeEnum>;
+    using XDataType = DataTypeToNative<XDataTypeEnum>;
+    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
@@ -116,9 +114,9 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dw_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), Input0DataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), Input1DataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
 
         return true;
     }
@@ -145,7 +143,7 @@ public:
             nodeAttributes->conv_mode());
 
         return std::make_unique<
-            ConvolutionWrwPlan<Input0DataType, Input1DataType, ComputeDataType, OutputDataType>>(
+            ConvolutionWrwPlan<XDataType, DyDataType, ComputeDataType, OutputDataType>>(
             std::move(params));
     }
 };

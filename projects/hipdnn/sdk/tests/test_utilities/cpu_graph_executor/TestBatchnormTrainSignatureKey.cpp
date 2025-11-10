@@ -91,7 +91,7 @@ TEST(TestBatchnormTrainSignatureKey, Copy)
     BatchnormTrainSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
-    EXPECT_EQ(copied.inputDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.xDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanVarianceDataType, DataType::DOUBLE);
     EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);

@@ -16,18 +16,18 @@ struct ConvolutionFwdSignatureKey
 {
     const hipdnn_sdk::data_objects::NodeAttributes nodeType{
         hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes};
-    hipdnn_sdk::data_objects::DataType input0DataType;
-    hipdnn_sdk::data_objects::DataType input1DataType;
+    hipdnn_sdk::data_objects::DataType xDataType;
+    hipdnn_sdk::data_objects::DataType wDataType;
     hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
 
     ConvolutionFwdSignatureKey() = default;
-    constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType input0,
-                                         hipdnn_sdk::data_objects::DataType input1,
+    constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType x,
+                                         hipdnn_sdk::data_objects::DataType w,
                                          hipdnn_sdk::data_objects::DataType compute,
                                          hipdnn_sdk::data_objects::DataType output)
-        : input0DataType(input0)
-        , input1DataType(input1)
+        : xDataType(x)
+        , wDataType(w)
         , computeDataType(compute)
         , outputDataType(output)
     {
@@ -55,8 +55,8 @@ struct ConvolutionFwdSignatureKey
                                      "failed to construct key");
         }
 
-        input0DataType = xTensorAttr->data_type();
-        input1DataType = wTensorAttr->data_type();
+        xDataType = xTensorAttr->data_type();
+        wDataType = wTensorAttr->data_type();
         computeDataType = computeType;
         outputDataType = yTensorAttr->data_type();
     }
@@ -69,16 +69,16 @@ struct ConvolutionFwdSignatureKey
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(input0DataType)) << 4)
-               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(wDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16);
     }
 
     bool operator==(const ConvolutionFwdSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && input0DataType == other.input0DataType
-               && input1DataType == other.input1DataType && computeDataType == other.computeDataType
+        return nodeType == other.nodeType && xDataType == other.xDataType
+               && wDataType == other.wDataType && computeDataType == other.computeDataType
                && outputDataType == other.outputDataType;
     }
 
@@ -108,8 +108,8 @@ struct ConvolutionFwdSignatureKey
         return map;
     }
 
-    template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
+    template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType WDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
               hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<ConvolutionFwdSignatureKey,
@@ -117,9 +117,9 @@ struct ConvolutionFwdSignatureKey
                                                   ConvolutionFwdSignatureKey>& map)
     {
         map[ConvolutionFwdSignatureKey(
-            Input0DataTypeEnum, Input1DataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
-            = std::make_unique<ConvolutionFwdPlanBuilder<Input0DataTypeEnum,
-                                                         Input1DataTypeEnum,
+            XDataTypeEnum, WDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
+            = std::make_unique<ConvolutionFwdPlanBuilder<XDataTypeEnum,
+                                                         WDataTypeEnum,
                                                          ComputeDataTypeEnum,
                                                          OutputDataTypeEnum>>();
     }
@@ -141,8 +141,8 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::ConvolutionFwdSignatureKey>
     {
         return fmt::format_to(ctx.out(),
                               "ConvolutionFwd(x={}, w={}, compute={}, y={})",
-                              key.input0DataType,
-                              key.input1DataType,
+                              key.xDataType,
+                              key.wDataType,
                               key.computeDataType,
                               key.outputDataType);
     }

@@ -50,8 +50,8 @@ struct ConvolutionBwdParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename Input0DataType,
-          typename Input1DataType,
+template <typename DyDataType,
+          typename WDataType,
           typename ComputeDataType,
           typename OutputDataType>
 class ConvolutionBwdPlan : public IGraphNodePlanExecutor
@@ -67,37 +67,35 @@ public:
         auto shallowDXTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowWTensor = createShallowTensor<Input1DataType>(
-            _params.wTensor, variantPack.at(_params.wTensor.uid));
+        auto shallowWTensor
+            = createShallowTensor<WDataType>(_params.wTensor, variantPack.at(_params.wTensor.uid));
 
-        auto shallowDYTensor = createShallowTensor<Input0DataType>(
+        auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<Input0DataType,
-                                      Input1DataType,
-                                      ComputeDataType,
-                                      OutputDataType>::convBwdData(*shallowDXTensor,
-                                                                   *shallowWTensor,
-                                                                   *shallowDYTensor,
-                                                                   _params.stride,
-                                                                   _params.dilation,
-                                                                   _params.prePadding,
-                                                                   _params.postPadding);
+        CpuFpReferenceConvolutionImpl<DyDataType, WDataType, ComputeDataType, OutputDataType>::
+            convBwdData(*shallowDXTensor,
+                        *shallowWTensor,
+                        *shallowDYTensor,
+                        _params.stride,
+                        _params.dilation,
+                        _params.prePadding,
+                        _params.postPadding);
     }
 
 private:
     ConvolutionBwdParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType WDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
           hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
 class ConvolutionBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using Input0DataType = DataTypeToNative<Input0DataTypeEnum>;
-    using Input1DataType = DataTypeToNative<Input1DataTypeEnum>;
+    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
+    using WDataType = DataTypeToNative<WDataTypeEnum>;
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
 
@@ -117,8 +115,8 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), Input1DataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), Input0DataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), WDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
 
         return true;
     }
@@ -145,7 +143,7 @@ public:
             nodeAttributes->conv_mode());
 
         return std::make_unique<
-            ConvolutionBwdPlan<Input0DataType, Input1DataType, ComputeDataType, OutputDataType>>(
+            ConvolutionBwdPlan<DyDataType, WDataType, ComputeDataType, OutputDataType>>(
             std::move(params));
     }
 };
