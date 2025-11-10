@@ -39,6 +39,7 @@ add_executable(MIOpenDriver
     dm_convbfp16.cpp
     dm_convbfp8.cpp
     dm_convfp16.cpp
+    dm_convfp32.cpp
     dm_convfp8.cpp
     dm_convint8.cpp
     dm_dropout.cpp
