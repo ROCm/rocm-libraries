@@ -43,8 +43,8 @@ namespace rocRoller::Scheduling::LDSBankModel
 
     uint getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx)
     {
-        // Assumes aligned assesses (e.g. b128 is 16-byte aligned)
-        // In future, when linked to codegen, update interface check alignment of allocation
+        // Assumes aligned accesses (e.g. b128 is 16-byte aligned)
+        // In future, when linked to codegen, update interface to check alignment of allocation
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == LdsDirection::Read)
         {
             switch(dwords)
@@ -54,8 +54,7 @@ namespace rocRoller::Scheduling::LDSBankModel
             case 2:
                 return 16;
             case 3:
-                // ds_read_b96 on gfx950 retains the same peak throughput as gfx942
-                // and is thus slower than ds_read_b128
+                // ds_read_b96 on gfx950 retains the throughput of gfx942
                 return 4;
             case 4:
                 return 8;
@@ -79,6 +78,7 @@ namespace rocRoller::Scheduling::LDSBankModel
 
     uint getNumLDSBanks(GPUArchitectureGFX gfx, const MemoryOpLDS& memoryOp, uint dwords)
     {
+        // Non ds_read_b128 and ds_read_b64 on gfx950 act as-if there are still only 32 banks for conflict resolution
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == LdsDirection::Read
            && (dwords == 2 || dwords == 4))
         {
@@ -121,7 +121,7 @@ namespace rocRoller::Scheduling::LDSBankModel
                 baseAddresses[i] % 4 == 0, "Base address is not dword aligned ", baseAddresses[i]);
             uint baseAddr = baseAddresses[i] / 4; // in dwords
 
-            // Note: address arithmetic is operating on dword (instead of byte) units
+            // Note: using dword as the unit here
             for(uint offset = 0; offset < dwords; offset += 1)
             {
                 uint currentAddr = baseAddr + offset;
@@ -140,8 +140,8 @@ namespace rocRoller::Scheduling::LDSBankModel
             return 0;
         }
 
-        // The number of clock cycles is determined by the bank with the maximum
-        // number of addresses, since only one address per bank can be serviced per cycle
+        // The number of clock cycles is determined by the bank accessed by the most addresses,
+        // since only one address per bank can be serviced per cycle
         uint maxAddressesPerBank = 0;
         for(const auto& [bankIndex, count] : bankToAddressCounts)
         {
@@ -191,7 +191,7 @@ namespace rocRoller::Scheduling::LDSBankModel
         {
             for(const auto& [bankIndex, count] : mapping)
             {
-                // Log::error("Bank {} accessed {} times", bankIndex, count);
+                Log::trace("Bank {} accessed {} times", bankIndex, count);
             }
         }
 
@@ -202,6 +202,7 @@ namespace rocRoller::Scheduling::LDSBankModel
 
     uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords)
     {
+        // 4 cycles for addresses, additional cycles for write
         uint cycles = 4;
         if(memoryOp.direction == LdsDirection::Write)
         {
@@ -236,13 +237,6 @@ namespace rocRoller::Scheduling::LDSBankModel
         return ss.str();
     }
 
-    /**
-     * @brief Generate a string representation of the instruction analysis
-     * @param instr The instruction to analyze
-     * @param gfx The GPU architecture
-     * @return A pair containing the string representation and the total clock cycles
-     *         calculated for the instruction
-     */
     std::pair<std::string, uint> stringifyInstructionAnalysis(const RuntimeLDSInstruction& instr,
                                                               GPUArchitectureGFX           gfx)
     {
