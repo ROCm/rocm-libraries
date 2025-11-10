@@ -2,7 +2,7 @@
 
 ## How to Build
 
-1. **Prerequisites:** 
+1. **Prerequisites:**
    - Build and install hipDNN following the [Building documentation](../docs/Building.md)
    - Ensure ROCm is installed (typically in `/opt/rocm`)
    - A ROCm-compatible GPU is required to run the samples
@@ -28,6 +28,25 @@ Example:
 ./build/conv_forward --cpu-validation
 ```
 
+## Profiling Samples
+
+Samples can be profiled using ROCprofiler-SDK (`rocprofv3`), included in ROCm version 6.2 or later.
+
+```bash
+# Profile a sample with system trace and perfetto output format
+rocprofv3 --sys-trace -f pftrace -o ./profile_output -- ./bn_inference
+```
+
+Since `rocprofv3` has limited host-side tracing, `hipDeviceSynchronize()` calls can be added to gauge granular performance.
+
+```cpp
+HIP_CHECK(hipDeviceSynchronize()); // Flush previous work and record in trace
+
+HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
+
+HIP_CHECK(hipDeviceSynchronize()); // Await completion and record in trace for approximate delta
+```
+
 ## Available Samples
 
 All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.
@@ -36,15 +55,6 @@ All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp
 > 💡 Set `HIPDNN_LOG_LEVEL=info` to observe detailed logs from the samples.
 
 The current samples include:
-
-### [**`BnInference`**](./batchnorm/BnInference.cpp)
-
-Executes a single-node batch normalization inference graph on a 4D input tensor.
-
-- It normalizes each dimension of the input tensor `x` of shape `(N, C, H, W)`, using pre-calculated population statistics. The result is then transformed by the learned parameters `scale` and `bias`, each with shape `(1, C, 1, 1)` to enable broadcasting over the batch (N) and spatial (H, W) dimensions. At a high-level, the following element-wise linear transformation is broadcast over the batch and spatial dimensions:
-    ```python
-    y = scale * ((x - mean) * inv_variance) + bias
-    ```
 
 ### [**`BnTraining`**](./batchnorm/BnTraining.cpp)
 
@@ -119,21 +129,21 @@ Executes the forward pass of a 2D convolution operation on a 4D input tensor.
 - For an input tensor `x` of shape `(N, C, H_in, W_in)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution operation computes the output tensor `y` of shape `(N, K, H_out, W_out)`. At a high-level, each output element is computed by the following summation over input channels and filter spatial positions:
 
     ```python
-    y[n, k, p, q] = sum(sum(sum(x[n, c, h, w] * w[k, c, r, s] 
-                                for c in range(C)) 
-                            for r in range(R)) 
+    y[n, k, p, q] = sum(sum(sum(x[n, c, h, w] * w[k, c, r, s]
+                                for c in range(C))
+                            for r in range(R))
                         for s in range(S))
     ```
 
     where the input spatial indices `(h, w)` are determined by the output position `(p, q)`, stride, padding, and dilation:
-    
+
     ```python
     h = p * stride_h - pad_h + r * dilation_h
     w = q * stride_w - pad_w + s * dilation_w
     ```
-    
+
     The output spatial dimensions are calculated as:
-    
+
     ```python
     H_out = floor((H_in + 2*pad_h - dilation_h*(R - 1) - 1) / stride_h) + 1
     W_out = floor((W_in + 2*pad_w - dilation_w*(S - 1) - 1) / stride_w) + 1
@@ -146,14 +156,14 @@ Executes the backward pass (data gradient) of a 2D convolution operation to comp
 - For an output gradient tensor `dy` of shape `(N, K, H_out, W_out)` and a filter tensor `w` of shape `(K, C, R, S)`, the convolution backward data operation computes the input gradient tensor `dx` of shape `(N, C, H_in, W_in)`. At a high-level, each input gradient element is computed by accumulating contributions from all output gradients that were influenced by that input position:
 
     ```python
-    dx[n, c, h, w] = sum(sum(sum(dy[n, k, p, q] * w[k, c, r, s] 
-                                 for k in range(K)) 
-                             for r in range(R)) 
+    dx[n, c, h, w] = sum(sum(sum(dy[n, k, p, q] * w[k, c, r, s]
+                                 for k in range(K))
+                             for r in range(R))
                          for s in range(S))
     ```
 
     where for each input position `(h, w)` and filter position `(r, s)`, the corresponding output position `(p, q)` that contribute is computed as:
-    
+
     ```python
     p = (h + pad_h - r * dilation_h) / stride_h  # must be integer in [0, H_out)
     q = (w + pad_w - s * dilation_w) / stride_w  # must be integer in [0, W_out)
@@ -161,7 +171,7 @@ Executes the backward pass (data gradient) of a 2D convolution operation to comp
     Only positions where both divisions yield integers within the valid output range contribute to the gradient.
 
     The input gradient dimensions are calculated as the inverse of the forward convolution:
-    
+
     ```python
     H_in = stride_h * (H_out - 1) + dilation_h * (R - 1) + 1 - 2*pad_h
     W_in = stride_w * (W_out - 1) + dilation_w * (S - 1) + 1 - 2*pad_w
@@ -181,20 +191,20 @@ Executes the backward pass (filter gradient) of a 2D convolution operation to co
     ```
 
     where for each output position `(p, q)` and filter position `(r, s)`, the corresponding input position `(h, w)` is computed as:
-    
+
     ```python
     h = p * stride_h - pad_h + r * dilation_h
     w = q * stride_w - pad_w + s * dilation_w
     ```
-    
+
     For each valid output position, the input position `(h, w)` must fall within the input bounds `[0, H_in) × [0, W_in)` to contribute to the gradient. Input positions outside these bounds (from padding regions) do not contribute.
 
     The filter gradient dimensions match the original filter tensor from the forward pass:
-    
+
     ```python
     dw.shape = w.shape = (K, C, R, S)
     ```
-    
+
     where:
     - `K` = number of output channels (filters)
     - `C` = number of input channels per filter
