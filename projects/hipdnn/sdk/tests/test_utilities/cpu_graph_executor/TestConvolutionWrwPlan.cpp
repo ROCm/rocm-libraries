@@ -68,7 +68,7 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
     variantPack[2] = planTensorBundle.dwTensor.memory().hostData();
     variantPack[3] = planTensorBundle.dyTensor.memory().hostData();
 
-    CpuFpReferenceConvolutionImpl<float, float, float, float>::convBwdWeight(
+    CpuFpReferenceConvolution::convBwdWeight<float, float, float, float>(
         directTensorBundle.xTensor,
         directTensorBundle.dwTensor,
         directTensorBundle.dyTensor,

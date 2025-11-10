@@ -701,18 +701,19 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
     double momentum = 0.1;
 
     // Cannot deduce template with partial nullptr params
-    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(inputTensor,
-                                         scaleTensor,
-                                         biasTensor,
-                                         outputTensor,
-                                         BATCHNORM_DEFAULT_EPSILON,
-                                         momentum,
-                                         nullptr,
-                                         nullptr,
-                                         &prevRunningMean,
-                                         &prevRunningVariance,
-                                         &nextRunningMean,
-                                         &nextRunningVariance);
+    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(
+        inputTensor,
+        scaleTensor,
+        biasTensor,
+        outputTensor,
+        BATCHNORM_DEFAULT_EPSILON,
+        momentum,
+        nullptr,
+        nullptr,
+        &prevRunningMean,
+        &prevRunningVariance,
+        &nextRunningMean,
+        &nextRunningVariance);
 
     // Verify running statistics were updated
     for(int i = 0; i < 3; i++)

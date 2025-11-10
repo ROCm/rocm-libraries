@@ -70,14 +70,15 @@ public:
         auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<XDataType, WDataType, ComputeDataType, OutputDataType>::
-            convFwdInference(*shallowXTensor,
-                             *shallowWTensor,
-                             *shallowYTensor,
-                             _params.stride,
-                             _params.dilation,
-                             _params.prePadding,
-                             _params.postPadding);
+        CpuFpReferenceConvolution::
+            convFwdInference<XDataType, WDataType, ComputeDataType, OutputDataType>(
+                *shallowXTensor,
+                *shallowWTensor,
+                *shallowYTensor,
+                _params.stride,
+                _params.dilation,
+                _params.prePadding,
+                _params.postPadding);
     }
 
 private:

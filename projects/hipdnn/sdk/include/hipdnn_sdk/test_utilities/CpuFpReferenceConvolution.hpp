@@ -18,11 +18,7 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 
-template <class Input0DataType,
-          class Input1DataType,
-          class ComputeDataType,
-          class OutputDataType = Input0DataType>
-class CpuFpReferenceConvolutionImpl
+class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
@@ -49,9 +45,10 @@ public:
     }
 
     // Overload for uniform padding
-    static void convFwdInference(const TensorBase<Input0DataType>& x,
-                                 const TensorBase<Input1DataType>& w,
-                                 TensorBase<OutputDataType>& y,
+    template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
+    static void convFwdInference(const TensorBase<XDataType>& x,
+                                 const TensorBase<WDataType>& w,
+                                 TensorBase<YDataType>& y,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& padding)
@@ -59,9 +56,10 @@ public:
         convFwdInference(x, w, y, strides, dilations, padding, padding);
     }
 
-    static void convFwdInference(const TensorBase<Input0DataType>& x,
-                                 const TensorBase<Input1DataType>& w,
-                                 TensorBase<OutputDataType>& y,
+    template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
+    static void convFwdInference(const TensorBase<XDataType>& x,
+                                 const TensorBase<WDataType>& w,
+                                 TensorBase<YDataType>& y,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& prePadding,
@@ -145,8 +143,8 @@ public:
                             int64_t wIdx = (gIdx * yChannelsPerGroup) + kIdx;
                             auto wFullIndices = buildTensorIndices(wIdx, c, kernelSpatialIndices);
 
-                            Input0DataType xVal = x.getHostValue(xFullIndices);
-                            Input1DataType wVal = w.getHostValue(wFullIndices);
+                            XDataType xVal = x.getHostValue(xFullIndices);
+                            WDataType wVal = w.getHostValue(wFullIndices);
 
                             accumulator = accumulator
                                           + (static_cast<ComputeDataType>(xVal)
@@ -158,7 +156,7 @@ public:
             int64_t yChannel = (gIdx * yChannelsPerGroup) + kIdx;
             auto yFullIndices = buildTensorIndices(nIdx, yChannel, ySpatialIndices);
 
-            y.setHostValue(static_cast<OutputDataType>(accumulator), yFullIndices);
+            y.setHostValue(static_cast<YDataType>(accumulator), yFullIndices);
         };
 
         // Build dimensions for parallel iteration
@@ -173,9 +171,10 @@ public:
     }
 
     // Overload for uniform padding
-    static void convBwdData(TensorBase<OutputDataType>& gradX,
-                            const TensorBase<Input1DataType>& w,
-                            const TensorBase<Input0DataType>& gradY,
+    template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
+    static void convBwdData(TensorBase<DxDataType>& gradX,
+                            const TensorBase<WDataType>& w,
+                            const TensorBase<DyDataType>& gradY,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& padding)
@@ -183,9 +182,10 @@ public:
         convBwdData(gradX, w, gradY, strides, dilations, padding, padding);
     }
 
-    static void convBwdData(TensorBase<OutputDataType>& gradX,
-                            const TensorBase<Input1DataType>& w,
-                            const TensorBase<Input0DataType>& gradY,
+    template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
+    static void convBwdData(TensorBase<DxDataType>& gradX,
+                            const TensorBase<WDataType>& w,
+                            const TensorBase<DyDataType>& gradY,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& prePadding,
@@ -275,8 +275,8 @@ public:
                             auto wFullIndices
                                 = buildTensorIndices(wBatchIdx, wChannelIdx, kernelSpatialIndices);
 
-                            Input0DataType vOut = gradY.getHostValue(gradOutputFullIndices);
-                            Input1DataType vWei = w.getHostValue(wFullIndices);
+                            DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
+                            WDataType vWei = w.getHostValue(wFullIndices);
 
                             vAcc = vAcc
                                    + (static_cast<ComputeDataType>(vOut)
@@ -288,7 +288,7 @@ public:
             int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
             auto gradInputFullIndices = buildTensorIndices(nIdx, xChannelIdx, xSpatialIndices);
 
-            gradX.setHostValue(static_cast<OutputDataType>(vAcc), gradInputFullIndices);
+            gradX.setHostValue(static_cast<DxDataType>(vAcc), gradInputFullIndices);
         };
 
         // Build dimensions for parallel iteration
@@ -302,9 +302,10 @@ public:
         gradX.memory().markHostModified();
     }
 
-    static void convBwdWeight(const TensorBase<Input0DataType>& x,
-                              TensorBase<OutputDataType>& gradW,
-                              const TensorBase<Input1DataType>& gradY,
+    template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
+    static void convBwdWeight(const TensorBase<XDataType>& x,
+                              TensorBase<DwDataType>& gradW,
+                              const TensorBase<DyDataType>& gradY,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& padding)
@@ -312,9 +313,10 @@ public:
         convBwdWeight(x, gradW, gradY, strides, dilations, padding, padding);
     }
 
-    static void convBwdWeight(const TensorBase<Input0DataType>& x,
-                              TensorBase<OutputDataType>& gradW,
-                              const TensorBase<Input1DataType>& gradY,
+    template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
+    static void convBwdWeight(const TensorBase<XDataType>& x,
+                              TensorBase<DwDataType>& gradW,
+                              const TensorBase<DyDataType>& gradY,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,
@@ -390,9 +392,9 @@ public:
 
                         auto xFullIndices = buildTensorIndices(n, xChannelIdx, xSpatialIndices);
 
-                        Input1DataType vOut = gradY.getHostValue(gradOutputFullIndices);
+                        DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
 
-                        Input0DataType vIn = x.getHostValue(xFullIndices);
+                        XDataType vIn = x.getHostValue(xFullIndices);
 
                         vAcc = vAcc
                                + (static_cast<ComputeDataType>(vOut)
@@ -404,7 +406,7 @@ public:
             auto wN = (gIdx * yChannelsPerGroup) + kIdx;
             auto wFullIndices = buildTensorIndices(wN, cIdx, kernelSpatialIndices);
 
-            gradW.setHostValue(static_cast<OutputDataType>(vAcc), wFullIndices);
+            gradW.setHostValue(static_cast<DwDataType>(vAcc), wFullIndices);
         };
 
         // Build dimensions for parallel iteration

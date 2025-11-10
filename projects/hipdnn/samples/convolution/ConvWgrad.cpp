@@ -114,7 +114,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> dwRefTensor(dwAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdWeight(
+        test_utilities::CpuFpReferenceConvolution::convBwdWeight<InputType, InputType, InputType, float>(
             xTensor, dwRefTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = test_utilities::conv::getToleranceWrw<InputType>();
