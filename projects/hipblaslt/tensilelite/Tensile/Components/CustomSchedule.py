@@ -248,13 +248,25 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     return module, numCodePath
 
 
-def _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLDS):
+def isNN(kernel):
+    return not kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
+
+def isNT(kernel):
+    return not kernel["ProblemType"]["TransposeA"] and kernel["ProblemType"]["TransposeB"]
+
+def isTT(kernel):
+    return kernel["ProblemType"]["TransposeA"] and kernel["ProblemType"]["TransposeB"]
+
+def isTN(kernel):
+    return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
+
+def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
     optSchedule = dict()
     syncCode = []
 
-    if isTN and TLDS == 1:
+    if isTN(kernel) and TLDS == 1:
         optSchedule = {
             'SYNC'   : [[19,20, 50,51, 67,68, 104, 105]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
@@ -285,7 +297,7 @@ def _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLD
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous GRA to completely"),
                     SBarrier(comment="")]
-    elif isNT and not useLDSTr and TLDS == 0:
+    elif isNT(kernel) and not useLDSTr and TLDS == 0:
         kernel["UsePLRPack"] = True
 
         optSchedule = {
@@ -328,7 +340,7 @@ def _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLD
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
-    elif (isNN or isTT) and not useLDSTr and TLDS == 1:
+    elif (isNN(kernel) or isTT(kernel)) and not useLDSTr and TLDS == 1:
         kernel["UsePLRPack"] = True
 
         optSchedule = {
@@ -366,7 +378,7 @@ def _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLD
                     SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRB to complete"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete")]
-        if isTT:
+        if isTT(kernel):
             kernel["SwapGlobalReadOrder"] = True
 
             optSchedule['GRIncA'], optSchedule['GRIncB'] = optSchedule['GRIncB'], optSchedule['GRIncA']
@@ -383,7 +395,7 @@ def _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLD
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode)
     return True, opt1
 
-def _get_schedule_256x256x128_8bit(kernel, isTN, TLDS):
+def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
     optSchedule = dict()
@@ -391,7 +403,7 @@ def _get_schedule_256x256x128_8bit(kernel, isTN, TLDS):
 
     plr = 3 if kernel["ForceUnrollSubIter"] else 1
 
-    if isTN and TLDS == 1:
+    if isTN(kernel) and TLDS == 1:
         optSchedule = {
             'SYNC'      : [[6,7, 20,21, 46,47, 61]],
             'GRIncA'    : [[0,1,2,3,4,4,4,4,4]],
@@ -429,12 +441,12 @@ def _get_schedule_256x256x128_8bit(kernel, isTN, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, mfmaReorder)
     return True, opt1
 
-def _get_schedule_192x256x64_16bit(kernel, isNN, useLDSTr, TLDS):
+def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
     optSchedule = dict()
     syncCode = []
-    if isNN and useLDSTr and TLDS==1:
+    if isNN(kernel) and useLDSTr and TLDS==1:
         # TODO: This schedule can be improved when BC are resolved for MT192
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
@@ -509,20 +521,11 @@ def hasCustomSchedule(kernel):
     is192x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [192, 256, 64, 2, 1, True]
     is256x256x128DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 256, 128, 2, 0, True]
 
-
-    transA = kernel["ProblemType"]["TransposeA"]
-    transB = kernel["ProblemType"]["TransposeB"]
-
-    isNN = transA == False and transB == False
-    isNT = transA == False and transB == True
-    isTT = transA == True and transB == True
-    isTN = transA == True and transB == False
-
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_256x256x64_16bit(kernel, isNN, isNT, isTT, isTN, useLDSTr, TLDS)
+        return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x256x128DTL and is8bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [16, 16, 16]) and MI == [16,16,128,1] and MIWG == [2,2]:
-        return _get_schedule_256x256x128_8bit(kernel, isTN, TLDS)
+        return _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS)
     elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_192x256x64_16bit(kernel, isNN, useLDSTr, TLDS)
+        return _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS)
 
     return False, None
