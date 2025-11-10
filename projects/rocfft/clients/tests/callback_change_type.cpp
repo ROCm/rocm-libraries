@@ -230,6 +230,6 @@ TEST_P(change_type, short_to_float)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
 }

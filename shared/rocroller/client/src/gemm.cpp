@@ -421,6 +421,15 @@ namespace rocRoller::Client::GEMMClient
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
 
+        if(commandKernel->getContext() && commandKernel->getContext()->kernel())
+        {
+            auto assemblyKernel = commandKernel->getContext()->kernel();
+            result.sgprCount    = assemblyKernel->sgpr_count();
+            result.vgprCount    = assemblyKernel->vgpr_count();
+            result.agprCount    = assemblyKernel->agpr_count();
+            result.ldsBytes     = assemblyKernel->group_segment_fixed_size();
+        }
+
         if(benchmarkParams.check)
         {
             AssertFatal(hipMemcpy(hostD.data(),
