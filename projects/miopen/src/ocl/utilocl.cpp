@@ -865,19 +865,8 @@ float transpose_NCHW2CNHW(const Handle& handle,
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if((gd0 * c) < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
-
+        kernel_name += "_2D_WG";
+        
         kernel_name += "_off64";
 
         auto&& kernels = handle.GetKernels(kernel_name, network_config);
@@ -995,18 +984,8 @@ float transpose_CNHW2NCHW(const Handle& handle,
         const std::vector<size_t> vld{std::min(gd0, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if(gd0 < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
+        kernel_name += "_2D_WG";
+
 
         /// After switching to 64-bit offsets, do not use old kernels
         /// from the binary cache that use 32-bit offsets.

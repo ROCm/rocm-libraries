@@ -273,36 +273,6 @@ __kernel void transpose_NCHW2CNHW_V2_2D_WG_off64(const global data_t* in,
         cout[hw_out * n_i] = cin[C * hw_in * n_i];
 }
 
-__kernel void transpose_NCHW2CNHW_V2_3D_WG_off64(const global data_t* in,
-                                                 global data_t* out,
-                                                 const arg_size_t in_off,
-                                                 const arg_size_t out_off,
-                                                 const int w_in,
-                                                 const int w_out,
-                                                 const int N,
-                                                 const int C,
-                                                 const int h_stride,
-                                                 const int w_stride,
-                                                 const int hw_in,
-                                                 const int hw_out)
-{
-    uint hw_i = get_global_id(0);
-    uint c_i  = get_global_id(2);
-
-    // uint c_i  = iDiv(i, hw_out);
-    // uint hw_i = iMod(i, c_i, hw_out);
-    uint h_i = iDiv(hw_i, w_out);
-    uint w_i = iMod(hw_i, h_i, w_out);
-
-    /// \ref multiply_dims_overflow_assumption
-    size_t in_offset         = c_i * hw_in + h_i * h_stride * w_in + w_i * w_stride + in_off;
-    size_t out_offset        = c_i * N * hw_out + hw_i + out_off;
-    const global data_t* cin = (const global data_t*)(in + in_offset);
-    global data_t* cout      = (global data_t*)(out + out_offset);
-
-    uint n_i           = get_global_id(1);
-    cout[hw_out * n_i] = cin[C * hw_in * n_i];
-}
 
 __kernel void transpose_CNHW2NCHW_V1_1D_WG_float_off64(const global data_t* in,
                                                        global data_t* out,
@@ -497,34 +467,6 @@ __kernel void transpose_CNHW2NCHW_V2_2D_WG_off64(const global data_t* in,
     }
 }
 
-__kernel void transpose_CNHW2NCHW_V2_3D_WG_off64(const global data_t* in,
-                                                 global data_t* out,
-                                                 const arg_size_t in_off,
-                                                 const arg_size_t out_off,
-                                                 const int w_in,
-                                                 const int w_out,
-                                                 const int N,
-                                                 const int C,
-                                                 const int h_stride,
-                                                 const int w_stride,
-                                                 const int hw_in,
-                                                 const int hw_out)
-{
-    uint hw_i = get_global_id(0);
-    uint c_i  = get_global_id(2);
-
-    uint h_i = iDiv(hw_i, w_out);
-    uint w_i = iMod(hw_i, h_i, w_out);
-
-    /// \ref multiply_dims_overflow_assumption
-    size_t in_offset         = c_i * N * hw_out + hw_i + in_off;
-    size_t out_offset        = c_i * hw_in + h_i * h_stride * w_in + w_i * w_stride + out_off;
-    const global data_t* cin = (const global data_t*)(in + in_offset);
-    global data_t* cout      = (global data_t*)(out + out_offset);
-
-    uint n_i              = get_global_id(1);
-    cout[C * hw_in * n_i] = cin[hw_out * n_i];
-}
 
 __kernel void transpose_packed_MN2NM_off64(const global data_t* in,
                                            global data_t* out,
