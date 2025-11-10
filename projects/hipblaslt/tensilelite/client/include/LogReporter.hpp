@@ -211,7 +211,10 @@ namespace TensileLite
                 else if(value == "DID_NOT_SATISFY_ASSERTS")
                     m_rowLevel = LogLevel::Terse;
                 else if(value == "INVALID")
+                {
                     m_rowLevel = LogLevel::Error;
+                    ++m_exceptionsReported;
+                }
             }
 
             virtual bool logAtLevel(LogLevel level) override
@@ -345,7 +348,7 @@ namespace TensileLite
                 m_firstRun = true;
             }
 
-            virtual void preSolution(ContractionSolution const& solution) override
+            virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_csvOutput.push();
                 m_rowLevel = LogLevel::Normal;

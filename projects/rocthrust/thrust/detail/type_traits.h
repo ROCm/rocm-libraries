@@ -55,6 +55,10 @@ template <typename Invokable, typename InputT, typename InitT = InputT>
 using accumulator_t = _THRUST_STD::__accumulator_t<Invokable, InputT, InitT>;
 template <typename T>
 using decay_t = _THRUST_STD::decay_t<T>;
+template <typename T>
+using remove_cvref = _THRUST_STD::remove_cvref<T>;
+template <typename T>
+using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
 template <typename... Pred>
 using _And = _THRUST_STD::_And<Pred...>;
 
@@ -80,6 +84,10 @@ using decay_t = ::std::decay_t<T>;
 #  else
 using decay_t = ::std::__decay_t<T>;
 #  endif
+template <typename T>
+using remove_cvref = ::std::remove_cv<::std::remove_reference_t<T>>;
+template <typename T>
+using remove_cvref_t = ::std::remove_cv_t<::std::remove_reference_t<T>>;
 
 namespace detail
 {
@@ -127,6 +135,21 @@ struct is_non_bool_integral<bool> : public false_type
 template <typename T>
 struct is_non_bool_arithmetic : public ::internal::is_arithmetic<T>
 {};
+
+template <typename T>
+struct is_unbounded_array : public thrust::detail::false_type
+{};
+template <typename T>
+struct is_unbounded_array<T[]> : public thrust::detail::true_type
+{};
+
+template <typename T>
+struct is_bounded_array : public thrust::detail::false_type
+{};
+template <typename T, size_t N>
+struct is_bounded_array<T[N]> : public thrust::detail::true_type
+{};
+
 template <>
 struct is_non_bool_arithmetic<bool> : public false_type
 {};
@@ -162,6 +185,12 @@ struct identity_
 {
   using type = T;
 }; // end identity
+
+template <class Tp, bool>
+struct dependent_type
+{
+  using type = Tp;
+}; // end dependent_type
 
 template <bool, typename T>
 struct lazy_enable_if
@@ -224,7 +253,7 @@ namespace internal
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename... Tp>
-using promoted_numerical_type = _THRUST_STD::common_type_t<Tp...>;
+using promoted_numerical_type = _THRUST_STD::common_type<Tp...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 

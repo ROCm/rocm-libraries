@@ -629,8 +629,8 @@ namespace rocRoller
             }
 
             // StoreLDS next
-            auto storeLDScounter = 0;
-            auto direct2LDSTile  = 0;
+            auto storeLDScounter   = 0;
+            auto direct2LDSCounter = 0;
             for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
@@ -642,12 +642,20 @@ namespace rocRoller
                 graph.mapper.connect<LDS>(preBarrier, ldsTileTag, storeLDScounter);
                 storeLDScounter++;
 
-                auto ldsTile = graph.coordinates.getNode<LDS>(ldsTileTag);
-                if(ldsTile.isDirect2LDS)
-                    direct2LDSTile++;
+                auto op = std::get<Operation>(graph.control.getElement(load.globalOperation));
+                if(std::holds_alternative<LoadTiled>(op))
+                {
+                    auto macroTile = graph.coordinates.get<MacroTile>(
+                        graph.mapper.get<MacroTile>(load.globalOperation));
+                    if(macroTile && macroTile->memoryType == MemoryType::WAVE_Direct2LDS)
+                    {
+                        direct2LDSCounter++;
+                    }
+                }
             }
 
-            auto prefetchDirect2LDS = ((direct2LDSTile > 0) && (storeLDScounter == direct2LDSTile));
+            auto prefetchDirect2LDS
+                = ((direct2LDSCounter > 0) && (storeLDScounter == direct2LDSCounter));
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
             for(uint i = 1; i < preChain.size(); ++i)
@@ -1427,11 +1435,10 @@ namespace rocRoller
                     for(auto op :
                         k.control.depthFirstVisit(starts, onlyFollowSequenceEdges, GD::Downstream))
                     {
-                        auto outgoing
-                            = k.control.getNeighbours(op, GD::Downstream).to<std::unordered_set>();
+                        auto outgoing = k.control.getNeighbours(op, GD::Downstream);
                         for(auto tag : m_prefetchDelete[forLoop])
                         {
-                            outgoing.erase(tag);
+                            std::erase(outgoing, tag);
                         }
                         if(outgoing.empty())
                         {

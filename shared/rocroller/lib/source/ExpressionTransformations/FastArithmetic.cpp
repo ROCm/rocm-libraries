@@ -36,6 +36,35 @@ namespace rocRoller
         {
         }
 
+        std::vector<ExpressionTransformType> FastArithmetic::getTransforms() const
+        {
+            std::vector<ExpressionTransformType> transforms
+                = {splitBitfieldCombine,
+                   lowerBitfieldCombine,
+                   convertPropagation,
+                   [this](auto e) { return fastDivision(e, m_context); },
+                   simplify,
+                   lowerExponential,
+                   fastMultiplication,
+                   lowerUnsignedArithmeticShiftR,
+                   fuseAssociative,
+                   combineShifts,
+                   fuseTernary,
+                   [this](auto e) { return launchTimeSubExpressions(e, m_context); },
+                   convertPropagation,
+                   simplify};
+
+            return transforms;
+        }
+
+        ExpressionPtr FastArithmetic::applyTransforms(
+            ExpressionPtr expr, const std::vector<ExpressionTransformType>& transforms) const
+        {
+            for(const auto& transform : transforms)
+                expr = transform(expr);
+            return expr;
+        }
+
         ExpressionPtr FastArithmetic::operator()(ExpressionPtr x) const
         {
             if(!x)
@@ -44,22 +73,14 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
-            x = convertPropagation(x);
-            x = fastDivision(x, m_context);
-            x = simplify(x);
-            x = lowerExponential(x);
-            x = fastMultiplication(x);
-            x = lowerUnsignedArithmeticShiftR(x);
-            x = fuseAssociative(x);
-            x = combineShifts(x);
-            x = fuseTernary(x);
-            x = launchTimeSubExpressions(x, m_context);
+            auto transforms = getTransforms();
+            x               = applyTransforms(x, transforms);
 
             if(!identical(orig, x))
             {
-                auto comment = Instruction::Comment(
-                    concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
-                m_context->schedule(comment);
+                // auto comment = Instruction::Comment(
+                //     concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
+                // m_context->schedule(comment);
 
                 auto origResultType = resultType(orig);
                 AssertFatal(origResultType.varType == resultType(x).varType,

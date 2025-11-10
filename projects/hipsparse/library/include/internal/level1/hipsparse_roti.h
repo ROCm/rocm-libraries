@@ -73,62 +73,11 @@ extern "C" {
 *  idxBase    \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p c, \p s, \p xVal, \p xInd 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p c, \p s, \p xVal, \p xInd
 *              or \p y is invalid.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      int nnz = 3;
-*
-*      // Sparse index vector
-*      int hxInd[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      float hxVal[3] = {1.0f, 2.0f, 3.0f};
-*
-*      // Dense vector
-*      float hy[9] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*      // c and s
-*      float c = 3.7;
-*      float s = 1.3;
-*
-*      // Index base
-*      hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
-*
-*      // Offload data to device
-*      int* dxInd;
-*      float*        dxVal;
-*      float*        dy;
-*
-*      hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*      hipMalloc((void**)&dy, sizeof(float) * 9);
-*
-*      hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dxVal, hxVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice);
-*
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // Call sroti
-*      hipsparseSroti(handle, nnz, dxVal, dxInd, dy, &c, &s, idxBase);
-*
-*      // Copy result back to host
-*      hipMemcpy(hxVal, dxVal, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*      hipMemcpy(hy, dy, sizeof(float) * 9, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dxInd);
-*      hipFree(dxVal);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_hipsparse_roti.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

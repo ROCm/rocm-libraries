@@ -42,7 +42,6 @@ RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /e
 RUN apt-get update && apt-get install -y \
    bc \
    gdb \
-   libboost-container1.74-dev \
    libopenblas-dev \
    libncurses-dev \
    m4 \
@@ -54,14 +53,15 @@ RUN apt-get update && apt-get install -y \
    python3-venv \
    vim \
    wget \
-   xz-utils
+   xz-utils \
+   libdw-dev
 
 # Needed for clang-format from ROCm 4.3.1
 RUN wget -nv --show-progress --progress=dot:mega -O /tmp/libtinfo5.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb \
     && apt-get install -y /tmp/libtinfo5.deb
 
-# cmake 3.24.4
- RUN wget -nv --show-progress --progress=dot:mega -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.24.4/cmake-3.24.4-linux-x86_64.sh \
+# cmake 3.25.2
+ RUN wget -nv --show-progress --progress=dot:mega -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.25.2/cmake-3.25.2-linux-x86_64.sh \
    && sh /tmp/cmake-install.sh --prefix=/usr/local --skip-license \
    && rm /tmp/cmake-install.sh
 
@@ -103,7 +103,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.
 ADD docker/setup-node /tmp
 RUN bash --login -ex /tmp/setup-node install && rm /tmp/setup-node
 
-# Tensile
+# HipBLASLt
 RUN apt-get update && apt-get install -y \
     libmsgpack-dev \
     libboost-program-options-dev \
@@ -139,6 +139,9 @@ RUN ( \
 
 ENV CXX=/opt/rocm/bin/amdclang++
 ENV CC=/opt/rocm/bin/amdclang
+
+ADD docker/install-rocprof-trace-decoder /tmp
+RUN /tmp/install-rocprof-trace-decoder && rm /tmp/install-rocprof-trace-decoder
 
 # Clean image
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*

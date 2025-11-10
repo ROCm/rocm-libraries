@@ -9,4 +9,3 @@ add_library(TensileOcl STATIC
 message( TensileOcl SYSTEM ${HIP_INCLUDE_DIRS} ${HCC_INCLUDE_DIRS} )
 
 include_directories(${HIP_INCLUDE_DIRS} ${HCC_INCLUDE_DIRS})
-

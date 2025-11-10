@@ -1111,20 +1111,16 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm::IsApplicable(
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_PADDED_GEMM_XDLOPS))
         return false;
-
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
 
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;
 
-    if(problem.IsBfp16())
-    {
-        // Missing intrinsic: llvm.amdgcn.mfma.f32.16x16x8bf16
-        const auto dev_name = ctx.GetStream().GetDeviceName();
-        if(dev_name == "gfx942")
-            return false;
-    }
+    // Missing intrinsic: llvm.amdgcn.mfma.f32.16x16x8bf16
+    if(problem.IsBfp16() && static_ck::GfxHasMissingBf16Intrinsics(name))
+        return false;
 
     if(problem.GetConv().attribute.deterministic)
         return false;
@@ -1153,7 +1149,7 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm::IsApplicable(
     if(problem.IsTensorsCasted())
         return false;
 
-    if(ctx.GetStream().GetDeviceName() == "gfx90a" && problem.IsGfx90aFp16altRequired())
+    if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
 
     if(!static_ck::IsIndexRangeLargeEnough(problem))

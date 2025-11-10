@@ -35,7 +35,7 @@ option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Don't search the system for dependencies, always download them" OFF)
 cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover niche functionality and take long time" OFF "BUILD_TEST" OFF)
-
+cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 
 if (NOT DEFINED ENV{ROCM_PATH})
 #Path to ROCm installation
@@ -154,6 +154,7 @@ else()
 endif()
 if(CODE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    add_definitions(-DCODE_COVERAGE_ENABLED)
 endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
@@ -188,11 +189,16 @@ set(rocrand_SOVERSION 1.1)
 include(cmake/Summary.cmake)
 print_configuration_summary()
 
-# Tools
-add_subdirectory(tools)
+# The "tools" and "library" targets may be skipped under certain conditions when USE_SYSTEM_LIB=ON
+if ((NOT BUILD_BENCHMARK) AND (NOT BUILD_FORTRAN_WRAPPER) AND BUILD_TEST AND USE_SYSTEM_LIB)
+  message(STATUS "Skipping the 'tools' and 'library' targets as only BUILD_TEST=ON and USE_SYSTEM_LIB=ON were specified")
+else()
+  # Tools
+  add_subdirectory(tools)
 
-# rocRAND library, adds library target "rocrand" and includes Fortran wrapper
-add_subdirectory(library)
+  # rocRAND library, adds library target "rocrand" and includes Fortran wrapper
+  add_subdirectory(library)
+endif()
 
 if(BUILD_TEST OR BUILD_BENCHMARK)
   rocm_package_setup_component(clients)
@@ -200,6 +206,13 @@ endif()
 
 # Tests
 if (BUILD_TEST)
+    if(USE_SYSTEM_LIB)
+        find_package(rocrand REQUIRED CONFIG PATHS "$ENV{ROCM_PATH}/rocrand")
+        if (NOT ${rocrand_VERSION} VERSION_EQUAL ${rocRAND_VERSION})
+            message(WARNING "The installed rocrand version, ${rocrand_VERSION}, does not match project version ${rocRAND_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+        endif()
+    endif()
+
     enable_testing()
     rocm_package_setup_client_component(tests)
     add_subdirectory(test)
@@ -212,7 +225,7 @@ if (BUILD_BENCHMARK)
 endif()
 
 # Package (make package)
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )

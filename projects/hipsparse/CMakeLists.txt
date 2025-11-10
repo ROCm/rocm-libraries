@@ -85,6 +85,7 @@ option(BUILD_SHARED_LIBS "Build hipSPARSE as a shared library" ON)
 option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
 option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" ON)
 option(BUILD_CLIENTS_SAMPLES "Build examples" ON)
+option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(USE_CUDA "Build hipSPARSE using CUDA backend" OFF)
 option(BUILD_CUDA "Build hipSPARSE using CUDA backend" OFF)
@@ -112,13 +113,15 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Setup version
-rocm_setup_version(VERSION 4.0.1)
-set(hipsparse_SOVERSION 4.0.1)
+rocm_setup_version(VERSION 4.2.0)
+set(hipsparse_SOVERSION 4.2.0)
 
 # hipSPARSE library
-add_subdirectory(library)
+if (NOT BUILD_CLIENTS_ONLY)
+  add_subdirectory(library)
+endif()
 
-if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
+if(BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
@@ -171,7 +174,7 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
       RPM "${OPENMP_RPM}"
   )
   endif()
-  
+
   add_subdirectory( clients )
 
   if(NOT WIN32)
@@ -286,6 +289,3 @@ if(BUILD_CODE_COVERAGE)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
-
-
-

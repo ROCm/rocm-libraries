@@ -53,6 +53,8 @@ namespace TensileLite
         , deviceName(name)
         , skDynamicGrid(getSKDynamicGrid())
         , skDynamicWGM(getSKDynamicWGM())
+        , fixedWGM(getFixedWGM())
+        , fixedWGMXCC(getFixedWGMXCC())
         , skMaxCUs(getSKMaxCUs())
         , skGridMultiplier(getSKGridMultiplier())
         , skFixedGrid(getSKFixedGrid())

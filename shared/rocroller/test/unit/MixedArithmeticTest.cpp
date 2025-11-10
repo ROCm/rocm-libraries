@@ -263,6 +263,14 @@ namespace MixedArithmeticTest
                 {
                     Throw<FatalError>("Pointer value present in arithmetic test.");
                 }
+                else if constexpr(std::is_same_v<CurType, Raw32>)
+                {
+                    Throw<FatalError>("Raw32 value present in arithmetic test.");
+                }
+                else if constexpr(std::is_same_v<CurType, Buffer>)
+                {
+                    Throw<FatalError>("Buffer value present in arithmetic test.");
+                }
                 else
                 {
                     return static_cast<NewType>(v);

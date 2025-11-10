@@ -34,6 +34,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUtilityTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssignComputeIndexTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BranchGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandArgumentValueTest.cpp"
@@ -54,6 +55,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InstructionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArgumentsTest.cpp"
@@ -65,11 +67,14 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/LargerLDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LoadPackedTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MEMObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MFMACoexecObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MultipleLDSAllocationTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/NaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RemapOutputTilesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScalarExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
@@ -85,5 +90,11 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAHazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp" 
+)
+
+target_include_directories(rocroller-tests-catch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include
 )

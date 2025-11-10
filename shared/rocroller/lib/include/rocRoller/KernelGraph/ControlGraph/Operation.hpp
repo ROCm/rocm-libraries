@@ -36,6 +36,7 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -218,6 +219,10 @@ namespace rocRoller
             // (valueCount / variableType.packing) registers will be allocated.
             std::optional<VariableType> variableType = std::nullopt;
 
+            // If the destination coordinate is Stride then
+            // set the register expression attributes
+            std::optional<RegisterExpressionAttributes> strideExpressionAttributes = std::nullopt;
+
             std::string name() const;
             std::string toString() const;
         };
@@ -246,11 +251,11 @@ namespace rocRoller
             // to allow user to specify stride types instead of
             // forcing size_t.
 
-            bool     forward      = false;
-            bool     isDirect2LDS = false;
-            DataType valueType    = DataType::Count;
-            DataType offsetType   = DataType::Count;
-            DataType strideType   = DataType::Count;
+            bool     forward                  = false;
+            bool     isStorePartOfGlobalToLDS = false;
+            DataType valueType                = DataType::Count;
+            DataType offsetType               = DataType::Count;
+            DataType strideType               = DataType::Count;
 
             std::string name() const;
         };
@@ -293,13 +298,9 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            explicit LoadTiled(VariableType const varType,
-                               bool const         isTransposedTile = false,
-                               bool const         isDirect2LDS     = false);
+            explicit LoadTiled(VariableType const varType);
 
             VariableType varType;
-            bool         isTransposedTile;
-            bool         isDirect2LDS;
 
             std::string name() const;
         };

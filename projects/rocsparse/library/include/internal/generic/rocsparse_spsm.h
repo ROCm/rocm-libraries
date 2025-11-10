@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -67,22 +67,21 @@ extern "C" {
 *  The user then allocates this buffer and calls \p rocsparse_spsm with the stage \ref rocsparse_spsm_stage_preprocess
 *  which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes the computation by calling
 *  \p rocsparse_spsm with the stage \ref rocsparse_spsm_stage_compute. The buffer size, buffer allocation, and preprecess
-*  stages only need to be called once for a given sparse triangular matrix \f$op(A)\f$ while the computation stage can be 
-*  repeatedly used with different \f$B\f$ and \f$C\f$ matrices. Once all calls to \p rocsparse_spsm are complete, the 
-*  temporary buffer can be deallocated.
+*  stages only need to be called once for a given sparse triangular matrix \f$op(A)\f$ while the computation stage can be
+*  repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
 *
-*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
-*  row order and \f$C\f$ is column order and vice versa). Internally however, rocSPARSE kernels solve the system assuming the 
-*  matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This means that if the matrix 
-*  \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column order as this is 
-*  equivalent to being in row order), then internally memory copies and/or transposing of data may be performed to get them 
-*  into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies and/or 
-*  transposing of data may be performed to get them back into the user arrays. For best performance and smallest required 
-*  temporary storage buffers, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column order if 
-*  \f$B\f$ is being transposed). 
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
+*  row order and \f$C\f$ is column order and vice versa). Internally however, rocSPARSE kernels solve the system assuming the
+*  matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This means that if the matrix
+*  \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column order as this is
+*  equivalent to being in row order), then internally memory copies and/or transposing of data may be performed to get them
+*  into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies and/or
+*  transposing of data may be performed to get them back into the user arrays. For best performance and smallest required
+*  temporary storage buffers, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column order if
+*  \f$B\f$ is being transposed).
 *
-*  \p rocsparse_spsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the 
-*  row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsm supports the following data types for 
+*  \p rocsparse_spsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
+*  row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsm supports the following data types for
 *  \f$op(A)\f$, \f$op(B)\f$, \f$C\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
@@ -149,19 +148,20 @@ extern "C" {
 *  \par Example
 *  \snippet example_rocsparse_spsm.cpp doc example
 */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_spsm(rocsparse_handle            handle,
-                                rocsparse_operation         trans_A,
-                                rocsparse_operation         trans_B,
-                                const void*                 alpha,
-                                rocsparse_const_spmat_descr matA,
-                                rocsparse_const_dnmat_descr matB,
-                                const rocsparse_dnmat_descr matC,
-                                rocsparse_datatype          compute_type,
-                                rocsparse_spsm_alg          alg,
-                                rocsparse_spsm_stage        stage,
-                                size_t*                     buffer_size,
-                                void*                       temp_buffer);
+__attribute__((deprecated("This function is deprecated and will be removed in a future release. "
+                          "Use rocsparse_sptrsm instead."))) ROCSPARSE_EXPORT rocsparse_status
+    rocsparse_spsm(rocsparse_handle            handle,
+                   rocsparse_operation         trans_A,
+                   rocsparse_operation         trans_B,
+                   const void*                 alpha,
+                   rocsparse_const_spmat_descr matA,
+                   rocsparse_const_dnmat_descr matB,
+                   const rocsparse_dnmat_descr matC,
+                   rocsparse_datatype          compute_type,
+                   rocsparse_spsm_alg          alg,
+                   rocsparse_spsm_stage        stage,
+                   size_t*                     buffer_size,
+                   void*                       temp_buffer);
 #ifdef __cplusplus
 }
 #endif

@@ -27,6 +27,10 @@
 
 TESTS_DEFINE(EventTests, FullTestsParams);
 
+// note: there is no matching THRUST_SUPPRESS_DEPRECATED_POP, so the warning suppression leaks into more content of the
+// generated cudafe1.stub.c file.
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 ///////////////////////////////////////////////////////////////////////////////
 
 TEST(EventTests, test_event_default_constructed)
@@ -158,7 +162,7 @@ TEST(EventTests, test_event_when_all)
 
   ASSERT_EQ(e0_stream, e8.stream().native_handle());
 
-  e8.wait();
+  TEST_EVENT_WAIT(e8);
 
   ASSERT_EQ(false, e0.ready());
   ASSERT_EQ(false, e1.ready());
@@ -169,8 +173,7 @@ TEST(EventTests, test_event_when_all)
   ASSERT_EQ(false, e6.ready());
   ASSERT_EQ(false, e7.ready());
 
-  // // FIXME: Temporarily disabled due to observed failure in AMD CI.
-  // ASSERT_EQ(true, e8.ready());
+  ASSERT_EQ(true, e8.ready());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

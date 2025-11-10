@@ -436,6 +436,21 @@ namespace hipblaslt_ext
                                         size_t&                workspaceSizeInBytes);
 
         /*! \ingroup library_module
+         *  \brief This function sets the max workspace size.
+         *
+         *  @param[in]
+         *  workspaceBytes  Set the max workspace size in bytes.
+         */
+        HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
+
+        /*! \ingroup library_module
+         *  \brief This function returns the set max workspace size.
+         *
+         *  \retval size_t Returns the set max workspace size.
+         */
+        HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
+
+        /*! \ingroup library_module
         *  \brief Create kernel arguments from a given hipblaslt_ext::GemmInstance.
         *
         *  \details
@@ -459,7 +474,9 @@ namespace hipblaslt_ext
         * submitted. (May be deprecated in the future)
         *
         *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_INVALID_VALUE If the gemm_count = 0.
+        * successfully. \retval HIPBLAS_STATUS_INVALID_VALUE If the gemm_count = 0 or
+        * workspace is null but workspaceBytes is greater than zero.
+        * Note that workspaceBytes should be set with setMaxWorkspaceBytes.
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo,
@@ -495,7 +512,9 @@ namespace hipblaslt_ext
         * submitted. (May be deprecated in the future)
         *
         *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_INVALID_VALUE If the gemm_count = 0.
+        * successfully. \retval HIPBLAS_STATUS_INVALID_VALUE If the gemm_count = 0 or
+        * workspace is null but workspaceBytes is greater than zero.
+        * Note that workspaceBytes should be set with setMaxWorkspaceBytes.
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo,
@@ -541,6 +560,8 @@ namespace hipblaslt_ext
 
         hipblasLtHandle_t     m_handle;
         std::shared_ptr<void> m_data;
+
+        size_t m_workspace_bytes = 0;
     };
 
     /*! \ingroup types_module

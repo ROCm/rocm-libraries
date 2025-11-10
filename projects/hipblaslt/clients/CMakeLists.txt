@@ -18,8 +18,6 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
-else()
-    target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
@@ -31,16 +29,11 @@ target_link_libraries(hipblaslt-clients-common
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBRARIES_SUPERBUILD)
-        if(HIPBLASLT_ENABLE_FETCH)
-            FetchContent_Declare(
-                mxDataGenerator
-                GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
-                GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
-            )
-            FetchContent_MakeAvailable(mxDataGenerator)
-        else()
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        if(HIPBLASLT_ENABLE_THEROCK)
             find_package(mxDataGenerator REQUIRED)
+        else()
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
         endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
@@ -93,25 +86,27 @@ add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
 target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
-find_package(LLVM REQUIRED)
-add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
-target_link_libraries(hipblaslt-sequence PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(hipblaslt-sequence PRIVATE ROCBLASLT_INTERNAL_API)
-target_link_libraries(hipblaslt-sequence PRIVATE LLVMObjectYAML)
-target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
-
+if(HIPBLASLT_ENABLE_LLVM)
+    find_package(LLVM REQUIRED)
+    add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
+    target_link_libraries(hipblaslt-sequence PRIVATE hipblaslt-clients-common hip::device)
+    target_compile_definitions(hipblaslt-sequence PRIVATE ROCBLASLT_INTERNAL_API)
+    target_link_libraries(hipblaslt-sequence PRIVATE LLVMObjectYAML)
+    target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     find_package(GTest REQUIRED)
     add_executable(hipblaslt-test)
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
-    target_link_libraries(hipblaslt-test 
+    target_link_libraries(hipblaslt-test
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
             GTest::gtest
             OpenMP::OpenMP_CXX
+            ${CMAKE_DL_LIBS}
     )
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)

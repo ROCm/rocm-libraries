@@ -46,6 +46,11 @@ struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType>
     using kCPs2RHssMinor = sequence<1, 0>;
     using kCYs2RHsMajor  = sequence<1, 1>;
     using kCYs2RHsMinor  = sequence<0, 2>;
+
+    using kCTPs2RHssMajor = sequence<2, 1>;
+    using kCTPs2RHssMinor = sequence<1, 0>;
+    using kCTYs2RHsMajor  = sequence<2, 2>;
+    using kCTYs2RHsMinor  = sequence<0, 2>;
 };
 
 // GFX12 specialization
@@ -70,9 +75,9 @@ struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType>
     static constexpr index_t kRepeat      = 1;
     static constexpr index_t kAMLane      = 16;
     static constexpr index_t kBNLane      = 16;
-    static constexpr index_t kABK0PerLane = 2;
+    static constexpr index_t kABK0PerLane = 1;
     static constexpr index_t kABKLane     = 2;
-    static constexpr index_t kABK1PerLane = 4;
+    static constexpr index_t kABK1PerLane = 8;
 
     static constexpr index_t kCMLane     = 2;
     static constexpr index_t kCNLane     = 16;
@@ -88,5 +93,10 @@ struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType>
     using kCPs2RHssMinor = sequence<1, 0>;
     using kCYs2RHsMajor  = sequence<1, 1>;
     using kCYs2RHsMinor  = sequence<0, 2>;
+
+    using kCTPs2RHssMajor = sequence<2, 1>;
+    using kCTPs2RHssMinor = sequence<1, 0>;
+    using kCTYs2RHsMajor  = sequence<2, 2>;
+    using kCTYs2RHsMinor  = sequence<0, 2>;
 };
 } // namespace ck_tile

@@ -65,7 +65,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the 
+*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
 *  user prior to calling \p hipsparseXcsr2csc().
 *
 *  \note
@@ -111,55 +111,7 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseAction_t action = HIPSPARSE_ACTION_NUMERIC;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcscRowInd = nullptr;
-*    int* dcscColPtr = nullptr;
-*    float* dcsc_val   = nullptr;
-*    hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1));
-*    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
-*
-*    hipsparseScsr2csc(handle, m, n, nnz, dcsrVal, dcsrRowPtr, dcsrColInd, dcsc_val, dcscRowInd, dcscColPtr, action, base);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    
-*    hipFree(dcscRowInd);
-*    hipFree(dcscColPtr);
-*    hipFree(dcsc_val);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_csr2csc.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -227,7 +179,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  when converting a sparse CSR matrix into a sparse CSC matrix.
 *
 *  \details
-*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed 
+*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed
 *  by \ref hipsparseCsr2cscEx2 to convert a CSR matrix into a CSC matrix. \ref hipsparseCsr2cscEx2
 *  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
 *  whether \p cscVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
@@ -265,7 +217,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  cscRowInd          array of \p nnz elements containing the row indices of the sparse
 *                     CSC matrix.
 *  @param[in]
-*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *                     HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues         \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -342,7 +294,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  cscRowInd   array of \p nnz elements containing the row indices of the sparse
 *              CSC matrix.
 *  @param[in]
-*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *              HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -360,92 +312,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseAction_t action = HIPSPARSE_ACTION_NUMERIC;
-*    hipsparseCsr2CscAlg_t alg = HIPSPARSE_CSR2CSC_ALG_DEFAULT;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcscRowInd = nullptr;
-*    int* dcscColPtr = nullptr;
-*    float* dcsc_val   = nullptr;
-*    hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1));
-*    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
-*
-*    size_t bufferSize;
-*    hipsparseCsr2cscEx2_bufferSize(handle, 
-*                                   m, 
-*                                   n, 
-*                                   nnz, 
-*                                   dcsrVal, 
-*                                   dcsrRowPtr, 
-*                                   dcsrColInd, 
-*                                   dcsc_val, 
-*                                   dcscColPtr, 
-*                                   dcscRowInd,
-*                                   HIP_R_32F, 
-*                                   action, 
-*                                   base, 
-*                                   alg, 
-*                                   &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    hipsparseCsr2cscEx2(handle, 
-*                        m, 
-*                        n, 
-*                        nnz, 
-*                        dcsrVal, 
-*                        dcsrRowPtr, 
-*                        dcsrColInd, 
-*                        dcsc_val, 
-*                        dcscColPtr, 
-*                        dcscRowInd, 
-*                        HIP_R_32F, 
-*                        action, 
-*                        base, 
-*                        alg, 
-*                        dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    
-*    hipFree(dcscRowInd);
-*    hipFree(dcscColPtr);
-*    hipFree(dcsc_val);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_csr2csc_ex2.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,

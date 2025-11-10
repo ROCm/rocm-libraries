@@ -33,7 +33,7 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcscsort_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes required by hipsparseXcscsort(). The temporary storage buffer must be 
+*  in bytes required by hipsparseXcscsort(). The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
@@ -73,8 +73,8 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *  \details
 *  \p hipsparseXcscsort sorts a matrix in CSC format. The sorted permutation vector
 *  \p P can be used to obtain sorted \p cscVal array. In this case, \p P must be
-*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To 
-*  apply the permutation vector to the CSC values, see hipsparse \ref hipsparseSgthr 
+*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To
+*  apply the permutation vector to the CSC values, see hipsparse \ref hipsparseSgthr
 *  "hipsparseXgthr()".
 *
 *  \p hipsparseXcscsort requires extra temporary storage buffer that has to be allocated by
@@ -112,85 +112,14 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *                  \ref hipsparseXcscsort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p cscColPtr, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p cscColPtr,
 *              \p cscRowInd or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Sparse matrix in CSC format (unsorted row indices)
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcscRowInd[8] = {2, 0, 1, 0, 1, 2, 0, 2};
-*    int hcscColPtr[6] = {0, 2, 4, 5, 7, 8};
-*    float hcscVal[8]  = {6.0f, 1.0f, 4.0f, 2.0f, 5.0f, 7.0f, 3.0f, 8.0f}; 
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*
-*    int* dcscRowInd = nullptr;
-*    int* dcscColPtr = nullptr;
-*    float* dcscVal = nullptr;
-*    hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1));
-*    hipMalloc((void**)&dcscVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcscRowInd, hcscRowInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcscColPtr, hcscColPtr, sizeof(int) * (n + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcscVal, hcscVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    size_t bufferSize;
-*    hipsparseXcscsort_bufferSizeExt(handle,
-*                                    m,
-*                                    n,
-*                                    nnz,
-*                                    dcscColPtr,
-*                                    dcscRowInd,
-*                                    &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int* dperm = nullptr;
-*    hipMalloc((void**)&dperm, sizeof(int) * nnz);
-*    hipsparseCreateIdentityPermutation(handle, nnz, dperm);
-*
-*    hipsparseXcscsort(handle,
-*                      m,
-*                      n,
-*                      nnz,
-*                      descr,
-*                      dcscColPtr,
-*                      dcscRowInd,
-*                      dperm,
-*                      dbuffer);
-*
-*    float* dcscValSorted = nullptr;
-*    hipMalloc((void**)&dcscValSorted, sizeof(float) * nnz);
-*    hipsparseSgthr(handle, nnz, dcscVal, dcscValSorted, dperm, HIPSPARSE_INDEX_BASE_ZERO);
-*
-*    hipFree(dcscRowInd);
-*    hipFree(dcscColPtr);
-*    hipFree(dcscVal);
-*    hipFree(dcscValSorted);
-*
-*    hipFree(dbuffer);
-*    hipFree(dperm);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_cscsort.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcscsort(hipsparseHandle_t         handle,

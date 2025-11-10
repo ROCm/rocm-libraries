@@ -37,11 +37,7 @@
 #include _THRUST_STD_INCLUDE(functional)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/functional>
-#  else
-#    include <hip/functional>
-#  endif
+#  include _THRUST_LIBCXX_INCLUDE(functional)
 #else
 #  include <utility>
 #endif
@@ -52,13 +48,8 @@ namespace internal
 {
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::maximum;
-using ::cuda::minimum;
-#  else
-using ::hip::maximum;
-using ::hip::minimum;
-#  endif
+using _THRUST_LIBCXX::maximum;
+using _THRUST_LIBCXX::minimum;
 using identity = _THRUST_STD::__identity;
 #else
 // cuda::maximum or hip::maximum
@@ -1188,7 +1179,7 @@ struct bit_xor : public _THRUST_STD::bit_xor<T>
  */
 // TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to _THRUST_STD::identity
 template <typename T = void>
-struct identity
+struct THRUST_DEPRECATED_BECAUSE("use ::internal::identity instead") identity
 {
   /*! \typedef argument_type
    *  \brief The type of the function object's first argument.
@@ -1228,9 +1219,11 @@ struct identity
   }
 };
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <>
-struct identity<void> : ::internal::identity
+struct THRUST_DEPRECATED_BECAUSE("use ::internal::identity instead") identity<void> : ::internal::identity
 {};
+THRUST_SUPPRESS_DEPRECATED_POP
 
 /*! \p maximum is a function object that takes two arguments and returns the greater
  *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an

@@ -52,7 +52,7 @@ In scope:
 - Gardeners are responsible for ensuring develop (post-submit) checks remain green.
 - If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
 - No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
-- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue, 
+- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue,
   verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
 - If the issue is related to a code change, the gardener should isolate the error message, and notify the
   appropriate component owners with a link to the log (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
@@ -85,16 +85,7 @@ TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/t
 
 ## Gardener Rotation
 
-Week | North America | Europe / India / APAC
----- | ------- | ---------
-Jun 30, 2025 | ellosel | marbre
-July 7, 2025 | geomin12 | kkyang
-July 14, 2025 | jhawk-commits | N/A
-Aug 05, 2025 | amd-aakash | N/A
-Aug 12, 2025 | eidenyoshida | N/A
-Aug 19, 2025 | stanleytsang-amd | N/A
-Aug 26, 2025 | rahulc-gh | N/A
-Sep 02, 2025 | paveltc | N/A
+[Confluence doc for Gardener Rotation](http://u.amd.com/rocm-libraries-gardeners)
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 

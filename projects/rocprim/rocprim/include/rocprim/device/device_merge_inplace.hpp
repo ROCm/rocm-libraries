@@ -262,7 +262,8 @@ struct merge_inplace_impl
     static auto get_num_global_divisions(size_t left_size, size_t right_size)
     {
         const offset_t max_size = max(left_size, right_size);
-        const int32_t  set_bits = std::numeric_limits<size_t>::digits - clz(max_size);
+        const int32_t  set_bits = max_size == 0 ? std::numeric_limits<size_t>::digits :
+                                  std::numeric_limits<size_t>::digits - clz(max_size);
 
         // compute 2 + ceil(log_2(max(left, right))) - log_2(items_per_thread)
         return max(2, 2 + set_bits - Log2<block_merge_items_per_block>::VALUE);
@@ -554,7 +555,7 @@ struct merge_inplace_impl
     ROCPRIM_DETAIL_GENERATE_DISPATCH_KERNEL(update_work_tree);
 #undef ROCPRIM_DETAIL_GENERATE_DISPATCH_KERNEL
 
-    static __global__
+    static ROCPRIM_KERNEL
     void block_merge_kernel(iterator_t     data,
                             size_t         num_items,
                             BinaryFunction compare_function,

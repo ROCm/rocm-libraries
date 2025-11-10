@@ -3,7 +3,16 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## hipFFT 1.0.21 (unreleased)
+## hipFFT 1.0.22 (unreleased)
+
+## hipFFT 1.0.21 for ROCm 7.1.0
+
+### Added
+
+* Improved test coverage of multi-stream plans.
+* Improved test coverage of user-specified work areas.
+* Improved test coverage of default stride calculation.
+* **[Experimental]** Introduced the hipFFTW library, interfacing rocFFT on AMD platforms using the same symbols as FFTW3 (with partial support).
 
 ## hipFFT 1.0.20 for ROCm 7.0.0
 

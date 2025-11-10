@@ -34,14 +34,14 @@ extern "C" {
 *  \p hipsparseXdense2csr converts the matrix A in dense format into a sparse matrix in CSR format.
 *
 *  \details
-*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m, 
-*  \p hipsparseXdense2csr converts the matrix to a sparse CSR format matrix. All the parameters 
-*  are assumed to have been pre-allocated by the user and the arrays are filled in based on number 
-*  of nonzeros per row, which can be pre-computed with \ref hipsparseSnnz "hipsparseXnnz()". The 
-*  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See 
-*  \ref hipsparseSetMatIndexBase(). 
+*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m,
+*  \p hipsparseXdense2csr converts the matrix to a sparse CSR format matrix. All the parameters
+*  are assumed to have been pre-allocated by the user and the arrays are filled in based on number
+*  of nonzeros per row, which can be pre-computed with \ref hipsparseSnnz "hipsparseXnnz()". The
+*  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See
+*  \ref hipsparseSetMatIndexBase().
 *
-*  As an example, if using index base zero (i.e. the default) and the dense 
+*  As an example, if using index base zero (i.e. the default) and the dense
 *  matrix:
 *
 *  \f[
@@ -73,7 +73,7 @@ extern "C" {
 *  @param[in]
 *  n            number of columns of the dense matrix \p A.
 *  @param[in]
-*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *               any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  A            array of dimensions (\p ld, \p n)
@@ -93,55 +93,7 @@ extern "C" {
 *              pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Dense matrix in column order
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float hdense_A[15] = {1.0f, 0.0f, 6.0f, 2.0f, 4.0f, 0.0f, 0.0f, 5.0f, 0.0f, 3.0f, 0.0f, 7.0f, 0.0f, 0.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * m * n);
-*    hipMemcpy(ddense_A, hdense_A, sizeof(float) * m * n, hipMemcpyHostToDevice);
-*
-*    // Allocate memory for the nnz_per_row_columns array
-*    int* dnnz_per_row;
-*    hipMalloc((void**)&dnnz_per_row, sizeof(int) * m);
-*
-*    int nnz_A;
-*    hipsparseSnnz(handle, dir, m, n, descr, ddense_A, m, dnnz_per_row, &nnz_A);
-*
-*    // Allocate sparse CSR matrix
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipsparseSdense2csr(handle, m, n, descr, ddense_A, m, dnnz_per_row, dcsrVal, dcsrRowPtr, dcsrColInd);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(dnnz_per_row);
-*    hipFree(ddense_A);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \snippet example_hipsparse_dense2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT
