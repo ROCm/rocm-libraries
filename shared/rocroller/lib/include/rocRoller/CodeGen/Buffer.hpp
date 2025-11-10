@@ -38,6 +38,21 @@
 
 namespace rocRoller
 {
+    namespace buffDescriptor {
+
+        using namespace Expression;
+
+        ExpressionPtr setDefaults(ExpressionPtr bufferExpr, ContextPtr ctx);
+        ExpressionPtr getDefaultOptions(ContextPtr ctx);
+        ExpressionPtr setBasePointer(ExpressionPtr bufferExpr, ExpressionPtr ptrExpr);
+        ExpressionPtr getBasePointer(ExpressionPtr bufferExpr);
+        ExpressionPtr incrementBasePointer(ExpressionPtr bufferExpr, ExpressionPtr offsetExpr);
+        ExpressionPtr setSize(ExpressionPtr bufferExpr, ExpressionPtr sizeExpr);
+        ExpressionPtr getSize(ExpressionPtr bufferExpr);
+        ExpressionPtr setOptions(ExpressionPtr bufferExpr, ExpressionPtr optsExpr);
+        ExpressionPtr getOptions(ExpressionPtr bufferExpr);
+    }
+
     class BufferDescriptor
     {
     public:
