@@ -25,7 +25,7 @@ public:
     template <class XDataType,
               class ScaleBiasDataType,
               class MeanVarianceDataType,
-              class ComputeDataType,
+              class ComputeDataType = MeanVarianceDataType,
               class YDataType>
     static void fwdInference(const TensorBase<XDataType>& x,
                              const TensorBase<ScaleBiasDataType>& scale,

@@ -700,8 +700,8 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwWithRunningStats)
 
     double momentum = 0.1;
 
-    // Call with running statistics
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
+    // Cannot deduce template with partial nullptr params
+    CpuFpReferenceBatchnorm::fwdTraining<float, float, float, float, float>(inputTensor,
                                          scaleTensor,
                                          biasTensor,
                                          outputTensor,
