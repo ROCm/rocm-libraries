@@ -4606,6 +4606,9 @@ template <Backend backend>
 struct ConvHipImplicitGemm3DGroupFwd
     : ConvTunableSolver<PerformanceConfigHipImplicitGemm3DGroupFwd<backend>>
 {
+    static_assert(backend == Backend::Xdlops || backend == Backend::Wmma,
+                  "Backend must be either Backend::Xdlops or Backend::Wmma");
+
     const std::string& SolverDbId() const override
     {
         throw std::runtime_error("SolverDbId() not implemented for "
