@@ -829,6 +829,21 @@ public:
     std::vector<fft_field> ifields;
     std::vector<fft_field> ofields;
 
+    // Check that a supplied vector of callback pointers has an
+    // expected size.  Optionally also check that each pointer is
+    // non-null.  Throws an exception if a check fails.  The vector
+    // itself can be null, as callbacks are optional.
+    static void check_callback_vec(std::vector<void*>* cb, size_t expected_size, bool nonnull)
+    {
+        if(!cb)
+            return;
+        if(cb->size() != expected_size)
+            throw std::invalid_argument("expected " + std::to_string(expected_size)
+                                        + " callback pointers, got " + std::to_string(cb->size()));
+        if(nonnull && std::any_of(cb->begin(), cb->end(), [](void* p) { return p == nullptr; }))
+            throw std::invalid_argument("null callback function");
+    }
+
     // simple "multi-GPU" count, meaning the library decides on the
     // decomposition instead of it being explicit as bricks.  only
     // has an effect if set to a number > 1.
@@ -2329,12 +2344,18 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void*  load_cb_host,
-                                     void*  load_cb_data,
-                                     void*  store_cb_host,
-                                     void*  store_cb_data,
-                                     size_t load_cb_shared_mem_bytes,
-                                     size_t store_cb_shared_mem_bytes)
+    // A callback is expressed as a pair of device function pointer +
+    // device function data.
+    //
+    // Load and store callbacks are provided as vectors of those
+    // pointers, as we need a separate function+data for each device
+    // being loaded from or stored to.
+    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes,
+                                     size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }

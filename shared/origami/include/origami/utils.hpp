@@ -19,7 +19,7 @@ namespace origami
                                        size_t, // MI_M
                                        size_t, // MI_N
                                        size_t, // MI_K
-                                       size_t,  // Occupancy
+                                       int,  // Occupancy
                                        int,     // WGM
                                        size_t, // non_temporal_a
                                        size_t>; // non_temporal_b
@@ -30,7 +30,7 @@ namespace origami
                                      size_t, // MI_M
                                      size_t, // MI_N
                                      size_t, // MI_K
-                                     size_t,  // Occupancy
+                                     int,  // Occupancy
                                      int,     // WGM
                                      size_t, // non_temporal_a
                                      size_t>; // non_temporal_b
@@ -54,7 +54,7 @@ namespace origami
                                      data_type_t     mi_datatype,
                                      size_t          mx_block_size,
                                      double          H_L2,
-                                     size_t          WGM,
+                                     int             WGM,
                                      size_t          biggest_allowable_split = 8,
                                      size_t          max_cus = 0);
 
@@ -73,7 +73,7 @@ namespace origami
                                                               size_t mx_block_size,
                                                               double H_L2,
                                                               bool   print,
-                                                              size_t WGM,
+                                                              int WGM,
                                                               size_t max_cus = 0);
 
         std::vector<result_tuple> sweep_macro_tile_sizes(size_t    M,
@@ -94,25 +94,18 @@ namespace origami
                                                         = {},
                                                         bool print = false);
 
-        size_t select_best_wgmxcc(const hardware_t& hardware,
-                                  size_t            M,
-                                  size_t            N,
-                                  size_t            K,
-                                  size_t            batch,
-                                  size_t            MT_M,
-                                  size_t            MT_N,
-                                  size_t            MT_K,
-                                  bool              print);
-
-        int32_t select_best_wgm(const hardware_t& hardware,
-                                size_t            M,
-                                size_t            N,
-                                size_t            K,
-                                size_t            batch,
-                                size_t            MT_M,
-                                size_t            MT_N,
-                                size_t            MT_K,
-                                bool              print);
+        std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware,
+                                                    size_t            M,
+                                                    size_t            N,
+                                                    size_t            K,
+                                                    size_t            batch,
+                                                    size_t            MT_M,
+                                                    size_t            MT_N,
+                                                    size_t            MT_K,
+                                                    int               nta,
+                                                    int               ntb,
+                                                    size_t            skGrid,
+                                                    bool              print);
 
         double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,

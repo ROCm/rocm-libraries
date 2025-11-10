@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_frontend_tests
     main.cpp
+    TestAttributes.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
@@ -32,6 +33,7 @@ add_executable(
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestINode.cpp
+    TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
