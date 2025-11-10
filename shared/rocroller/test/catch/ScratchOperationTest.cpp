@@ -1,0 +1,204 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2024-2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
+#include <rocRoller/Operations/Scratch.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
+
+#include <sstream>
+
+using namespace rocRoller;
+using namespace rocRoller::Operations;
+
+namespace ScratchOperationTest
+{
+    TEST_CASE("ScratchPolicy enum", "[scratch][policy]")
+    {
+        SECTION("toString for all values")
+        {
+            CHECK(toString(ScratchPolicy::None) == "None");
+            CHECK(toString(ScratchPolicy::ZeroedBeforeAndAfter) == "ZeroedBeforeAndAfter");
+        }
+
+        SECTION("operator<< for ScratchPolicy")
+        {
+            std::ostringstream oss;
+            oss << ScratchPolicy::None;
+            CHECK(oss.str() == "None");
+
+            oss.str("");
+            oss << ScratchPolicy::ZeroedBeforeAndAfter;
+            CHECK(oss.str() == "ZeroedBeforeAndAfter");
+        }
+
+        SECTION("Count value for range checking")
+        {
+            // Verify Count is at the end for range-based operations
+            CHECK(static_cast<int>(ScratchPolicy::Count) == 2);
+        }
+
+        SECTION("Invalid policy returns Invalid")
+        {
+            auto invalidPolicy = static_cast<ScratchPolicy>(99);
+            CHECK(toString(invalidPolicy) == "Invalid");
+        }
+    }
+
+    TEST_CASE("Scratch construction", "[scratch]")
+    {
+        SECTION("Create Scratch with None policy")
+        {
+            Scratch scratch(ScratchPolicy::None);
+            CHECK(scratch.policy() == ScratchPolicy::None);
+        }
+
+        SECTION("Create Scratch with ZeroedBeforeAndAfter policy")
+        {
+            Scratch scratch(ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(scratch.policy() == ScratchPolicy::ZeroedBeforeAndAfter);
+        }
+
+        SECTION("policy() accessor returns correct value")
+        {
+            Scratch scratch1(ScratchPolicy::None);
+            Scratch scratch2(ScratchPolicy::ZeroedBeforeAndAfter);
+
+            CHECK(scratch1.policy() == ScratchPolicy::None);
+            CHECK(scratch2.policy() == ScratchPolicy::ZeroedBeforeAndAfter);
+        }
+    }
+
+    TEST_CASE("Scratch toString", "[scratch][toString]")
+    {
+        SECTION("toString for None policy")
+        {
+            Scratch scratch(ScratchPolicy::None);
+            CHECK(scratch.toString() == "Scratch(None)");
+        }
+
+        SECTION("toString for ZeroedBeforeAndAfter policy")
+        {
+            Scratch scratch(ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(scratch.toString() == "Scratch(ZeroedBeforeAndAfter)");
+        }
+
+        SECTION("Verify format is Scratch(PolicyName)")
+        {
+            Scratch scratch(ScratchPolicy::None);
+            std::string str = scratch.toString();
+            CHECK(str.substr(0, 8) == "Scratch(");
+            CHECK(str.back() == ')');
+        }
+    }
+
+    TEST_CASE("Scratch equality", "[scratch][equality]")
+    {
+        SECTION("Same policy should be equal")
+        {
+            Scratch scratch1(ScratchPolicy::None);
+            Scratch scratch2(ScratchPolicy::None);
+            CHECK(scratch1 == scratch2);
+
+            Scratch scratch3(ScratchPolicy::ZeroedBeforeAndAfter);
+            Scratch scratch4(ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(scratch3 == scratch4);
+        }
+
+        SECTION("Different policies should not be equal")
+        {
+            Scratch scratch1(ScratchPolicy::None);
+            Scratch scratch2(ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(!(scratch1 == scratch2));
+        }
+
+        SECTION("operator== is reflexive")
+        {
+            Scratch scratch(ScratchPolicy::None);
+            CHECK(scratch == scratch);
+        }
+    }
+
+    TEST_CASE("Scratch in Command", "[scratch][command]")
+    {
+        SECTION("Add Scratch operation to Command")
+        {
+            auto command = std::make_shared<Command>();
+
+            auto tag = command->addOperation(Scratch(ScratchPolicy::ZeroedBeforeAndAfter));
+
+            CHECK(tag.uninitialized() == false);
+        }
+
+        SECTION("Tag assignment works correctly")
+        {
+            auto command = std::make_shared<Command>();
+
+            auto tag1 = command->addOperation(Scratch(ScratchPolicy::None));
+            auto tag2 = command->addOperation(Scratch(ScratchPolicy::ZeroedBeforeAndAfter));
+
+            CHECK(tag1 != tag2);
+        }
+    }
+
+    TEST_CASE("Scratch visitors", "[scratch][visitors]")
+    {
+        SECTION("ToString visitor")
+        {
+            Scratch scratch(ScratchPolicy::ZeroedBeforeAndAfter);
+            ToStringVisitor toStringVisitor;
+
+            std::string str = toStringVisitor(scratch);
+            CHECK(str == "Scratch(ZeroedBeforeAndAfter)");
+        }
+
+        SECTION("VariableTypeVisitor returns DataType::None")
+        {
+            Scratch scratch(ScratchPolicy::None);
+            VariableTypeVisitor typeVisitor;
+
+            auto varType = typeVisitor(scratch);
+            CHECK(varType.dataType == DataType::None);
+        }
+
+        SECTION("SetCommand visitor")
+        {
+            auto command = std::make_shared<Command>();
+            Scratch scratch(ScratchPolicy::None);
+
+            SetCommand setCommandVisitor(command);
+            setCommandVisitor(scratch);
+
+            // Verify command was set (indirectly by checking tag can be assigned)
+            auto tag = command->addOperation(scratch);
+            CHECK(!tag.uninitialized());
+        }
+    }
+}
+
