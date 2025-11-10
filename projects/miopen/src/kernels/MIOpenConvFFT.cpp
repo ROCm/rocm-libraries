@@ -303,52 +303,33 @@ __device__ void FwdPassIN(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2* bufOut)
 {
     unsigned int met = me % 48;
     float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
 
-    R0 = float2(0, 0);
-    R1 = float2(0, 0);
-    R2 = float2(0, 0);
-    R3 = float2(0, 0);
-    R4 = float2(0, 0);
-    R5 = float2(0, 0);
-
-    bufOut[outOffset + me + 0 * 192] = R0;
-    bufOut[outOffset + me + 1 * 192] = R0;
-    bufOut[outOffset + me + 2 * 192] = R0;
-    bufOut[outOffset + me + 3 * 192] = R0;
-    bufOut[outOffset + me + 4 * 192] = R0;
-    bufOut[outOffset + me + 5 * 192] = R0;
-    bufOut[outOffset + me + 6 * 192] = R0;
+    bufOut[outOffset + me + 0 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 1 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 2 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 3 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 4 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 5 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 6 * 192] = float2(0, 0);
 
     __syncthreads();
 
-    R0.x = bufIn[inOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)];
-    R1.x = bufIn[inOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)];
-    R2.x = bufIn[inOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)];
-    R3.x = bufIn[inOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)];
-
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 0 * 672] =
-        R0.x;
+        bufIn[inOffset + (((me / 48) + 0) * CFF_IMG_W * CFF_IMG_W + met)];
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 1 * 672] =
-        R1.x;
+        bufIn[inOffset + (((me / 48) + 4) * CFF_IMG_W * CFF_IMG_W + met)];
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 2 * 672] =
-        R2.x;
+        bufIn[inOffset + (((me / 48) + 8) * CFF_IMG_W * CFF_IMG_W + met)];
     ldsf[(2 + (met % 7)) * 2 + ((met / 7) % 2) + (1 + met / 14) * 24 + (me / 48) * 168 + 3 * 672] =
-        R3.x;
+        bufIn[inOffset + (((me / 48) + 12) * CFF_IMG_W * CFF_IMG_W + met)];
 
     if(me < 16)
     {
-        R4.x                 = bufIn[inOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)];
-        ldsf[me * 168 + 112] = R4.x;
+        ldsf[me * 168 + 112] = bufIn[inOffset + (me * CFF_IMG_W * CFF_IMG_W + 48)];
     }
 }
 
@@ -357,13 +338,7 @@ __device__ void FwdPassWE(unsigned int batch,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2* bufOut)
 {
     unsigned int met = me % 24;
     float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
@@ -375,71 +350,51 @@ __device__ void FwdPassWE(unsigned int batch,
     inOffset = batch * 25 * 16;
 #endif
 
-    R0 = float2(0, 0);
-    R1 = float2(0, 0);
-    R2 = float2(0, 0);
-    R3 = float2(0, 0);
-    R4 = float2(0, 0);
-    R5 = float2(0, 0);
-
 #ifdef CFF_BACKWARD
-    R0.x = bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
-    R1.x = bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
-
-    ldsf[met + ((me / 24) + 0) * 25] = R0.x;
-    ldsf[met + ((me / 24) + 8) * 25] = R1.x;
+    ldsf[met + ((me / 24) + 0) * 25] = bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
+    ldsf[met + ((me / 24) + 8) * 25] = bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
 #else
-    R0.x = bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
-    R1.x = bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
-
-    ldsf[(23 - met) + ((me / 24) + 0) * 25] = R0.x;
-    ldsf[(23 - met) + ((me / 24) + 8) * 25] = R1.x;
+    ldsf[(23 - met) + ((me / 24) + 0) * 25] = bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
+    ldsf[(23 - met) + ((me / 24) + 8) * 25] = bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
 #endif
 
     __syncthreads();
 
-    R0.x = ldsf[((me / 24) + 0) * 25 + met];
-    R1.x = ldsf[((me / 24) + 8) * 25 + met];
+    float R0 = ldsf[((me / 24) + 0) * 25 + met];
+    float R1 = ldsf[((me / 24) + 8) * 25 + met];
 
     __syncthreads();
 
-    bufOut[outOffset + me + 0 * 192] = R5;
-    bufOut[outOffset + me + 1 * 192] = R5;
-    bufOut[outOffset + me + 2 * 192] = R5;
-    bufOut[outOffset + me + 3 * 192] = R5;
-    bufOut[outOffset + me + 4 * 192] = R5;
-    bufOut[outOffset + me + 5 * 192] = R5;
-    bufOut[outOffset + me + 6 * 192] = R5;
+    bufOut[outOffset + me + 0 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 1 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 2 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 3 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 4 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 5 * 192] = float2(0, 0);
+    bufOut[outOffset + me + 6 * 192] = float2(0, 0);
 
     __syncthreads();
 
-    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 0 * 1344] = R0.x;
-    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 1 * 1344] = R1.x;
+    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 0 * 1344] = R0;
+    ldsf[(met % 5) * 2 + ((met / 5) % 2) + (met / 10) * 24 + (me / 24) * 168 + 1 * 1344] = R1;
 
     if(me < 16)
     {
 #ifdef CFF_BACKWARD
-        R4.x = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
+        ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
 #else
-        R4.x = bufIn[inOffset + (me * 25)];
+        ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25)];
 #endif
-
-        ldsf[me * 168 + 56] = R4.x;
     }
 }
 
 __device__ void FwdPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 2)];
@@ -463,15 +418,10 @@ __device__ void FwdPass0(unsigned int me,
 __device__ void FwdPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 3 + 0 + 0)];
     R2 = bufIn[inOffset + (me * 3 + 1 + 0)];
@@ -524,15 +474,10 @@ __device__ void FwdPass1(unsigned int me,
 __device__ void FwdPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (3 * me + 1)];
     R1 = bufIn[inOffset + (3 * me + 2)];
@@ -567,15 +512,10 @@ __device__ void FwdPass1b(unsigned int me,
 __device__ void FwdPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0) * 7];
     R1 = bufIn[inOffset + (me + 2) * 7];
@@ -599,15 +539,10 @@ __device__ void FwdPass2(unsigned int me,
 __device__ void FwdPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
     R2 = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
@@ -660,16 +595,11 @@ __device__ void FwdPass3(unsigned int me,
 __device__ void FwdPass4_IN(unsigned int me,
                             unsigned int inOffset,
                             unsigned int outOffset,
-                            float2* bufIn,
-                            float2* bufOut,
-                            float2& R0,
-                            float2& R1,
-                            float2& R2,
-                            float2& R3,
-                            float2& R4,
-                            float2& R5,
-                            float2& R6)
+                            float2 const* bufIn,
+                            float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6;
+
     R0 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
     R1 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
     R2 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
@@ -692,16 +622,11 @@ __device__ void FwdPass4_IN(unsigned int me,
 __device__ void FwdPass4_WE(unsigned int me,
                             unsigned int inOffset,
                             unsigned int outOffset,
-                            float2* bufIn,
-                            float2* bufOut,
-                            float2& R0,
-                            float2& R1,
-                            float2& R2,
-                            float2& R3,
-                            float2& R4,
-                            float2& R5,
-                            float2& R6)
+                            float2 const* bufIn,
+                            float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6;
+
     R0 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 0 * 12)];
     R1 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 1 * 12)];
     R2 = bufIn[inOffset + ((me % 16) * 84 + (me / 16) + 2 * 12)];
@@ -733,89 +658,36 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-    float2 R6;
-
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 16;
     lwbOut = gbOut + CFF_HALFW + batch * 16;
 
     unsigned int met = me % 12;
 
-    FwdPassIN(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    FwdPassIN(me, 0, 0, lwbIn, lds);
     __syncthreads();
 
-    FwdPass0(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass0(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
-    FwdPass1(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass1(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
 
-    FwdPass1b(me % 2,
-              (me / 12) * 84 + (met / 2) * 12,
-              (me / 12) * 84 + (met / 2) * 14,
-              lds,
-              lds,
-              R0,
-              R1,
-              R2,
-              R3,
-              R4,
-              R5);
+    FwdPass1b(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 14, lds, lds);
     __syncthreads();
 
-    FwdPass2(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass2(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
-    FwdPass3(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass3(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
 
     if(met < 2)
     {
-        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
-        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
     }
 
-    FwdPass4_IN(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6);
+    FwdPass4_IN(me, 0, 0, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -830,89 +702,36 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-    float2 R6;
-
     lwbIn  = gbIn;
     lwbOut = gbOut + CFF_HALFW + 84 * (CFF_CHANNELS * CFF_BATCH + 64) + batch * 16;
 
     unsigned int met = me % 12;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    FwdPassWE(batch, me, 0, 0, lwbIn, lds);
     __syncthreads();
 
-    FwdPass0(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass0(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
-    FwdPass1(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass1(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
 
-    FwdPass1b(me % 2,
-              (me / 12) * 84 + (met / 2) * 12,
-              (me / 12) * 84 + (met / 2) * 14,
-              lds,
-              lds,
-              R0,
-              R1,
-              R2,
-              R3,
-              R4,
-              R5);
+    FwdPass1b(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 14, lds, lds);
     __syncthreads();
 
-    FwdPass2(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass2(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
-    FwdPass3(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    FwdPass3(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
 
     if(met < 2)
     {
-        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
-        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
     }
 
-    FwdPass4_WE(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6);
+    FwdPass4_WE(me, 0, 0, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -973,15 +792,10 @@ extern "C" __global__
 __device__ void InvPassA(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         const float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         const float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6;
 
     R0 = bufIn[inOffset + (me + 0 * 192)];
     R1 = bufIn[inOffset + (me + 1 * 192)];
@@ -989,6 +803,7 @@ __device__ void InvPassA(unsigned int me,
     R3 = bufIn[inOffset + (me + 3 * 192)];
     R4 = bufIn[inOffset + (me + 4 * 192)];
     R5 = bufIn[inOffset + (me + 5 * 192)];
+    R6 = bufIn[inOffset + (me + 6 * 192)];
 
     bufOut[outOffset + (me + 0 * 192)] = R0;
     bufOut[outOffset + (me + 1 * 192)] = R1;
@@ -996,23 +811,16 @@ __device__ void InvPassA(unsigned int me,
     bufOut[outOffset + (me + 3 * 192)] = R3;
     bufOut[outOffset + (me + 4 * 192)] = R4;
     bufOut[outOffset + (me + 5 * 192)] = R5;
-
-    R0                                 = bufIn[inOffset + (me + 6 * 192)];
-    bufOut[outOffset + (me + 6 * 192)] = R0;
+    bufOut[outOffset + (me + 6 * 192)] = R6;
 }
 
 __device__ void InvPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0) * 7];
     R1 = bufIn[inOffset + (me + 2) * 7];
@@ -1036,15 +844,10 @@ __device__ void InvPass0(unsigned int me,
 __device__ void InvPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 3 + 0 + 0) * 7];
     R2 = bufIn[inOffset + (me * 3 + 1 + 0) * 7];
@@ -1097,15 +900,10 @@ __device__ void InvPass1(unsigned int me,
 __device__ void InvPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + 0 + (3 * me + 1)];
     R1 = bufIn[inOffset + 0 + (3 * me + 2)];
@@ -1139,15 +937,10 @@ __device__ void InvPass1b(unsigned int me,
 __device__ void InvPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 2)];
@@ -1171,15 +964,10 @@ __device__ void InvPass2(unsigned int me,
 __device__ void InvPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 3 + 0 + 0)];
     R2 = bufIn[inOffset + (me * 3 + 1 + 0)];
@@ -1233,13 +1021,9 @@ __device__ void InvPassOUT(unsigned int me,
                            unsigned int inOffset,
                            unsigned int outOffset,
                            float2 const* bufIn,
-                           float* bufOut,
-                           float2& R0,
-                           float2& R1,
-                           float2& R2,
-                           float2& R3,
-                           float2& R4)
+                           float* bufOut)
 {
+    float2 R0, R1, R2, R3, R4;
 
     unsigned int met  = me % 48;
     float const* ldsf = reinterpret_cast<float const*>(bufIn + inOffset);
@@ -1278,86 +1062,34 @@ extern "C" __global__
     const float2* lwbIn;
     float* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-
     lwbIn  = gbIn + CFF_HALFW + batch * 1344;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 16;
 
-    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    InvPassA(me, 0, 0, lwbIn, lds);
     __syncthreads();
 
-    InvPass0(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    InvPass0(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
-    InvPass1(me % 2,
-             (me / 12) * 84 + (met / 2),
-             (me / 12) * 84 + (met / 2),
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    InvPass1(me % 2, (me / 12) * 84 + (met / 2), (me / 12) * 84 + (met / 2), lds, lds);
     __syncthreads();
 
     if(met < 2)
     {
-        InvPass0(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        InvPass0(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
-        InvPass1(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds, R0, R1, R2, R3, R4, R5);
+        InvPass1(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
         __syncthreads();
     }
 
-    InvPass1b(me % 2,
-              (me / 12) * 84 + (met / 2) * 14,
-              (me / 12) * 84 + (met / 2) * 12,
-              lds,
-              lds,
-              R0,
-              R1,
-              R2,
-              R3,
-              R4,
-              R5);
+    InvPass1b(me % 2, (me / 12) * 84 + (met / 2) * 14, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
 
-    InvPass2(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    InvPass2(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
-    InvPass3(me % 2,
-             (me / 12) * 84 + (met / 2) * 12,
-             (me / 12) * 84 + (met / 2) * 12,
-             lds,
-             lds,
-             R0,
-             R1,
-             R2,
-             R3,
-             R4,
-             R5);
+    InvPass3(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
 
-    InvPassOUT(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4);
+    InvPassOUT(me, 0, 0, lds, lwbOut);
 }
 
 #elif defined(CFF_IMG_SZ_14_14)
@@ -1385,15 +1117,10 @@ static __constant__ float2 twiddles[17] = {
 __device__ void FwdPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 3)];
@@ -1417,15 +1144,10 @@ __device__ void FwdPass0(unsigned int me,
 __device__ void FwdPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
     R3 = bufIn[inOffset + (me * 2 + 1 + 0)];
@@ -1484,15 +1206,10 @@ __device__ void FwdPass1(unsigned int me,
 __device__ void FwdPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (3 * me + 1)];
     R1 = bufIn[inOffset + (3 * me + 2)];
@@ -1527,15 +1244,10 @@ __device__ void FwdPass1b(unsigned int me,
 __device__ void FwdPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0) * 10];
     R1 = bufIn[inOffset + (me + 3) * 10];
@@ -1559,15 +1271,10 @@ __device__ void FwdPass2(unsigned int me,
 __device__ void FwdPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
     R3 = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
@@ -1626,15 +1333,11 @@ __device__ void FwdPass3(unsigned int me,
 __device__ void FwdPass4(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
+
     if(me < 120)
     {
         R0 = bufIn[inOffset + (me + 0 * 120)];
@@ -1657,29 +1360,18 @@ __device__ void FwdPassIN(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2* bufOut)
 {
-    R0 = float2(0, 0);
-    R1 = float2(0, 0);
-    R2 = float2(0, 0);
-    R3 = float2(0, 0);
-    R4 = float2(0, 0);
-    R5 = float2(0, 0);
+    float2 R0, R1, R2, R3;
 
     if(me < 120)
     {
-        bufOut[outOffset + me + 0 * 120] = R0;
-        bufOut[outOffset + me + 1 * 120] = R1;
-        bufOut[outOffset + me + 2 * 120] = R2;
-        bufOut[outOffset + me + 3 * 120] = R3;
-        bufOut[outOffset + me + 4 * 120] = R4;
-        bufOut[outOffset + me + 5 * 120] = R5;
+        bufOut[outOffset + me + 0 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 1 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 2 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 3 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 4 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 5 * 120] = float2(0, 0);
     }
 
     __syncthreads();
@@ -1722,13 +1414,7 @@ __device__ void FwdPassWE(unsigned int batch,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2* bufOut)
 {
     unsigned int met = me % 32;
 
@@ -1739,25 +1425,20 @@ __device__ void FwdPassWE(unsigned int batch,
     inOffset = batch * 25 * 4 + (me / 32) * 25;
 #endif
 
-    R0 = float2(0, 0);
-    R1 = float2(0, 0);
-    R2 = float2(0, 0);
-    R3 = float2(0, 0);
-    R4 = float2(0, 0);
-    R5 = float2(0, 0);
+    float R0 = 0;
 
     float* ldsf = reinterpret_cast<float*>(bufOut + outOffset);
 
-    ldsf[(me / 32) * 180 * 2 + met] = R0.x;
+    ldsf[(me / 32) * 180 * 2 + met] = R0;
 
     if(met < 25)
     {
-        R0.x = bufIn[inOffset + met];
+        R0 = bufIn[inOffset + met];
 
 #ifdef CFF_BACKWARD
-        ldsf[(me / 32) * 180 * 2 + met] = R0.x;
+        ldsf[(me / 32) * 180 * 2 + met] = R0;
 #else
-        ldsf[(me / 32) * 180 * 2 + met + 5] = R0.x;
+        ldsf[(me / 32) * 180 * 2 + met + 5] = R0;
 #endif
     }
 
@@ -1766,10 +1447,10 @@ __device__ void FwdPassWE(unsigned int batch,
     if(met < 30)
     {
 #ifdef CFF_BACKWARD
-        R0.x = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
+        R0 = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
 #else
-        R0.x = ldsf[(me / 32) * 180 * 2 + 5 +
-                    (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
+        R0 = ldsf[(me / 32) * 180 * 2 + 5 +
+                  (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
 #endif
     }
 
@@ -1777,122 +1458,65 @@ __device__ void FwdPassWE(unsigned int batch,
 
     if(me < 120)
     {
-        bufOut[outOffset + me + 0 * 120] = R5;
-        bufOut[outOffset + me + 1 * 120] = R5;
-        bufOut[outOffset + me + 2 * 120] = R5;
-        bufOut[outOffset + me + 3 * 120] = R5;
-        bufOut[outOffset + me + 4 * 120] = R5;
-        bufOut[outOffset + me + 5 * 120] = R5;
+        bufOut[outOffset + me + 0 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 1 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 2 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 3 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 4 * 120] = float2(0, 0);
+        bufOut[outOffset + me + 5 * 120] = float2(0, 0);
     }
 
     __syncthreads();
 
     if(met < 30)
     {
-        ldsf[(me / 32) * 180 * 2 + (met / 10) * 18 * 2 + met % 10] = R0.x;
+        ldsf[(me / 32) * 180 * 2 + (met / 10) * 18 * 2 + met % 10] = R0;
     }
-
-    R0 = float2(0, 0);
 }
 
-__device__ void FwdPass(unsigned int me,
-                        float2* lds,
-                        float2* lwbOut,
-                        float2& R0,
-                        float2& R1,
-                        float2& R2,
-                        float2& R3,
-                        float2& R4,
-                        float2& R5)
+__device__ void FwdPass(unsigned int me, float2* lds, float2* lwbOut)
 {
     unsigned int met = me % 32;
 
     if(met < 27)
     {
-        FwdPass0(me % 3,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        FwdPass0(
+            me % 3, (me / 32) * 180 + (met / 3) * 18, (me / 32) * 180 + (met / 3) * 18, lds, lds);
     }
 
     __syncthreads();
 
     if(met < 27)
     {
-        FwdPass1(me % 3,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        FwdPass1(
+            me % 3, (me / 32) * 180 + (met / 3) * 18, (me / 32) * 180 + (met / 3) * 18, lds, lds);
     }
 
     __syncthreads();
 
     if(met < 27)
     {
-        FwdPass1b(me % 3,
-                  (me / 32) * 180 + (met / 3) * 18,
-                  (me / 32) * 180 + (met / 3) * 20,
-                  lds,
-                  lds,
-                  R0,
-                  R1,
-                  R2,
-                  R3,
-                  R4,
-                  R5);
+        FwdPass1b(
+            me % 3, (me / 32) * 180 + (met / 3) * 18, (me / 32) * 180 + (met / 3) * 20, lds, lds);
     }
 
     __syncthreads();
 
     if(met < 30)
     {
-        FwdPass2(me % 3,
-                 (me / 32) * 180 + (met / 3),
-                 (me / 32) * 180 + (met / 3),
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        FwdPass2(me % 3, (me / 32) * 180 + (met / 3), (me / 32) * 180 + (met / 3), lds, lds);
     }
 
     __syncthreads();
 
     if(met < 30)
     {
-        FwdPass3(me % 3,
-                 (me / 32) * 180 + (met / 3),
-                 (me / 32) * 180 + (met / 3),
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        FwdPass3(me % 3, (me / 32) * 180 + (met / 3), (me / 32) * 180 + (met / 3), lds, lds);
     }
 
     __syncthreads();
 
-    FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5);
+    FwdPass4(me, 0, 0, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -1907,16 +1531,14 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 4;
     lwbOut = gbOut + batch * 720;
 
-    FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds);
 
     __syncthreads();
 
-    FwdPass(me, lds, lwbOut, R0, R1, R2, R3, R4, R5);
+    FwdPass(me, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -1931,17 +1553,15 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-
     lwbIn = gbIn;
 
     lwbOut = gbOut + 180 * CFF_CHANNELS * CFF_BATCH + batch * 720;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    FwdPassWE(batch, me, 0, 0, lwbIn, lds);
 
     __syncthreads();
 
-    FwdPass(me, lds, lwbOut, R0, R1, R2, R3, R4, R5);
+    FwdPass(me, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -2113,15 +1733,10 @@ extern "C" __global__
 __device__ void InvPassA(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         const float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         const float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     if(me < 120)
     {
@@ -2144,15 +1759,10 @@ __device__ void InvPassA(unsigned int me,
 __device__ void InvPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0) * 10];
     R1 = bufIn[inOffset + (me + 3) * 10];
@@ -2176,15 +1786,10 @@ __device__ void InvPass0(unsigned int me,
 __device__ void InvPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 10];
     R3 = bufIn[inOffset + (me * 2 + 1 + 0) * 10];
@@ -2243,15 +1848,10 @@ __device__ void InvPass1(unsigned int me,
 __device__ void InvPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + 0 + (3 * me + 1)];
     R1 = bufIn[inOffset + 0 + (3 * me + 2)];
@@ -2285,15 +1885,10 @@ __device__ void InvPass1b(unsigned int me,
 __device__ void InvPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 3)];
@@ -2317,15 +1912,10 @@ __device__ void InvPass2(unsigned int me,
 __device__ void InvPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
     R3 = bufIn[inOffset + (me * 2 + 1 + 0)];
@@ -2384,13 +1974,10 @@ __device__ void InvPass3(unsigned int me,
 __device__ void InvPassOUT(unsigned int me,
                            unsigned int inOffset,
                            unsigned int outOffset,
-                           float2* bufIn,
-                           float* bufOut,
-                           float2& R0,
-                           float2& R1,
-                           float2& R2,
-                           float2& R3)
+                           float2 const* bufIn,
+                           float* bufOut)
 {
+    float2 R0, R1, R2, R3;
 
     if((me % 16) < CFF_IMG_W)
     {
@@ -2446,101 +2033,52 @@ extern "C" __global__
     const float2* lwbIn;
     float* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5;
-
     lwbIn  = gbIn + CFF_HALFW + batch * 720;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 4;
 
-    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5);
+    InvPassA(me, 0, 0, lwbIn, lds);
 
     __syncthreads();
 
     if(met < 30)
     {
-        InvPass0(me % 3,
-                 (me / 32) * 180 + (met / 3),
-                 (me / 32) * 180 + (met / 3),
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        InvPass0(me % 3, (me / 32) * 180 + (met / 3), (me / 32) * 180 + (met / 3), lds, lds);
     }
 
     __syncthreads();
 
     if(met < 30)
     {
-        InvPass1(me % 3,
-                 (me / 32) * 180 + (met / 3),
-                 (me / 32) * 180 + (met / 3),
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        InvPass1(me % 3, (me / 32) * 180 + (met / 3), (me / 32) * 180 + (met / 3), lds, lds);
     }
 
     __syncthreads();
 
     if(met < 27)
     {
-        InvPass1b(me % 3,
-                  (me / 32) * 180 + (met / 3) * 20,
-                  (me / 32) * 180 + (met / 3) * 18,
-                  lds,
-                  lds,
-                  R0,
-                  R1,
-                  R2,
-                  R3,
-                  R4,
-                  R5);
+        InvPass1b(
+            me % 3, (me / 32) * 180 + (met / 3) * 20, (me / 32) * 180 + (met / 3) * 18, lds, lds);
     }
 
     __syncthreads();
 
     if(met < 27)
     {
-        InvPass2(me % 3,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        InvPass2(
+            me % 3, (me / 32) * 180 + (met / 3) * 18, (me / 32) * 180 + (met / 3) * 18, lds, lds);
     }
 
     __syncthreads();
 
     if(met < 27)
     {
-        InvPass3(me % 3,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 (me / 32) * 180 + (met / 3) * 18,
-                 lds,
-                 lds,
-                 R0,
-                 R1,
-                 R2,
-                 R3,
-                 R4,
-                 R5);
+        InvPass3(
+            me % 3, (me / 32) * 180 + (met / 3) * 18, (me / 32) * 180 + (met / 3) * 18, lds, lds);
     }
 
     __syncthreads();
 
-    InvPassOUT(me, 0, (me / 32) * CFF_IMG_W * CFF_IMG_H, lds, lwbOut, R0, R1, R2, R3);
+    InvPassOUT(me, 0, (me / 32) * CFF_IMG_W * CFF_IMG_H, lds, lwbOut);
 }
 
 // =================================================================================================
@@ -2585,16 +2123,10 @@ __device__ void FwdPassIN(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5,
-                          float2& R6,
-                          float2& R7)
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
+
     R0 = float2(0, 0);
     R1 = float2(0, 0);
     R2 = float2(0, 0);
@@ -2662,16 +2194,9 @@ __device__ void FwdPassWE(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
                           const float* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5,
-                          float2& R6,
-                          float2& R7)
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     float* ldsf = reinterpret_cast<float*>(bufOut);
 
@@ -2732,17 +2257,10 @@ __device__ void FwdPassWE(unsigned int me,
 __device__ void FwdPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 4)];
@@ -2770,17 +2288,10 @@ __device__ void FwdPass0(unsigned int me,
 __device__ void FwdPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
     R4 = bufIn[inOffset + (me * 2 + 1 + 0)];
@@ -2863,17 +2374,11 @@ __device__ void FwdPass1(unsigned int me,
 __device__ void FwdPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5,
-                          float2& R6,
-                          float2& R7)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
+
     R0 = bufIn[inOffset + (me + 1)];
     R1 = bufIn[inOffset + (me + 5)];
     R2 = bufIn[inOffset + (me + 9)];
@@ -2911,17 +2416,10 @@ __device__ void FwdPass1b(unsigned int me,
 __device__ void FwdPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me + 0) * 17];
     R1 = bufIn[inOffset + (me + 4) * 17];
@@ -2949,17 +2447,10 @@ __device__ void FwdPass2(unsigned int me,
 __device__ void FwdPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
     R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
@@ -3042,17 +2533,10 @@ __device__ void FwdPass3(unsigned int me,
 __device__ void FwdPass4(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me + 0 * 64)];
     R1 = bufIn[inOffset + (me + 1 * 64)];
@@ -3091,35 +2575,33 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5, R6, R7;
-
     lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H;
     lwbOut = gbOut + batch * 544;
 
-    FwdPassIN(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPassIN(me, 0, 0, lwbIn, lds);
     __syncthreads();
-    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
-    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
 
-    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds);
 
     __syncthreads();
-    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
-    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
     if(me < 4)
     {
-        FwdPass2(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        FwdPass2(me % 4, 16, 16, lds, lds);
         __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        FwdPass3(me % 4, 16, 16, lds, lds);
         __syncthreads();
     }
 
-    FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass4(me, 0, 0, lds, lwbOut);
 }
 
 extern "C" __global__
@@ -3134,8 +2616,6 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5, R6, R7;
-
 #ifdef CFF_BACKWARD
     lwbIn = gbIn + (batch % CFF_CHANNELS) * 25 * CFF_NFILTER + (batch / CFF_CHANNELS) * 25;
 #else
@@ -3144,30 +2624,30 @@ extern "C" __global__
 
     lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
 
-    FwdPassWE(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPassWE(me, 0, 0, lwbIn, lds);
     __syncthreads();
-    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
-    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass1(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
 
-    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass1b(me % 4, (me / 4) * 32, (me / 4) * 34, lds, lds);
 
     __syncthreads();
-    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass2(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
-    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass3(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
     if(me < 4)
     {
-        FwdPass2(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        FwdPass2(me % 4, 16, 16, lds, lds);
         __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        FwdPass3(me % 4, 16, 16, lds, lds);
         __syncthreads();
     }
 
-    FwdPass4(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
+    FwdPass4(me, 0, 0, lds, lwbOut);
 }
 
 #if defined(CFF_TRANSP_IN_MOD16)
@@ -3412,57 +2892,31 @@ extern "C" __global__
 __device__ void InvPassA(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         const float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         const float2 const* bufIn,
+                         float2* bufOut)
 {
-
-    R0 = bufIn[inOffset + (me + 0 * 64)];
-    R1 = bufIn[inOffset + (me + 1 * 64)];
-    R2 = bufIn[inOffset + (me + 2 * 64)];
-    R3 = bufIn[inOffset + (me + 3 * 64)];
-    R4 = bufIn[inOffset + (me + 4 * 64)];
-    R5 = bufIn[inOffset + (me + 5 * 64)];
-    R6 = bufIn[inOffset + (me + 6 * 64)];
-    R7 = bufIn[inOffset + (me + 7 * 64)];
-
-    bufOut[outOffset + (me + 0 * 64)] = R0;
-    bufOut[outOffset + (me + 1 * 64)] = R1;
-    bufOut[outOffset + (me + 2 * 64)] = R2;
-    bufOut[outOffset + (me + 3 * 64)] = R3;
-    bufOut[outOffset + (me + 4 * 64)] = R4;
-    bufOut[outOffset + (me + 5 * 64)] = R5;
-    bufOut[outOffset + (me + 6 * 64)] = R6;
-    bufOut[outOffset + (me + 7 * 64)] = R7;
+    bufOut[outOffset + (me + 0 * 64)] = bufIn[inOffset + (me + 0 * 64)];
+    bufOut[outOffset + (me + 1 * 64)] = bufIn[inOffset + (me + 1 * 64)];
+    bufOut[outOffset + (me + 2 * 64)] = bufIn[inOffset + (me + 2 * 64)];
+    bufOut[outOffset + (me + 3 * 64)] = bufIn[inOffset + (me + 3 * 64)];
+    bufOut[outOffset + (me + 4 * 64)] = bufIn[inOffset + (me + 4 * 64)];
+    bufOut[outOffset + (me + 5 * 64)] = bufIn[inOffset + (me + 5 * 64)];
+    bufOut[outOffset + (me + 6 * 64)] = bufIn[inOffset + (me + 6 * 64)];
+    bufOut[outOffset + (me + 7 * 64)] = bufIn[inOffset + (me + 7 * 64)];
 
     if(me < 32)
     {
-        R0                             = bufIn[inOffset + (512 + me)];
-        bufOut[outOffset + (512 + me)] = R0;
+        bufOut[outOffset + (512 + me)] = bufIn[inOffset + (512 + me)];
     }
 }
 
 __device__ void InvPass0(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me + 0) * 17];
     R1 = bufIn[inOffset + (me + 4) * 17];
@@ -3490,17 +2944,10 @@ __device__ void InvPass0(unsigned int me,
 __device__ void InvPass1(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0) * 17];
     R4 = bufIn[inOffset + (me * 2 + 1 + 0) * 17];
@@ -3570,39 +3017,23 @@ __device__ void InvPass1(unsigned int me,
 
     __syncthreads();
 
-    R0 = R0 * 3.1250000000000000e-02f;
-    R4 = R4 * 3.1250000000000000e-02f;
-    R1 = R1 * 3.1250000000000000e-02f;
-    R5 = R5 * 3.1250000000000000e-02f;
-    R2 = R2 * 3.1250000000000000e-02f;
-    R6 = R6 * 3.1250000000000000e-02f;
-    R3 = R3 * 3.1250000000000000e-02f;
-    R7 = R7 * 3.1250000000000000e-02f;
-
-    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0;
-    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4;
-    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1;
-    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5;
-    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2;
-    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6;
-    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3;
-    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
+    bufOut[outOffset + (2 * me + 0 + 0) * 17]  = R0 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 0) * 17]  = R4 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 8) * 17]  = R1 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 8) * 17]  = R5 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 16) * 17] = R2 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 16) * 17] = R6 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 0 + 24) * 17] = R3 * 3.1250000000000000e-02f;
+    bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7 * 3.1250000000000000e-02f;
 }
 
 __device__ void InvPass1b(unsigned int me,
                           unsigned int inOffset,
                           unsigned int outOffset,
-                          float2* bufIn,
-                          float2* bufOut,
-                          float2& R0,
-                          float2& R1,
-                          float2& R2,
-                          float2& R3,
-                          float2& R4,
-                          float2& R5,
-                          float2& R6,
-                          float2& R7)
+                          float2 const* bufIn,
+                          float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + 0 + (me + 1)];
     R1 = bufIn[inOffset + 0 + (me + 5)];
@@ -3640,17 +3071,10 @@ __device__ void InvPass1b(unsigned int me,
 __device__ void InvPass2(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me + 0)];
     R1 = bufIn[inOffset + (me + 4)];
@@ -3678,17 +3102,10 @@ __device__ void InvPass2(unsigned int me,
 __device__ void InvPass3(unsigned int me,
                          unsigned int inOffset,
                          unsigned int outOffset,
-                         float2* bufIn,
-                         float2* bufOut,
-                         float2& R0,
-                         float2& R1,
-                         float2& R2,
-                         float2& R3,
-                         float2& R4,
-                         float2& R5,
-                         float2& R6,
-                         float2& R7)
+                         float2 const* bufIn,
+                         float2* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + (me * 2 + 0 + 0)];
     R4 = bufIn[inOffset + (me * 2 + 1 + 0)];
@@ -3771,17 +3188,10 @@ __device__ void InvPass3(unsigned int me,
 __device__ void InvPassOUT(unsigned int me,
                            unsigned int inOffset,
                            unsigned int outOffset,
-                           float2* bufIn,
-                           float* bufOut,
-                           float2& R0,
-                           float2& R1,
-                           float2& R2,
-                           float2& R3,
-                           float2& R4,
-                           float2& R5,
-                           float2& R6,
-                           float2& R7)
+                           float2 const* bufIn,
+                           float* bufOut)
 {
+    float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
     R0 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 0) % 16) * 32 + ((4 + me) % 32)];
     R1 = bufIn[inOffset + ((2 + 0 + (me / 32) * 6 + 1) % 16) * 32 + ((4 + me) % 32)];
@@ -3841,35 +3251,33 @@ extern "C" __global__
     const float2* lwbIn;
     float* lwbOut;
 
-    float2 R0, R1, R2, R3, R4, R5, R6, R7;
-
     lwbIn  = CFF_HALFW + gbIn + batch * 544;
     lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H;
 
-    InvPassA(me, 0, 0, lwbIn, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPassA(me, 0, 0, lwbIn, lds);
     __syncthreads();
 
-    InvPass0(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPass0(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
-    InvPass1(me % 4, (me / 4), (me / 4), lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPass1(me % 4, (me / 4), (me / 4), lds, lds);
     __syncthreads();
 
     if(me < 4)
     {
-        InvPass0(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        InvPass0(me % 4, 16, 16, lds, lds);
         __syncthreads();
-        InvPass1(me % 4, 16, 16, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+        InvPass1(me % 4, 16, 16, lds, lds);
         __syncthreads();
     }
 
     __syncthreads();
-    InvPass1b(me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPass1b(me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds);
     __syncthreads();
-    InvPass2(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPass2(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
-    InvPass3(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPass3(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
-    InvPassOUT(me, 0, 0, lds, lwbOut, R0, R1, R2, R3, R4, R5, R6, R7);
+    InvPassOUT(me, 0, 0, lds, lwbOut);
 }
 
 // =================================================================================================
@@ -3911,19 +3319,13 @@ extern "C" __global__
 #define TYPE_A float2
 #define TYPE_B float2
 #define TYPE_C float2
-#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MADs */
 #define TYPE_MAD(MULA, MULB, DST)        \
-    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
-    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
-    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
-    DST.y = MAD(MULA.y, MULB.x, DST.y);
-#define TYPE_MAD_WRITE(DST, REG) \
-    /* (1) */                    \
-    /* (2) */                    \
-    /* (3) */                    \
-    DST = REG;
+    DST.x = fma(MULA.x, MULB.x, DST.x);  \
+    DST.x = fma(-MULA.y, MULB.y, DST.x); \
+    DST.y = fma(MULA.x, MULB.y, DST.y);  \
+    DST.y = fma(MULA.y, MULB.x, DST.y);
 
 // TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
 
@@ -4112,160 +3514,108 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0][0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[0][0];
         }
-    }
-    if(globalC0I + 0 * WG_0I < size0I)
-    {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0][1])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[0][1];
         }
-    }
-    if(globalC0I + 0 * WG_0I < size0I)
-    {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0][2])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[0][2];
         }
-    }
-    if(globalC0I + 0 * WG_0I < size0I)
-    {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0][3])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 0 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[0][3];
         }
     }
     if(globalC0I + 1 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[1][0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[1][0];
         }
-    }
-    if(globalC0I + 1 * WG_0I < size0I)
-    {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[1][1])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[1][1];
         }
-    }
-    if(globalC0I + 1 * WG_0I < size0I)
-    {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[1][2])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[1][2];
         }
-    }
-    if(globalC0I + 1 * WG_0I < size0I)
-    {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[1][3])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 1 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[1][3];
         }
     }
     if(globalC0I + 2 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[2][0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[2][0];
         }
-    }
-    if(globalC0I + 2 * WG_0I < size0I)
-    {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[2][1])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[2][1];
         }
-    }
-    if(globalC0I + 2 * WG_0I < size0I)
-    {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[2][2])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[2][2];
         }
-    }
-    if(globalC0I + 2 * WG_0I < size0I)
-    {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[2][3])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 2 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[2][3];
         }
     }
     if(globalC0I + 3 * WG_0I < size0I)
     {
         if(globalC1J + 0 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[3][0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 0 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[3][0];
         }
-    }
-    if(globalC0I + 3 * WG_0I < size0I)
-    {
         if(globalC1J + 1 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[3][1])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 1 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[3][1];
         }
-    }
-    if(globalC0I + 3 * WG_0I < size0I)
-    {
         if(globalC1J + 2 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[3][2])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 2 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[3][2];
         }
-    }
-    if(globalC0I + 3 * WG_0I < size0I)
-    {
         if(globalC1J + 3 * WG_1J < size1J)
         {
-            TYPE_MAD_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
-                                      static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[3][3])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I) + 3 * WG_0I,
+                       static_cast<unsigned long>(globalC1J) + 3 * WG_1J,
+                       static_cast<unsigned long>(globalCK))] = rC[3][3];
         }
     }
 }
@@ -4395,19 +3745,13 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
 /* data types */
 #define DATA_TYPE float2
 #define VECTOR_TYPE float2
-#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)        \
-    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
-    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
-    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
-    DST.y = MAD(MULA.y, MULB.x, DST.y);
-#define TYPE_MAC_WRITE(DST, REG) \
-    /* (1) */                    \
-    /* (2) */                    \
-    /* (3) */                    \
-    DST = REG;
+    DST.x = fma(MULA.x, MULB.x, DST.x);  \
+    DST.x = fma(-MULA.y, MULB.y, DST.x); \
+    DST.y = fma(MULA.x, MULB.y, DST.y);  \
+    DST.y = fma(MULA.y, MULB.x, DST.y);
 
 // TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
 
@@ -4845,40 +4189,27 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                                      static_cast<unsigned long>(globalC1J) + 0 * CPS,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                       static_cast<unsigned long>(globalC1J) + 0 * CPS,
+                       static_cast<unsigned long>(globalCK))] = rC[0];
         }
-    }
-    if(globalC0I < size0I)
-    {
         if(globalC1J + 1 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                                      static_cast<unsigned long>(globalC1J) + 1 * CPS,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[1])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                       static_cast<unsigned long>(globalC1J) + 1 * CPS,
+                       static_cast<unsigned long>(globalCK))] = rC[1];
         }
-    }
-    if(globalC0I < size0I)
-    {
         if(globalC1J + 2 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                                      static_cast<unsigned long>(globalC1J) + 2 * CPS,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[2])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                       static_cast<unsigned long>(globalC1J) + 2 * CPS,
+                       static_cast<unsigned long>(globalCK))] = rC[2];
         }
-    }
-    if(globalC0I < size0I)
-    {
         if(globalC1J + 3 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                                      static_cast<unsigned long>(globalC1J) + 3 * CPS,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[3])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                       static_cast<unsigned long>(globalC1J) + 3 * CPS,
+                       static_cast<unsigned long>(globalCK))] = rC[3];
         }
     }
 }
@@ -4983,22 +4314,16 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 /* data types */
 #define DATA_TYPE float2
 #define VECTOR_TYPE float2
-#define MAD(A, B, DST) fma(A, B, DST)
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)        \
-    DST.x = MAD(MULA.x, MULB.x, DST.x);  \
-    DST.x = MAD(-MULA.y, MULB.y, DST.x); \
-    DST.y = MAD(MULA.x, MULB.y, DST.y);  \
-    DST.y = MAD(MULA.y, MULB.x, DST.y);
-#define TYPE_MAC_WRITE(DST, REG) \
-    /* (1) */                    \
-    /* (2) */                    \
-    /* (3) */                    \
-    DST = REG;
+    DST.x = fma(MULA.x, MULB.x, DST.x);  \
+    DST.x = fma(-MULA.y, MULB.y, DST.x); \
+    DST.y = fma(MULA.x, MULB.y, DST.y);  \
+    DST.y = fma(MULA.y, MULB.x, DST.y);
 
 /* 2x2 micro-tile */
-#define MAC_2x2                                              \
+#define MAC_2x2()                                            \
     TYPE_MAC(rA[0], rB[0], rC[0 + 0 * TT0I / VECTOR_WIDTH]); \
     TYPE_MAC(rA[1], rB[0], rC[1 + 0 * TT0I / VECTOR_WIDTH]); \
     TYPE_MAC(rA[0], rB[1], rC[0 + 1 * TT0I / VECTOR_WIDTH]); \
@@ -5251,13 +4576,13 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
         /* local read increment b */
         localReadB += SPLITU * (MT1J / VECTOR_WIDTH + PAD);
-        MAC_2x2
+        MAC_2x2();
 
-            /* iter 1 */
+        /* iter 1 */
 
-            /* local read a */
-            rA[0] = localReadA[0 * SG0I];
-        rA[1]     = localReadA[1 * SG0I];
+        /* local read a */
+        rA[0] = localReadA[0 * SG0I];
+        rA[1] = localReadA[1 * SG0I];
 
         /* local read b */
         rB[0] = localReadB[0 * SG1J];
@@ -5268,13 +4593,13 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
         /* local read increment b */
         localReadB += SPLITU * (MT1J / VECTOR_WIDTH + PAD);
-        MAC_2x2
+        MAC_2x2();
 
-            /* iter 2 */
+        /* iter 2 */
 
-            /* local read a */
-            rA[0] = localReadA[0 * SG0I];
-        rA[1]     = localReadA[1 * SG0I];
+        /* local read a */
+        rA[0] = localReadA[0 * SG0I];
+        rA[1] = localReadA[1 * SG0I];
 
         /* local read b */
         rB[0] = localReadB[0 * SG1J];
@@ -5285,13 +4610,13 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
         /* local read inc b */
         localReadB += SPLITU * (MT1J / VECTOR_WIDTH + PAD);
-        MAC_2x2
+        MAC_2x2();
 
-            /* iter 3 */
+        /* iter 3 */
 
-            /* local read a */
-            rA[0] = localReadA[0 * SG0I];
-        rA[1]     = localReadA[1 * SG0I];
+        /* local read a */
+        rA[0] = localReadA[0 * SG0I];
+        rA[1] = localReadA[1 * SG0I];
 
         /* local read b */
         rB[0] = localReadB[0 * SG1J];
@@ -5302,7 +4627,7 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
         /* local read init pointers b */
         localReadB = reinterpret_cast<VECTOR_TYPE const*>(localMemory + localReadOffsetB);
-        MAC_2x2
+        MAC_2x2();
     }
 
     /******************************************/
@@ -5353,7 +4678,7 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
         /* local read inc b */
         localReadB += SPLITU * (MT1J / VECTOR_WIDTH + PAD);
-        MAC_2x2
+        MAC_2x2();
     }
 
     /******************************************/
@@ -5400,10 +4725,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     {
         if(globalC1J + 0 * CPS < size1J)
         {
-            TYPE_MAC_WRITE(C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
-                                      static_cast<unsigned long>(globalC1J) + 0 * CPS,
-                                      static_cast<unsigned long>(globalCK))],
-                           rC[0])
+            C[GLOBAL_C(static_cast<unsigned long>(globalC0I),
+                       static_cast<unsigned long>(globalC1J) + 0 * CPS,
+                       static_cast<unsigned long>(globalCK))] = rC[0];
         }
     }
 }
