@@ -251,6 +251,14 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             }
         }
 
+        // Note: BN Fwd inference temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+        if(node.attributes_type()
+           == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
+        {
+            HIPDNN_LOG_WARN("Batchnorm inference support is temporarily disabled.");
+            return false;
+        }
+
         return true;
     }
     case 3:

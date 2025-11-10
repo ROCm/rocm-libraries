@@ -248,37 +248,9 @@ private:
         }
     }
 
-public:
-    Graph()
-        : INode(GraphAttributes{})
+    static Error checkNoDuplicateTensorIdsImpl(
+        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
     {
-        HIPDNN_FE_LOG_INFO("Creating new Graph instance");
-    }
-
-    Error validate()
-    {
-        HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
-
-        auto result = checkNoDuplicateTensorIds();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        result = topologicallySortGraph();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        return validateSubtree();
-    }
-
-    Error checkNoDuplicateTensorIds()
-    {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
-
         std::unordered_set<int64_t> seenUids;
         std::unordered_set<int64_t> duplicateUids;
 
@@ -306,6 +278,58 @@ public:
         }
 
         return {ErrorCode::OK, ""};
+    }
+
+public:
+    Graph()
+        : INode(GraphAttributes{})
+    {
+        HIPDNN_FE_LOG_INFO("Creating new Graph instance");
+    }
+
+    Error validate()
+    {
+        HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
+
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        result = topologicallySortGraph();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        result = validateSubtree();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        for(const auto& tensor : allTensors)
+        {
+            result = tensor->validate();
+            if(result.code != ErrorCode::OK)
+            {
+                return result;
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error checkNoDuplicateTensorIds()
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
     Error topologicallySortGraph()
