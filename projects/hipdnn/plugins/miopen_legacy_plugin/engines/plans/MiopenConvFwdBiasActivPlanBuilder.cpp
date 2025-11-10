@@ -336,6 +336,7 @@ size_t
     MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                                         const hipdnn_plugin::IGraph& opGraph) const
 {
+    std::cerr << "MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize called\n";
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 

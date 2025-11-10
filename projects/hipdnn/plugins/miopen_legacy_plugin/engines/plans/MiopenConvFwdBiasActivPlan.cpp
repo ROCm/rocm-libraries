@@ -155,6 +155,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
 size_t ConvFwdBiasActivPlan::getWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
 {
+    std::cerr << "\ngetWorkspaceSize called, workspaceSize=" << _workspaceSize << '\n';
     return _workspaceSize;
 }
 
