@@ -1,411 +1,395 @@
-# ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-# The ROCm platform requires at least Ubuntu 16.04 or Fedora 24, which have cmake 3.5
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25.2)
 
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if(WIN32)
-  set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH "Install path prefix, prepended onto install directories")
-else()
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
-endif()
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json for clang tooling")
 
-# Adding CMAKE_PREFIX_PATH, needed for static builds
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# CMake modules
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake)
+# Load backward compatibility shim BEFORE project() to retain behaviour in included files.
+include(rocsparse_shim)
 
-# Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-# Honor per-config flags in try_compile() source-file signature. cmake v3.7 and up
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)
-endif()
-
-# rocSPARSE project
+# Do not set VERSION here, it is managed by rocm_setup_version
 project(rocsparse LANGUAGES CXX C)
 
-# Determine if CXX Compiler is hip-clang
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  message(STATUS "Using hip-clang to build for amdgpu backend")
+if(POLICY CMP0066)
+    cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
+endif()
+
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+
+# Set cpack license file to avoid rocm-cmake warning
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+
+include(fetch_rocm_cmake)
+include(rocsparse_supported_architectures.cmake)
+include(CMakeDependentOption)
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+include(CheckCXXCompilerFlag)
+
+<<<<<<< HEAD
+# Version setup
+set(VERSION_STRING "4.3.0")
+=======
+set(VERSION_STRING "4.2.0")
+>>>>>>> 9f8ea79e9b (refactor: review of refactored files and comments)
+set(SOVERSION_STRING "1.0")
+rocm_setup_version(VERSION ${VERSION_STRING})
+set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(WIN32)
+        set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path prefix" FORCE)
+    else()
+        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix" FORCE)
+    endif()
+endif()
+
+# --- Build Options ---
+
+option(ROCSPARSE_BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)
+option(ROCSPARSE_BUILD_TESTING "Build tests (requires googletest)" OFF)
+option(ROCSPARSE_ENABLE_BENCHMARKS "Build benchmarks" OFF)
+option(ROCSPARSE_ENABLE_SAMPLES "Build examples" OFF)
+option(ROCSPARSE_BUILD_DOCS "Build documentation" OFF)
+
+# Optional features
+option(ROCSPARSE_BUILD_COVERAGE "Build with code coverage enabled" OFF)
+option(ROCSPARSE_ENABLE_ASAN "Build with address sanitizer enabled" OFF)
+option(ROCSPARSE_ENABLE_MEMSTAT "Build with memory statistics enabled" OFF)
+option(ROCSPARSE_ENABLE_ILP64 "Build with rocsparse_int equal to int64_t" OFF)
+option(ROCSPARSE_ENABLE_COMPRESSED_DBG "Enable compressed debug symbols" ON)
+option(ROCSPARSE_ENABLE_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
+option(ROCSPARSE_ENABLE_MARKER "Enable rocTracer marker support" ON)
+option(ROCSPARSE_ENABLE_OFFLOAD_COMPRESS "Enable offload compression during compilation" ON)
+
+if(NOT ROCSPARSE_ENABLE_FORTRAN)
+    option(ROCSPARSE_ENABLE_FORTRAN "Build rocSPARSE clients requiring Fortran capabilities" ON)
+endif()
+
+if(ROCSPARSE_ENABLE_SAMPLES OR ROCSPARSE_BUILD_TESTING OR ROCSPARSE_ENABLE_BENCHMARKS)
+    set(ROCSPARSE_ENABLE_CLIENT ON)
 else()
-  message(FATAL_ERROR "'hip-clang' compiler required to compile for ROCm platform.")
+    set(ROCSPARSE_ENABLE_CLIENT OFF)
 endif()
 
-# Set CXX flags
-if (NOT DEFINED CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-# Set CXX standard
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(ROCSPARSE_ENABLE_ASAN AND ROCSPARSE_ENABLE_FORTRAN)
+    message(FATAL_ERROR "Cannot enable both address sanitizer and Fortran clients")
 endif()
 
-# Build options
-option(BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)
-option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
-option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
-option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
-option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
-option(BUILD_VERBOSE "Output additional build information" OFF)
-option(BUILD_CODE_COVERAGE "Build rocSPARSE with code coverage enabled" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
-option(BUILD_MEMSTAT "Build rocSPARSE with memory statistics enabled" OFF)
-option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_t" OFF)
-option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
-option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
-option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
-option(BUILD_WITH_OFFLOAD_COMPRESS
-       "Enable offload compression during compilation" ON)
-
-# Clients utilize rocsparse fortran API and a fortran compiler
-if( NOT BUILD_FORTRAN_CLIENTS )
-  option( BUILD_FORTRAN_CLIENTS "Build rocSPARSE clients requiring Fortran capabilities" ON )
-endif( )
-option(BUILD_DOCS "Build documentation" OFF)
-
-if(BUILD_WITH_OFFLOAD_COMPRESS)
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("--offload-compress"
-                          CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(NOT CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    message(
-      FATAL_ERROR
-        "The option '--offload-compress' is not supported from the CXX compiler, turn off the option BUILD_WITH_OFFLOAD_COMPRESS."
-    )
-  endif()
+if(ROCSPARSE_BUILD_COVERAGE AND ROCSPARSE_ENABLE_FORTRAN)
+    message(FATAL_ERROR "Cannot enable both code coverage and Fortran clients")
 endif()
 
-#
-if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
+if(ROCSPARSE_BUILD_COVERAGE AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(FATAL_ERROR "Code coverage is only supported for CMAKE_BUILD_TYPE=Debug")
 endif()
 
-if(BUILD_COMPRESSED_DBG)
-  add_compile_options($<$<CONFIG:Debug>:-gz> $<$<CONFIG:RelWithDebInfo>:-gz>)
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "'hipcc' or 'amdclang' compiler required to compile for ROCm platform")
 endif()
 
-if(BUILD_ADDRESS_SANITIZER)
-
-  # CXX
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-  set(CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_LINK_EXECUTABLE} -fuse-ld=lld")
-
-  # C
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
-  set(CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE} -fuse-ld=lld")
-
-  # Fortran not supported, add_link_options below invalid for fortran linking
-  set(BUILD_FORTRAN_CLIENTS OFF)
+if(ROCSPARSE_ENABLE_OFFLOAD_COMPRESS)
+    check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    if(NOT CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+        message(FATAL_ERROR
+            "The option '--offload-compress' is not supported by the CXX compiler. "
+            "Turn off ROCSPARSE_ENABLE_OFFLOAD_COMPRESS."
+        )
+    endif()
 endif()
 
-# Dependencies
-include(cmake/Dependencies.cmake)
+if(ROCSPARSE_ENABLE_FORTRAN)
+    enable_language(Fortran)
+endif()
 
+set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
+
+<<<<<<< HEAD
 # Detect compiler support for target ID
 if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-    OUTPUT_VARIABLE CXX_OUTPUT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE)
-  string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-endif()
-
-# Detect compiler support for target ID
-# This section is deprecated. Please use rocm_check_target_ids for future use.
-if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} "--help"
         OUTPUT_VARIABLE CXX_OUTPUT
         OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE)
+        ERROR_STRIP_TRAILING_WHITESPACE
+    )
     string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
-#Set the GPU_TARGETS with backward compatibility
+# Set GPU targets with backward compatibility
 if(COMMAND rocm_check_target_ids)
-    if(BUILD_ADDRESS_SANITIZER)
-      rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
+    if(ROCSPARSE_ENABLE_ASAN)
+        rocm_check_target_ids(DEFAULT_GPU_TARGETS
+            TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
+        )
     else()
-      rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+        rocm_check_target_ids(DEFAULT_GPU_TARGETS
+            TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 else()
-    # Use target ID syntax if supported for GPU_TARGETS
+    # Use target ID syntax if supported
     if(TARGET_ID_SUPPORT)
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
-endif()
-
-#Support AMDGPU_TARGETS as deprecated
-if( AMDGPU_TARGETS AND NOT GPU_TARGETS )
-  message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
-  set( GFX_LIST ${AMDGPU_TARGETS} )
-elseif( GPU_TARGETS )
-  set( GFX_LIST ${GPU_TARGETS} )
-else ()
-  set( GFX_LIST ${DEFAULT_AMDGPU_TARGETS} ) # default if not set
-endif()
-
-set(GPU_TARGETS "${GFX_LIST}" CACHE STRING "GPU architectures to build for")
-
-if (GPU_TARGETS)
-  set(TMPGPU_TARGETS "${GPU_TARGETS}")
-  if(TMPGPU_TARGETS STREQUAL "all" )
-    set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
-  else()
-    set(GPU_TARGETS "${TMPGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-  endif()
+=======
+if(NOT GPU_TARGETS)
+    message(FATAL_ERROR "No GPU targets specified.")
+elseif(GPU_TARGETS STREQUAL "all")
+    rocsparse_get_base_architectures(GPU_TARGETS)
 else()
-  set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+    rocsparse_validate_gpu_targets("${GPU_TARGETS}")
+>>>>>>> 9f8ea79e9b (refactor: review of refactored files and comments)
 endif()
 
-message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
+message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
-# Setup version
-set(VERSION_STRING "4.3.0")
-set(SOVERSION_STRING "1.0")
-set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
-set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
+# --- Dependency Setup ---
 
-rocm_setup_version(VERSION ${VERSION_STRING})
-set(rocsparse_SOVERSION ${SOVERSION_STRING})
+find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
-# Find rocprim package
+set(ROCSPARSE_MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM")
 find_package(rocprim REQUIRED)
-if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_VERSION})
-  message(FATAL_ERROR "The version of rocPRIM found was incompatible. Found: ${rocprim_VERSION} Required: ${MIN_ROCPRIM_VERSION}")
-endif()
-
-# Find rocblas package
-if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas REQUIRED)
-  if (${rocblas_VERSION} VERSION_LESS ${MIN_ROCBLAS_VERSION})
-    message(FATAL_ERROR "The version of rocBLAS found was incompatible. Found: ${rocblas_VERSION} Required: ${MIN_ROCBLAS_VERSION}")
-  endif()
-else()
-  message("-- Build rocSPARSE with rocBLAS is disabled")
-endif()
-
-if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-  find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
-endif( )
-
-if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
-  set( BUILD_CLIENTS ON )
-  if(NOT CLIENTS_OS)
-    rocm_set_os_id(CLIENTS_OS)
-    string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
-    rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
-  endif()
-  find_package(OpenMP QUIET)
-  if(OPENMP_FOUND)
-    set(OPENMP_RPM "libgomp")
-    set(OPENMP_DEB "libomp-dev")
-  endif()
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
-    endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "sles" AND OPENMP_FOUND)
-    set(OPENMP_RPM "libgomp1")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
-  endif()
-
-  rocm_package_setup_component(clients)
-  rocm_package_setup_client_component(clients-common)
-  if( BUILD_CLIENTS_TESTS )
-    rocm_package_setup_client_component(
-      tests
-      DEPENDS
-        COMPONENT clients-common
-        DEB "${OPENMP_DEB}"
-        RPM "${OPENMP_RPM}"
+if(rocprim_VERSION VERSION_LESS ROCSPARSE_MIN_ROCPRIM_VERSION)
+    message(FATAL_ERROR
+        "Incompatible rocPRIM version. Found: ${rocprim_VERSION}, Required: ${ROCSPARSE_MIN_ROCPRIM_VERSION}"
     )
-  endif()
-  if( BUILD_CLIENTS_BENCHMARKS )
-  rocm_package_setup_client_component(
-    benchmarks
-    DEPENDS
-      COMPONENT clients-common
-      DEB "${OPENMP_DEB}"
-      RPM "${OPENMP_RPM}"
-  )
-  endif()
-  if(BUILD_FORTRAN_CLIENTS)
+endif()
+
+set(ROCSPARSE_MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS")
+if(ROCSPARSE_ENABLE_ROCBLAS)
+    find_package(rocblas REQUIRED)
+    if(rocblas_VERSION VERSION_LESS ROCSPARSE_MIN_ROCBLAS_VERSION)
+        message(FATAL_ERROR
+            "Incompatible rocBLAS version. Found: ${rocblas_VERSION}, Required: ${ROCSPARSE_MIN_ROCBLAS_VERSION}"
+        )
+    endif()
+endif()
+
+if(ROCSPARSE_ENABLE_CLIENT)
+    find_package(OpenMP QUIET)
+    if(NOT OPENMP_FOUND)
+        message(WARNING "OpenMP not found. Clients may have reduced performance.")
+    endif()
+endif()
+
+if(ROCSPARSE_BUILD_SHARED_LIBS)
+    add_library(rocsparse SHARED "")
+else()
+    add_library(rocsparse STATIC "")
+endif()
+
+add_library(roc::rocsparse ALIAS rocsparse)
+
+add_subdirectory(library)
+
+target_compile_features(rocsparse PRIVATE cxx_std_17)
+
+if(ROCSPARSE_ENABLE_COMPRESSED_DBG)
+    target_compile_options(rocsparse PRIVATE
+        $<$<CONFIG:Debug>:-gz>
+        $<$<CONFIG:RelWithDebInfo>:-gz>
+    )
+endif()
+
+if(ROCSPARSE_ENABLE_OFFLOAD_COMPRESS)
+    target_compile_options(rocsparse PRIVATE --offload-compress)
+endif()
+
+if(ROCSPARSE_BUILD_COVERAGE)
+    target_compile_options(rocsparse PRIVATE -fprofile-arcs -ftest-coverage)
+    target_link_options(rocsparse PRIVATE --coverage -lgcov)
+endif()
+
+if(ROCSPARSE_ENABLE_ASAN)
+    target_compile_options(rocsparse PRIVATE -fsanitize=address -shared-libasan)
+    target_link_options(rocsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
+endif()
+
+rocm_set_soversion(rocsparse ${rocsparse_SOVERSION})
+
+if(ROCSPARSE_ENABLE_CLIENT)
+    add_subdirectory(clients)
+endif()
+
+if(ROCSPARSE_BUILD_DOCS)
+    add_subdirectory(docs)
+endif()
+
+# --- Packaging and installation ---
+
+if(ROCSPARSE_ENABLE_CLIENT)
+    include(rocm_client_packages.cmake)
+    rocm_package_setup_component(clients)
+    rocm_package_setup_client_component(clients-common)
+endif()
+
+if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    rocm_package_setup_client_component(tests DEPENDS COMPONENT clients-common)
+endif()
+
+if(ROCSPARSE_ENABLE_BENCHMARKS)
+    rocm_package_setup_client_component(benchmarks DEPENDS COMPONENT clients-common)
+endif()
+
+if(ROCSPARSE_ENABLE_SAMPLES)
+    rocm_package_setup_client_component(samples)
+endif()
+
+if(ROCSPARSE_ENABLE_FORTRAN)
     rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
     rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
     rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
     rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
-  endif()
 endif()
 
-# rocSPARSE library
-if (NOT BUILD_CLIENTS_ONLY)
-  add_subdirectory(library)
-endif()
-
-# Trigger client builds if selected
-if(BUILD_CLIENTS)
-  add_subdirectory(clients)
-endif()
-
-# Build docs
-if(BUILD_DOCS)
-  add_subdirectory(docs)
-endif()
-
-# Package specific CPACK vars
-## add dependency on hip runtime for shared libraries
-set(HIP_RUNTIME_MINIMUM 4.5.0)
-if(BUILD_ADDRESS_SANITIZER)
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+# Work around code object stripping failure if using /usr/bin/strip
+find_program(LLVM_STRIP NAMES llvm-strip PATH_SUFFIXES lib/llvm/bin llvm/bin bin)
+if(LLVM_STRIP)
+    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
 else()
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+    message(
+        WARNING
+            "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging."
+    )
 endif()
-rocm_package_add_dependencies(SHARED_DEPENDS "${DEPENDS_HIP_RUNTIME} >= ${HIP_RUNTIME_MINIMUM}")
 
-## add dependency on hip runtime for static libraries
-rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
-rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
+rocm_install(
+    TARGETS rocsparse
+    EXPORT rocsparse-targets
+    ARCHIVE COMPONENT "devel"
+    LIBRARY COMPONENT "runtime"
+    RUNTIME COMPONENT "runtime"
+)
 
-## add dependency on rocBLAS
-if (rocblas_FOUND)
-  set(ROCBLAS_MINIMUM "4.1.0")
-  rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${ROCBLAS_MINIMUM}")
-  rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${ROCBLAS_MINIMUM}")
-  rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${ROCBLAS_MINIMUM}")
+rocm_install(
+    DIRECTORY "${PROJECT_BINARY_DIR}/include/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT "devel"
+)
+
+rocm_export_targets(
+    NAMESPACE roc::
+    TARGETS rocsparse
+    EXPORT rocsparse-targets
+    DEPENDS
+    PACKAGE hip
+    PACKAGE rocprim
+    COMPATIBILITY SameMajorVersion
+    CONFIG_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocsparse-config.cmake.in"
+)
+
+
+# Set up runtime component
+rocm_package_setup_component(runtime)
+
+# HIP runtime dependencies
+set(HIP_RUNTIME_MINIMUM "4.5.0")
+if(ROCSPARSE_ENABLE_ASAN)
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan")
 else()
-  message("-- Build rocSPARSE with rocBLAS is disabled since rocBLAS is not found")
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd")
 endif()
 
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+# Add runtime dependencies
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= ${HIP_RUNTIME_MINIMUM}" COMPONENT runtime)
+
+# rocBLAS dependency
+if(rocblas_FOUND)
+    set(ROCBLAS_MINIMUM "4.1.0")
+    rocm_package_add_dependencies(DEPENDS "rocblas >= ${ROCBLAS_MINIMUM}" COMPONENT runtime)
+endif()
+
+# Add rocm-core dependency
+rocm_package_add_dependencies(DEPENDS "rocm-core" COMPONENT runtime)
+
+# Development package depends on runtime package
+rocm_package_add_deb_dependencies(DEPENDS "rocsparse (>= ${rocsparse_VERSION})" COMPONENT devel)
+rocm_package_add_rpm_dependencies(DEPENDS "rocsparse >= ${rocsparse_VERSION}" COMPONENT devel)
+
+# CPack configuration
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 if(WIN32)
-  set(CPACK_SOURCE_GENERATOR "ZIP")
-  set(CPACK_GENERATOR "ZIP")
-  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
-  endif()
-  set(INSTALL_PREFIX "C:/hipSDK")
-  set(CPACK_SET_DESTDIR OFF)
-  set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
-  set(CPACK_PACKAGING_INSTALL_PREFIX "")
-  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+    set(CPACK_SOURCE_GENERATOR "ZIP")
+    set(CPACK_GENERATOR "ZIP")
+    set(CPACK_SET_DESTDIR OFF)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "")
+    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 else()
-  if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-  endif()
+    if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+        set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    endif()
 endif()
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
-# Package name
-set(package_name rocsparse)
-
-set(ROCSPARSE_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
-
-rocm_create_package(
-  NAME ${package_name}
-  DESCRIPTION "ROCm SPARSE library"
-  MAINTAINER "rocSPARSE Maintainer <rocsparse-maintainer@amd.com>"
-  LDCONFIG
-  LDCONFIG_DIR ${ROCSPARSE_CONFIG_DIR}
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
+set(ROCSPARSE_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH
+    "Path placed into ldconfig file"
 )
 
-#
-# ADDITIONAL TARGETS FOR CODE COVERAGE
-#
-if(BUILD_CODE_COVERAGE)
-  #
-  # > make coverage_cleanup (clean coverage related files.)
-  # > make coverage GTEST_FILTER=<>
-  # will run:
-  #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
-  #
+# Create package
+rocm_create_package(
+    NAME rocsparse
+    DESCRIPTION "ROCm SPARSE library"
+    MAINTAINER "rocSPARSE Maintainer <rocsparse-maintainer@amd.com>"
+    LDCONFIG
+    LDCONFIG_DIR ${ROCSPARSE_CONFIG_DIR}
+)
 
-  #
-  # Run coverage analysis
-  #
-  add_custom_target(coverage_analysis
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+# --- Coverage setup ---
+
+if(ROCSPARSE_BUILD_COVERAGE)
+    # Coverage analysis target
+    add_custom_target(
+        coverage_analysis
+        COMMAND echo "Running coverage with GTEST_FILTER=\${GTEST_FILTER}"
+        COMMAND ./clients/staging/rocsparse-test --gtest_filter="\${GTEST_FILTER}"
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
-  add_dependencies(coverage_analysis rocsparse)
+    add_dependencies(coverage_analysis rocsparse)
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
-    DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
+    # Coverage output preparation
+    add_custom_target(
+        coverage_output
+        DEPENDS coverage_analysis
+        COMMAND ${CMAKE_COMMAND} -E make_directory lcoverage
+        COMMAND ${CMAKE_COMMAND} -E echo "#!/bin/bash" > llvm-gcov.sh
+        COMMAND ${CMAKE_COMMAND} -E echo "# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
+        COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
+        COMMAND chmod +x llvm-gcov.sh
     )
 
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    # Generate coverage report
+    add_custom_command(
+        TARGET coverage_output
+        COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh
+                --capture -o lcoverage/raw_main_coverage.info
+        COMMAND lcov --remove lcoverage/raw_main_coverage.info
+                "'${PROJECT_SOURCE_DIR}/clients/*'"
+                "'${PROJECT_SOURCE_DIR}/build/*'"
+                "'/opt/*'" "'/usr/*'"
+                -o lcoverage/main_coverage.info
+        COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
     )
 
-  add_custom_target(coverage DEPENDS coverage_output)
+    add_custom_target(coverage DEPENDS coverage_output)
 
-  #
-  # Coverage cleanup
-  #
-  add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    # Coverage cleanup
+    add_custom_target(
+        coverage_cleanup
+        COMMAND find ${CMAKE_BINARY_DIR} -name "*.gcda" -delete
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()

@@ -1,0 +1,37 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default:release",
+      "displayName": "Configure preset for release build with installation to /opt/rocm",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+        "CMAKE_PREFIX_PATH": "/opt/rocm",
+        "ROCSPARSE_BUILD_SHARED_LIBS": "ON"
+      },
+      "environment": {
+        "ROCM_PATH": "/opt/rocm"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Configure preset for debug build with installation to /opt/rocm",
+      "inherits": "default:release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ROCSPARSE_BUILD_TESTING": "ON",
+        "ROCSPARSE_ENABLE_BENCHMARKS": "ON",
+        "ROCSPARSE_ENABLE_SAMPLES": "ON"
+      }
+    }
+  ]
+}
+

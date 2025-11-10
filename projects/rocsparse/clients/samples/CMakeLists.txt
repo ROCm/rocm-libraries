@@ -1,52 +1,28 @@
-# ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-# Function to add rocsparse examples
 function(add_rocsparse_example EXAMPLE_SOURCE)
-  get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
-  add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+    get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
+    add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
-  # Target compile options
-  target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
-
-  # Include common client headers
-  target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-  if (BUILD_CLIENTS_ONLY)
-    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
-  endif()
-
-  # Linker dependencies
-  target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host hip::device)
-  # Target properties
-  set_target_properties(${EXAMPLE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
+    target_compile_features(${EXAMPLE_TARGET} PRIVATE cxx_std_17)
+    
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
+    )
+    
+    target_link_libraries(${EXAMPLE_TARGET} PRIVATE
+        roc::rocsparse
+        hip::host
+        hip::device
+    )
 endfunction()
 
-# Examples
-
-# Empty C program for checking rocsparse headers are C compatible.
-# weird compiler flags on Windows.
+# Empty C program for checking rocsparse headers are C compatible
 if(NOT WIN32)
-  add_rocsparse_example(example_c_headers.c)
+    add_executable(example_c_headers example_c_headers.c)
+    target_link_libraries(example_c_headers PRIVATE roc::rocsparse hip::host hip::device)
 endif()
 
 # Auxiliary
@@ -70,31 +46,20 @@ add_rocsparse_example(example_ellmv.cpp)
 add_rocsparse_example(example_hybmv.cpp)
 add_rocsparse_example(example_csrsv.cpp)
 add_rocsparse_example(example_csritsv.cpp)
-add_rocsparse_example(example_spmv_coo.cpp)
-add_rocsparse_example(example_spmv_csr.cpp)
-add_rocsparse_example(example_spmv_ell.cpp)
 add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
 add_rocsparse_example(example_sptrsv.cpp)
 
-set_source_files_properties(
-  example_spmv_coo.cpp
-  PROPERTIES
-  COMPILE_FLAGS "-Wno-deprecated-declarations"
-)
+# Deprecated examples with warning suppression
+add_rocsparse_example(example_spmv_coo.cpp)
+target_compile_options(example_spmv_coo PRIVATE -Wno-deprecated-declarations)
 
-set_source_files_properties(
-  example_spmv_csr.cpp
-  PROPERTIES
-  COMPILE_FLAGS "-Wno-deprecated-declarations"
-)
+add_rocsparse_example(example_spmv_csr.cpp)
+target_compile_options(example_spmv_csr PRIVATE -Wno-deprecated-declarations)
 
-set_source_files_properties(
-  example_spmv_ell.cpp
-  PROPERTIES
-  COMPILE_FLAGS "-Wno-deprecated-declarations"
-)
+add_rocsparse_example(example_spmv_ell.cpp)
+target_compile_options(example_spmv_ell PRIVATE -Wno-deprecated-declarations)
 
 # Level 3
 add_rocsparse_example(example_bsrmm.cpp)
@@ -124,36 +89,27 @@ add_rocsparse_example(example_csrmv_managed.cpp)
 add_rocsparse_example(example_csrsv_managed.cpp)
 
 # Fortran examples
-if(TARGET rocsparse)
-  # Compile Fortran examples only if built directly with package
-  # else the Fortran module file is not generated
-
-  if (NOT WIN32 AND BUILD_FORTRAN_CLIENTS)
-
+if(ROCSPARSE_ENABLE_FORTRAN AND NOT WIN32)
     function(add_rocsparse_fortran_example EXAMPLE_SOURCE)
-      set( fortran_language "Fortran" )
-      get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
-      add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
-
-      # Target compile options
-      target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
-
-      # Include common client headers
-      target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-      if (BUILD_CLIENTS_ONLY)
-        target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
-      endif()
-
-      # Linker dependencies
-      target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host)
-      if (BUILD_CODE_COVERAGE)
-	      target_link_libraries(${EXAMPLE_TARGET} PRIVATE -lgcov)
-      endif()
-
-      target_link_libraries( ${EXAMPLE_TARGET} PRIVATE rocsparse_fortran )
-
-      # Target properties
-      set_target_properties(${EXAMPLE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+        get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
+        add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+        
+        target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
+        
+        target_include_directories(${EXAMPLE_TARGET} PRIVATE
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
+        )
+        
+        target_link_libraries(${EXAMPLE_TARGET} PRIVATE
+            roc::rocsparse
+            rocsparse-fortran-module
+            hip::host
+            # Fortran calling C++ requires explicit C++ runtime deps
+            Threads::Threads
+            $<$<PLATFORM_ID:Linux>:m>
+            $<$<PLATFORM_ID:Linux>:stdc++>
+            $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>
+        )
     endfunction()
 
     add_rocsparse_fortran_example(example_fortran_gtsv.f90)
@@ -170,12 +126,10 @@ if(TARGET rocsparse)
     add_rocsparse_fortran_example(example_fortran_auxiliary.f90)
     add_rocsparse_fortran_example(example_fortran_dotci.f90)
     add_rocsparse_fortran_example(example_fortran_roti.f90)
-  endif()
 endif()
 
-# Build documentation examples
-FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
-
+# Documentation examples
+file(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})
 endforeach()

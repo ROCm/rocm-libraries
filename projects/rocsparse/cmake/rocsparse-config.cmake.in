@@ -1,0 +1,26 @@
+@PACKAGE_INIT@
+
+# Find dependencies
+find_dependency(hip)
+find_dependency(rocprim)
+
+# Include the export file
+set_and_check(rocsparse_TARGET_FILE "@PACKAGE_CONFIG_PACKAGE_INSTALL_DIR@/rocsparse-targets.cmake")
+include(${rocsparse_TARGET_FILE})
+
+# Set include directories
+set_and_check(rocsparse_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocsparse_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCSPARSE_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCSPARSE_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@")
+
+# Set library variables to use namespaced target
+# This ensures backward compatibility with old FindrocSPARSE.cmake usage
+set(rocsparse_LIBRARIES roc::rocsparse)
+set(rocsparse_LIBRARY roc::rocsparse)
+set(ROCSPARSE_LIBRARIES roc::rocsparse)
+set(ROCSPARSE_LIBRARY roc::rocsparse)
+
+# For backward compatibility with projects checking specific version variables
+set(rocsparse_VERSION @rocsparse_VERSION@)
+set(ROCSPARSE_VERSION @rocsparse_VERSION@)
