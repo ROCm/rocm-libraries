@@ -33,6 +33,8 @@ target_link_libraries(
                                           Threads::Threads
 )
 
+add_dependencies(miopen_plugin_integration_test miopen_legacy_plugin)
+
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_plugin_integration_test)
 endif()
