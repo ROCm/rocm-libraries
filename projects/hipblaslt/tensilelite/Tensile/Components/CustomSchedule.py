@@ -511,7 +511,44 @@ def hasCustomSchedule(kernel):
                         SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
-
+        elif isNT and not useLDSTr and TLDS == 0:
+            kernel["UsePLRPack"] = True
+            
+            optSchedule = {
+                'SYNC': [[-1, 32, 32, 46, 46, 55, 55]],
+                'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+                'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+                'LRA0': [[0, 0, 2, 2, 4, 4, 6, 6, 16, 16, 18, 18, 20, 20, 22, 22, 24, 24, 26, 26, 28, 28, 30 ,30],
+                         [1, 1, 3, 3, 5, 5, 7, 7, 17, 17, 19, 19, 21, 21, 23, 23, 25, 25, 27, 27, 29, 29, 31, 31]],
+                'LRB0': [[8, 8, 10, 10, 12, 12, 14, 14],
+                         [9, 9, 11, 11, 13, 13, 15, 15],],
+                'GRA': [[32, 32, 34, 34, 36, 36, 38, 38, 40, 40, 42, 42],
+                        [33, 33, 35, 35, 37, 37, 39, 39, 41, 41, 43, 43]],
+                'GRB': [[47, 47, 49, 49, 51, 51, 53, 53, 63, 63, 65, 65, 67, 67, 69, 69],
+                        [48, 48, 50, 50, 52, 52, 54, 54, 64, 64, 66, 66, 68, 68, 70, 70]],
+                'LRA1': [[55, 55, 57, 57, 59, 59, 61, 61, 72, 72, 74, 74, 76, 76, 78, 78, 88, 88, 90, 90, 92, 92, 94, 94],
+                         [56, 56, 58, 58, 60, 60, 62, 62, 73, 73, 75, 75, 77, 77, 79, 79, 89, 89, 91, 91, 93, 93, 95, 95]],
+                'LRB1': [[ 80, 80, 82, 82, 84, 84, 86, 86],
+                         [ 81, 81, 83, 83, 85, 85, 87, 87]],
+                'LRSA': [[46]],
+                'LRSB': [[46]],
+                'LWSA': [[78]],
+                'LWSB': [[78]],
+                'PackB1': [[-1, -1, -1, -1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5]],
+                'PackA1': [[-1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2]],
+                'PackB0': [[47, 47, 47, 47, 50, 50, 50, 50, 50, 50, 51, 51, 51, 51, 51, 51, 51, 51, 52, 52, 52, 52, 52, 52, 52, 52, 53, 53, 53, 53, 53, 53]],
+                'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 48, 48, 48, 48, 49, 49, 49, 49, 49, 49, 49, 49, 50, 50]],
+                'LCC'   : [[95, 95]],
+            }
+            
+            syncCode = [SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0") ,
+                        SWaitCnt(dscnt=32, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
+                        SBarrier(comment="") ,
+                        SWaitCnt(dscnt=32, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
+                        SBarrier(comment="") ,
+                        SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads") ,
+                        SBarrier(comment="") ,
+            ]
         else:
             return False, None
 
