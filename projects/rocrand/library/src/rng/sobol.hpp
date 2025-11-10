@@ -75,9 +75,11 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution,
-         host::target_arch Arch = host::target_arch::unknown>
-void generate_sobol_host(dim3,
+         class Distribution>
+struct generate_sobol_host
+{
+    template<host::target_arch Arch = host::target_arch::unknown>
+    static void generate(dim3,
                          dim3,
                          dim3,
                          dim3,
@@ -87,7 +89,8 @@ void generate_sobol_host(dim3,
                          const Constant*,
                          const unsigned int,
                          Distribution)
-{}
+    {}
+};
 
 template<unsigned int OutputPerThread,
          bool         Scrambled,
@@ -122,9 +125,11 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution,
-         host::target_arch Arch = host::target_arch::unknown>
-void generate_sobol_host(dim3               block_idx,
+         class Distribution>
+struct generate_sobol_host
+{
+    template<host::target_arch Arch = host::target_arch::unknown>
+    static void generate(dim3               block_idx,
                          dim3               thread_idx,
                          dim3               grid_dim,
                          dim3               block_dim,
@@ -263,6 +268,9 @@ void generate_sobol_host(dim3               block_idx,
         }
     }
 }
+#ifndef __HIP_DEVICE_COMPILE__
+};
+#endif
 
 template<bool Is64, bool Scrambled, bool UseSharedVectors>
 struct sobol_device_engine;
@@ -727,18 +735,13 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            auto generate_sobol_host_kernel = [&] __host__ __device__(auto arch, auto... args)
-            {
-                generate_sobol_host<output_per_thread,
-                                    Scrambled,
-                                    engine_type,
-                                    constant_type,
-                                    T,
-                                    Distribution,
-                                    arch>(args...);
-            };
-            status = system_type::template launch<block_size_provider>(generate_sobol_host_kernel,
-                                                                       target_arch,
+            status = system_type::template launch<generate_sobol_host<output_per_thread,
+                                                                      Scrambled,
+                                                                      engine_type,
+                                                                      constant_type,
+                                                                      T,
+                                                                      Distribution>,
+                                                  block_size_provider>(target_arch,
                                                                        dim3(blocks_x, blocks_y),
                                                                        dim3(threads),
                                                                        shared_mem_bytes,
