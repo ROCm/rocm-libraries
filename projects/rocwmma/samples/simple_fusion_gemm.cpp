@@ -597,7 +597,6 @@ ROCWMMA_DEVICE static inline void
         for(int j = 0; j < BLOCKS_Y; j++)
         {
             store_matrix_sync(gAddrD + offsetY, fragsD[i][j], ldd);
-            // printf("offsetY:%u\n",offsetY);
             offsetY += blockStepY;
         }
         gAddrD += blockStepX;
