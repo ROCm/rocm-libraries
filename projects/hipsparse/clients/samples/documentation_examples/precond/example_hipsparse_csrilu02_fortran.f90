@@ -184,11 +184,11 @@ program example_hipsparse_csrilu02
     ! Matrix A (4x4) in CSR format
     integer, parameter :: m = 4
     integer, parameter :: n = 4
-    integer, parameter :: nnz = 9
+    integer, parameter :: nnz = 10
     
-    integer, dimension(m+1), target :: hcsrRowPtr = (/0, 2, 4, 7, 9/)
-    integer, dimension(nnz), target :: hcsrColInd = (/0, 1, 1, 2, 0, 2, 3, 2, 3/)
-    real(c_float), dimension(nnz), target :: hcsrVal = (/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0/)
+    integer, dimension(m+1), target :: hcsrRowPtr = (/0, 2, 5, 8, 10/)
+    integer, dimension(nnz), target :: hcsrColInd = (/0, 1, 0, 1, 2, 1, 2, 3, 2, 3/)
+    real(c_float), dimension(nnz), target :: hcsrVal = (/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0/)
     
     ! Result array
     real(c_float), dimension(nnz), target :: hcsrVal_result

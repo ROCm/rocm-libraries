@@ -61,6 +61,16 @@ int main(int argc, char* argv[])
 
     float* hA = (float*)malloc(nnz_A * sizeof(float));
     float* hC = (float*)malloc(nnz_C * sizeof(float));
+    
+    // Initialize A and C to 1.0
+    for(int i = 0; i < nnz_A; i++)
+    {
+        hA[i] = 1.0f;
+    }
+    for(int i = 0; i < nnz_C; i++)
+    {
+        hC[i] = 1.0f;
+    }
 
     int*   dcscColPtr;
     int*   dcscRowInd;

@@ -46,3 +46,16 @@ extensions.extend([
 # Configure Breathe (Doxygen integration)
 breathe_projects = {"hipsparse": "doxygen/xml"}
 breathe_default_project = "hipsparse"
+
+# Configure sphinx-tabs to prevent collapsing when clicking the same tab
+sphinx_tabs_disable_tab_closing = True
+
+# Add custom static files
+if 'html_static_path' not in globals():
+    html_static_path = []
+if '_static' not in html_static_path:
+    html_static_path.append('_static')
+
+if 'html_js_files' not in globals():
+    html_js_files = []
+html_js_files.append('custom_tabs.js')

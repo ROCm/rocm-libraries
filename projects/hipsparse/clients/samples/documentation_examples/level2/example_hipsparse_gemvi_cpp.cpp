@@ -44,7 +44,7 @@
         }                                                                            \
     }
 
-/*! [doc example start] */
+//! [doc example start]
 int main(int argc, char* argv[])
 {
     hipsparseOperation_t opA     = HIPSPARSE_OPERATION_NON_TRANSPOSE;
@@ -142,4 +142,4 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-/*! [doc example end] */
+//! [doc example end]

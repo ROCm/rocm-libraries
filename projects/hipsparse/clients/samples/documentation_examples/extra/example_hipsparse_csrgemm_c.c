@@ -169,7 +169,7 @@ int main(int argc, char* argv[])
         int start = hcsrRowPtrC[i];
         int end   = hcsrRowPtrC[i + 1];
 
-        float* temp = (float*)malloc(n * sizeof(float));
+        float* temp = (float*)calloc(n, sizeof(float));
         for(int j = start; j < end; j++)
         {
             temp[hcsrColIndC[j]] = hcsrValC[j];
@@ -180,6 +180,7 @@ int main(int argc, char* argv[])
             printf("%f ", temp[j]);
         }
         printf("\n");
+        free(temp);
     }
     printf("\n");
 

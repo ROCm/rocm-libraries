@@ -89,14 +89,17 @@ program example_fortran_csrgeam2
     integer, target :: h_csr_row_ptr_a(5), h_csr_col_ind_a(9)
     integer, target :: h_csr_row_ptr_b(5), h_csr_col_ind_b(6)
     integer, target :: h_csr_row_ptr_c(5)
+    integer, allocatable, target :: h_csr_col_ind_c(:)
     real(4), target :: h_csr_val_a(9), h_csr_val_b(6)
+    real(4), allocatable, target :: h_csr_val_c(:)
+    real(4) :: temp(4)
 
     type(c_ptr) :: d_csr_row_ptr_a, d_csr_col_ind_a, d_csr_val_a
     type(c_ptr) :: d_csr_row_ptr_b, d_csr_col_ind_b, d_csr_val_b
     type(c_ptr) :: d_csr_row_ptr_c, d_csr_col_ind_c, d_csr_val_c
     type(c_ptr) :: d_buffer
 
-    integer :: i
+    integer :: i, j, row_start, row_end
     integer(c_int) :: m, n, nnz_a, nnz_b
     integer(c_int), target :: nnz_c
     integer(c_size_t), target :: buffer_size
@@ -105,8 +108,6 @@ program example_fortran_csrgeam2
 
     type(c_ptr) :: handle
     type(c_ptr) :: descr_a, descr_b, descr_c
-
-    integer :: version
 
 !   Input data
     m = 4
@@ -152,11 +153,6 @@ program example_fortran_csrgeam2
     call HIPSPARSE_CHECK(hipsparseCreateMatDescr(descr_a))
     call HIPSPARSE_CHECK(hipsparseCreateMatDescr(descr_b))
     call HIPSPARSE_CHECK(hipsparseCreateMatDescr(descr_c))
-
-!   Get hipSPARSE version
-    call HIPSPARSE_CHECK(hipsparseGetVersion(handle, version))
-    write(*,fmt='(A,I0,A,I0,A,I0)') 'hipSPARSE version: ', version / 100000, '.', &
-        mod(version / 100, 1000), '.', mod(version, 100)
 
 !   Get buffer size
     call HIPSPARSE_CHECK(hipsparseScsrgeam2_bufferSizeExt(handle, &
@@ -226,8 +222,40 @@ program example_fortran_csrgeam2
                                            d_csr_col_ind_c, &
                                            d_buffer))
 
-!   Print result
-    write(*,fmt='(A,I0)') 'nnz_c = ', nnz_c
+!   Allocate host memory for C
+    allocate(h_csr_col_ind_c(nnz_c))
+    allocate(h_csr_val_c(nnz_c))
+
+!   Copy result back to host
+    call HIP_CHECK(hipMemcpy(c_loc(h_csr_row_ptr_c), d_csr_row_ptr_c, int(m + 1, c_size_t) * 4, 2))
+    call HIP_CHECK(hipMemcpy(c_loc(h_csr_col_ind_c), d_csr_col_ind_c, int(nnz_c, c_size_t) * 4, 2))
+    call HIP_CHECK(hipMemcpy(c_loc(h_csr_val_c), d_csr_val_c, int(nnz_c, c_size_t) * 4, 2))
+
+!   Print result in dense format
+    write(*,'(A)') 'C'
+    do i = 1, m
+        row_start = h_csr_row_ptr_c(i) + 1
+        row_end = h_csr_row_ptr_c(i + 1)
+        
+        ! Initialize temp array to zeros
+        temp = 0.0
+        
+        ! Fill in non-zero values
+        do j = row_start, row_end
+            temp(h_csr_col_ind_c(j) + 1) = h_csr_val_c(j)
+        end do
+        
+        ! Print the row
+        do j = 1, n
+            write(*,'(I0,1X)',advance='no') int(temp(j))
+        end do
+        write(*,*)
+    end do
+    write(*,*)
+
+!   Deallocate host arrays
+    deallocate(h_csr_col_ind_c)
+    deallocate(h_csr_val_c)
 
 !   Clear hipSPARSE
     call HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr_a))

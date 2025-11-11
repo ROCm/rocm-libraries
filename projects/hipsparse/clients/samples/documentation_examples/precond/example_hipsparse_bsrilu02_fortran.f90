@@ -196,11 +196,11 @@ program example_hipsparse_bsrilu02
     integer, parameter :: bs = 1
     integer, parameter :: mb = m / bs
     integer, parameter :: nb = n / bs
-    integer, parameter :: nnzb = 9
+    integer, parameter :: nnzb = 10
     
-    integer, dimension(mb+1), target :: hbsrRowPtr = (/0, 2, 4, 7, 9/)
-    integer, dimension(nnzb), target :: hbsrColInd = (/0, 1, 1, 2, 0, 2, 3, 2, 3/)
-    real(c_float), dimension(nnzb*bs*bs), target :: hbsrVal = (/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0/)
+    integer, dimension(mb+1), target :: hbsrRowPtr = (/0, 2, 5, 8, 10/)
+    integer, dimension(nnzb), target :: hbsrColInd = (/0, 1, 0, 1, 2, 1, 2, 3, 2, 3/)
+    real(c_float), dimension(nnzb*bs*bs), target :: hbsrVal = (/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0/)
     
     ! Result array
     real(c_float), dimension(nnzb*bs*bs), target :: hbsrVal_result

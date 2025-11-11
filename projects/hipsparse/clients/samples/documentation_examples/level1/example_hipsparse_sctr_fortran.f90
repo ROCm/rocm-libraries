@@ -108,7 +108,7 @@ program example_fortran_sctr
 
 !   Fill structures
     h_xind = (/0, 3, 5/)
-    h_xval = (/1.0, 2.0, 3.0/)
+    h_xval = (/9.0, 2.0, 3.0/)
     h_y    = (/1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0/)
 
 !   Allocate device memory

@@ -193,6 +193,13 @@ int main(int argc, char* argv[])
     // Copy result back to host
     HIP_CHECK(hipMemcpy(hB, dB, sizeof(double) * m * nrhs, hipMemcpyDeviceToHost));
 
+    printf("hB\n");
+    for(int i = 0; i < m * nrhs; i++)
+    {
+        printf("%f ", hB[i]);
+    }
+    printf("\n");
+
     // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroyCsrsm2Info(info));
     HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr));
