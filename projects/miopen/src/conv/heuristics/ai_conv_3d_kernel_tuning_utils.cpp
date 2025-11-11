@@ -26,16 +26,15 @@
  * general AI-related code for kernel tuning and heuristics. To be called in the
  * solver-specific code.
  *******************************************************************************/
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
-#include <sstream>
 #include <algorithm>
+#include <iterator>
+#include <map>
+#include <sstream>
+#include <string>
+
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/conv/problem_description.hpp>
-#include <map>
-#include <string>
-#include <iterator>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
