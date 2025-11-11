@@ -54,7 +54,7 @@ namespace TopologicalCompareTest
 
         auto graphPtr = std::make_shared<rocRoller::KernelGraph::KernelGraph>(graph);
 
-        std::string constructionMethod = GENERATE("reference", "pointer", "shared_ptr");
+        std::string constructionMethod = GENERATE("reference", "pointer");
         DYNAMIC_SECTION("Construction from " << constructionMethod)
         {
             auto testComparator = [&](KernelGraph::TopologicalCompare&& comp) {
@@ -121,10 +121,17 @@ namespace TopologicalCompareTest
                 }
             };
 
-            KernelGraph::TopologicalCompare comp(graph);
             if(constructionMethod == "reference")
             {
                 testComparator(KernelGraph::TopologicalCompare(graph));
+            }
+            else if(constructionMethod == "pointer")
+            {
+                testComparator(KernelGraph::TopologicalCompare(&graph));
+            }
+            else
+            {
+                FAIL();
             }
         }
     }
