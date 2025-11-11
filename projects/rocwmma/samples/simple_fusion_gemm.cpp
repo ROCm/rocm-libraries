@@ -578,7 +578,7 @@ ROCWMMA_DEVICE static inline void
     }
 }
 
-// Global D reads for warp tile gemm, non-cooperative
+// Global D writes for warp tile gemm, non-cooperative
 ROCWMMA_DEVICE static inline void
     globalWriteD(OutputT* gAddrD, MfmaFragAcc const (&fragsD)[BLOCKS_X][BLOCKS_Y], uint32_t ldd)
 {
