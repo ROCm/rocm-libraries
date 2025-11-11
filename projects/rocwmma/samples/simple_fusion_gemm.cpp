@@ -51,8 +51,6 @@
 * And for S (the result of AxB) x C, the current performance isn’t particularly good.
 * This sample showcases fusing two matmuls and serves as a basic reference for users opting
 * to use rocWMMA for attention-style architectures.
-
-
 *
 * Unlike the other samples, we use a 1D grid instead of a 2D grid.
 * Since tensors in neural networks are typically 4-D (B, H, N, D or B, N, H, D),
