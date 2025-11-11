@@ -7,6 +7,7 @@
 #include <ostream>
 #include <vector>
 
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 namespace test_conv_common
@@ -87,7 +88,7 @@ struct ConvTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
     {
-        using namespace hipdnn_sdk::test_utilities;
+        using namespace hipdnn_sdk::utilities;
 
         ss << "(x:";
         vecToStream(ss, tc.xDims);
@@ -112,7 +113,7 @@ struct ConvTestCase
 
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -130,12 +131,16 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
         {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         // Non-square
         {{1, 16, 16, 8}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16, 16}, {4, 8, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {2, 2}, seed},
     };
 }
 
 inline std::vector<ConvTestCase> getConvTestCases5D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -153,6 +158,10 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
         {{8, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
         // Non-square
         {{1, 16, 16, 8, 4}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16, 16, 16}, {2, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
     };
 }
 

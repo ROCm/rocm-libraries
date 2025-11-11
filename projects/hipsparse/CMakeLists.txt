@@ -23,6 +23,8 @@
 
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
+
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
 if(WIN32)

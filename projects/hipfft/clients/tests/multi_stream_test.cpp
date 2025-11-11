@@ -140,7 +140,7 @@ public:
             std::vector<size_t> sub_strides(sub_dft.length.size());
             for(int stride_idx = sub_strides.size() - 1; stride_idx >= 0; stride_idx--)
             {
-                if(stride_idx == sub_strides.size() - 1)
+                if(static_cast<size_t>(stride_idx) == sub_strides.size() - 1)
                 {
                     sub_strides[stride_idx] = total_batch_for_step;
                 }

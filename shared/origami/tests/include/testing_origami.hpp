@@ -323,7 +323,8 @@ void ComputeTotalLatency(const origami::hardware_t& hardware,
                          size_t                     element_size_out, //In bits
                          size_t                     mx_block_size,
                          int                        WGM,
-                         size_t                     splittingFactor)
+                         size_t                     splittingFactor,
+                         size_t                     max_cus)
 {
     double latency_cycles_small = origami::compute_total_latency(hardware,
                                                                  M,
@@ -346,7 +347,8 @@ void ComputeTotalLatency(const origami::hardware_t& hardware,
                                                                  WGM,
                                                                  0,
                                                                  0,
-                                                                 splittingFactor);
+                                                                 splittingFactor,
+                                                                 max_cus);
 
     double latency_cycles_large = origami::compute_total_latency(hardware,
                                                                  M * 2,
@@ -369,7 +371,8 @@ void ComputeTotalLatency(const origami::hardware_t& hardware,
                                                                  WGM,
                                                                  0,
                                                                  0,
-                                                                 splittingFactor);
+                                                                 splittingFactor,
+                                                                 max_cus);
     EXPECT_LT(latency_cycles_small, latency_cycles_large);
 }
 
@@ -388,7 +391,8 @@ void ComputePerfGflops(size_t M,
                        size_t element_size_A, //In bits
                        size_t element_size_B, //In bits,
                        size_t element_size_out, //In bits
-                       int    WGM)
+                       int    WGM,
+                       size_t max_cus)
 {
     auto gfx942arch  = origami::hardware_t::arch_name_to_enum("gfx942");
     auto gfx942_slow = origami::hardware_t(
@@ -412,7 +416,8 @@ void ComputePerfGflops(size_t M,
                                                      element_size_B,
                                                      element_size_out,
                                                      origami::data_type_t::BFloat16,
-                                                     WGM);
+                                                     WGM,
+                                                     max_cus);
     double flops_fast = origami::compute_perf_gflops(gfx942_fast,
                                                      M,
                                                      N,
@@ -430,7 +435,8 @@ void ComputePerfGflops(size_t M,
                                                      element_size_B,
                                                      element_size_out,
                                                      origami::data_type_t::BFloat16,
-                                                     WGM);
+                                                     WGM,
+                                                     max_cus);
     EXPECT_GT(flops_fast, flops_slow); // faster clock = higher flops
 }
 
@@ -499,8 +505,9 @@ void BestGridSize(const origami::hardware_t& hardware,
                   size_t                     element_size_out,
                   size_t                     mx_block_size,
                   double                     H_L2,
-                  size_t                     WGM,
+                  int                        WGM,
                   size_t                     biggest_allowable_split,
+                  size_t                     max_cus,
                   const std::optional<int>   expected_gt)
 {
     size_t grid_size = origami::select_best_grid_size(M,
@@ -523,7 +530,8 @@ void BestGridSize(const origami::hardware_t& hardware,
                                                       mx_block_size,
                                                       H_L2,
                                                       WGM,
-                                                      biggest_allowable_split);
+                                                      biggest_allowable_split,
+                                                      max_cus);
     EXPECT_GT(grid_size, expected_gt);
 }
 
@@ -539,7 +547,8 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                        size_t                     element_size_out, //In bits
                        size_t                     mx_block_size,
                        double                     H_L2,
-                       size_t                     WGM)
+                       size_t                     WGM,
+                       size_t                     max_cus)
 {
     const std::vector<std::tuple<size_t, // MT_M
                                  size_t, // MT_N
@@ -547,7 +556,7 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                                  size_t, // MI_M
                                  size_t, // MI_N
                                  size_t, // MI_K
-                                 size_t, // Occupancy
+                                 int, // Occupancy
                                  int, // wgm
                                  size_t, // non_temporal_a
                                  size_t // non_temporal_b
@@ -570,7 +579,8 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                                                mx_block_size,
                                                H_L2,
                                                false,
-                                               WGM);
+                                               WGM,
+                                               max_cus);
 
     EXPECT_EQ(results.size(), MT_list.size());
     for(int i = 0; i < results.size() - 1; i++)
@@ -584,65 +594,59 @@ void BestWGM(const origami::hardware_t& hardware,
              size_t                     batch,
              size_t                     MT_M,
              size_t                     MT_N,
-             size_t                     MT_K,
-             size_t                     MI_M,
-             size_t                     MI_N,
-             size_t                     MI_K,
-             size_t                     element_size,
-             double H_L2) // not needed for L2 hit rate but retained if your code expects it
+             size_t                     MT_K)
 {
-    std::vector<size_t> WGM_list = {1, 2, 4, 6, 8, 12};
+    // Assume no nt
+    auto nta = 0;
+    auto ntb = 0;
+    // Assume DP
+    auto skGrid = (M + MT_M - 1) / MT_M * (N + MT_N - 1) / MT_N;
 
-    auto best_wgm_large_tile = select_best_wgm(M,
-                                               N,
-                                               K,
-                                               batch,
-                                               hardware,
-                                               MT_M,
-                                               MT_N,
-                                               MT_K,
-                                               MI_M,
-                                               MI_N,
-                                               MI_K,
-                                               WGM_list,
-                                               element_size,
-                                               H_L2,
-                                               false);
+    auto [best_wgmxcc_large_tile, best_wgm_large_tile] = 
+        select_best_wgm(hardware,
+                        M,
+                        N,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
-    auto best_wgm_small_tile = select_best_wgm(M / 4,
-                                               N / 4,
-                                               K,
-                                               batch,
-                                               hardware,
-                                               MT_M,
-                                               MT_N,
-                                               MT_K * 2,
-                                               MI_M,
-                                               MI_N,
-                                               MI_K,
-                                               WGM_list,
-                                               element_size,
-                                               H_L2,
-                                               false);
+    auto [best_wgmxcc_small_tile, best_wgm_small_tile] = 
+        select_best_wgm(hardware,
+                        M / 4,
+                        N / 4,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K * 2,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
-    auto best_wgm_nonsquare = select_best_wgm(1024,
-                                              5120,
-                                              K,
-                                              batch,
-                                              hardware,
-                                              MT_M,
-                                              MT_N,
-                                              MT_K,
-                                              MI_M,
-                                              MI_N,
-                                              MI_K,
-                                              WGM_list,
-                                              element_size,
-                                              H_L2,
-                                              false);
+    auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare_tile] = 
+        select_best_wgm(hardware,
+                        1024,
+                        5120,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
-    EXPECT_GT(best_wgm_large_tile.second, best_wgm_small_tile.second);
-    EXPECT_NE(best_wgm_large_tile.second, best_wgm_nonsquare.second);
+    EXPECT_EQ(best_wgmxcc_large_tile, best_wgmxcc_small_tile);
+    EXPECT_GT(best_wgm_large_tile, best_wgm_small_tile);
+    EXPECT_NE(best_wgm_large_tile, best_wgm_nonsquare_tile);
 }
 
 void UtilsTFlopsFromLatency(size_t M, size_t N, size_t K, double latency_cycles, double clock_GHz)

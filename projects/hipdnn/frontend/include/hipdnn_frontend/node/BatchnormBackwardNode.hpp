@@ -124,36 +124,18 @@ public:
         return {};
     }
 
-    void gather_hipdnn_tensor_ids(std::unordered_set<int64_t>& usedIds,
-                                  std::unordered_set<int64_t>& duplicateIds) const override
+    void gather_hipdnn_tensors(
+        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
     {
-        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensor_ids(usedIds, duplicateIds);
+        BaseNode<BatchnormBackwardNode>::gather_hipdnn_tensors(allTensors);
 
         for(auto& tensor : attributes.peer_stats)
         {
-            processTensorUid(tensor, usedIds, duplicateIds);
-        }
-    }
-
-    Error populate_hipdnn_tensor_ids(
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorLookup,
-        int64_t& currentTensorId,
-        std::unordered_set<int64_t>& usedIds) const override
-    {
-        BaseNode<BatchnormBackwardNode>::populate_hipdnn_tensor_ids(
-            tensorLookup, currentTensorId, usedIds);
-
-        for(auto& tensor : attributes.peer_stats)
-        {
-            if(tensor && !tensor->has_uid())
+            if(tensor)
             {
-                tensor->set_uid(get_unused_tensor_uid(currentTensorId, usedIds));
+                allTensors.insert(tensor);
             }
-
-            tensorLookup[tensor->get_uid()] = tensor;
         }
-
-        return {};
     }
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
@@ -162,6 +144,7 @@ public:
         return hipdnn_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
             hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
             attributes.pack_attributes(builder).Union());
     }

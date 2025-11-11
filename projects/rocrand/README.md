@@ -75,7 +75,15 @@ git clone https://github.com/ROCm/rocm-libraries.git
 cd rocm-libraries/projects/rocrand; mkdir build; cd build
 
 # Configure rocRAND, setup options for your system
-# Build options: BUILD_TEST (off by default), BUILD_BENCHMARK (off by default), BUILD_SHARED_LIBS (on by default)
+# Build options:
+#   BUILD_SHARED_LIBS - ON by default.
+#   BUILD_TEST        - OFF by default.
+#   BUILD_BENCHMARK   - OFF by default.
+#   USE_SYSTEM_LIB    - OFF by default. Setting it to ON will build tests using the existing ``rocrand``
+#                       library installation from the system. This only takes effect when BUILD_TEST is ON
+#                       and the ``rocrand`` installation must be compatible with the version of the tests.
+#                       This option can be used to build tests exclusively when you do not intend to build
+#                       the library nor the benchmarks.
 # Additionally, the ROCm installation prefix should be passed using CMAKE_PREFIX_PATH or by setting the ROCM_PATH environment variable.
 #
 # ! IMPORTANT !
@@ -98,8 +106,7 @@ ctest --output-on-failure
 
 ### SPIR-V
 
-rocRAND supports the `amdgcnspirv` target, but it should be built with `USE_DEVICE_DISPATCH`
-turned off like `-DUSE_DEVICE_DISPATCH=0`.
+rocRAND supports the `amdgcnspirv` target, it should be built with `-DAMDGPU_TARGETS=amdgcnspirv`.
 
 ### HIP on Windows
 
