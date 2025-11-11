@@ -54,8 +54,7 @@ extern "C" {
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
-*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend. 
-*  For portable code across backends, consider using the generic sparse APIs instead.
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
