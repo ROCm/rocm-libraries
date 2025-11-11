@@ -1012,7 +1012,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
     }
 }
 
-//simple cpu gemm impletment, no alpha/bias processing, only do d=a*b
+// Simple CPU GEMM implementation, no alpha/bias processing, only do d=a*b
 template <typename InputT,
           typename OutputT,
           typename ComputeT,
