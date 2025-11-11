@@ -640,27 +640,6 @@ def smallMN_largeK_fp32():
     )
 
 
-def smallMN_largeK_streamk_fp32():
-    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
-        yield mkGEMM(
-            SGEMM_256x256x16384,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
-            visualize=False,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
-            streamK=True,
-            streamKTwoTile=twoTile,
-            streamKTwoTileDPFirst=twoTileDPFirst,
-            types=TypeParameters(
-                SGEMM_256x256x16384["types"],
-                trans_A="T",
-                trans_B="N",
-            ),
-        )
-
-
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
     sgemm = update_parameters(
@@ -1782,14 +1761,13 @@ def all():
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
 
-    yield from smallMN_largeK_fp32()
-    yield from smallMN_largeK_streamk_fp32()
     yield from sgemm()
     yield from hgemm()
     yield from hgemm_no_store_LDS()
     yield from streamk()
     yield from streamk_sweep()
     yield from scalar_is_zero()
+    yield from smallMN_largeK_fp32()
     yield from codegen()
 
 
