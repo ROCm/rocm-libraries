@@ -389,7 +389,7 @@ namespace
                         {
                             if(fwd_domain_nembed[dim_idx] % 2 == 1)
                                 throw valid_values_cannot_be_created();
-                            ret[dim_idx] = ret[dim_idx] / 2 + 1;
+                            ret[dim_idx] = ret[dim_idx] / 2;
                         }
                         if(ret[dim_idx] < min_nembed)
                             throw valid_values_cannot_be_created();
@@ -426,10 +426,9 @@ namespace
                 check = ret[dim] >= min_nembed && ret[dim] > 0;
                 if(placement == fft_placement_inplace && check)
                 {
-                    check
-                        = ret[dim]
-                          == (dim == ret.size() - 1 && is_real_dft ? fwd_domain_nembed[dim] / 2 + 1
-                                                                   : fwd_domain_nembed[dim]);
+                    check = ret[dim]
+                            == (dim == ret.size() - 1 && is_real_dft ? fwd_domain_nembed[dim] / 2
+                                                                     : fwd_domain_nembed[dim]);
                 }
             }
             return check;
