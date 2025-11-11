@@ -261,10 +261,7 @@ using namespace rocwmma;
 *|         | ROCWMMA_M | ROCWMMA_N | ROCWMMA_K | BLOCKS_X | BLOCKS_Y | TBLOCK_X | TBLOCK_Y |
 *|_________|___________|___________|___________|__________|__________|__________|__________|
 *|         |           |           |           |          |          |          |          |
-*|  GFX_9  |    32     |    32     |    16     |    2     |    2     |   128    |    2     |
-*|_________|___________|___________|___________|__________|__________|__________|__________|
-*|         |           |           |           |          |          |          |          |
-*|  GFX_11 |    16     |    16     |    16     |    4     |    2     |    64    |    4     |
+*|  GFX_9  |    16     |    16     |    32     |    2     |    2     |   128    |    2     |
 *|_________|___________|___________|___________|__________|__________|__________|__________|
 *
 * __________________________________________
@@ -273,9 +270,6 @@ using namespace rocwmma;
 *|_________|________________________________|
 *|         |                                |
 *|  GFX_9  | Constants::AMDGCN_WAVE_SIZE_64 |
-*|_________|________________________________|
-*|         |                                |
-*|  GFX_11 | Constants::AMDGCN_WAVE_SIZE_32 |
 *|_________|________________________________|
 */
 
@@ -294,26 +288,7 @@ namespace gfx9Params
     };
 }
 
-namespace gfx11Params
-{
-    enum kernelParams : uint32_t
-    {
-        ROCWMMA_M = 16u,
-        ROCWMMA_N = 16u,
-        ROCWMMA_K = 16u,
-        BLOCKS_X  = 4u,
-        BLOCKS_Y  = 2u,
-        TBLOCK_X  = 64u,
-        TBLOCK_Y  = 4u,
-        WARP_SIZE = Constants::AMDGCN_WAVE_SIZE_32
-    };
-}
-
-#if(ROCWMMA_ARCH_GFX9)
 using namespace gfx9Params;
-#else
-using namespace gfx11Params;
-#endif // defined(ROCWMMA_ARCH_GFX9)
 
 ///
 /// Types and Data Layouts
@@ -337,7 +312,6 @@ using DataLayoutLds_new = row_major;
 /// Fragment types
 ///
 
-// #if (ROCWMMA_ARCH_GFX9 || ROCWMMA_ARCH_GFX11)
 // Warp tile: computed by each warp
 constexpr uint32_t WARP_TILE_X = BLOCKS_X * ROCWMMA_M;
 constexpr uint32_t WARP_TILE_Y = BLOCKS_Y * ROCWMMA_N;
@@ -772,10 +746,10 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
 
             // Bounds check
             auto warpTileBound = warpTileCoord + warpTileSize;
-            // if(get<0>(warpTileBound) > m || get<1>(warpTileBound) > n)
-            // {
-            //     continue;
-            // }
+            if(get<0>(warpTileBound) > m || get<1>(warpTileBound) > n)
+            {
+                return;
+            }
 
             ///
             /// 1D global read coordinate setup
@@ -960,7 +934,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
 
                 auto ldsWriteOffsetV = MACRO_TILE_X * MACRO_TILE_Y;
                 auto ldsReadOffsetS  = get<0>(localWarpOffset) * ldsld_new;
-                auto ldsReadOffsetV = ldsWriteOffsetV
+                auto ldsReadOffsetV  = ldsWriteOffsetV
                                       + LWBuffVMap1d::fromMatrixCoord(
                                           make_coord2d(get<1>(localWarpOffset), 0u), ldsld_new);
 
@@ -1046,13 +1020,13 @@ ROCWMMA_HOST void gemm_cpu_simple(uint32_t      m,
 ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, ComputeT beta)
 {
     // Runtime checks for host parameters
-    uint32_t hTBLOCK_X    = isGfx9() ? gfx9Params::TBLOCK_X : gfx11Params::TBLOCK_X;
-    uint32_t hTBLOCK_Y    = isGfx9() ? gfx9Params::TBLOCK_Y : gfx11Params::TBLOCK_Y;
-    uint32_t hBLOCKS_X    = isGfx9() ? gfx9Params::BLOCKS_X : gfx11Params::BLOCKS_X;
-    uint32_t hBLOCKS_Y    = isGfx9() ? gfx9Params::BLOCKS_Y : gfx11Params::BLOCKS_Y;
-    uint32_t hROCWMMA_M   = isGfx9() ? gfx9Params::ROCWMMA_M : gfx11Params::ROCWMMA_M;
-    uint32_t hROCWMMA_N   = isGfx9() ? gfx9Params::ROCWMMA_N : gfx11Params::ROCWMMA_N;
-    uint32_t hROCWMMA_K   = isGfx9() ? gfx9Params::ROCWMMA_K : gfx11Params::ROCWMMA_K;
+    uint32_t hTBLOCK_X    = gfx9Params::TBLOCK_X;
+    uint32_t hTBLOCK_Y    = gfx9Params::TBLOCK_Y;
+    uint32_t hBLOCKS_X    = gfx9Params::BLOCKS_X;
+    uint32_t hBLOCKS_Y    = gfx9Params::BLOCKS_Y;
+    uint32_t hROCWMMA_M   = gfx9Params::ROCWMMA_M;
+    uint32_t hROCWMMA_N   = gfx9Params::ROCWMMA_N;
+    uint32_t hROCWMMA_K   = gfx9Params::ROCWMMA_K;
     uint32_t hWARP_TILE_X = hBLOCKS_X * hROCWMMA_M;
     uint32_t hWARP_TILE_Y = hBLOCKS_Y * hROCWMMA_N;
 
@@ -1158,7 +1132,6 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
         = max(2u * sizeof(InputT) * (get<0>(macroTileSize) + get<1>(macroTileSize)) * hROCWMMA_K,
               2u * sizeof(ComputeT) * get<0>(macroTileSize) * get<1>(macroTileSize));
 
-    ////
     auto rocwmmaKernel = [&]() {
         // Instantiate kernel with compile-time SV_ITERS to avoid dynamic alloca/VLA in device code.
         switch(sv_iterations)
@@ -1345,6 +1318,9 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
 
 int main()
 {
-    gemm_test(8192, 8192, 128, 1, 0);
+    if(isGfx9())
+        gemm_test(8192, 8192, 128, 1, 0);
+    else
+        std::cout << "This sample Not test on gfx11/gfx12 yet!" << std::endl;
     return 0;
 }

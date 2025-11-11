@@ -29,9 +29,6 @@
 
 #include <iostream>
 #include <mutex>
-#include <omp.h>
-#include <random>
-#include <type_traits>
 
 // Helper macro for HIP errors
 #ifndef CHECK_HIP_ERROR
