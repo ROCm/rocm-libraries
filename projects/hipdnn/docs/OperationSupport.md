@@ -12,13 +12,15 @@ The following table lists all operations currently supported in hipDNN:
 | Operation | Datatypes | Layouts | Plugin | Notes |
 |-----------|-----------|---------|--------|-------|
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
-| Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
+| Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Fused graph³ |
 | Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
+| Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 
-¹ See Batchnorm Operations note below
+¹ See Batchnorm Operations note below  
 ² See Convolution Operations note below  
+³ See Fused Operations note below
 
 ## Operation Notes
 
@@ -27,6 +29,9 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
+
+> [!NOTE]
+> **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.

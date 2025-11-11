@@ -102,6 +102,9 @@ class ABMatrixInfo(MatrixInfo):
   startVgprLocalWriteSwapAddr: int= -1
   numSgprGlobalReadIncs: int     = -1
 
+  gNLCPermBlock: int             = -1
+  gNLCPerpStride: int            = -1
+
 # States
 @dataclass
 class StateValues:
@@ -1956,7 +1959,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #     If this occurs we need to 'unshift' the C values (see shiftVectorComponents)
       #     BufferLoad does support this shifting, but if GuaranteeNoPartial=1 then
       #     it can be guaranteed that no shifting is required.
-      if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialA"]) and not forceNoTileCode:
+      if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialA"]) and not forceNoTileCode and not kernel["UseGeneralizedNLCOneA"]:
         module.addComment1("global read addresses: shift a")
         module.add(self.graShift(kernel, tensorParametersA))
         if tensorParametersA["is_sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -1969,7 +1972,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Using A's margin to instead Metadata's margin
         module.add(self.graShift(kernel, tPM, tPMRef["glvw"] if tPMRef["rtv"] else 1))
 
-      if not (kernel["BufferLoad"] and  kernel["GuaranteeNoPartialB"]) and not forceNoTileCode:
+      if not (kernel["BufferLoad"] and  kernel["GuaranteeNoPartialB"]) and not forceNoTileCode and not kernel["UseGeneralizedNLCOneB"]:
         module.addComment1("global read addresses: shift b")
         module.add(self.graShift(kernel, tensorParametersB))
         if tensorParametersB["is_sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -4371,6 +4374,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         numVgprGlobalReadIncsMetadata = 0
 
+
+    def GNLCOInit(tc):
+      abmatrixinfo = self.states.a if tc == 'A' else self.states.b
+      if kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
+        ntpl = kernel["NumTotalPackedLoads%s"%tc]
+        # TODOBS: Determine logic to calculate best permStride..
+        if kernel["ProblemType"]["TLU%s"%tc] == 1 and not kernel["enableLDSTr%s"%tc]:
+          usePerpPerm = False
+        elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
+          usePerpPerm = (ntpl & (ntpl-1)) == 0
+        else:
+          # Currently only VW=1,2 is supported due to how the local read offset
+          # is currently computed. Supporting VW=1,2 only required small modifications
+          # to the offset calc.
+          # TODO: Add support for VW=4,8, this will require more changes in LR offset
+          # calculations
+          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 else True
+
+        permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
+          else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
+        abmatrixinfo.gNLCPermBlock  = permBlock
+        abmatrixinfo.gNLCPerpStride = min([8, 2**int(math.log(ntpl, 2)), permBlock]) if usePerpPerm else 1
+      else:
+        abmatrixinfo.gNLCPerpStride = 1
+        abmatrixinfo.gNLCPermBlock = 1
+
+    GNLCOInit('A')
+    GNLCOInit('B')
+
     numVgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
 
     ####################################
@@ -4913,10 +4945,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
       self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
 
-    GSUAMBSK = 0
-    if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
-      GSUAMBSK = 1
-
     self.defineSgpr("Alpha", numSgprAlpha, numSgprAlpha)
     self.states.numSgprAlpha = numSgprAlpha
     if kernel["ProblemType"]["UseBeta"]:
@@ -4950,8 +4978,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         self.defineSgpr("SwapMetadata", 1)
 
-
-    if GSUAMBSK:
+    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
       self.defineSgpr("AddressTD", numSgprAddressD, align=2)
       self.states.numSgprAddressGSUSync += numSgprAddressD
       self.defineSgpr("Synchronizer", 2, align=2)
@@ -5340,6 +5367,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["nru"] = itP[cM].numReadsUnroll                           # number of reads along unroll dimension
     tP["nrc"] = kernel["NumLoadsCoalesced%s"%cM]                 # number of reads along coalesced dimension
     tP["nrcv"] = itP[cM].numReadsCoalVecComp                     # number of vector components along coalesced dimension
+    tP["ntpl"] = kernel["NumTotalPackedLoads%s"%cM]
     tP["nrp"] = kernel["NumLoadsPerpendicular%s"%cM]             # number of reads along perpendicular dimension
     tP["nrpv"] = itP[cM].numReadsPerpVecComp                     # number of vector components along perpendicular dimension
     tP["nwcv"] = itP[cM].numWritesCoalVecComp                    # number of vector component writes along coalesced dimension
