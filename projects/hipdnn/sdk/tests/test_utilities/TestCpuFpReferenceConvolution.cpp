@@ -170,7 +170,7 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionFwdInferenceBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::fprop<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>(
+    CpuFpReferenceConvolution::fprop<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Test that computation produces reasonable results
@@ -199,7 +199,7 @@ TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionFwdInferenceBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::fprop<half, half, float, half>(
+    CpuFpReferenceConvolution::fprop<half, half, half, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Test that computation produces reasonable results
@@ -1011,7 +1011,7 @@ TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionBwdDataBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::dgrad<half, half, float, half>(
+    CpuFpReferenceConvolution::dgrad<half, half, half, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 }
 
@@ -1040,7 +1040,7 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdDataBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>(
+    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 }
 
@@ -1802,7 +1802,7 @@ TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionWrwBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::wgrad<half, half, float, half>(
+    CpuFpReferenceConvolution::wgrad<half, half, half, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
 
     // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
@@ -1838,7 +1838,7 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionWrwBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::wgrad<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>(
+    CpuFpReferenceConvolution::wgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
 
     // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
@@ -2451,7 +2451,7 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdData3D)
     std::vector<int64_t> dilations = {1, 1, 1};
     std::vector<int64_t> padding = {0, 0, 0};
 
-    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>(
+    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Verify all values are 2.0 (gradOutput * weight)
@@ -2481,7 +2481,7 @@ TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdData3DNdhwc)
     std::vector<int64_t> dilations = {1, 1, 1};
     std::vector<int64_t> padding = {0, 0, 0};
 
-    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, float, hip_bfloat16>(
+    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Verify all values are 2.0 (gradOutput * weight)

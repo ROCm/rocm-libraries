@@ -87,15 +87,15 @@ TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
 TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
 {
     BatchnormFwdInferenceSignatureKey original{
-        DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::BFLOAT16, DataType::FLOAT};
+        DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::FLOAT, DataType::BFLOAT16};
     BatchnormFwdInferenceSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanVarianceDataType, DataType::DOUBLE);
-    EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);
     EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)

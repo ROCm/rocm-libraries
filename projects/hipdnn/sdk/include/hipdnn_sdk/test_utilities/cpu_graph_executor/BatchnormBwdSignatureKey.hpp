@@ -20,22 +20,22 @@ struct BatchnormBwdSignatureKey
     hipdnn_sdk::data_objects::DataType xDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
-    hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
+    hipdnn_sdk::data_objects::DataType computeDataType;
 
     BatchnormBwdSignatureKey() = default;
     constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType dy,
                                        hipdnn_sdk::data_objects::DataType x,
                                        hipdnn_sdk::data_objects::DataType scaleBias,
                                        hipdnn_sdk::data_objects::DataType meanVariance,
-                                       hipdnn_sdk::data_objects::DataType compute,
-                                       hipdnn_sdk::data_objects::DataType output)
+                                       hipdnn_sdk::data_objects::DataType output,
+                                       hipdnn_sdk::data_objects::DataType compute)
         : dyDataType(dy)
         , xDataType(x)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
-        , computeDataType(compute)
         , outputDataType(output)
+        , computeDataType(compute)
     {
     }
 
@@ -84,8 +84,8 @@ struct BatchnormBwdSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 24);
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 20)
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 24);
     }
 
     bool operator==(const BatchnormBwdSignatureKey& other) const noexcept
@@ -93,8 +93,8 @@ struct BatchnormBwdSignatureKey
         return nodeType == other.nodeType && dyDataType == other.dyDataType
                && xDataType == other.xDataType && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
-               && computeDataType == other.computeDataType
-               && outputDataType == other.outputDataType;
+               && outputDataType == other.outputDataType
+               && computeDataType == other.computeDataType;
     }
 
     static std::unordered_map<BatchnormBwdSignatureKey,
@@ -117,14 +117,14 @@ struct BatchnormBwdSignatureKey
                        hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
@@ -153,14 +153,14 @@ struct BatchnormBwdSignatureKey
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
@@ -169,8 +169,8 @@ struct BatchnormBwdSignatureKey
               hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<BatchnormBwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   BatchnormBwdSignatureKey>& map)
@@ -179,14 +179,14 @@ struct BatchnormBwdSignatureKey
                                      InputDataTypeEnum,
                                      ScaleBiasDataTypeEnum,
                                      MeanVarianceDataTypeEnum,
-                                     ComputeDataTypeEnum,
-                                     OutputDataTypeEnum)]
+                                     OutputDataTypeEnum,
+                                     ComputeDataTypeEnum)]
             = std::make_unique<BatchnormBwdPlanBuilder<DyDataTypeEnum,
                                                        InputDataTypeEnum,
                                                        ScaleBiasDataTypeEnum,
                                                        MeanVarianceDataTypeEnum,
-                                                       ComputeDataTypeEnum,
-                                                       OutputDataTypeEnum>>();
+                                                       OutputDataTypeEnum,
+                                                       ComputeDataTypeEnum>>();
     }
 };
 
@@ -205,12 +205,12 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormBwdSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormBwd(dy={}, x={}, scale={}, mean={}, compute={}, dx={})",
+                              "BatchnormBwd(dy={}, x={}, scale={}, mean={}, dx={}, compute={})",
                               key.dyDataType,
                               key.xDataType,
                               key.scaleBiasDataType,
                               key.meanVarianceDataType,
-                              key.computeDataType,
-                              key.outputDataType);
+                              key.outputDataType,
+                              key.computeDataType);
     }
 };

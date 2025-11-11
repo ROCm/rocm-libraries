@@ -109,7 +109,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolution::fprop<InputType, InputType, float, InputType>(
+        test_utilities::CpuFpReferenceConvolution::fprop<InputType, InputType, InputType, float>(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();

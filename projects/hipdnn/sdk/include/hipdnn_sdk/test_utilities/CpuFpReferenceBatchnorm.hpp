@@ -25,8 +25,8 @@ public:
     template <class XDataType,
               class ScaleBiasDataType,
               class MeanVarianceDataType,
-              class ComputeDataType = MeanVarianceDataType,
-              class YDataType>
+              class YDataType,
+              class ComputeDataType = MeanVarianceDataType>
     static void fwdInference(const TensorBase<XDataType>& x,
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
@@ -67,8 +67,8 @@ public:
     template <class XDataType,
               class ScaleBiasDataType,
               class MeanVarianceDataType = ScaleBiasDataType,
-              class ComputeDataType = ScaleBiasDataType,
-              class YDataType>
+              class YDataType,
+              class ComputeDataType = MeanVarianceDataType>
     static void fwdTraining(const TensorBase<XDataType>& x,
                             const TensorBase<ScaleBiasDataType>& scale,
                             const TensorBase<ScaleBiasDataType>& bias,
@@ -207,8 +207,8 @@ public:
               class XDataType,
               class ScaleBiasDataType,
               class MeanVarianceDataType = ScaleBiasDataType,
-              class ComputeDataType = MeanVarianceDataType,
-              class DxDataType = XDataType>
+              class DxDataType = XDataType,
+              class ComputeDataType = MeanVarianceDataType>
     static void backward(const TensorBase<DyDataType>& dy,
                          const TensorBase<XDataType>& x,
                          const TensorBase<MeanVarianceDataType>& mean,

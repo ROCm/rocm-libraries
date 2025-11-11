@@ -34,14 +34,14 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
-                                  DataType::FLOAT,
-                                  DataType::HALF};
+                                  DataType::HALF,
+                                  DataType::FLOAT};
     BatchnormBwdSignatureKey key4{DataType::HALF,
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
-                                  DataType::FLOAT,
-                                  DataType::HALF};
+                                  DataType::HALF,
+                                  DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
     BatchnormBwdSignatureKey key5{DataType::FLOAT,
@@ -54,8 +54,8 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
-                                  DataType::FLOAT,
-                                  DataType::HALF};
+                                  DataType::HALF,
+                                  DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
     BatchnormBwdSignatureKey key7{DataType::FLOAT,
@@ -80,8 +80,8 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                   DataType::FLOAT};
     BatchnormBwdSignatureKey key10{DataType::FLOAT,
                                    DataType::FLOAT,
-                                   DataType::FLOAT,
                                    DataType::DOUBLE,
+                                   DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
@@ -96,8 +96,8 @@ TEST(TestBatchnormBwdSignatureKey, EqualityOperator)
                                    DataType::FLOAT,
                                    DataType::FLOAT,
                                    DataType::FLOAT,
-                                   DataType::DOUBLE,
-                                   DataType::FLOAT};
+                                   DataType::FLOAT,
+                                   DataType::DOUBLE};
     EXPECT_FALSE(key11 == key12);
 }
 
@@ -122,8 +122,8 @@ TEST(TestBatchnormBwdSignatureKey, HashFunction)
                                   DataType::HALF,
                                   DataType::FLOAT,
                                   DataType::FLOAT,
-                                  DataType::FLOAT,
-                                  DataType::HALF};
+                                  DataType::HALF,
+                                  DataType::FLOAT};
     BatchnormBwdSignatureKey key4{DataType::FLOAT,
                                   DataType::HALF,
                                   DataType::FLOAT,
@@ -174,8 +174,8 @@ TEST(TestBatchnormBwdSignatureKey, Copy)
                                       DataType::FLOAT,
                                       DataType::HALF,
                                       DataType::DOUBLE,
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT};
+                                      DataType::FLOAT,
+                                      DataType::BFLOAT16};
     BatchnormBwdSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
@@ -183,8 +183,8 @@ TEST(TestBatchnormBwdSignatureKey, Copy)
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanVarianceDataType, DataType::DOUBLE);
-    EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);
     EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);
 }
 
 TEST(TestBatchnormBwdSignatureKey, CreateFromNodeAndTensorMap)

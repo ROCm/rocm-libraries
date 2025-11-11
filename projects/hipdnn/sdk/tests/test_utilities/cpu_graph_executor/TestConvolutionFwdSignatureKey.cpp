@@ -51,7 +51,7 @@ TEST(TestConvolutionFwdSignatureKey, HashFunction)
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
     ConvolutionFwdSignatureKey key3{
-        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+        DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     ConvolutionFwdSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     ConvolutionFwdSignatureKey key5{
@@ -67,14 +67,14 @@ TEST(TestConvolutionFwdSignatureKey, HashFunction)
 TEST(TestConvolutionFwdSignatureKey, Copy)
 {
     ConvolutionFwdSignatureKey original{
-        DataType::BFLOAT16, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+        DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     ConvolutionFwdSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::BFLOAT16);
     EXPECT_EQ(copied.wDataType, DataType::FLOAT);
-    EXPECT_EQ(copied.computeDataType, DataType::HALF);
     EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.computeDataType, DataType::HALF);
 }
 
 TEST(TestConvolutionFwdSignatureKey, CreateFromNodeAndTensorMap)

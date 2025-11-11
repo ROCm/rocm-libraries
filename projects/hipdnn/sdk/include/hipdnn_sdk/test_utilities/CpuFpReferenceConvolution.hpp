@@ -45,7 +45,7 @@ public:
     }
 
     // Overload for uniform padding
-    template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
+    template <class XDataType, class WDataType, class YDataType, class ComputeDataType = float>
     static void fprop(const TensorBase<XDataType>& x,
                       const TensorBase<WDataType>& w,
                       TensorBase<YDataType>& y,
@@ -56,7 +56,7 @@ public:
         fprop(x, w, y, strides, dilations, padding, padding);
     }
 
-    template <class XDataType, class WDataType, class ComputeDataType = float, class YDataType>
+    template <class XDataType, class WDataType, class YDataType, class ComputeDataType = float>
     static void fprop(const TensorBase<XDataType>& x,
                       const TensorBase<WDataType>& w,
                       TensorBase<YDataType>& y,
@@ -171,7 +171,7 @@ public:
     }
 
     // Overload for uniform padding
-    template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
+    template <class DxDataType, class WDataType, class DyDataType, class ComputeDataType = float>
     static void dgrad(TensorBase<DxDataType>& gradX,
                       const TensorBase<WDataType>& w,
                       const TensorBase<DyDataType>& gradY,
@@ -182,7 +182,7 @@ public:
         dgrad(gradX, w, gradY, strides, dilations, padding, padding);
     }
 
-    template <class DxDataType, class WDataType, class ComputeDataType = float, class DyDataType>
+    template <class DxDataType, class WDataType, class DyDataType, class ComputeDataType = float>
     static void dgrad(TensorBase<DxDataType>& gradX,
                       const TensorBase<WDataType>& w,
                       const TensorBase<DyDataType>& gradY,
@@ -302,7 +302,7 @@ public:
         gradX.memory().markHostModified();
     }
 
-    template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
+    template <class XDataType, class DwDataType, class DyDataType, class ComputeDataType = float>
     static void wgrad(const TensorBase<XDataType>& x,
                       TensorBase<DwDataType>& gradW,
                       const TensorBase<DyDataType>& gradY,
@@ -313,7 +313,7 @@ public:
         wgrad(x, gradW, gradY, strides, dilations, padding, padding);
     }
 
-    template <class XDataType, class DwDataType, class ComputeDataType = float, class DyDataType>
+    template <class XDataType, class DwDataType, class DyDataType, class ComputeDataType = float>
     static void wgrad(const TensorBase<XDataType>& x,
                       TensorBase<DwDataType>& gradW,
                       const TensorBase<DyDataType>& gradY,

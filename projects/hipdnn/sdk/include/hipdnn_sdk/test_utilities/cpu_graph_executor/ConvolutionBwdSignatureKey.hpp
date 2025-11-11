@@ -18,19 +18,19 @@ struct ConvolutionBwdSignatureKey
         hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes};
     hipdnn_sdk::data_objects::DataType dyDataType;
     hipdnn_sdk::data_objects::DataType wDataType;
-    hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
+    hipdnn_sdk::data_objects::DataType computeDataType;
 
     ConvolutionBwdSignatureKey() = default;
 
     constexpr ConvolutionBwdSignatureKey(hipdnn_sdk::data_objects::DataType dy,
                                          hipdnn_sdk::data_objects::DataType w,
-                                         hipdnn_sdk::data_objects::DataType compute,
-                                         hipdnn_sdk::data_objects::DataType output)
+                                         hipdnn_sdk::data_objects::DataType output,
+                                         hipdnn_sdk::data_objects::DataType compute)
         : dyDataType(dy)
         , wDataType(w)
-        , computeDataType(compute)
         , outputDataType(output)
+        , computeDataType(compute)
     {
     }
 
@@ -73,15 +73,15 @@ struct ConvolutionBwdSignatureKey
         return static_cast<std::size_t>(static_cast<int>(nodeType))
                ^ (static_cast<std::size_t>(static_cast<int>(dyDataType)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(wDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16);
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 12)
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16);
     }
 
     bool operator==(const ConvolutionBwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && dyDataType == other.dyDataType
-               && wDataType == other.wDataType && computeDataType == other.computeDataType
-               && outputDataType == other.outputDataType;
+               && wDataType == other.wDataType && outputDataType == other.outputDataType
+               && computeDataType == other.computeDataType;
     }
 
     static std::unordered_map<ConvolutionBwdSignatureKey,
@@ -100,30 +100,30 @@ struct ConvolutionBwdSignatureKey
                        hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::HALF,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
     }
 
     template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
               hipdnn_sdk::data_objects::DataType WDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<ConvolutionBwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   ConvolutionBwdSignatureKey>& map)
     {
         map[ConvolutionBwdSignatureKey(
-            DyDataTypeEnum, WDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
+            DyDataTypeEnum, WDataTypeEnum, OutputDataTypeEnum, ComputeDataTypeEnum)]
             = std::make_unique<ConvolutionBwdPlanBuilder<DyDataTypeEnum,
                                                          WDataTypeEnum,
-                                                         ComputeDataTypeEnum,
-                                                         OutputDataTypeEnum>>();
+                                                         OutputDataTypeEnum,
+                                                         ComputeDataTypeEnum>>();
     }
 };
 
@@ -142,10 +142,10 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::ConvolutionBwdSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "ConvolutionBwd(dy={}, w={}, compute={}, dx={})",
+                              "ConvolutionBwd(dy={}, w={}, dx={}, compute={})",
                               key.dyDataType,
                               key.wDataType,
-                              key.computeDataType,
-                              key.outputDataType);
+                              key.outputDataType,
+                              key.computeDataType);
     }
 };

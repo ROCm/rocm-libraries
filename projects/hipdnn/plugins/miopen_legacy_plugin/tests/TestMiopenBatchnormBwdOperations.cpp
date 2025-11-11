@@ -163,7 +163,7 @@ protected:
                                                   testCase.seed);
 
         CpuFpReferenceBatchnorm::
-            backward<InputType, InputType, IntermediateType, IntermediateType, float, InputType>(
+            backward<InputType, InputType, IntermediateType, IntermediateType, InputType, float>(
                 dyTensorCpu,
                 xTensorCpu,
                 meanTensorCpu,

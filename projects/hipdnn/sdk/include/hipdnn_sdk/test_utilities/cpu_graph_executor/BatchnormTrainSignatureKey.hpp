@@ -19,20 +19,20 @@ struct BatchnormTrainSignatureKey
     hipdnn_sdk::data_objects::DataType xDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
-    hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
+    hipdnn_sdk::data_objects::DataType computeDataType;
 
     BatchnormTrainSignatureKey() = default;
     constexpr BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType input,
                                          hipdnn_sdk::data_objects::DataType scaleBias,
                                          hipdnn_sdk::data_objects::DataType meanVariance,
-                                         hipdnn_sdk::data_objects::DataType compute,
-                                         hipdnn_sdk::data_objects::DataType output)
+                                         hipdnn_sdk::data_objects::DataType output,
+                                         hipdnn_sdk::data_objects::DataType compute)
         : xDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
-        , computeDataType(compute)
         , outputDataType(output)
+        , computeDataType(compute)
     {
     }
 
@@ -77,8 +77,8 @@ struct BatchnormTrainSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 20);
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
+               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20);
     }
 
     bool operator==(const BatchnormTrainSignatureKey& other) const noexcept
@@ -86,8 +86,8 @@ struct BatchnormTrainSignatureKey
         return nodeType == other.nodeType && xDataType == other.xDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
-               && computeDataType == other.computeDataType
-               && outputDataType == other.outputDataType;
+               && outputDataType == other.outputDataType
+               && computeDataType == other.computeDataType;
     }
 
     static std::unordered_map<BatchnormTrainSignatureKey,
@@ -118,13 +118,13 @@ struct BatchnormTrainSignatureKey
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::HALF>(map);
+                       hipdnn_sdk::data_objects::DataType::HALF,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+                       hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_sdk::data_objects::DataType::HALF,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
                        hipdnn_sdk::data_objects::DataType::FLOAT,
@@ -142,8 +142,8 @@ struct BatchnormTrainSignatureKey
     template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
               hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
     static void addPlanBuilder(std::unordered_map<BatchnormTrainSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   BatchnormTrainSignatureKey>& map)
@@ -151,13 +151,13 @@ struct BatchnormTrainSignatureKey
         map[BatchnormTrainSignatureKey(XDataTypeEnum,
                                        ScaleBiasDataTypeEnum,
                                        MeanVarianceDataTypeEnum,
-                                       ComputeDataTypeEnum,
-                                       OutputDataTypeEnum)]
+                                       OutputDataTypeEnum,
+                                       ComputeDataTypeEnum)]
             = std::make_unique<BatchnormTrainPlanBuilder<XDataTypeEnum,
                                                          ScaleBiasDataTypeEnum,
                                                          MeanVarianceDataTypeEnum,
-                                                         ComputeDataTypeEnum,
-                                                         OutputDataTypeEnum>>();
+                                                         OutputDataTypeEnum,
+                                                         ComputeDataTypeEnum>>();
     }
 };
 }
@@ -175,10 +175,10 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormTrainSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormTrain(x={}, scale={}, compute={}, out={})",
+                              "BatchnormTrain(x={}, scale={}, out={}, compute={})",
                               key.xDataType,
                               key.scaleBiasDataType,
-                              key.computeDataType,
-                              key.outputDataType);
+                              key.outputDataType,
+                              key.computeDataType);
     }
 };

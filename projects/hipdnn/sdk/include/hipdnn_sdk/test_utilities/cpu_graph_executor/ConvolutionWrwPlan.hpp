@@ -52,8 +52,8 @@ struct ConvolutionWrwParams
 
 template <typename XDataType,
           typename DyDataType,
-          typename ComputeDataType,
-          typename OutputDataType>
+          typename OutputDataType,
+          typename ComputeDataType>
 class ConvolutionWrwPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -73,7 +73,7 @@ public:
         auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolution::wgrad<XDataType, OutputDataType, ComputeDataType, DyDataType>(
+        CpuFpReferenceConvolution::wgrad<XDataType, OutputDataType, DyDataType, ComputeDataType>(
             *shallowXTensor,
             *shallowDWTensor,
             *shallowDYTensor,
@@ -89,15 +89,15 @@ private:
 
 template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using XDataType = DataTypeToNative<XDataTypeEnum>;
     using DyDataType = DataTypeToNative<DyDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -143,7 +143,7 @@ public:
             nodeAttributes->conv_mode());
 
         return std::make_unique<
-            ConvolutionWrwPlan<XDataType, DyDataType, ComputeDataType, OutputDataType>>(
+            ConvolutionWrwPlan<XDataType, DyDataType, OutputDataType, ComputeDataType>>(
             std::move(params));
     }
 };

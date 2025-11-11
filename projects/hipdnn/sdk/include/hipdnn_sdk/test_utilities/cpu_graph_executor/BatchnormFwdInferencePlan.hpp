@@ -49,8 +49,8 @@ struct BatchnormFwdInferenceParams
 template <typename XDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
-          typename ComputeDataType,
-          typename OutputDataType>
+          typename OutputDataType,
+          typename ComputeDataType>
 class BatchnormFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -82,8 +82,8 @@ public:
         CpuFpReferenceBatchnorm::fwdInference<XDataType,
                                               ScaleBiasDataType,
                                               MeanVarianceDataType,
-                                              ComputeDataType,
-                                              OutputDataType>(*shallowXTensor,
+                                              OutputDataType,
+                                              ComputeDataType>(*shallowXTensor,
                                                               *shallowScaleTensor,
                                                               *shallowBiasTensor,
                                                               *shallowMeanTensor,
@@ -98,16 +98,16 @@ private:
 template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormFwdInferencePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using XDataType = DataTypeToNative<XDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -166,8 +166,8 @@ public:
         return std::make_unique<BatchnormFwdPlan<XDataType,
                                                  ScaleBiasDataType,
                                                  MeanVarianceDataType,
-                                                 ComputeDataType,
-                                                 OutputDataType>>(std::move(params));
+                                                 OutputDataType,
+                                                 ComputeDataType>>(std::move(params));
     }
 };
 }

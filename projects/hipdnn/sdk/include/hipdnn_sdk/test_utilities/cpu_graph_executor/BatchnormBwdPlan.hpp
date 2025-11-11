@@ -54,8 +54,8 @@ template <typename DyDataType,
           typename XDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
-          typename ComputeDataType,
-          typename OutputDataType>
+          typename OutputDataType,
+          typename ComputeDataType>
 class BatchnormBwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -94,8 +94,8 @@ public:
                                           XDataType,
                                           ScaleBiasDataType,
                                           MeanVarianceDataType,
-                                          ComputeDataType,
-                                          OutputDataType>(*shallowDyTensor,
+                                          OutputDataType,
+                                          ComputeDataType>(*shallowDyTensor,
                                                           *shallowXTensor,
                                                           *shallowMeanTensor,
                                                           *shallowInvVarianceTensor,
@@ -113,8 +113,8 @@ template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
           hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -122,8 +122,8 @@ public:
     using XDataType = DataTypeToNative<XDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
     using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -196,8 +196,8 @@ public:
                                                  XDataType,
                                                  ScaleBiasDataType,
                                                  MeanVarianceDataType,
-                                                 ComputeDataType,
-                                                 OutputDataType>>(std::move(params));
+                                                 OutputDataType,
+                                                 ComputeDataType>>(std::move(params));
     }
 };
 
