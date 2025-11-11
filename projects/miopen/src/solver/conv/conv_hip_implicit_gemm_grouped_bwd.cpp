@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,8 +38,12 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
+
+// list all relevant environment variables
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_WMMA)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_WMMA_AI_HEUR)
 
 namespace miopen {
 namespace solver {
@@ -51,6 +55,7 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 
 namespace {
 
+template <Backend backend>
 struct CKArgs
 {
     CKArgs(const ProblemDescription& problem)
@@ -166,20 +171,41 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
-        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
-        if(workspace_size != 0)
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
+        if constexpr(backend == Backend::Xdlops)
+        {
+            auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+            if(workspace_size != 0)
+                conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
+        }
+        else if constexpr(backend == Backend::Wmma)
+        {
+            // Create dummy workspace to pass the ck IsSupportedArgument check.
+            int dummy_var = 1;
+            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
+        }
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
-        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
-        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
-        if(workspace_size != 0)
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
+        if constexpr(backend == Backend::Xdlops)
+        {
+            auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+            if(workspace_size != 0)
+                conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
+        }
+        else if constexpr(backend == Backend::Wmma)
+        {
+            if(CKWrwRequireWorkspace(G, C1, K1, data_type, alpha_beta_case))
+            {
+                // Create dummy workspace to pass the ck IsSupportedArgument check.
+                int dummy_var = 1;
+                conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
+            }
+        }
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
@@ -217,27 +243,30 @@ struct CKArgs
 };
 } // namespace
 
+template <Backend backend>
 template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemmGroupBwd<backend>::Init(const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs<backend>>(problem);
     index         = 0;
     split_k       = 1;
     kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
+template <Backend backend>
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::CheckIsSupportCKArgs(
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
-    return IsCKArgsSupported<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem, kernel_id);
+    return IsCKArgsSupported<DeviceOpGBwdPtrs<DataType>, CKArgs<backend>>(problem, kernel_id);
 }
 
+template <Backend backend>
 template <typename DataType>
-bool ConvHipImplicitGemmGroupBwdXdlops::CheckCKApplicability(
+bool ConvHipImplicitGemmGroupBwd<backend>::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
-    return IsCKApplicable<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+    return IsCKApplicable<DeviceOpGBwdPtrs<DataType>, CKArgs<backend>>(problem);
 }
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -256,48 +285,57 @@ static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
     return tokens;
 }
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
+template <Backend backend>
+void PerformanceConfigHipImplicitGemmGroupBwd<backend>::InitHeuristicKernelIDs()
 {
-    for(int i = 0; i < valid_kernels.size(); i++)
+    if constexpr(backend == Backend::Xdlops)
     {
-        if(valid_kernels[i].find("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1") !=
-           std::string::npos)
+        for(int i = 0; i < valid_kernels.size(); i++)
         {
-            heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            if(valid_kernels[i].find("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1") !=
+               std::string::npos)
+            {
+                heuristic_indexes.push_back(i);
+                heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            }
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::ModelApplyToken(
     int idx, std::string value, const std::string& arch, const ProblemDescription& /*problem*/)
 {
-    if(arch == "gfx90a")
+    if constexpr(backend == Backend::Xdlops)
     {
-        if(idx == 13)
-            idx += 1; // skip
-    }
-    if(arch == "gfx942")
-    {
-        if(idx < 3)
-            idx += 0;
-        else if(idx <= 4)
-            idx += 2;
-        else if(idx <= 8)
-            idx += 4;
-        else
+        if(arch == "gfx90a")
+        {
+            if(idx == 13)
+                idx += 1; // skip
+        }
+        if(arch == "gfx942")
+        {
+            if(idx < 3)
+                idx += 0;
+            else if(idx <= 4)
+                idx += 2;
+            else if(idx <= 8)
+                idx += 4;
+            else
+                return true;
+        }
+
+        auto eraseBegin = std::remove_if(
+            heuristic_indexes.begin(), heuristic_indexes.end(), [&](int heuristic_index) {
+                return heuristic_kernels[heuristic_index][idx] != value;
+            });
+
+        if(eraseBegin != heuristic_indexes.begin())
+        {
+            heuristic_indexes.erase(eraseBegin, heuristic_indexes.end());
             return true;
-    }
-
-    auto eraseBegin = std::remove_if(
-        heuristic_indexes.begin(), heuristic_indexes.end(), [&](int heuristic_index) {
-            return heuristic_kernels[heuristic_index][idx] != value;
-        });
-
-    if(eraseBegin != heuristic_indexes.begin())
-    {
-        heuristic_indexes.erase(eraseBegin, heuristic_indexes.end());
-        return true;
+        }
+        return false;
     }
     return false;
 }
@@ -359,48 +397,65 @@ GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std
     return features;
 }
 
+template <Backend backend>
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel(
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
-    InitHeuristicKernelIDs();
-    static const std::string& arch = ctx.GetStream().GetDeviceName();
-    static std::string solver      = "ConvHipIgemmGroupBwdXdlops";
-    if(arch == "gfx90a")
-        solver = "ConvHipIgemmGroupXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-    if(ai::tuning::ModelSetParams(
-           arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
-               return this->ModelApplyToken(idx, value, arch, problem);
-           }))
+    if constexpr(backend == Backend::Xdlops)
     {
-        index     = heuristic_indexes[0];
-        kernel_id = valid_kernels[index] + "+1";
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
-        return true;
+        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs<backend>>(
+            problem); // filter valid_kernel ID's
+        InitHeuristicKernelIDs();
+        static const std::string& arch = ctx.GetStream().GetDeviceName();
+        static std::string solver      = "ConvHipIgemmGroupBwdXdlops";
+        if(arch == "gfx90a")
+            solver = "ConvHipIgemmGroupXdlops";
+        std::vector<float> features =
+            GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+        if(ai::tuning::ModelSetParams(arch,
+                                      solver,
+                                      problem.GetDirection(),
+                                      features,
+                                      true,
+                                      [&](int idx, std::string value) {
+                                          return this->ModelApplyToken(idx, value, arch, problem);
+                                      }))
+        {
+            index     = heuristic_indexes[0];
+            kernel_id = valid_kernels[index] + "+1";
+            MIOPEN_LOG_I("Params set by AI: " << this->ToString());
+            return true;
+        }
+        return false;
     }
     return false;
 }
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       !StartsWith(ctx.GetStream().GetDeviceName(), "gfx95"))
-        return false;
-    if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
-       problem.GetInDataType() != miopenBFloat16)
-        return false;
-    if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
-        return false;
-    return true;
+    if constexpr(backend == Backend::Xdlops)
+    {
+        if(ctx.GetStream().GetDeviceName() != "gfx90a" &&
+           ctx.GetStream().GetDeviceName() != "gfx942" &&
+           !StartsWith(ctx.GetStream().GetDeviceName(), "gfx95"))
+            return false;
+        if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
+           problem.GetInDataType() != miopenBFloat16)
+            return false;
+        if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
+            return false;
+        return true;
+    }
+    return false;
 }
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
+template <Backend backend>
+void PerformanceConfigHipImplicitGemmGroupBwd<backend>::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
@@ -410,22 +465,25 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if constexpr(backend == Backend::Xdlops)
     {
-        if(problem.GetInDataType() == miopenFloat)
+        if(IsModelApplicable(ctx, problem))
         {
-            if(RunParameterPredictionModel<float>(ctx, problem))
-                return;
-        }
-        else if(problem.GetInDataType() == miopenBFloat16)
-        {
-            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
-                return;
-        }
-        else
-        {
-            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
-                return;
+            if(problem.GetInDataType() == miopenFloat)
+            {
+                if(RunParameterPredictionModel<float>(ctx, problem))
+                    return;
+            }
+            else if(problem.GetInDataType() == miopenBFloat16)
+            {
+                if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
+                    return;
+            }
+            else
+            {
+                if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
+                    return;
+            }
         }
     }
 #endif
@@ -433,7 +491,12 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
     case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenInt8:
+        if constexpr(backend == Backend::Xdlops)
+            Init<int8_t>(problem);
+        else if constexpr(backend == Backend::Wmma)
+            ; // no Int8 support for WmmaBackend
+        break;
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     case miopenInt64:
     case miopenInt32:
@@ -444,7 +507,9 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
 #endif
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemDescription& problem)
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::SetNextValue(
+    const ProblemDescription& problem)
 {
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
@@ -453,7 +518,12 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
         {
         case miopenHalf: Init<ck::half_t>(problem); break;
         case miopenFloat: Init<float>(problem); break;
-        case miopenInt8: Init<int8_t>(problem); break;
+        case miopenInt8:
+            if constexpr(backend == Backend::Xdlops)
+                Init<int8_t>(problem);
+            else if constexpr(backend == Backend::Wmma)
+                ; // no Int8 support for WmmaBackend
+            break;
         case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
         case miopenInt64:
         case miopenInt32:
@@ -485,12 +555,14 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
     return true;
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::IsValidValue() const
 {
     return index < valid_kernels.size();
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -498,7 +570,11 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
     case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
-    case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
+    case miopenInt8:
+        if constexpr(backend == Backend::Xdlops)
+            return CheckIsSupportCKArgs<int8_t>(problem);
+        else if constexpr(backend == Backend::Wmma)
+            break; // no Int8 support for WmmaBackend
     case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
@@ -510,73 +586,103 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     return false;
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::operator==(
-    const PerformanceConfigHipImplicitGemmGroupBwdXdlops& other) const
+template <Backend backend>
+bool PerformanceConfigHipImplicitGemmGroupBwd<backend>::operator==(
+    const PerformanceConfigHipImplicitGemmGroupBwd<backend>& other) const
 {
     return kernel_id == other.kernel_id;
 }
 
-PerformanceConfigHipImplicitGemmGroupBwdXdlops
-ConvHipImplicitGemmGroupBwdXdlops::GetDefaultPerformanceConfig(
+template <Backend backend>
+PerformanceConfigHipImplicitGemmGroupBwd<backend>
+ConvHipImplicitGemmGroupBwd<backend>::GetDefaultPerformanceConfig(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    PerformanceConfigHipImplicitGemmGroupBwdXdlops pp;
+    PerformanceConfigHipImplicitGemmGroupBwd<backend> pp;
     pp.HeuristicInit(ctx, problem);
     return pp;
 }
 
-bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
+template <Backend backend>
+bool ConvHipImplicitGemmGroupBwd<backend>::IsValidPerformanceConfig(
     const ExecutionContext&,
     const ProblemDescription& problem,
-    const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
+    const PerformanceConfigHipImplicitGemmGroupBwd<backend>& config) const
 {
     return config.IsValid(problem);
 }
 
+template <Backend backend>
 size_t
-ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
+ConvHipImplicitGemmGroupBwd<backend>::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    switch(problem.GetInDataType())
+    if constexpr(backend == Backend::Xdlops)
     {
-    case miopenHalf:
-        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::half_t>, CKArgs>(problem);
-    case miopenFloat: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<float>, CKArgs>(problem);
-    case miopenInt8: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<int8_t>, CKArgs>(problem);
-    case miopenBFloat16:
-        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::bhalf_t>, CKArgs>(problem);
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf:
+            return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::half_t>, CKArgs<backend>>(
+                problem);
+        case miopenFloat:
+            return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<float>, CKArgs<backend>>(problem);
+        case miopenInt8:
+            return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<int8_t>, CKArgs<backend>>(problem);
+        case miopenBFloat16:
+            return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::bhalf_t>, CKArgs<backend>>(
+                problem);
+        case miopenInt64:
+        case miopenInt32:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenDouble: break;
+        }
     }
 #endif
     return 0; // other types not applicable for this solver
 }
 
-size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
-                                                           const ProblemDescription& problem) const
+template <Backend backend>
+size_t
+ConvHipImplicitGemmGroupBwd<backend>::GetWorkspaceSize(const ExecutionContext&,
+                                                       const ProblemDescription& problem) const
 {
-    auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
-    return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    if constexpr(backend == Backend::Xdlops)
+    {
+        auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
+        return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    }
+    else if constexpr(backend == Backend::Wmma)
+    {
+        return GetWorkspaceSizeLayoutTransformConv(problem);
+    }
 }
 
-PerformanceConfigHipImplicitGemmGroupBwdXdlops
-ConvHipImplicitGemmGroupBwdXdlops::Search(const ExecutionContext& ctx,
-                                          const ProblemDescription& problem,
-                                          const AnyInvokeParams& invoke_ctx) const
+template <Backend backend>
+PerformanceConfigHipImplicitGemmGroupBwd<backend>
+ConvHipImplicitGemmGroupBwd<backend>::Search(const ExecutionContext& ctx,
+                                             const ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
+template <Backend backend>
+bool ConvHipImplicitGemmGroupBwd<backend>::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
-        return false;
+    if constexpr(backend == Backend::Xdlops)
+    {
+        if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
+            return false;
+    }
+    else if constexpr(backend == Backend::Wmma)
+    {
+        if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_WMMA))
+            return false;
+    }
     if(problem.GetConv().attribute.deterministic)
         return false;
     if(problem.HasMixedDataTypes())
@@ -594,13 +700,25 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     // needed because layout transpose kernel does not support non-packed tensors
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
-    if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
-        return false;
+    if constexpr(backend == Backend::Xdlops)
+    {
+        if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
+            return false;
+    }
+    else if constexpr(backend == Backend::Wmma)
+    {
+        if(!ck_utility::is_wmma_capable(ctx.GetStream().GetDeviceName()))
+            return false;
+    }
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat: return CheckCKApplicability<float>(problem);
-    case miopenInt8: return CheckCKApplicability<int8_t>(problem);
+    case miopenInt8:
+        if constexpr(backend == Backend::Xdlops)
+            return CheckCKApplicability<int8_t>(problem);
+        else if constexpr(backend == Backend::Wmma)
+            break; // no Int8 support for WmmaBackend
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
@@ -612,36 +730,68 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     return false;
 }
 
-ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
+template <Backend backend>
+ConvSolution ConvHipImplicitGemmGroupBwd<backend>::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
+    [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupBwd<backend>& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    return MakeSolutionGroupConvImplicitGemmXdlops(
-        problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryBwdNCHW<2,
-                                             false,
-                                             DeviceOpGBwdPtrs<T>,
-                                             CKArgs,
-                                             miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGBwdPtrs<T>,
-                                          CKArgs,
-                                          miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        });
+    if constexpr(backend == Backend::Xdlops)
+    {
+        return MakeSolutionGroupConvImplicitGemmXdlops(
+            problem,
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryBwdNCHW<2,
+                                                 false,
+                                                 DeviceOpGBwdPtrs<T>,
+                                                 CKArgs<backend>,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            },
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGBwdPtrs<T>,
+                                              CKArgs<backend>,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            });
+    }
+    else if constexpr(backend == Backend::Wmma)
+    {
+        return MakeSolutionGroupConvImplicitGemmWmma(
+            problem,
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryBwdNCHW<2,
+                                                 false,
+                                                 DeviceOpGBwdPtrs<T>,
+                                                 CKArgs<backend>,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            },
+            [&](auto data_type_val) {
+                using T = decltype(data_type_val);
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGBwdPtrs<T>,
+                                              CKArgs<backend>,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            });
+    }
 
 #else
     return {};
 #endif
 }
+
+// explicit template instantiations
+template struct PerformanceConfigHipImplicitGemmGroupBwd<Backend::Xdlops>;
+template struct PerformanceConfigHipImplicitGemmGroupBwd<Backend::Wmma>;
+template struct ConvHipImplicitGemmGroupBwd<Backend::Xdlops>;
+template struct ConvHipImplicitGemmGroupBwd<Backend::Wmma>;
 
 } // namespace conv
 } // namespace solver
