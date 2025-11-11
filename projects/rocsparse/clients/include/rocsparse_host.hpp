@@ -355,6 +355,22 @@ void host_ellmv(rocsparse_operation  trans,
                 Y*                   y,
                 rocsparse_index_base base);
 
+template <typename T, typename I, typename J, typename A, typename X, typename Y>
+void host_sellmv(rocsparse_operation  trans,
+                 J                    M,
+                 J                    N,
+                 I                    nnz,
+                 J                    sell_slice_size,
+                 I                    sell_colval_size,
+                 T                    alpha,
+                 const I*             sell_slice_offsets,
+                 const J*             sell_col_ind,
+                 const A*             sell_val,
+                 const X*             x,
+                 T                    beta,
+                 Y*                   y,
+                 rocsparse_index_base base);
+
 template <typename T>
 void host_hybmv(rocsparse_operation  trans,
                 rocsparse_int        M,
@@ -1166,6 +1182,19 @@ void host_csr_to_ell(J                     M,
                      J&                    ell_width,
                      rocsparse_index_base  csr_base,
                      rocsparse_index_base  ell_base);
+
+template <typename I, typename J, typename T>
+void host_csr_to_sell(J                     M,
+                      J                     sell_slice_size,
+                      const std::vector<I>& csr_row_ptr,
+                      const std::vector<J>& csr_col_ind,
+                      const std::vector<T>& csr_val,
+                      std::vector<I>&       sell_slice_offsets,
+                      std::vector<J>&       sell_col_ind,
+                      std::vector<T>&       sell_val,
+                      I&                    sell_colval_size,
+                      rocsparse_index_base  csr_base,
+                      rocsparse_index_base  sell_base);
 
 template <typename T>
 void host_csr_to_hyb(rocsparse_int                     M,
